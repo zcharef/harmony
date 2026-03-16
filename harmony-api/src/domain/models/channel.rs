@@ -32,6 +32,28 @@ pub struct Channel {
 }
 
 impl Channel {
+    /// Create a new channel with given parameters.
+    #[must_use]
+    pub fn new(
+        server_id: ServerId,
+        name: String,
+        channel_type: ChannelType,
+        position: i32,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: ChannelId::new(Uuid::new_v4()),
+            server_id,
+            name,
+            topic: None,
+            channel_type,
+            position,
+            category_id: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
     /// Create the default `#general` text channel for a newly created server.
     #[must_use]
     pub fn default_general(server_id: ServerId) -> Self {

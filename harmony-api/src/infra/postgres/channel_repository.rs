@@ -26,8 +26,6 @@ impl PgChannelRepository {
 ///
 /// The DB `channel_type` is a Postgres enum (`channel_type`).
 /// sqlx decodes it as `String` via the `!: String` type override.
-/// The DB has no `updated_at` or `category_id` columns — we set
-/// `updated_at = created_at` and `category_id = None` in the mapping.
 struct ChannelRow {
     id: Uuid,
     server_id: Uuid,
@@ -36,6 +34,7 @@ struct ChannelRow {
     channel_type: String,
     position: i32,
     created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
 }
 
 impl ChannelRow {
@@ -49,7 +48,7 @@ impl ChannelRow {
             position: self.position,
             category_id: None, // DB has no category_id column yet
             created_at: self.created_at,
-            updated_at: self.created_at, // DB has no updated_at column; use created_at
+            updated_at: self.updated_at,
         }
     }
 }
@@ -60,6 +59,14 @@ fn parse_channel_type(value: &str) -> ChannelType {
         "voice" => ChannelType::Voice,
         // "text" and any future variants default to Text
         _ => ChannelType::Text,
+    }
+}
+
+/// Convert a domain `ChannelType` to the Postgres enum string.
+fn channel_type_to_str(ct: &ChannelType) -> &'static str {
+    match ct {
+        ChannelType::Text => "text",
+        ChannelType::Voice => "voice",
     }
 }
 
@@ -77,7 +84,8 @@ impl ChannelRepository for PgChannelRepository {
                 topic,
                 channel_type as "channel_type!: String",
                 position,
-                created_at
+                created_at,
+                updated_at
             FROM channels
             WHERE server_id = $1
             ORDER BY position
@@ -99,6 +107,7 @@ impl ChannelRepository for PgChannelRepository {
                     channel_type: r.channel_type,
                     position: r.position,
                     created_at: r.created_at,
+                    updated_at: r.updated_at,
                 }
                 .into_channel()
             })
@@ -119,7 +128,8 @@ impl ChannelRepository for PgChannelRepository {
                 topic,
                 channel_type as "channel_type!: String",
                 position,
-                created_at
+                created_at,
+                updated_at
             FROM channels
             WHERE id = $1
             "#,
@@ -138,8 +148,162 @@ impl ChannelRepository for PgChannelRepository {
                 channel_type: r.channel_type,
                 position: r.position,
                 created_at: r.created_at,
+                updated_at: r.updated_at,
             }
             .into_channel()
         }))
+    }
+
+    async fn create(&self, channel: &Channel) -> Result<Channel, DomainError> {
+        let id = channel.id.0;
+        let server_id = channel.server_id.0;
+        let channel_type_str = channel_type_to_str(&channel.channel_type);
+
+        let r = sqlx::query!(
+            r#"
+            INSERT INTO channels (id, server_id, name, topic, channel_type, position, created_at)
+            VALUES ($1, $2, $3, $4, $5::text::channel_type, $6, $7)
+            RETURNING
+                id,
+                server_id,
+                name,
+                topic,
+                channel_type as "channel_type!: String",
+                position,
+                created_at,
+                updated_at
+            "#,
+            id,
+            server_id,
+            channel.name,
+            channel.topic,
+            channel_type_str,
+            channel.position,
+            channel.created_at,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(ChannelRow {
+            id: r.id,
+            server_id: r.server_id,
+            name: r.name,
+            topic: r.topic,
+            channel_type: r.channel_type,
+            position: r.position,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+        .into_channel())
+    }
+
+    async fn update(
+        &self,
+        channel_id: &ChannelId,
+        name: Option<String>,
+        topic: Option<Option<String>>,
+    ) -> Result<Channel, DomainError> {
+        let cid = channel_id.0;
+        // $3: whether topic was provided at all
+        let should_update_topic = topic.is_some();
+        // $4: the new topic value (None = clear topic)
+        let topic_value = topic.flatten();
+
+        let row = sqlx::query!(
+            r#"
+            UPDATE channels
+            SET name = COALESCE($2, name),
+                topic = CASE WHEN $3 THEN $4 ELSE topic END
+            WHERE id = $1
+            RETURNING
+                id,
+                server_id,
+                name,
+                topic,
+                channel_type as "channel_type!: String",
+                position,
+                created_at,
+                updated_at
+            "#,
+            cid,
+            name,
+            should_update_topic,
+            topic_value,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let r = row.ok_or_else(|| DomainError::NotFound {
+            resource_type: "Channel",
+            id: channel_id.to_string(),
+        })?;
+
+        Ok(ChannelRow {
+            id: r.id,
+            server_id: r.server_id,
+            name: r.name,
+            topic: r.topic,
+            channel_type: r.channel_type,
+            position: r.position,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+        .into_channel())
+    }
+
+    async fn delete_if_not_last(&self, channel_id: &ChannelId) -> Result<(), DomainError> {
+        let cid = channel_id.0;
+
+        // WHY: Atomic check-and-delete prevents TOCTOU race where two concurrent
+        // requests both pass a separate count check and both delete, leaving zero channels.
+        let result = sqlx::query!(
+            r#"
+            DELETE FROM channels
+            WHERE id = $1
+              AND (
+                SELECT COUNT(*)
+                FROM channels c2
+                WHERE c2.server_id = (SELECT server_id FROM channels WHERE id = $1)
+              ) > 1
+            "#,
+            cid,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        if result.rows_affected() == 0 {
+            // Either channel doesn't exist, or it's the last one — check which.
+            let exists = self.get_by_id(channel_id).await?;
+            if exists.is_some() {
+                return Err(DomainError::ValidationError(
+                    "Cannot delete the last channel in a server".to_string(),
+                ));
+            }
+            return Err(DomainError::NotFound {
+                resource_type: "Channel",
+                id: channel_id.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn count_for_server(&self, server_id: &ServerId) -> Result<i64, DomainError> {
+        let sid = server_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            SELECT COALESCE(COUNT(*), 0) as "count!" FROM channels WHERE server_id = $1
+            "#,
+            sid,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(row.count)
     }
 }

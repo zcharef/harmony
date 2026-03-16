@@ -1,7 +1,7 @@
 //! Channel DTOs (request/response types).
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::domain::models::{CategoryId, Channel, ChannelId, ChannelType, ServerId};
@@ -52,4 +52,27 @@ impl From<Vec<Channel>> for ChannelListResponse {
             items: channels.into_iter().map(ChannelResponse::from).collect(),
         }
     }
+}
+
+/// Request body for creating a new channel.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateChannelRequest {
+    /// Channel name (lowercase alphanumeric + hyphens, 1-100 chars).
+    pub name: String,
+    /// Channel type (defaults to "text" if omitted).
+    #[serde(default)]
+    pub channel_type: Option<ChannelType>,
+}
+
+/// Request body for updating an existing channel.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateChannelRequest {
+    /// New channel name (if provided).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// New channel topic (if provided; null clears it).
+    #[serde(default)]
+    pub topic: Option<Option<String>>,
 }

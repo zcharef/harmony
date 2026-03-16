@@ -8,7 +8,7 @@ pub mod pagination;
 pub mod profiles;
 pub mod servers;
 
-pub use channels::{ChannelListResponse, ChannelResponse};
+pub use channels::{ChannelListResponse, ChannelResponse, CreateChannelRequest, UpdateChannelRequest};
 pub use invites::{CreateInviteRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest};
 pub use members::{MemberListResponse, MemberResponse};
 pub use messages::{

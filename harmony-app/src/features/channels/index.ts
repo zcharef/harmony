@@ -1,2 +1,7 @@
 export { ChannelSidebar } from './channel-sidebar'
+export { CreateChannelDialog } from './create-channel-dialog'
+export { EditChannelDialog } from './edit-channel-dialog'
 export { useChannels } from './hooks/use-channels'
+export { useCreateChannel } from './hooks/use-create-channel'
+export { useDeleteChannel } from './hooks/use-delete-channel'
+export { useUpdateChannel } from './hooks/use-update-channel'

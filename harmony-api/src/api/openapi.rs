@@ -5,10 +5,11 @@
 use utoipa::OpenApi;
 
 use super::dto::{
-    ChannelListResponse, ChannelResponse, CreateInviteRequest, CreateServerRequest,
-    EditMessageRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest,
-    MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse, MessageResponse,
-    ProfileResponse, SendMessageRequest, ServerListResponse, ServerResponse,
+    ChannelListResponse, ChannelResponse, CreateChannelRequest, CreateInviteRequest,
+    CreateServerRequest, EditMessageRequest, InvitePreviewResponse, InviteResponse,
+    JoinServerRequest, MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse,
+    MessageResponse, ProfileResponse, SendMessageRequest, ServerListResponse, ServerResponse,
+    UpdateChannelRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse};
@@ -41,6 +42,9 @@ use crate::domain::models::{
         handlers::servers::get_server,
         // Channels
         handlers::channels::list_channels,
+        handlers::channels::create_channel,
+        handlers::channels::update_channel,
+        handlers::channels::delete_channel,
         // Invites
         handlers::invites::create_invite,
         handlers::invites::preview_invite,
@@ -76,6 +80,8 @@ use crate::domain::models::{
             ServerResponse,
             ServerListResponse,
             // Channel DTOs
+            CreateChannelRequest,
+            UpdateChannelRequest,
             ChannelResponse,
             ChannelListResponse,
             // Invite DTOs

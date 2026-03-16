@@ -70,7 +70,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/servers/{id}", get(handlers::servers::get_server))
         .route(
             "/v1/servers/{id}/channels",
-            get(handlers::channels::list_channels),
+            post(handlers::channels::create_channel).get(handlers::channels::list_channels),
+        )
+        .route(
+            "/v1/servers/{id}/channels/{channel_id}",
+            patch(handlers::channels::update_channel).delete(handlers::channels::delete_channel),
         )
         // Invites
         .route(
