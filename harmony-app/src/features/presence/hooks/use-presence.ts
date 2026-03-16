@@ -156,7 +156,9 @@ export function usePresence(
     channelMapRef.current = channels
 
     return () => {
-      channels.forEach((ch) => supabase.removeChannel(ch))
+      channels.forEach((ch) => {
+        supabase.removeChannel(ch)
+      })
       channelMapRef.current = new Map()
 
       // WHY: Preserve own status across teardowns so the sidebar panel
