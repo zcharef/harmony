@@ -9,9 +9,16 @@
  */
 
 import { env } from '@/lib/env'
+import { supabase } from '@/lib/supabase'
 import type { CreateClientConfig } from './api/client.gen'
 
 export const createClientConfig: CreateClientConfig = (config) => ({
   ...config,
   baseUrl: env.VITE_API_URL,
+  // WHY: Every API request needs the Supabase JWT for backend auth verification.
+  // The @hey-api client calls this before each request to get a fresh token.
+  auth: async () => {
+    const { data } = await supabase.auth.getSession()
+    return data.session?.access_token
+  },
 })

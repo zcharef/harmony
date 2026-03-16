@@ -1,11 +1,33 @@
 import { Avatar } from '@heroui/react'
-import type { Message } from '@/lib/data'
+import type { MessageResponse } from '@/lib/api'
 
-export function MessageItem({ message }: { message: Message }) {
+/**
+ * WHY: Format ISO timestamp to a human-readable relative format.
+ * Keeps it simple for MVP — no i18n library needed yet.
+ */
+function formatTimestamp(iso: string): string {
+  const date = new Date(iso)
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+
+  const time = date.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+
+  if (isToday) return `Today at ${time}`
+  return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${time}`
+}
+
+export function MessageItem({ message }: { message: MessageResponse }) {
+  // WHY: authorId is a UUID — use first 2 chars as initials fallback.
+  // A proper profile lookup would be a future enhancement.
+  const authorLabel = message.authorId.slice(0, 8)
+
   return (
     <div className="group flex gap-4 px-4 py-1 hover:bg-default-200/50">
       <Avatar
-        name={message.authorName}
+        name={authorLabel}
         color="primary"
         size="md"
         classNames={{
@@ -16,9 +38,9 @@ export function MessageItem({ message }: { message: Message }) {
       <div className="flex min-w-0 flex-col">
         <div className="flex items-baseline gap-2">
           <span className="cursor-pointer font-medium text-foreground hover:underline">
-            {message.authorName}
+            {authorLabel}
           </span>
-          <span className="text-xs text-default-500">{message.timestamp}</span>
+          <span className="text-xs text-default-500">{formatTimestamp(message.createdAt)}</span>
         </div>
         <p className="text-sm text-foreground/90">{message.content}</p>
       </div>

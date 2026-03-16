@@ -10,6 +10,8 @@ use axum::{
 use serde::de::DeserializeOwned;
 
 use crate::api::errors::{ApiError, ProblemDetails};
+use crate::domain::models::UserId;
+use crate::infra::auth::AuthenticatedUser;
 
 /// Custom JSON extractor that returns RFC 9457 `ProblemDetails` on parse failure.
 ///
@@ -92,6 +94,39 @@ where
                     Err(ApiError::bad_request(rejection.body_text()))
                 }
             }
+        }
+    }
+}
+
+/// Extractor that pulls the authenticated user's ID from request extensions.
+///
+/// Requires the `require_auth` middleware to have run first, which inserts
+/// `AuthenticatedUser` into extensions after JWT/session verification.
+///
+/// Usage in handlers: `AuthUser(user_id): AuthUser`
+#[derive(Debug)]
+pub struct AuthUser(pub UserId);
+
+impl<S> FromRequestParts<S> for AuthUser
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    #[allow(clippy::manual_async_fn)]
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+        async move {
+            // WHY: AuthenticatedUser is inserted by the auth middleware layer.
+            // If missing, the request bypassed auth — reject immediately.
+            let user = parts
+                .extensions
+                .get::<AuthenticatedUser>()
+                .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
+
+            Ok(AuthUser(user.user_id.clone()))
         }
     }
 }

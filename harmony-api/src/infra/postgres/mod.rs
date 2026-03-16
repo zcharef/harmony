@@ -1,5 +1,15 @@
 //! `PostgreSQL` adapter (Supabase Postgres via `SQLx`).
 
+mod channel_repository;
+mod message_repository;
+mod profile_repository;
+mod server_repository;
+
+pub use channel_repository::PgChannelRepository;
+pub use message_repository::PgMessageRepository;
+pub use profile_repository::PgProfileRepository;
+pub use server_repository::PgServerRepository;
+
 use std::time::Duration;
 
 use secrecy::{ExposeSecret, SecretString};

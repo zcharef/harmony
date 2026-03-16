@@ -5,7 +5,8 @@ use std::time::Duration;
 use axum::{
     Router,
     http::{HeaderValue, Method, header},
-    routing::get,
+    middleware,
+    routing::{get, post},
 };
 use sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
 use tower_http::{
@@ -55,23 +56,33 @@ pub fn build_router(state: AppState) -> Router {
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION, header::ACCEPT])
         .allow_credentials(true);
 
-    // ── Authenticated v1 routes (example placeholder) ───────────
-    // Uncomment and add routes as features are implemented:
-    // let authenticated_routes = Router::new()
-    //     .route("/example", get(handlers::example))
-    //     .route_layer(middleware::from_fn_with_state(
-    //         state.clone(),
-    //         super::middleware::auth::require_auth,
-    //     ))
-    //     .with_state(state.clone());
+    // ── Authenticated v1 routes ───────────
+    let v1_routes = Router::new()
+        // Auth
+        .route("/v1/auth/me", post(handlers::profiles::sync_profile))
+        // Profiles
+        .route("/v1/profiles/me", get(handlers::profiles::get_my_profile))
+        // Servers
+        .route("/v1/servers", post(handlers::servers::create_server).get(handlers::servers::list_servers))
+        .route("/v1/servers/{id}", get(handlers::servers::get_server))
+        .route("/v1/servers/{id}/channels", get(handlers::channels::list_channels))
+        // Messages
+        .route(
+            "/v1/channels/{id}/messages",
+            post(handlers::messages::send_message).get(handlers::messages::list_messages),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            super::middleware::auth::require_auth,
+        ));
 
     Router::new()
         // Swagger UI
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         // System endpoints
         .route("/health", get(handlers::health_check))
-        // Versioned API namespace
-        // .nest("/v1", authenticated_routes)
+        // Versioned API routes (auth-protected)
+        .merge(v1_routes)
         .with_state(state)
         .fallback(handlers::not_found_fallback)
         // Middleware layers (applied in REVERSE order - last declared = runs first)

@@ -45,10 +45,535 @@
           }
         }
       }
+    },
+    "/v1/auth/me": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Sync (get or create) the authenticated user's profile.",
+        "description": "Called after Supabase login. Creates a profile row if this is the first login,\nor returns the existing one.\n\n# Errors\nReturns `ApiError` if the JWT lacks an email claim or the upsert fails.",
+        "operationId": "sync_profile",
+        "responses": {
+          "200": {
+            "description": "Profile synced successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/channels/{id}/messages": {
+      "get": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "List messages in a channel with cursor-based pagination.",
+        "description": "Use `before` (ISO 8601) to paginate backward. Default limit is 50, max is 100.\n\n# Errors\nReturns `ApiError` if the cursor is invalid or a repository error occurs.",
+        "operationId": "list_messages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "ISO 8601 timestamp cursor — fetch messages created before this time.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of messages to return (1-100, default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Send a message to a channel.",
+        "description": "# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "operationId": "send_message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Message sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/profiles/me": {
+      "get": {
+        "tags": [
+          "Profiles"
+        ],
+        "summary": "Get the authenticated user's own profile.",
+        "description": "# Errors\nReturns `ApiError` if the profile is not found or a repository error occurs.",
+        "operationId": "get_my_profile",
+        "responses": {
+          "200": {
+            "description": "Profile found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Profile not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers": {
+      "get": {
+        "tags": [
+          "Servers"
+        ],
+        "summary": "List all servers the authenticated user is a member of.",
+        "description": "# Errors\nReturns `ApiError` on repository error.",
+        "operationId": "list_servers",
+        "responses": {
+          "200": {
+            "description": "Server list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Servers"
+        ],
+        "summary": "Create a new server.",
+        "description": "The authenticated user becomes the owner. A default `#general` channel\nand server membership are created automatically.\n\n# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "operationId": "create_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Server created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers/{id}": {
+      "get": {
+        "tags": [
+          "Servers"
+        ],
+        "summary": "Get a server by ID.",
+        "description": "# Errors\nReturns `ApiError` if the server is not found or a repository error occurs.",
+        "operationId": "get_server",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers/{id}/channels": {
+      "get": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "List all channels in a server.",
+        "description": "# Errors\nReturns `ApiError` on repository error.",
+        "operationId": "list_channels",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channel list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
     }
   },
   "components": {
     "schemas": {
+      "CategoryId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a channel category.",
+        "example": "aa0e8400-e29b-41d4-a716-446655440005"
+      },
+      "ChannelId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a channel within a server.",
+        "example": "770e8400-e29b-41d4-a716-446655440002"
+      },
+      "ChannelListResponse": {
+        "type": "object",
+        "description": "Envelope for a list of channels (ADR-036).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChannelResponse"
+            }
+          }
+        }
+      },
+      "ChannelResponse": {
+        "type": "object",
+        "description": "Channel response returned to API consumers.",
+        "required": [
+          "id",
+          "serverId",
+          "name",
+          "channelType",
+          "position",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "categoryId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CategoryId"
+              }
+            ]
+          },
+          "channelType": {
+            "$ref": "#/components/schemas/ChannelType"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "serverId": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "topic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ChannelType": {
+        "type": "string",
+        "description": "Channel type (matches Postgres `channel_type` enum).",
+        "enum": [
+          "text",
+          "voice"
+        ]
+      },
       "ComponentHealth": {
         "type": "object",
         "description": "Health status of individual components.",
@@ -66,6 +591,20 @@
             "description": "Database connectivity: \"connected\", \"disconnected\", or error detail"
           }
         }
+      },
+      "CreateServerRequest": {
+        "type": "object",
+        "description": "Request body for creating a new server.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Server name (required, non-empty)."
+          }
+        },
+        "additionalProperties": false
       },
       "HealthResponse": {
         "type": "object",
@@ -94,6 +633,91 @@
           "version": {
             "type": "string",
             "description": "API version from Cargo.toml"
+          }
+        }
+      },
+      "MessageId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a message.",
+        "example": "880e8400-e29b-41d4-a716-446655440003"
+      },
+      "MessageListQuery": {
+        "type": "object",
+        "description": "Query parameters for listing messages (cursor-based pagination).",
+        "properties": {
+          "before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp cursor — fetch messages created before this time."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Maximum number of messages to return (1-100, default 50)."
+          }
+        }
+      },
+      "MessageListResponse": {
+        "type": "object",
+        "description": "Envelope for a list of messages with cursor pagination (ADR-036).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor for the next page. `None` if this is the last page."
+          }
+        }
+      },
+      "MessageResponse": {
+        "type": "object",
+        "description": "Message response returned to API consumers.\n\nExcludes `deleted_at` — soft-deleted messages are filtered server-side.",
+        "required": [
+          "id",
+          "channelId",
+          "authorId",
+          "content",
+          "createdAt"
+        ],
+        "properties": {
+          "authorId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "channelId": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "editedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "$ref": "#/components/schemas/MessageId"
           }
         }
       },
@@ -128,6 +752,145 @@
             "type": "string"
           }
         }
+      },
+      "ProfileResponse": {
+        "type": "object",
+        "description": "Profile response returned to API consumers.",
+        "required": [
+          "id",
+          "username",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "customStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UserStatus"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "SendMessageRequest": {
+        "type": "object",
+        "description": "Request body for sending a new message.",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Message content (required, non-empty)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ServerId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a server (guild).",
+        "example": "660e8400-e29b-41d4-a716-446655440001"
+      },
+      "ServerListResponse": {
+        "type": "object",
+        "description": "Envelope for a list of servers (ADR-036).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerResponse"
+            }
+          }
+        }
+      },
+      "ServerResponse": {
+        "type": "object",
+        "description": "Server response returned to API consumers.",
+        "required": [
+          "id",
+          "name",
+          "ownerId",
+          "isDm",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "iconUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "isDm": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ownerId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UserId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a user (Supabase auth.users UUID).",
+        "example": "550e8400-e29b-41d4-a716-446655440000"
+      },
+      "UserStatus": {
+        "type": "string",
+        "description": "User presence status.",
+        "enum": [
+          "online",
+          "idle",
+          "dnd",
+          "offline"
+        ]
       }
     },
     "securitySchemes": {
@@ -143,6 +906,26 @@
     {
       "name": "System",
       "description": "System health and status endpoints"
+    },
+    {
+      "name": "Auth",
+      "description": "Authentication and profile sync"
+    },
+    {
+      "name": "Profiles",
+      "description": "User profile endpoints"
+    },
+    {
+      "name": "Servers",
+      "description": "Server (guild) management"
+    },
+    {
+      "name": "Channels",
+      "description": "Channel management within servers"
+    },
+    {
+      "name": "Messages",
+      "description": "Messaging within channels"
     }
   ]
 }

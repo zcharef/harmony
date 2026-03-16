@@ -1,10 +1,11 @@
 import { GripVertical } from 'lucide-react'
+import { useState } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 
-import { ChannelSidebar } from '@/features/channels'
+import { ChannelSidebar, useChannels } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
 import { MemberList } from '@/features/members'
-import { ServerList } from '@/features/server-nav'
+import { ServerList, useServers } from '@/features/server-nav'
 
 function ResizeHandle() {
   return (
@@ -17,21 +18,43 @@ function ResizeHandle() {
 }
 
 export function MainLayout() {
+  const [selectedServerId, setSelectedServerId] = useState<string | null>(null)
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null)
+
+  // WHY: Derive server/channel names from query cache to display in headers.
+  // This avoids passing full objects between features (CLAUDE.md 4.5: pass IDs, not objects).
+  const { data: servers } = useServers()
+  const { data: channels } = useChannels(selectedServerId)
+
+  const selectedServer = servers?.find((s) => s.id === selectedServerId)
+  const selectedChannel = channels?.find((c) => c.id === selectedChannelId)
+
+  function handleSelectServer(serverId: string) {
+    setSelectedServerId(serverId)
+    // WHY: Reset channel selection when switching servers
+    setSelectedChannelId(null)
+  }
+
   return (
     <div className="flex h-screen w-screen overflow-hidden">
       {/* Server nav - fixed width, outside resizable group */}
-      <ServerList />
+      <ServerList selectedServerId={selectedServerId} onSelectServer={handleSelectServer} />
 
       {/* Resizable panels for sidebar, chat, members */}
       <Group orientation="horizontal" className="flex h-full w-full flex-1">
         <Panel defaultSize="20%" minSize="15%" maxSize="30%">
-          <ChannelSidebar />
+          <ChannelSidebar
+            serverId={selectedServerId}
+            serverName={selectedServer?.name ?? null}
+            selectedChannelId={selectedChannelId}
+            onSelectChannel={setSelectedChannelId}
+          />
         </Panel>
 
         <ResizeHandle />
 
         <Panel defaultSize="60%" minSize="30%">
-          <ChatArea />
+          <ChatArea channelId={selectedChannelId} channelName={selectedChannel?.name ?? null} />
         </Panel>
 
         <ResizeHandle />

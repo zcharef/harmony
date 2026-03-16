@@ -8,9 +8,10 @@
 // WHY: main.rs is the composition root — process::exit on fatal startup errors is acceptable.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-use harmony_api::{api, config, infra};
+use harmony_api::{api, config, domain, infra};
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
@@ -75,7 +76,7 @@ async fn main() {
     }
 }
 
-/// Initialize application state with Postgres pool and JWT config.
+/// Initialize application state with Postgres pool, services, and repositories.
 async fn init_app_state(config: &Config) -> AppState {
     // Initialize Postgres connection pool
     let pool = infra::postgres::create_pool(&config.database_url, config.max_db_connections).await;
@@ -97,12 +98,29 @@ async fn init_app_state(config: &Config) -> AppState {
         SecretString::from("dev-only-insecure-session-secret-do-not-use-in-prod!!")
     });
 
-    AppState {
+    // Construct Postgres adapters (ports → adapters)
+    let profile_repo = Arc::new(infra::postgres::PgProfileRepository::new(pool.clone()));
+    let server_repo = Arc::new(infra::postgres::PgServerRepository::new(pool.clone()));
+    let message_repo = Arc::new(infra::postgres::PgMessageRepository::new(pool.clone()));
+    let channel_repo = Arc::new(infra::postgres::PgChannelRepository::new(pool.clone()));
+
+    // Construct domain services (injected with repository ports)
+    let profile_service = Arc::new(domain::services::ProfileService::new(profile_repo));
+    let server_service = Arc::new(domain::services::ServerService::new(server_repo));
+    let message_service = Arc::new(domain::services::MessageService::new(message_repo));
+
+    tracing::info!("Domain services initialized");
+
+    AppState::new(
         pool,
-        jwt_secret: config.supabase_jwt_secret.clone(),
+        config.supabase_jwt_secret.clone(),
         session_secret,
-        is_production: config.is_production(),
-    }
+        config.is_production(),
+        profile_service,
+        server_service,
+        message_service,
+        channel_repo,
+    )
 }
 
 /// Initialize Sentry for crash reporting and proactive alerting.

@@ -1,5 +1,10 @@
 //! HTTP handlers for API endpoints.
 
+pub mod channels;
+pub mod messages;
+pub mod profiles;
+pub mod servers;
+
 use std::time::Instant;
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};

@@ -18,6 +18,7 @@ export const queryKeys = {
   },
   servers: {
     all: ['servers'] as const,
+    list: () => ['servers', 'list'] as const,
     detail: (serverId: string) => ['servers', 'detail', serverId] as const,
     members: (serverId: string) => ['servers', serverId, 'members'] as const,
     channels: (serverId: string) => ['servers', serverId, 'channels'] as const,
@@ -26,6 +27,7 @@ export const queryKeys = {
   },
   channels: {
     all: ['channels'] as const,
+    byServer: (serverId: string) => ['channels', 'server', serverId] as const,
     detail: (channelId: string) => ['channels', 'detail', channelId] as const,
   },
   messages: {

@@ -4,8 +4,16 @@
 
 use utoipa::OpenApi;
 
+use super::dto::{
+    ChannelListResponse, ChannelResponse, CreateServerRequest, MessageListQuery,
+    MessageListResponse, MessageResponse, ProfileResponse, SendMessageRequest, ServerListResponse,
+    ServerResponse,
+};
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse};
+use crate::domain::models::{
+    CategoryId, ChannelId, ChannelType, MessageId, ServerId, UserId, UserStatus,
+};
 
 /// `OpenAPI` documentation for Harmony API.
 #[derive(Debug, OpenApi)]
@@ -20,17 +28,60 @@ use super::handlers::{self, ComponentHealth, HealthResponse};
         (url = "http://localhost:3000", description = "Local development"),
     ),
     paths(
+        // System
         handlers::health_check,
+        // Auth
+        handlers::profiles::sync_profile,
+        // Profiles
+        handlers::profiles::get_my_profile,
+        // Servers
+        handlers::servers::create_server,
+        handlers::servers::list_servers,
+        handlers::servers::get_server,
+        // Channels
+        handlers::channels::list_channels,
+        // Messages
+        handlers::messages::send_message,
+        handlers::messages::list_messages,
     ),
     components(
         schemas(
+            // System
             HealthResponse,
             ComponentHealth,
             ProblemDetails,
+            // Domain ID types
+            UserId,
+            ServerId,
+            ChannelId,
+            MessageId,
+            CategoryId,
+            // Domain enums
+            UserStatus,
+            ChannelType,
+            // Profile DTOs
+            ProfileResponse,
+            // Server DTOs
+            CreateServerRequest,
+            ServerResponse,
+            ServerListResponse,
+            // Channel DTOs
+            ChannelResponse,
+            ChannelListResponse,
+            // Message DTOs
+            SendMessageRequest,
+            MessageResponse,
+            MessageListResponse,
+            MessageListQuery,
         )
     ),
     tags(
         (name = "System", description = "System health and status endpoints"),
+        (name = "Auth", description = "Authentication and profile sync"),
+        (name = "Profiles", description = "User profile endpoints"),
+        (name = "Servers", description = "Server (guild) management"),
+        (name = "Channels", description = "Channel management within servers"),
+        (name = "Messages", description = "Messaging within channels"),
     ),
     modifiers(&SecurityAddon)
 )]

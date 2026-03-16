@@ -1,2 +1,5 @@
 export { ChatArea } from './chat-area'
+export { useMessages } from './hooks/use-messages'
+export { useRealtimeMessages } from './hooks/use-realtime-messages'
+export { useSendMessage } from './hooks/use-send-message'
 export { MessageItem } from './message-item'

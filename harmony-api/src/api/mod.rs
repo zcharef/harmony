@@ -8,5 +8,5 @@ pub mod router;
 pub mod session;
 pub mod state;
 
-pub use extractors::{ApiJson, ApiPath};
+pub use extractors::{ApiJson, ApiPath, AuthUser};
 pub use state::AppState;

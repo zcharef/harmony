@@ -1,22 +1,35 @@
-import { Avatar, Divider, Tooltip } from '@heroui/react'
+import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
 import { Plus } from 'lucide-react'
-import { servers } from '@/lib/data'
+import { useState } from 'react'
+import type { ServerResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
-
-const ACTIVE_SERVER_ID = '1'
+import { CreateServerDialog } from './create-server-dialog'
+import { useServers } from './hooks/use-servers'
 
 function ServerIcon({
   server,
   isActive,
-  isHome,
+  onSelect,
 }: {
-  server: (typeof servers)[number]
+  server: ServerResponse
   isActive: boolean
-  isHome?: boolean
+  onSelect: () => void
 }) {
+  // WHY: Generate initials from server name for avatar fallback
+  const initials = server.name
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+
   return (
     <Tooltip content={server.name} placement="right" offset={8}>
-      <div className="relative flex items-center justify-center w-full group">
+      <button
+        type="button"
+        onClick={onSelect}
+        className="relative flex w-full items-center justify-center group"
+      >
         {/* Active pill indicator */}
         <div
           className={cn(
@@ -26,14 +39,14 @@ function ServerIcon({
         />
 
         <Avatar
-          name={server.initials}
+          name={initials}
+          src={server.iconUrl ?? undefined}
           classNames={{
             base: cn(
               'h-12 w-12 cursor-pointer transition-all duration-200',
               isActive
                 ? 'rounded-2xl bg-primary text-primary-foreground'
                 : 'rounded-[24px] hover:rounded-2xl bg-default-100 text-default-foreground hover:bg-primary hover:text-primary-foreground',
-              isHome && !isActive && 'hover:bg-primary',
             ),
             name: cn(
               'text-sm font-medium transition-all duration-200',
@@ -43,27 +56,64 @@ function ServerIcon({
             ),
           }}
         />
-      </div>
+      </button>
     </Tooltip>
   )
 }
 
-export function ServerList() {
-  const [home, ...rest] = servers
-  if (!home) return null
+interface ServerListProps {
+  selectedServerId: string | null
+  onSelectServer: (serverId: string) => void
+}
+
+export function ServerList({ selectedServerId, onSelectServer }: ServerListProps) {
+  const { data: servers, isPending, isError } = useServers()
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+
+  if (isPending) {
+    return (
+      <div className="flex h-full w-[72px] flex-col items-center justify-center bg-content1">
+        <Spinner size="sm" />
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex h-full w-[72px] flex-col items-center justify-center bg-content1">
+        <span className="text-xs text-danger">Error</span>
+      </div>
+    )
+  }
+
+  // WHY: Separate DM servers from regular servers for Discord-like layout
+  const dmServers = servers?.filter((s) => s.isDm) ?? []
+  const regularServers = servers?.filter((s) => !s.isDm) ?? []
+  const homeServer = dmServers[0]
 
   return (
     <div className="flex h-full w-[72px] flex-col items-center bg-content1 py-3">
       {/* Home / DMs */}
-      <ServerIcon server={home} isActive={false} isHome />
+      {homeServer !== undefined && (
+        <ServerIcon
+          server={homeServer}
+          isActive={selectedServerId === homeServer.id}
+          onSelect={() => onSelectServer(homeServer.id)}
+        />
+      )}
 
       <Divider className="mx-auto my-2 w-8 bg-divider" />
 
       {/* Server list */}
-      <div className="flex-1 w-full overflow-y-auto">
+      <div className="w-full flex-1 overflow-y-auto">
         <div className="flex flex-col items-center gap-2">
-          {rest.map((server) => (
-            <ServerIcon key={server.id} server={server} isActive={server.id === ACTIVE_SERVER_ID} />
+          {regularServers.map((server) => (
+            <ServerIcon
+              key={server.id}
+              server={server}
+              isActive={server.id === selectedServerId}
+              onSelect={() => onSelectServer(server.id)}
+            />
           ))}
         </div>
       </div>
@@ -82,9 +132,16 @@ export function ServerList() {
               ),
               icon: 'text-current',
             }}
+            onClick={() => setIsCreateOpen(true)}
           />
         </div>
       </Tooltip>
+
+      <CreateServerDialog
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onCreated={(serverId) => onSelectServer(serverId)}
+      />
     </div>
   )
 }

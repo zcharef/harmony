@@ -1,0 +1,92 @@
+import { Button, Card, CardBody, CardHeader, Divider, Input } from '@heroui/react'
+import type { FormEvent } from 'react'
+import { useState } from 'react'
+import { supabase } from '@/lib/supabase'
+
+type AuthMode = 'login' | 'signup'
+
+export function LoginPage() {
+  const [mode, setMode] = useState<AuthMode>('login')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setIsSubmitting(true)
+
+    const result =
+      mode === 'login'
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({ email, password })
+
+    if (result.error) {
+      setError(result.error.message)
+    }
+
+    setIsSubmitting(false)
+  }
+
+  function toggleMode() {
+    setMode((prev) => (prev === 'login' ? 'signup' : 'login'))
+    setError(null)
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="flex flex-col items-center gap-1 pb-0 pt-6">
+          <h1 className="text-2xl font-bold text-foreground">Harmony</h1>
+          <p className="text-sm text-default-500">
+            {mode === 'login' ? 'Welcome back!' : 'Create your account'}
+          </p>
+        </CardHeader>
+
+        <CardBody className="gap-4 px-6 pb-6">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <Input
+              label="Email"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onValueChange={setEmail}
+              isRequired
+              autoComplete="email"
+            />
+
+            <Input
+              label="Password"
+              type="password"
+              placeholder="Enter your password"
+              value={password}
+              onValueChange={setPassword}
+              isRequired
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            />
+
+            {error !== null && <p className="text-sm text-danger">{error}</p>}
+
+            <Button type="submit" color="primary" isLoading={isSubmitting} className="mt-2">
+              {mode === 'login' ? 'Sign In' : 'Sign Up'}
+            </Button>
+          </form>
+
+          <Divider />
+
+          <p className="text-center text-sm text-default-500">
+            {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
+            <button
+              type="button"
+              onClick={toggleMode}
+              className="font-medium text-primary hover:underline"
+            >
+              {mode === 'login' ? 'Sign up' : 'Sign in'}
+            </button>
+          </p>
+        </CardBody>
+      </Card>
+    </div>
+  )
+}
