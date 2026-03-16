@@ -10,6 +10,9 @@
 -- Insert test users into auth.users
 -- Password: "password123" hashed with bcrypt
 -- Note: confirmed_at is a generated column (LEAST(email_confirmed_at, phone_confirmed_at)), omit it
+-- WHY: GoTrue scans token/change varchar columns into Go strings — NULL causes
+-- a scan error. Columns with no default must be set to '' explicitly.
+-- phone is left NULL (has unique constraint + GoTrue handles NULL phone natively).
 INSERT INTO auth.users (
     id,
     instance_id,
@@ -23,7 +26,11 @@ INSERT INTO auth.users (
     created_at,
     updated_at,
     is_sso_user,
-    is_anonymous
+    is_anonymous,
+    confirmation_token,
+    recovery_token,
+    email_change_token_new,
+    email_change
 ) VALUES (
     'a1111111-1111-1111-1111-111111111111',
     '00000000-0000-0000-0000-000000000000',
@@ -37,7 +44,8 @@ INSERT INTO auth.users (
     now(),
     now(),
     false,
-    false
+    false,
+    '', '', '', ''
 ), (
     'b2222222-2222-2222-2222-222222222222',
     '00000000-0000-0000-0000-000000000000',
@@ -51,7 +59,8 @@ INSERT INTO auth.users (
     now(),
     now(),
     false,
-    false
+    false,
+    '', '', '', ''
 ) ON CONFLICT (id) DO NOTHING;
 
 -- Insert identities (required for Supabase Auth login to work)
