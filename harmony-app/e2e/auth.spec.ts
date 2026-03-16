@@ -61,9 +61,14 @@ test.describe("Authentication", () => {
 		await passwordInput.fill("wrongpass");
 		await expect(passwordInput).toHaveValue("wrongpass");
 
+		const responsePromise = page.waitForResponse(
+			(response) => response.url().includes("/auth/v1/token"),
+		);
+
 		await page.locator('[data-test="login-submit-button"]').click();
 
-		await page.waitForTimeout(2000);
+		const response = await responsePromise;
+		expect(response.status()).toBeGreaterThanOrEqual(400);
 
 		const errorMessage = page.locator('[data-test="login-error-message"]');
 		await expect(errorMessage).toBeAttached();
