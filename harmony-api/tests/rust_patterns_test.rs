@@ -345,7 +345,9 @@ fn no_println_in_src() {
                 if line.contains(pattern) {
                     // Avoid false positives: "eprint!" matching "eprintln!"
                     // and "print!" matching "println!" — check boundaries
-                    if *pattern == "print!" && (line.contains("println!") || line.contains("eprint")) {
+                    if *pattern == "print!"
+                        && (line.contains("println!") || line.contains("eprint"))
+                    {
                         continue;
                     }
 
@@ -412,7 +414,10 @@ fn request_dtos_deny_unknown_fields() {
             if trimmed.starts_with("pub struct ") {
                 let struct_name = trimmed
                     .strip_prefix("pub struct ")
-                    .and_then(|rest| rest.split(|c: char| !c.is_alphanumeric() && c != '_').next())
+                    .and_then(|rest| {
+                        rest.split(|c: char| !c.is_alphanumeric() && c != '_')
+                            .next()
+                    })
                     .unwrap_or("unknown");
 
                 // Only check structs that follow request DTO naming conventions.
@@ -437,8 +442,11 @@ fn request_dtos_deny_unknown_fields() {
                 }
 
                 // Check for deny_unknown_fields in the preceding attributes
-                let has_deny = (i.saturating_sub(5)..i)
-                    .any(|j| lines.get(j).is_some_and(|l| l.contains("deny_unknown_fields")));
+                let has_deny = (i.saturating_sub(5)..i).any(|j| {
+                    lines
+                        .get(j)
+                        .is_some_and(|l| l.contains("deny_unknown_fields"))
+                });
 
                 if !has_deny {
                     violations.push(format!(
@@ -505,7 +513,10 @@ fn request_dtos_no_timestamp_fields() {
             if trimmed.starts_with("pub struct ") {
                 let struct_name = trimmed
                     .strip_prefix("pub struct ")
-                    .and_then(|rest| rest.split(|c: char| !c.is_alphanumeric() && c != '_').next())
+                    .and_then(|rest| {
+                        rest.split(|c: char| !c.is_alphanumeric() && c != '_')
+                            .next()
+                    })
                     .unwrap_or("unknown")
                     .to_string();
 
@@ -589,14 +600,17 @@ fn dtos_use_camel_case() {
             if trimmed.starts_with("pub struct ") {
                 let struct_name = trimmed
                     .strip_prefix("pub struct ")
-                    .and_then(|rest| rest.split(|c: char| !c.is_alphanumeric() && c != '_').next())
+                    .and_then(|rest| {
+                        rest.split(|c: char| !c.is_alphanumeric() && c != '_')
+                            .next()
+                    })
                     .unwrap_or("unknown");
 
                 // Check if it has Serialize or Deserialize
                 let has_serde = (i.saturating_sub(5)..i).any(|j| {
-                    lines.get(j).is_some_and(|l| {
-                        l.contains("Serialize") || l.contains("Deserialize")
-                    })
+                    lines
+                        .get(j)
+                        .is_some_and(|l| l.contains("Serialize") || l.contains("Deserialize"))
                 });
 
                 if !has_serde {

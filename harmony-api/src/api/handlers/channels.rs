@@ -30,7 +30,10 @@ pub async fn list_channels(
     State(state): State<AppState>,
     ApiPath(server_id): ApiPath<ServerId>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let channels = state.channel_repository().list_for_server(&server_id).await?;
+    let channels = state
+        .channel_repository()
+        .list_for_server(&server_id)
+        .await?;
 
     Ok((StatusCode::OK, Json(ChannelListResponse::from(channels))))
 }

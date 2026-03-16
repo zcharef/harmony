@@ -9,9 +9,7 @@ pub mod profiles;
 pub mod servers;
 
 pub use channels::{ChannelListResponse, ChannelResponse};
-pub use invites::{
-    CreateInviteRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest,
-};
+pub use invites::{CreateInviteRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest};
 pub use members::{MemberListResponse, MemberResponse};
 pub use messages::{
     EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, SendMessageRequest,

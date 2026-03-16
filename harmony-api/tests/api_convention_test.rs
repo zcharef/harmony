@@ -74,7 +74,9 @@ fn all_routes_versioned() {
                 let path = &after_route[..end_quote];
 
                 // Check if exempt
-                let is_exempt = exempt_prefixes.iter().any(|prefix| path.starts_with(prefix));
+                let is_exempt = exempt_prefixes
+                    .iter()
+                    .any(|prefix| path.starts_with(prefix));
 
                 // Check if versioned
                 let is_versioned = path.starts_with("/v");
@@ -295,8 +297,11 @@ fn all_handlers_have_tracing_instrument() {
                 }
 
                 // Check if any of the preceding 10 lines contain #[tracing::instrument]
-                let has_instrument = (i.saturating_sub(10)..i)
-                    .any(|j| lines.get(j).is_some_and(|l| l.contains("tracing::instrument")));
+                let has_instrument = (i.saturating_sub(10)..i).any(|j| {
+                    lines
+                        .get(j)
+                        .is_some_and(|l| l.contains("tracing::instrument"))
+                });
 
                 if !has_instrument {
                     violations.push(format!(

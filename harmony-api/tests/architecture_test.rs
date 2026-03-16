@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stdout)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout
+)]
 //! Architecture tests for hexagonal boundary enforcement.
 //!
 //! These tests verify that the domain layer remains pure (no infra/api dependencies)

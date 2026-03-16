@@ -30,10 +30,10 @@ pub async fn list_members(
     State(state): State<AppState>,
     ApiPath(server_id): ApiPath<ServerId>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let members = state
-        .member_repository()
-        .list_by_server(&server_id)
-        .await?;
+    let members = state.member_repository().list_by_server(&server_id).await?;
 
-    Ok((StatusCode::OK, Json(MemberListResponse::from_members(members))))
+    Ok((
+        StatusCode::OK,
+        Json(MemberListResponse::from_members(members)),
+    ))
 }

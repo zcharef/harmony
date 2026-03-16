@@ -41,7 +41,13 @@ pub async fn sync_profile(
     let sanitized: String = raw_prefix
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .take(32)
         .collect();
     let username = if sanitized.len() < 3 {

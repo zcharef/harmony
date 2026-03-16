@@ -71,14 +71,14 @@ impl MessageService {
             ));
         }
 
-        let message = self
-            .repo
-            .find_by_id(message_id)
-            .await?
-            .ok_or_else(|| DomainError::NotFound {
-                resource_type: "Message",
-                id: message_id.to_string(),
-            })?;
+        let message =
+            self.repo
+                .find_by_id(message_id)
+                .await?
+                .ok_or_else(|| DomainError::NotFound {
+                    resource_type: "Message",
+                    id: message_id.to_string(),
+                })?;
 
         if message.author_id != *user_id {
             return Err(DomainError::Forbidden(
@@ -99,14 +99,14 @@ impl MessageService {
         message_id: &MessageId,
         user_id: &UserId,
     ) -> Result<(), DomainError> {
-        let message = self
-            .repo
-            .find_by_id(message_id)
-            .await?
-            .ok_or_else(|| DomainError::NotFound {
-                resource_type: "Message",
-                id: message_id.to_string(),
-            })?;
+        let message =
+            self.repo
+                .find_by_id(message_id)
+                .await?
+                .ok_or_else(|| DomainError::NotFound {
+                    resource_type: "Message",
+                    id: message_id.to_string(),
+                })?;
 
         if message.author_id != *user_id {
             return Err(DomainError::Forbidden(

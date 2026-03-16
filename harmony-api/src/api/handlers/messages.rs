@@ -1,7 +1,7 @@
 //! Message handlers.
 
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use axum::extract::Query;
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use serde::Deserialize;
 
@@ -86,8 +86,9 @@ pub async fn list_messages(
     let cursor = query
         .before
         .map(|s| {
-            s.parse::<chrono::DateTime<chrono::Utc>>()
-                .map_err(|_| ApiError::bad_request("Invalid 'before' cursor: expected ISO 8601 timestamp"))
+            s.parse::<chrono::DateTime<chrono::Utc>>().map_err(|_| {
+                ApiError::bad_request("Invalid 'before' cursor: expected ISO 8601 timestamp")
+            })
         })
         .transpose()?;
 
@@ -103,7 +104,10 @@ pub async fn list_messages(
         None
     };
 
-    Ok((StatusCode::OK, Json(MessageListResponse::from_messages(messages, next_cursor))))
+    Ok((
+        StatusCode::OK,
+        Json(MessageListResponse::from_messages(messages, next_cursor)),
+    ))
 }
 
 /// Path parameters for message-specific operations.

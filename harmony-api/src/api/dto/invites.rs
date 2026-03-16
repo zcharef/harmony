@@ -66,3 +66,18 @@ pub struct InvitePreviewResponse {
     pub server_name: String,
     pub member_count: i64,
 }
+
+impl InvitePreviewResponse {
+    /// WHY: This DTO aggregates data from three sources (invite, server, members),
+    /// so a simple From<DomainModel> is not possible. A constructor keeps the
+    /// assembly logic out of the handler (ADR-023).
+    #[must_use]
+    pub fn new(invite: &Invite, server_name: String, member_count: i64) -> Self {
+        Self {
+            code: invite.code.clone(),
+            server_id: invite.server_id.clone(),
+            server_name,
+            member_count,
+        }
+    }
+}

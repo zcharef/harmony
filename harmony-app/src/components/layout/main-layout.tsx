@@ -1,5 +1,5 @@
 import { GripVertical } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 
 import { useAuthStore } from '@/features/auth'
@@ -23,14 +23,15 @@ export function MainLayout() {
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null)
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null)
 
-  // WHY: Mount presence subscription at layout level so it tracks the active server.
-  // Subscribes/unsubscribes automatically as selectedServerId changes.
-  const userId = useAuthStore((s) => s.user?.id ?? null)
-  usePresence(selectedServerId, userId)
-
   // WHY: Derive server/channel names from query cache to display in headers.
   // This avoids passing full objects between features (CLAUDE.md 4.5: pass IDs, not objects).
   const { data: servers } = useServers()
+
+  // WHY: Presence subscribes to ALL servers so the user appears online to
+  // friends everywhere, not just on the currently viewed server.
+  const userId = useAuthStore((s) => s.user?.id ?? null)
+  const serverIds = useMemo(() => servers?.map((s) => s.id) ?? [], [servers])
+  usePresence(serverIds, selectedServerId, userId)
   const { data: channels } = useChannels(selectedServerId)
 
   const selectedServer = servers?.find((s) => s.id === selectedServerId)

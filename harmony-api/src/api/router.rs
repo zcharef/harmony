@@ -63,11 +63,20 @@ pub fn build_router(state: AppState) -> Router {
         // Profiles
         .route("/v1/profiles/me", get(handlers::profiles::get_my_profile))
         // Servers
-        .route("/v1/servers", post(handlers::servers::create_server).get(handlers::servers::list_servers))
+        .route(
+            "/v1/servers",
+            post(handlers::servers::create_server).get(handlers::servers::list_servers),
+        )
         .route("/v1/servers/{id}", get(handlers::servers::get_server))
-        .route("/v1/servers/{id}/channels", get(handlers::channels::list_channels))
+        .route(
+            "/v1/servers/{id}/channels",
+            get(handlers::channels::list_channels),
+        )
         // Invites
-        .route("/v1/servers/{id}/invites", post(handlers::invites::create_invite))
+        .route(
+            "/v1/servers/{id}/invites",
+            post(handlers::invites::create_invite),
+        )
         // Members (join + list)
         .route(
             "/v1/servers/{id}/members",
@@ -88,8 +97,8 @@ pub fn build_router(state: AppState) -> Router {
         ));
 
     // ── Public v1 routes (no auth required) ───────────
-    let public_routes = Router::new()
-        .route("/v1/invites/{code}", get(handlers::invites::preview_invite));
+    let public_routes =
+        Router::new().route("/v1/invites/{code}", get(handlers::invites::preview_invite));
 
     Router::new()
         // Swagger UI

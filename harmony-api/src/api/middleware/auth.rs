@@ -69,13 +69,11 @@ pub async fn require_auth(
             )
         })?;
 
-    let user =
-        auth::verify_supabase_jwt(token, &state.jwt_secret, state.es256_key.as_ref()).map_err(
-            |e| {
-                tracing::warn!(error = %e, "JWT verification failed");
-                ApiError::unauthorized("Invalid or expired token")
-            },
-        )?;
+    let user = auth::verify_supabase_jwt(token, &state.jwt_secret, state.es256_key.as_ref())
+        .map_err(|e| {
+            tracing::warn!(error = %e, "JWT verification failed");
+            ApiError::unauthorized("Invalid or expired token")
+        })?;
 
     sentry::configure_scope(|scope| {
         scope.set_user(Some(sentry::protocol::User {

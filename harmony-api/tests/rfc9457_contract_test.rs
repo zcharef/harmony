@@ -177,7 +177,8 @@ mod serialization_tests {
     /// Test: `ProblemDetails` serialization matches RFC 9457.
     #[test]
     fn problem_details_serializes_to_rfc9457_format() {
-        let problem = ProblemDetails::new(StatusCode::BAD_REQUEST, "Bad Request", "Email is invalid");
+        let problem =
+            ProblemDetails::new(StatusCode::BAD_REQUEST, "Bad Request", "Email is invalid");
         let json = serde_json::to_value(&problem).expect("ProblemDetails should serialize");
 
         assert_eq!(json["type"], "about:blank");
@@ -192,7 +193,10 @@ mod serialization_tests {
         let problem = ProblemDetails::new(StatusCode::NOT_FOUND, "Not Found", "User not found");
         let json = serde_json::to_value(&problem).expect("ProblemDetails should serialize");
 
-        assert!(json["status"].is_number(), "status must be numeric, not string");
+        assert!(
+            json["status"].is_number(),
+            "status must be numeric, not string"
+        );
         assert_eq!(json["status"], 404);
     }
 
@@ -202,7 +206,10 @@ mod serialization_tests {
         let problem = ProblemDetails::new(StatusCode::FORBIDDEN, "Forbidden", "No access");
         let json = serde_json::to_value(&problem).expect("ProblemDetails should serialize");
 
-        assert!(json.get("instance").is_none(), "instance should be omitted when None");
+        assert!(
+            json.get("instance").is_none(),
+            "instance should be omitted when None"
+        );
     }
 
     /// Test: `instance` appears in JSON when set via builder.
@@ -218,7 +225,11 @@ mod serialization_tests {
     /// Test: Type defaults to "about:blank" per RFC 9457.
     #[test]
     fn problem_details_type_defaults_to_about_blank() {
-        let problem = ProblemDetails::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error", "Something went wrong");
+        let problem = ProblemDetails::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+            "Something went wrong",
+        );
         let json = serde_json::to_value(&problem).expect("ProblemDetails should serialize");
 
         assert_eq!(json["type"], "about:blank");
@@ -250,7 +261,13 @@ mod api_error_tests {
 
         assert_eq!(json["status"], 404);
         let detail = json["detail"].as_str().expect("detail should be a string");
-        assert!(detail.contains("User"), "detail should mention the resource type");
-        assert!(detail.contains("abc123"), "detail should mention the resource id");
+        assert!(
+            detail.contains("User"),
+            "detail should mention the resource type"
+        );
+        assert!(
+            detail.contains("abc123"),
+            "detail should mention the resource id"
+        );
     }
 }

@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{ServerMember, ServerId, UserId};
+use crate::domain::models::{ServerId, ServerMember, UserId};
 use crate::domain::ports::MemberRepository;
 
 /// PostgreSQL-backed member repository.
@@ -47,10 +47,7 @@ impl MemberRow {
 
 #[async_trait]
 impl MemberRepository for PgMemberRepository {
-    async fn list_by_server(
-        &self,
-        server_id: &ServerId,
-    ) -> Result<Vec<ServerMember>, DomainError> {
+    async fn list_by_server(&self, server_id: &ServerId) -> Result<Vec<ServerMember>, DomainError> {
         let sid = server_id.0;
 
         let rows = sqlx::query!(
@@ -91,11 +88,7 @@ impl MemberRepository for PgMemberRepository {
         Ok(members)
     }
 
-    async fn is_member(
-        &self,
-        server_id: &ServerId,
-        user_id: &UserId,
-    ) -> Result<bool, DomainError> {
+    async fn is_member(&self, server_id: &ServerId, user_id: &UserId) -> Result<bool, DomainError> {
         let sid = server_id.0;
         let uid = user_id.0;
 
@@ -117,11 +110,7 @@ impl MemberRepository for PgMemberRepository {
         Ok(result.exists)
     }
 
-    async fn add_member(
-        &self,
-        server_id: &ServerId,
-        user_id: &UserId,
-    ) -> Result<(), DomainError> {
+    async fn add_member(&self, server_id: &ServerId, user_id: &UserId) -> Result<(), DomainError> {
         let sid = server_id.0;
         let uid = user_id.0;
 

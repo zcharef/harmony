@@ -91,7 +91,10 @@ impl std::fmt::Debug for Config {
             .field("supabase_jwt_secret", &"[REDACTED]")
             .field("supabase_url", &self.supabase_url)
             .field("session_secret", &"[REDACTED]")
-            .field("sentry_dsn", &self.sentry_dsn.as_ref().map(|_| "[REDACTED]"))
+            .field(
+                "sentry_dsn",
+                &self.sentry_dsn.as_ref().map(|_| "[REDACTED]"),
+            )
             .field(
                 "otel_exporter_otlp_endpoint",
                 &self.otel_exporter_otlp_endpoint,

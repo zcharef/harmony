@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stdout)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout
+)]
 //! `OpenAPI` enforcement tests (static analysis).
 //!
 //! These tests verify that API handlers and DTOs follow the `OpenAPI` code-first
@@ -103,8 +108,10 @@ fn all_handler_functions_have_utoipa_path() {
                     continue;
                 }
 
-                // Check if any of the preceding 10 lines contain #[utoipa::path]
-                let has_utoipa = (i.saturating_sub(10)..i)
+                // Check if any of the preceding 15 lines contain #[utoipa::path]
+                // WHY 15: utoipa annotations with many response codes + doc comments
+                // can push the macro >10 lines above the function definition.
+                let has_utoipa = (i.saturating_sub(15)..i)
                     .any(|j| lines.get(j).is_some_and(|l| l.contains("#[utoipa::path")));
 
                 if !has_utoipa {

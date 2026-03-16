@@ -83,12 +83,8 @@ pub async fn preview_invite(
         .list_by_server(&invite.server_id)
         .await?;
 
-    let preview = InvitePreviewResponse {
-        code: invite.code,
-        server_id: invite.server_id,
-        server_name: server.name,
-        member_count: i64::try_from(members.len()).unwrap_or(0),
-    };
+    let member_count = i64::try_from(members.len()).unwrap_or(0);
+    let preview = InvitePreviewResponse::new(&invite, server.name, member_count);
 
     Ok((StatusCode::OK, Json(preview)))
 }

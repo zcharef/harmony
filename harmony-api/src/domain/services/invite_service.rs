@@ -13,7 +13,8 @@ use crate::domain::ports::{InviteRepository, MemberRepository};
 const INVITE_CODE_LENGTH: usize = 8;
 
 /// Characters used for invite code generation.
-const INVITE_CODE_CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const INVITE_CODE_CHARSET: &[u8] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 /// Service for invite-related business logic.
 #[derive(Debug)]
@@ -47,10 +48,7 @@ impl InviteService {
         expires_at: Option<DateTime<Utc>>,
     ) -> Result<Invite, DomainError> {
         // Only members can create invites
-        let is_member = self
-            .member_repo
-            .is_member(&server_id, &creator_id)
-            .await?;
+        let is_member = self.member_repo.is_member(&server_id, &creator_id).await?;
         if !is_member {
             return Err(DomainError::Forbidden(
                 "Only server members can create invites".to_string(),
@@ -101,14 +99,14 @@ impl InviteService {
         code: &InviteCode,
         user_id: &UserId,
     ) -> Result<ServerId, DomainError> {
-        let invite = self
-            .invite_repo
-            .get_by_code(code)
-            .await?
-            .ok_or_else(|| DomainError::NotFound {
-                resource_type: "Invite",
-                id: code.to_string(),
-            })?;
+        let invite =
+            self.invite_repo
+                .get_by_code(code)
+                .await?
+                .ok_or_else(|| DomainError::NotFound {
+                    resource_type: "Invite",
+                    id: code.to_string(),
+                })?;
 
         if !invite.is_valid() {
             return Err(DomainError::ValidationError(
