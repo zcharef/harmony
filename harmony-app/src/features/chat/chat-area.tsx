@@ -12,6 +12,7 @@ import {
   Users,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { MessageResponse } from '@/lib/api'
 import { useMessages } from './hooks/use-messages'
 import { useRealtimeMessages } from './hooks/use-realtime-messages'
 import { useSendMessage } from './hooks/use-send-message'
@@ -23,16 +24,25 @@ interface ChatAreaProps {
 }
 
 /**
- * WHY useMemo for flattening: useInfiniteQuery stores pages as an array of
- * arrays. We flatten into a single reversed array (oldest-first for display)
- * so the virtualizer sees one contiguous list. Memoized to avoid re-flattening
- * on every render.
+ * WHY deduplication here: Two cache update paths exist — realtime INSERT and
+ * sendMessage mutation invalidation. They can race, producing duplicate messages
+ * in the page cache. Deduplicating at the flatten step is the safest approach
+ * since it handles all race conditions regardless of source.
  */
 function useFlatMessages(data: ReturnType<typeof useMessages>['data']) {
   return useMemo(() => {
     if (!data) return []
-    // WHY: API returns DESC (newest first per page). Reverse so oldest are at top.
-    return data.pages.flatMap((page) => page.items).reverse()
+    const seen = new Set<string>()
+    const deduped: MessageResponse[] = []
+    // WHY: API returns DESC (newest first per page). Flatten then reverse for oldest-first display.
+    const allMessages = data.pages.flatMap((page) => page.items)
+    for (const msg of allMessages) {
+      if (!seen.has(msg.id)) {
+        seen.add(msg.id)
+        deduped.push(msg)
+      }
+    }
+    return deduped.reverse()
   }, [data])
 }
 
@@ -47,21 +57,33 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
   const messages = useFlatMessages(data)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevMessageCountRef = useRef(0)
+  const prevChannelIdRef = useRef(channelId)
 
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 52, // WHY: Estimated row height in px — virtualizer adjusts after measure
-    overscan: 10, // WHY: Pre-render 10 items above/below viewport for smooth scrolling
+    estimateSize: () => 52,
+    overscan: 10,
   })
 
-  // WHY: Auto-scroll to bottom when new messages arrive (not when loading old pages)
+  // WHY single effect: Merging initial-load + auto-scroll avoids the ref mutation
+  // ordering bug where two effects sharing prevMessageCountRef race each other.
+  // Also resets the ref on channel switch so scroll-to-bottom fires for new channels.
   useEffect(() => {
+    // WHY: Reset on channel switch so initial scroll fires for the new channel
+    if (prevChannelIdRef.current !== channelId) {
+      prevChannelIdRef.current = channelId
+      prevMessageCountRef.current = 0
+    }
+
     const prevCount = prevMessageCountRef.current
     const currentCount = messages.length
 
-    if (currentCount > prevCount && prevCount > 0) {
-      // WHY: Only auto-scroll if user was already near the bottom (within 200px)
+    if (currentCount > 0 && prevCount === 0) {
+      // WHY: Initial load — scroll to bottom (newest messages)
+      virtualizer.scrollToIndex(currentCount - 1, { align: 'end' })
+    } else if (currentCount > prevCount && prevCount > 0) {
+      // WHY: New messages arrived — auto-scroll only if user is near the bottom
       const el = scrollRef.current
       if (el) {
         const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
@@ -72,20 +94,12 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
     }
 
     prevMessageCountRef.current = currentCount
-  }, [messages.length, virtualizer])
-
-  // WHY: Scroll to bottom on initial load
-  useEffect(() => {
-    if (messages.length > 0 && prevMessageCountRef.current === 0) {
-      virtualizer.scrollToIndex(messages.length - 1, { align: 'end' })
-    }
-  }, [messages.length, virtualizer])
+  }, [messages.length, channelId, virtualizer])
 
   // WHY: Fetch older messages when user scrolls near the top
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    // WHY: 200px threshold gives time to fetch before hitting the top
     if (el.scrollTop < 200 && hasNextPage && !isFetchingNextPage) {
       fetchNextPage()
     }
@@ -148,54 +162,55 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
 
       {/* Virtualized message list */}
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
-        {/* WHY: relative container with dynamic height lets the virtualizer control scroll space */}
-        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-          {/* Loading older messages indicator */}
-          {isFetchingNextPage && (
-            <div className="flex justify-center py-2">
-              <Spinner size="sm" />
+        {/* WHY: These elements are OUTSIDE the virtualizer container (normal flow)
+            so they don't interfere with absolute-positioned virtual items. */}
+
+        {isFetchingNextPage && (
+          <div className="flex justify-center py-2">
+            <Spinner size="sm" />
+          </div>
+        )}
+
+        {!hasNextPage && messages.length > 0 && (
+          <div className="px-4 pb-6 pt-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-default-100">
+              <Hash className="h-10 w-10 text-default-500" />
             </div>
-          )}
+            <h2 className="mt-2 text-3xl font-bold text-foreground">
+              Welcome to #{channelName ?? 'channel'}
+            </h2>
+            <p className="mt-1 text-sm text-default-500">
+              This is the start of the #{channelName ?? 'channel'} channel.
+            </p>
+            <Divider className="mt-4" />
+          </div>
+        )}
 
-          {/* Welcome block — only when we've loaded all history */}
-          {!hasNextPage && messages.length > 0 && (
-            <div className="px-4 pb-6 pt-4">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-default-100">
-                <Hash className="h-10 w-10 text-default-500" />
-              </div>
-              <h2 className="mt-2 text-3xl font-bold text-foreground">
-                Welcome to #{channelName ?? 'channel'}
-              </h2>
-              <p className="mt-1 text-sm text-default-500">
-                This is the start of the #{channelName ?? 'channel'} channel.
-              </p>
-              <Divider className="mt-4" />
+        {isPending && (
+          <div className="flex justify-center py-8">
+            <Spinner size="md" />
+          </div>
+        )}
+
+        {isError && <p className="px-4 text-sm text-danger">Failed to load messages</p>}
+
+        {messages.length === 0 && !isPending && !isError && (
+          <div className="px-4 pt-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-default-100">
+              <Hash className="h-10 w-10 text-default-500" />
             </div>
-          )}
+            <h2 className="mt-2 text-3xl font-bold text-foreground">
+              Welcome to #{channelName ?? 'channel'}
+            </h2>
+            <p className="mt-1 text-sm text-default-500">
+              No messages yet. Start the conversation!
+            </p>
+          </div>
+        )}
 
-          {isPending && (
-            <div className="flex justify-center py-8">
-              <Spinner size="md" />
-            </div>
-          )}
-
-          {isError && <p className="px-4 text-sm text-danger">Failed to load messages</p>}
-
-          {messages.length === 0 && !isPending && !isError && (
-            <div className="px-4 pt-4">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-default-100">
-                <Hash className="h-10 w-10 text-default-500" />
-              </div>
-              <h2 className="mt-2 text-3xl font-bold text-foreground">
-                Welcome to #{channelName ?? 'channel'}
-              </h2>
-              <p className="mt-1 text-sm text-default-500">
-                No messages yet. Start the conversation!
-              </p>
-            </div>
-          )}
-
-          {/* WHY: virtualItems are only the visible rows — this is the performance win */}
+        {/* WHY: Virtualizer container is separate — only absolute-positioned items inside.
+            getTotalSize() is accurate because it only accounts for measured message rows. */}
+        <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const message = messages[virtualRow.index]
             if (!message) return null
