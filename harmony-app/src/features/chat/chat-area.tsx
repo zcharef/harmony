@@ -96,13 +96,20 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
     prevMessageCountRef.current = currentCount
   }, [messages.length, channelId, virtualizer])
 
-  // WHY: Fetch older messages when user scrolls near the top
+  // WHY: Throttle to 100ms — onScroll fires at 60Hz during active scrolling.
+  // The isFetchingNextPage guard prevents redundant fetches, but throttling
+  // avoids ~60 unnecessary function calls per second during scroll.
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    if (el.scrollTop < 200 && hasNextPage && !isFetchingNextPage) {
-      fetchNextPage()
-    }
+    if (scrollTimerRef.current !== null) return
+    scrollTimerRef.current = setTimeout(() => {
+      scrollTimerRef.current = null
+      const el = scrollRef.current
+      if (!el) return
+      if (el.scrollTop < 200 && hasNextPage && !isFetchingNextPage) {
+        fetchNextPage()
+      }
+    }, 100)
   }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
   function handleSend() {

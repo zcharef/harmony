@@ -1,4 +1,5 @@
 import { Avatar } from '@heroui/react'
+import { memo } from 'react'
 import type { MessageResponse } from '@/lib/api'
 
 /**
@@ -19,8 +20,18 @@ function formatTimestamp(iso: string): string {
   return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${time}`
 }
 
-export function MessageItem({ message }: { message: MessageResponse }) {
-  // WHY: authorId is a UUID — use first 2 chars as initials fallback.
+/**
+ * WHY React.memo: The virtualizer re-renders all visible items when the
+ * messages array reference changes (on every new message via realtime or
+ * pagination). Memoizing skips re-render for messages whose props haven't
+ * changed — only the new message actually renders.
+ */
+export const MessageItem = memo(function MessageItem({
+  message,
+}: {
+  message: MessageResponse
+}) {
+  // WHY: authorId is a UUID — use first 8 chars as label fallback.
   // A proper profile lookup would be a future enhancement.
   const authorLabel = message.authorId.slice(0, 8)
 
@@ -46,4 +57,4 @@ export function MessageItem({ message }: { message: MessageResponse }) {
       </div>
     </div>
   )
-}
+})
