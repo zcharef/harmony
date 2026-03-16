@@ -1,7 +1,4 @@
-interface TypingUser {
-  userId: string
-  username: string
-}
+import type { TypingUser } from './hooks/use-typing-indicator'
 
 interface TypingIndicatorProps {
   typingUsers: TypingUser[]

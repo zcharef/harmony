@@ -6,7 +6,6 @@ import {
   ModalContent,
   ModalFooter,
   ModalHeader,
-  Spinner,
 } from '@heroui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation } from '@tanstack/react-query'
@@ -68,12 +67,9 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
   function onJoin() {
     if (preview === null) return
 
-    // WHY: joinServer API requires serverId in the path. The invite code
-    // is used as the path parameter — the backend resolves the server
-    // from the invite code internally. Using the code as the path ID
-    // is the intended walking-skeleton flow until the API is refined.
+    // WHY: preview response now includes serverId, body type from OpenAPI SSoT.
     joinServer.mutate(
-      { serverId: previewCode, inviteCode: previewCode },
+      { serverId: preview.serverId, body: { inviteCode: previewCode } },
       {
         onSuccess: () => {
           handleClose()
@@ -160,7 +156,7 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
                 Cancel
               </Button>
               <Button type="submit" color="primary" isLoading={previewMutation.isPending}>
-                {previewMutation.isPending ? <Spinner size="sm" /> : 'Preview'}
+                Preview
               </Button>
             </ModalFooter>
           </form>

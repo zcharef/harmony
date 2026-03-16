@@ -62,6 +62,7 @@ impl From<Invite> for InviteResponse {
 #[serde(rename_all = "camelCase")]
 pub struct InvitePreviewResponse {
     pub code: InviteCode,
+    pub server_id: ServerId,
     pub server_name: String,
     pub member_count: i64,
 }

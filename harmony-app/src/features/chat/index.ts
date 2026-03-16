@@ -1,4 +1,6 @@
 export { ChatArea } from './chat-area'
+export { useDeleteMessage } from './hooks/use-delete-message'
+export { useEditMessage } from './hooks/use-edit-message'
 export { useMessages } from './hooks/use-messages'
 export { useRealtimeMessages } from './hooks/use-realtime-messages'
 export { useSendMessage } from './hooks/use-send-message'

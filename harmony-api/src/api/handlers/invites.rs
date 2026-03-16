@@ -85,6 +85,7 @@ pub async fn preview_invite(
 
     let preview = InvitePreviewResponse {
         code: invite.code,
+        server_id: invite.server_id,
         server_name: server.name,
         member_count: i64::try_from(members.len()).unwrap_or(0),
     };
@@ -117,10 +118,20 @@ pub async fn preview_invite(
 pub async fn join_server(
     AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
-    ApiPath(_server_id): ApiPath<ServerId>,
+    ApiPath(server_id): ApiPath<ServerId>,
     ApiJson(req): ApiJson<JoinServerRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let code = InviteCode::new(req.invite_code);
+
+    // WHY: Validate the invite belongs to the server in the URL path.
+    // Without this, a client could POST to /v1/servers/WRONG_ID/members
+    // with a valid invite for a different server and succeed.
+    let invite = state.invite_service().preview_invite(&code).await?;
+    if invite.server_id != server_id {
+        return Err(ApiError::bad_request(
+            "Invite code does not belong to this server",
+        ));
+    }
 
     state
         .invite_service()

@@ -34,7 +34,7 @@ pub struct AppState {
     invite_service: Arc<InviteService>,
     /// Channel repository (no service layer — accessed directly per hexagonal design).
     channel_repository: Arc<dyn ChannelRepository>,
-    /// Member repository (accessed directly for simple queries; invite logic lives in InviteService).
+    /// Member repository (accessed directly for simple queries; invite logic lives in `InviteService`).
     member_repository: Arc<dyn MemberRepository>,
 }
 
@@ -116,7 +116,7 @@ impl AppState {
         &*self.channel_repository
     }
 
-    /// Access the member repository directly (simple queries; invite logic in InviteService).
+    /// Access the member repository directly (simple queries; invite logic in `InviteService`).
     #[must_use]
     pub fn member_repository(&self) -> &dyn MemberRepository {
         &*self.member_repository

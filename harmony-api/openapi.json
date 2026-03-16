@@ -1096,6 +1096,7 @@
         "description": "Public invite preview (no auth required).\n\nContains just enough information for a user to decide whether to join.",
         "required": [
           "code",
+          "serverId",
           "serverName",
           "memberCount"
         ],
@@ -1106,6 +1107,9 @@
           "memberCount": {
             "type": "integer",
             "format": "int64"
+          },
+          "serverId": {
+            "$ref": "#/components/schemas/ServerId"
           },
           "serverName": {
             "type": "string"

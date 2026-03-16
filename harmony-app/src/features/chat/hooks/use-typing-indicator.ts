@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { z } from 'zod'
 import { supabase } from '@/lib/supabase'
 
-interface TypingUser {
-  userId: string
-  username: string
-}
+// WHY Zod: Broadcast payloads are external data from Supabase WebSocket (CLAUDE.md §1.2).
+const typingUserSchema = z.object({
+  userId: z.string(),
+  username: z.string(),
+})
+
+export type TypingUser = z.infer<typeof typingUserSchema>
 
 /**
  * WHY Broadcast (not Postgres Changes): Typing indicators are ephemeral
@@ -26,7 +30,9 @@ export function useTypingIndicator(channelId: string, currentUserId: string) {
 
     channel
       .on('broadcast', { event: 'typing' }, (payload) => {
-        const user = payload.payload as TypingUser
+        const parsed = typingUserSchema.safeParse(payload.payload)
+        if (!parsed.success) return
+        const user = parsed.data
         if (user.userId === currentUserId) return
 
         setTypingUsers((prev) => {

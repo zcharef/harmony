@@ -1,10 +1,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import type { JoinServerRequest } from '@/lib/api'
 import { joinServer } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 
+// WHY: serverId comes from the preview response, body type from OpenAPI SSoT.
 interface JoinServerInput {
   serverId: string
-  inviteCode: string
+  body: JoinServerRequest
 }
 
 /**
@@ -15,10 +17,10 @@ export function useJoinServer() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ serverId, inviteCode }: JoinServerInput) => {
+    mutationFn: async ({ serverId, body }: JoinServerInput) => {
       const { data } = await joinServer({
         path: { id: serverId },
-        body: { inviteCode },
+        body,
         throwOnError: true,
       })
       return data

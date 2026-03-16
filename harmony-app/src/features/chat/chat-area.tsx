@@ -1,5 +1,5 @@
 import { Button, Divider, Spinner, Textarea } from '@heroui/react'
-import { useVirtualizer } from '@tanstack/react-virtual'
+import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual'
 import {
   Bell,
   Hash,
@@ -52,6 +52,60 @@ function useFlatMessages(data: ReturnType<typeof useMessages>['data']) {
   }, [data])
 }
 
+// WHY extracted: Reduces ChatArea cognitive complexity below Biome's limit of 15.
+function useAutoScroll(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  messageCount: number,
+  channelId: string | null,
+  virtualizer: Virtualizer<HTMLDivElement, Element>,
+) {
+  const prevMessageCountRef = useRef(0)
+  const prevChannelIdRef = useRef(channelId)
+
+  useEffect(() => {
+    if (prevChannelIdRef.current !== channelId) {
+      prevChannelIdRef.current = channelId
+      prevMessageCountRef.current = 0
+    }
+
+    const prevCount = prevMessageCountRef.current
+
+    if (messageCount > 0 && prevCount === 0) {
+      virtualizer.scrollToIndex(messageCount - 1, { align: 'end' })
+    } else if (messageCount > prevCount && prevCount > 0) {
+      const el = scrollRef.current
+      if (el) {
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+        if (distanceFromBottom < 200) {
+          virtualizer.scrollToIndex(messageCount - 1, { align: 'end' })
+        }
+      }
+    }
+
+    prevMessageCountRef.current = messageCount
+  }, [messageCount, channelId, virtualizer, scrollRef])
+}
+
+function useThrottledScroll(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  hasNextPage: boolean | undefined,
+  isFetchingNextPage: boolean,
+  fetchNextPage: () => void,
+) {
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  return useCallback(() => {
+    if (scrollTimerRef.current !== null) return
+    scrollTimerRef.current = setTimeout(() => {
+      scrollTimerRef.current = null
+      const el = scrollRef.current
+      if (!el) return
+      if (el.scrollTop < 200 && hasNextPage === true && !isFetchingNextPage) {
+        fetchNextPage()
+      }
+    }, 100)
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, scrollRef])
+}
+
 /**
  * WHY Zod: user_metadata is external data from Supabase Auth (CLAUDE.md §1.2).
  * Using `as string` would lie to the compiler if the shape ever changes.
@@ -74,77 +128,13 @@ function useCurrentUser() {
   return { id, username }
 }
 
-export function ChatArea({ channelId, channelName }: ChatAreaProps) {
-  const currentUser = useCurrentUser()
-
-  const { data, isPending, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
-    useMessages(channelId)
-  const sendMessage = useSendMessage(channelId ?? '', currentUser.id)
-  const editMessageMutation = useEditMessage(channelId ?? '')
-  const deleteMessageMutation = useDeleteMessage(channelId ?? '')
-  const [messageContent, setMessageContent] = useState('')
+// WHY extracted: Keeps ChatArea below Biome's cognitive complexity limit of 15.
+function useMessageActions(channelId: string | null, currentUserId: string) {
+  const safeChannelId = channelId ?? ''
+  const sendMessage = useSendMessage(safeChannelId, currentUserId)
+  const editMessageMutation = useEditMessage(safeChannelId)
+  const deleteMessageMutation = useDeleteMessage(safeChannelId)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
-
-  useRealtimeMessages(channelId ?? '')
-  const { typingUsers, sendTyping } = useTypingIndicator(channelId ?? '', currentUser.id)
-
-  const messages = useFlatMessages(data)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const prevMessageCountRef = useRef(0)
-  const prevChannelIdRef = useRef(channelId)
-
-  const virtualizer = useVirtualizer({
-    count: messages.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 52,
-    overscan: 10,
-  })
-
-  // WHY single effect: Merging initial-load + auto-scroll avoids the ref mutation
-  // ordering bug where two effects sharing prevMessageCountRef race each other.
-  // Also resets the ref on channel switch so scroll-to-bottom fires for new channels.
-  useEffect(() => {
-    // WHY: Reset on channel switch so initial scroll fires for the new channel
-    if (prevChannelIdRef.current !== channelId) {
-      prevChannelIdRef.current = channelId
-      prevMessageCountRef.current = 0
-    }
-
-    const prevCount = prevMessageCountRef.current
-    const currentCount = messages.length
-
-    if (currentCount > 0 && prevCount === 0) {
-      // WHY: Initial load — scroll to bottom (newest messages)
-      virtualizer.scrollToIndex(currentCount - 1, { align: 'end' })
-    } else if (currentCount > prevCount && prevCount > 0) {
-      // WHY: New messages arrived — auto-scroll only if user is near the bottom
-      const el = scrollRef.current
-      if (el) {
-        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-        if (distanceFromBottom < 200) {
-          virtualizer.scrollToIndex(currentCount - 1, { align: 'end' })
-        }
-      }
-    }
-
-    prevMessageCountRef.current = currentCount
-  }, [messages.length, channelId, virtualizer])
-
-  // WHY: Throttle to 100ms — onScroll fires at 60Hz during active scrolling.
-  // The isFetchingNextPage guard prevents redundant fetches, but throttling
-  // avoids ~60 unnecessary function calls per second during scroll.
-  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const handleScroll = useCallback(() => {
-    if (scrollTimerRef.current !== null) return
-    scrollTimerRef.current = setTimeout(() => {
-      scrollTimerRef.current = null
-      const el = scrollRef.current
-      if (!el) return
-      if (el.scrollTop < 200 && hasNextPage && !isFetchingNextPage) {
-        fetchNextPage()
-      }
-    }, 100)
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
   const handleStartEdit = useCallback((messageId: string) => {
     setEditingMessageId(messageId)
@@ -171,13 +161,51 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
     [deleteMessageMutation],
   )
 
+  return {
+    sendMessage,
+    editingMessageId,
+    handleStartEdit,
+    handleCancelEdit,
+    handleSaveEdit,
+    handleDelete,
+  }
+}
+
+export function ChatArea({ channelId, channelName }: ChatAreaProps) {
+  const currentUser = useCurrentUser()
+
+  const { data, isPending, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
+    useMessages(channelId)
+  const {
+    sendMessage,
+    editingMessageId,
+    handleStartEdit,
+    handleCancelEdit,
+    handleSaveEdit,
+    handleDelete,
+  } = useMessageActions(channelId, currentUser.id)
+  const [messageContent, setMessageContent] = useState('')
+
+  useRealtimeMessages(channelId ?? '')
+  const { typingUsers, sendTyping } = useTypingIndicator(channelId ?? '', currentUser.id)
+
+  const messages = useFlatMessages(data)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 52,
+    overscan: 10,
+  })
+
+  useAutoScroll(scrollRef, messages.length, channelId, virtualizer)
+
+  const handleScroll = useThrottledScroll(scrollRef, hasNextPage, isFetchingNextPage, fetchNextPage)
+
   function handleSend() {
     const trimmed = messageContent.trim()
     if (trimmed.length === 0 || channelId === null) return
-
-    // WHY clear before mutate: With optimistic updates, the message appears
-    // instantly in the list. Waiting for onSuccess would leave stale text in
-    // the input until the server round-trip completes (~200ms of confusion).
     setMessageContent('')
     sendMessage.mutate(trimmed)
   }
@@ -296,7 +324,15 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                <MessageItem message={message} />
+                <MessageItem
+                  message={message}
+                  currentUserId={currentUser.id}
+                  isEditing={editingMessageId === message.id}
+                  onStartEdit={() => handleStartEdit(message.id)}
+                  onSaveEdit={(content) => handleSaveEdit(message.id, content)}
+                  onCancelEdit={handleCancelEdit}
+                  onDelete={() => handleDelete(message.id)}
+                />
               </div>
             )
           })}

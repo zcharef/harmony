@@ -21,24 +21,79 @@ const presencePayloadSchema = z.object({
 })
 
 /**
- * Subscribes to Supabase Presence for a server and tracks the current user's
- * online/idle status based on window activity.
+ * Tracks the current user's online/idle status and subscribes to Supabase
+ * Presence for a server.
  *
- * WHY a single `sync` handler instead of `join`/`leave`: the `sync` event fires
- * on every state change and gives the full presence map. Rebuilding from the
- * complete state avoids stale-entry bugs that arise from incremental join/leave
- * bookkeeping (documented in docs/architecture/03-realtime.md:238-246).
+ * WHY two effects: Own-user activity tracking must always run (even with no
+ * server selected) so the sidebar status dot reflects reality. The server
+ * channel subscription is separate because it requires a serverId.
  */
 export function usePresence(serverId: string | null, userId: string | null): void {
   const lastActivityRef = useRef(Date.now())
   const isIdleRef = useRef(false)
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
+  // Effect 1: Own-user activity tracking (always active when logged in)
+  useEffect(() => {
+    if (userId === null) return
+    const uid = userId
+
+    const { setUserStatus, removeUser } = usePresenceStore.getState()
+    setUserStatus(uid, 'online')
+
+    function updateStatus(status: UserStatus) {
+      setUserStatus(uid, status)
+      channelRef.current?.track({ userId: uid, status })
+    }
+
+    function onActivity() {
+      lastActivityRef.current = Date.now()
+      if (isIdleRef.current) {
+        isIdleRef.current = false
+        updateStatus('online')
+      }
+    }
+
+    function onVisibilityChange() {
+      if (document.hidden) {
+        isIdleRef.current = true
+        updateStatus('idle')
+      } else {
+        onActivity()
+      }
+    }
+
+    for (const event of ACTIVITY_EVENTS) {
+      window.addEventListener(event, onActivity, { passive: true })
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    const idleInterval = setInterval(() => {
+      const elapsed = Date.now() - lastActivityRef.current
+      if (elapsed >= IDLE_TIMEOUT_MS && !isIdleRef.current) {
+        isIdleRef.current = true
+        updateStatus('idle')
+      }
+    }, IDLE_CHECK_INTERVAL_MS)
+
+    return () => {
+      for (const event of ACTIVITY_EVENTS) {
+        window.removeEventListener(event, onActivity)
+      }
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      clearInterval(idleInterval)
+      removeUser(uid)
+    }
+  }, [userId])
+
+  // Effect 2: Server presence channel (only when a server is selected)
   useEffect(() => {
     if (serverId === null || userId === null) return
+    const uid = userId
 
-    const { syncPresenceState, clearAll } = usePresenceStore.getState()
-
+    const { syncPresenceState } = usePresenceStore.getState()
     const channel = supabase.channel(`presence:${serverId}`)
+    channelRef.current = channel
 
     channel
       .on('presence', { event: 'sync' }, () => {
@@ -63,55 +118,23 @@ export function usePresence(serverId: string | null, userId: string | null): voi
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          await channel.track({ userId, status: 'online' })
+          const currentStatus: UserStatus = isIdleRef.current ? 'idle' : 'online'
+          await channel.track({ userId: uid, status: currentStatus })
         }
       })
 
-    // --- Activity tracking ---
-
-    function onActivity() {
-      lastActivityRef.current = Date.now()
-
-      // WHY guard: avoid redundant track() calls when already online
-      if (isIdleRef.current) {
-        isIdleRef.current = false
-        channel.track({ userId, status: 'online' })
-      }
-    }
-
-    function onVisibilityChange() {
-      if (document.hidden) {
-        isIdleRef.current = true
-        channel.track({ userId, status: 'idle' })
-      } else {
-        // WHY: treat focus-back as activity so the idle timer resets
-        onActivity()
-      }
-    }
-
-    for (const event of ACTIVITY_EVENTS) {
-      window.addEventListener(event, onActivity, { passive: true })
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange)
-
-    const idleInterval = setInterval(() => {
-      const elapsed = Date.now() - lastActivityRef.current
-      if (elapsed >= IDLE_TIMEOUT_MS && !isIdleRef.current) {
-        isIdleRef.current = true
-        channel.track({ userId, status: 'idle' })
-      }
-    }, IDLE_CHECK_INTERVAL_MS)
-
-    // --- Cleanup ---
-
     return () => {
-      for (const event of ACTIVITY_EVENTS) {
-        window.removeEventListener(event, onActivity)
-      }
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-      clearInterval(idleInterval)
+      channelRef.current = null
       supabase.removeChannel(channel)
-      clearAll()
+      // WHY: Preserve own status when switching servers so the sidebar
+      // panel doesn't flash to "Offline" between server changes.
+      const { presenceMap } = usePresenceStore.getState()
+      const ownStatus = presenceMap.get(uid)
+      const ownOnly = new Map<string, UserStatus>()
+      if (ownStatus !== undefined) {
+        ownOnly.set(uid, ownStatus)
+      }
+      syncPresenceState(ownOnly)
     }
   }, [serverId, userId])
 }

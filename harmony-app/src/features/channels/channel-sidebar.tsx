@@ -65,8 +65,10 @@ export function ChannelSidebar({
   const user = useAuthStore((s) => s.user)
   const status = useUserStatus(user?.id ?? '')
   const username =
-    (user?.user_metadata?.username as string | undefined) ??
-    (user?.user_metadata?.display_name as string | undefined) ??
+    (typeof user?.user_metadata?.username === 'string' ? user.user_metadata.username : undefined) ??
+    (typeof user?.user_metadata?.display_name === 'string'
+      ? user.user_metadata.display_name
+      : undefined) ??
     user?.email?.split('@')[0] ??
     'You'
 
