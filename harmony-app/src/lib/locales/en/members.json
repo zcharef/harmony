@@ -1,0 +1,9 @@
+{
+  "selectServerToViewMembers": "Select a server to view members",
+  "members": "Members",
+  "membersWithCount": "Members — {{total}}",
+  "failedToLoadMembers": "Failed to load members",
+  "onlineWithCount": "Online — {{count}}",
+  "offlineWithCount": "Offline — {{count}}",
+  "noMembersYet": "No members yet"
+}

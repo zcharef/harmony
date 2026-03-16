@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { TypingUser } from './hooks/use-typing-indicator'
 
 interface TypingIndicatorProps {
@@ -10,17 +11,21 @@ interface TypingIndicatorProps {
  * and virtualized message list on every typing event.
  */
 export function TypingIndicator({ typingUsers }: TypingIndicatorProps) {
+  const { t } = useTranslation('chat')
+
   if (typingUsers.length === 0) return null
 
   const first = typingUsers[0]
   const second = typingUsers[1]
 
-  const text =
-    typingUsers.length === 1 && first !== undefined
-      ? `${first.username} is typing`
-      : typingUsers.length === 2 && first !== undefined && second !== undefined
-        ? `${first.username} and ${second.username} are typing`
-        : 'Several people are typing'
+  let text: string
+  if (typingUsers.length === 1 && first !== undefined) {
+    text = t('typingOne', { username: first.username })
+  } else if (typingUsers.length === 2 && first !== undefined && second !== undefined) {
+    text = t('typingTwo', { first: first.username, second: second.username })
+  } else {
+    text = t('typingSeveral')
+  }
 
   return (
     <div className="flex h-6 items-center gap-1 px-4 text-xs text-default-500">

@@ -1,6 +1,7 @@
 import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
 import { LogIn, Plus } from 'lucide-react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ServerResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CreateServerDialog } from './create-server-dialog'
@@ -70,6 +71,7 @@ interface ServerListProps {
 }
 
 export function ServerList({ selectedServerId, onSelectServer }: ServerListProps) {
+  const { t } = useTranslation('servers')
   const { data: servers, isPending, isError } = useServers()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isJoinOpen, setIsJoinOpen] = useState(false)
@@ -85,7 +87,7 @@ export function ServerList({ selectedServerId, onSelectServer }: ServerListProps
   if (isError) {
     return (
       <div className="flex h-full w-[72px] flex-col items-center justify-center bg-content1">
-        <span className="text-xs text-danger">Error</span>
+        <span className="text-xs text-danger">{t('common:error')}</span>
       </div>
     )
   }
@@ -96,7 +98,10 @@ export function ServerList({ selectedServerId, onSelectServer }: ServerListProps
   const homeServer = dmServers[0]
 
   return (
-    <div data-test="server-list" className="flex h-full w-[72px] flex-col items-center bg-content1 py-3">
+    <div
+      data-test="server-list"
+      className="flex h-full w-[72px] flex-col items-center bg-content1 py-3"
+    >
       {/* Home / DMs */}
       {homeServer !== undefined && (
         <ServerIcon
@@ -125,7 +130,7 @@ export function ServerList({ selectedServerId, onSelectServer }: ServerListProps
       <Divider className="mx-auto my-2 w-8 bg-divider" />
 
       {/* Add server button */}
-      <Tooltip content="Add a Server" placement="right" offset={8}>
+      <Tooltip content={t('addServer')} placement="right" offset={8}>
         <div className="flex items-center justify-center">
           <Avatar
             icon={<Plus className="h-5 w-5" />}
@@ -143,7 +148,7 @@ export function ServerList({ selectedServerId, onSelectServer }: ServerListProps
       </Tooltip>
 
       {/* Join server button */}
-      <Tooltip content="Join a Server" placement="right" offset={8}>
+      <Tooltip content={t('joinServer')} placement="right" offset={8}>
         <div className="mt-2 flex items-center justify-center">
           <Avatar
             icon={<LogIn className="h-5 w-5" />}

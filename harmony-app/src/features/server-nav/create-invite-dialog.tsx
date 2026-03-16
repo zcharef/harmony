@@ -10,21 +10,25 @@ import {
   SelectItem,
 } from '@heroui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
+import type { TFunction } from 'i18next'
 import { Check, Copy } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { useCreateInvite } from './hooks/use-create-invite'
 
-const EXPIRY_OPTIONS = [
-  { label: '30 minutes', value: '0.5' },
-  { label: '1 hour', value: '1' },
-  { label: '6 hours', value: '6' },
-  { label: '12 hours', value: '12' },
-  { label: '1 day', value: '24' },
-  { label: '7 days', value: '168' },
-  { label: 'Never', value: '' },
-] as const
+function getExpiryOptions(t: TFunction<'servers'>) {
+  return [
+    { label: t('expiry30min'), value: '0.5' },
+    { label: t('expiry1h'), value: '1' },
+    { label: t('expiry6h'), value: '6' },
+    { label: t('expiry12h'), value: '12' },
+    { label: t('expiry1d'), value: '24' },
+    { label: t('expiry7d'), value: '168' },
+    { label: t('expiryNever'), value: '' },
+  ] as const
+}
 
 const createInviteSchema = z.object({
   maxUses: z.string(),
@@ -40,9 +44,11 @@ interface CreateInviteDialogProps {
 }
 
 export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDialogProps) {
+  const { t } = useTranslation('servers')
   const createInvite = useCreateInvite(serverId)
   const [generatedCode, setGeneratedCode] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const expiryOptions = getExpiryOptions(t)
 
   const { register, handleSubmit, reset } = useForm<CreateInviteForm>({
     resolver: zodResolver(createInviteSchema),
@@ -82,11 +88,9 @@ export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDi
       <ModalContent>
         {generatedCode !== null ? (
           <>
-            <ModalHeader>Your Invite Code</ModalHeader>
+            <ModalHeader>{t('yourInviteCode')}</ModalHeader>
             <ModalBody>
-              <p className="text-sm text-default-500">
-                Share this code with others so they can join your server.
-              </p>
+              <p className="text-sm text-default-500">{t('shareInviteCode')}</p>
               <div className="flex items-center gap-2">
                 <Input
                   value={generatedCode}
@@ -95,7 +99,12 @@ export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDi
                   classNames={{ input: 'font-mono text-lg' }}
                   data-test="invite-code-display"
                 />
-                <Button isIconOnly variant="flat" onPress={handleCopy} data-test="invite-copy-button">
+                <Button
+                  isIconOnly
+                  variant="flat"
+                  onPress={handleCopy}
+                  data-test="invite-copy-button"
+                >
                   {copied ? (
                     <Check className="h-4 w-4 text-success" />
                   ) : (
@@ -106,39 +115,44 @@ export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDi
             </ModalBody>
             <ModalFooter>
               <Button color="primary" onPress={handleClose} data-test="invite-done-button">
-                Done
+                {t('common:done')}
               </Button>
             </ModalFooter>
           </>
         ) : (
           <form onSubmit={handleSubmit(onSubmit)}>
-            <ModalHeader>Invite People</ModalHeader>
+            <ModalHeader>{t('invitePeople')}</ModalHeader>
             <ModalBody>
               <Input
-                label="Max uses"
-                placeholder="Leave empty for unlimited"
+                label={t('maxUses')}
+                placeholder={t('maxUsesPlaceholder')}
                 type="number"
                 min={1}
                 data-test="invite-max-uses-input"
                 {...register('maxUses')}
               />
               <Select
-                label="Expire after"
+                label={t('expireAfter')}
                 defaultSelectedKeys={['24']}
                 data-test="invite-expires-select"
                 {...register('expiresInHours')}
               >
-                {EXPIRY_OPTIONS.map((option) => (
+                {expiryOptions.map((option) => (
                   <SelectItem key={option.value}>{option.label}</SelectItem>
                 ))}
               </Select>
             </ModalBody>
             <ModalFooter>
               <Button variant="light" onPress={handleClose} data-test="invite-cancel-button">
-                Cancel
+                {t('common:cancel')}
               </Button>
-              <Button type="submit" color="primary" isLoading={createInvite.isPending} data-test="invite-submit-button">
-                Create Invite
+              <Button
+                type="submit"
+                color="primary"
+                isLoading={createInvite.isPending}
+                data-test="invite-submit-button"
+              >
+                {t('createInvite')}
               </Button>
             </ModalFooter>
           </form>

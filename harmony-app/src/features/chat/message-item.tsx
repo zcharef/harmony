@@ -1,6 +1,8 @@
 import { Avatar, Button, Textarea } from '@heroui/react'
+import type { TFunction } from 'i18next'
 import { Pencil, Trash2 } from 'lucide-react'
 import { memo, useRef, useState } from 'react'
+import { Trans, useTranslation } from 'react-i18next'
 import type { MessageResponse } from '@/lib/api'
 
 interface MessageItemProps {
@@ -15,9 +17,9 @@ interface MessageItemProps {
 
 /**
  * WHY: Format ISO timestamp to a human-readable relative format.
- * Keeps it simple for MVP — no i18n library needed yet.
+ * Accepts `t` as parameter because this function is defined outside the component.
  */
-function formatTimestamp(iso: string): string {
+function formatTimestamp(iso: string, t: TFunction<'messages'>): string {
   const date = new Date(iso)
   const now = new Date()
   const isToday = date.toDateString() === now.toDateString()
@@ -27,8 +29,11 @@ function formatTimestamp(iso: string): string {
     minute: '2-digit',
   })
 
-  if (isToday) return `Today at ${time}`
-  return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${time}`
+  if (isToday) return t('todayAt', { time })
+  return t('dateAt', {
+    date: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+    time,
+  })
 }
 
 /**
@@ -46,6 +51,7 @@ export const MessageItem = memo(function MessageItem({
   onCancelEdit,
   onDelete,
 }: MessageItemProps) {
+  const { t } = useTranslation('messages')
   // WHY: authorId is a UUID — use first 8 chars as label fallback.
   // A proper profile lookup would be a future enhancement.
   const authorLabel = message.authorId.slice(0, 8)
@@ -92,11 +98,14 @@ export const MessageItem = memo(function MessageItem({
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-baseline gap-2">
-          <span data-test="message-author" className="cursor-pointer font-medium text-foreground hover:underline">
+          <span
+            data-test="message-author"
+            className="cursor-pointer font-medium text-foreground hover:underline"
+          >
             {authorLabel}
           </span>
           <span className="text-xs text-default-500">
-            {isPending ? 'Sending...' : formatTimestamp(message.createdAt)}
+            {isPending ? t('sending') : formatTimestamp(message.createdAt, t)}
           </span>
         </div>
 
@@ -118,32 +127,42 @@ export const MessageItem = memo(function MessageItem({
               data-test="message-edit-input"
             />
             <span className="text-xs text-default-500">
-              escape to{' '}
-              <button type="button" onClick={onCancelEdit} className="text-primary hover:underline" data-test="message-edit-cancel">
-                cancel
-              </button>
-              {' \u2022 '}
-              enter to{' '}
-              <button
-                type="button"
-                onClick={() => {
-                  const trimmed = editContent.trim()
-                  if (trimmed.length > 0) {
-                    onSaveEdit(trimmed)
-                  }
+              <Trans
+                t={t}
+                i18nKey="escapeToCancel"
+                components={{
+                  cancel: (
+                    <button
+                      type="button"
+                      onClick={onCancelEdit}
+                      className="text-primary hover:underline"
+                      data-test="message-edit-cancel"
+                    />
+                  ),
+                  save: (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const trimmed = editContent.trim()
+                        if (trimmed.length > 0) {
+                          onSaveEdit(trimmed)
+                        }
+                      }}
+                      className="text-primary hover:underline"
+                      data-test="message-edit-save"
+                    />
+                  ),
                 }}
-                className="text-primary hover:underline"
-                data-test="message-edit-save"
-              >
-                save
-              </button>
+              />
             </span>
           </div>
         ) : (
           <p data-test="message-content" className="text-sm text-foreground/90">
             {message.content}
             {message.editedAt !== undefined && message.editedAt !== null && (
-              <span className="ml-1 text-xs text-default-400" data-test="message-edited-indicator">(edited)</span>
+              <span className="ml-1 text-xs text-default-400" data-test="message-edited-indicator">
+                {t('edited')}
+              </span>
             )}
           </p>
         )}
@@ -152,11 +171,26 @@ export const MessageItem = memo(function MessageItem({
       {/* WHY: Hover actions only for own messages, hidden during edit mode.
           Uses group-hover to appear on row hover — avoids per-message state. */}
       {isOwnMessage && !isEditing && !isPending && (
-        <div data-test="message-actions" className="absolute -top-3 right-4 hidden gap-0.5 rounded-md border border-divider bg-background shadow-sm group-hover:flex">
-          <Button variant="light" isIconOnly size="sm" onPress={onStartEdit} data-test="message-edit-button">
+        <div
+          data-test="message-actions"
+          className="absolute -top-3 right-4 hidden gap-0.5 rounded-md border border-divider bg-background shadow-sm group-hover:flex"
+        >
+          <Button
+            variant="light"
+            isIconOnly
+            size="sm"
+            onPress={onStartEdit}
+            data-test="message-edit-button"
+          >
             <Pencil className="h-4 w-4 text-default-500" />
           </Button>
-          <Button variant="light" isIconOnly size="sm" onPress={onDelete} data-test="message-delete-button">
+          <Button
+            variant="light"
+            isIconOnly
+            size="sm"
+            onPress={onDelete}
+            data-test="message-delete-button"
+          >
             <Trash2 className="h-4 w-4 text-danger" />
           </Button>
         </div>

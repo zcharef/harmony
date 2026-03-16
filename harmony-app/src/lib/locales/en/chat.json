@@ -1,0 +1,13 @@
+{
+  "selectChannel": "Select a channel to start chatting",
+  "welcomeToChannel": "Welcome to #{{channelName}}",
+  "channelStart": "This is the start of the #{{channelName}} channel.",
+  "failedToLoadMessages": "Failed to load messages",
+  "noMessagesYet": "No messages yet. Start the conversation!",
+  "messagePlaceholder": "Message #{{channelName}}",
+  "channelFallback": "channel",
+  "unknownUser": "Unknown",
+  "typingOne": "{{username}} is typing",
+  "typingTwo": "{{first}} and {{second}} are typing",
+  "typingSeveral": "Several people are typing"
+}

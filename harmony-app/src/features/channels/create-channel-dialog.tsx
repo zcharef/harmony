@@ -8,19 +8,23 @@ import {
   ModalHeader,
 } from '@heroui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
+import type { TFunction } from 'i18next'
 import { useForm } from 'react-hook-form'
+import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { useCreateChannel } from './hooks/use-create-channel'
 
-const createChannelSchema = z.object({
-  name: z
-    .string()
-    .min(1, 'Channel name is required')
-    .max(100, 'Channel name must be 100 characters or less')
-    .regex(/^[a-z0-9-]+$/, 'Only lowercase letters, numbers, and hyphens allowed'),
-})
+function createChannelSchema(t: TFunction<'channels'>) {
+  return z.object({
+    name: z
+      .string()
+      .min(1, t('channelNameRequired'))
+      .max(100, t('channelNameMaxLength'))
+      .regex(/^[a-z0-9-]+$/, t('channelNamePattern')),
+  })
+}
 
-type CreateChannelForm = z.infer<typeof createChannelSchema>
+type CreateChannelForm = z.infer<ReturnType<typeof createChannelSchema>>
 
 interface CreateChannelDialogProps {
   serverId: string
@@ -29,14 +33,16 @@ interface CreateChannelDialogProps {
 }
 
 export function CreateChannelDialog({ serverId, isOpen, onClose }: CreateChannelDialogProps) {
+  const { t } = useTranslation('channels')
   const createChannel = useCreateChannel(serverId)
+  const schema = createChannelSchema(t)
   const {
     register,
     handleSubmit,
     reset,
     formState: { errors },
   } = useForm<CreateChannelForm>({
-    resolver: zodResolver(createChannelSchema),
+    resolver: zodResolver(schema),
     defaultValues: { name: '' },
   })
 
@@ -61,11 +67,11 @@ export function CreateChannelDialog({ serverId, isOpen, onClose }: CreateChannel
     <Modal isOpen={isOpen} onClose={handleClose} size="sm" data-test="create-channel-dialog">
       <ModalContent>
         <form onSubmit={handleSubmit(onSubmit)}>
-          <ModalHeader>Create Channel</ModalHeader>
+          <ModalHeader>{t('createChannel')}</ModalHeader>
           <ModalBody>
             <Input
-              label="Channel name"
-              placeholder="new-channel"
+              label={t('channelName')}
+              placeholder={t('channelNamePlaceholder')}
               isInvalid={errors.name !== undefined}
               errorMessage={errors.name?.message}
               autoFocus
@@ -75,7 +81,7 @@ export function CreateChannelDialog({ serverId, isOpen, onClose }: CreateChannel
           </ModalBody>
           <ModalFooter>
             <Button variant="light" onPress={handleClose} data-test="create-channel-cancel-button">
-              Cancel
+              {t('common:cancel')}
             </Button>
             <Button
               type="submit"
@@ -83,7 +89,7 @@ export function CreateChannelDialog({ serverId, isOpen, onClose }: CreateChannel
               isLoading={createChannel.isPending}
               data-test="create-channel-submit-button"
             >
-              Create
+              {t('common:create')}
             </Button>
           </ModalFooter>
         </form>

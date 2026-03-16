@@ -8,21 +8,25 @@ import {
   ModalHeader,
 } from '@heroui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
+import type { TFunction } from 'i18next'
 import { useForm } from 'react-hook-form'
+import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import type { ChannelResponse } from '@/lib/api'
 import { useUpdateChannel } from './hooks/use-update-channel'
 
-const editChannelSchema = z.object({
-  name: z
-    .string()
-    .min(1, 'Channel name is required')
-    .max(100, 'Channel name must be 100 characters or less')
-    .regex(/^[a-z0-9-]+$/, 'Only lowercase letters, numbers, and hyphens allowed'),
-  topic: z.string().max(1024, 'Topic must be 1024 characters or less'),
-})
+function editChannelSchema(t: TFunction<'channels'>) {
+  return z.object({
+    name: z
+      .string()
+      .min(1, t('channelNameRequired'))
+      .max(100, t('channelNameMaxLength'))
+      .regex(/^[a-z0-9-]+$/, t('channelNamePattern')),
+    topic: z.string().max(1024, t('topicMaxLength')),
+  })
+}
 
-type EditChannelForm = z.infer<typeof editChannelSchema>
+type EditChannelForm = z.infer<ReturnType<typeof editChannelSchema>>
 
 interface EditChannelDialogProps {
   channel: ChannelResponse
@@ -32,14 +36,16 @@ interface EditChannelDialogProps {
 }
 
 export function EditChannelDialog({ channel, serverId, isOpen, onClose }: EditChannelDialogProps) {
+  const { t } = useTranslation('channels')
   const updateChannel = useUpdateChannel(serverId, channel.id)
+  const schema = editChannelSchema(t)
   const {
     register,
     handleSubmit,
     reset,
     formState: { errors },
   } = useForm<EditChannelForm>({
-    resolver: zodResolver(editChannelSchema),
+    resolver: zodResolver(schema),
     defaultValues: {
       name: channel.name,
       topic: channel.topic ?? '',
@@ -67,11 +73,11 @@ export function EditChannelDialog({ channel, serverId, isOpen, onClose }: EditCh
     <Modal isOpen={isOpen} onClose={handleClose} size="sm" data-test="edit-channel-dialog">
       <ModalContent>
         <form onSubmit={handleSubmit(onSubmit)}>
-          <ModalHeader>Edit Channel</ModalHeader>
+          <ModalHeader>{t('editChannel')}</ModalHeader>
           <ModalBody>
             <Input
-              label="Channel name"
-              placeholder="channel-name"
+              label={t('channelName')}
+              placeholder={t('channelNamePlaceholder')}
               isInvalid={errors.name !== undefined}
               errorMessage={errors.name?.message}
               autoFocus
@@ -79,8 +85,8 @@ export function EditChannelDialog({ channel, serverId, isOpen, onClose }: EditCh
               {...register('name')}
             />
             <Input
-              label="Topic"
-              placeholder="What's this channel about?"
+              label={t('topic')}
+              placeholder={t('topicPlaceholder')}
               isInvalid={errors.topic !== undefined}
               errorMessage={errors.topic?.message}
               data-test="edit-channel-topic-input"
@@ -89,7 +95,7 @@ export function EditChannelDialog({ channel, serverId, isOpen, onClose }: EditCh
           </ModalBody>
           <ModalFooter>
             <Button variant="light" onPress={handleClose} data-test="edit-channel-cancel-button">
-              Cancel
+              {t('common:cancel')}
             </Button>
             <Button
               type="submit"
@@ -97,7 +103,7 @@ export function EditChannelDialog({ channel, serverId, isOpen, onClose }: EditCh
               isLoading={updateChannel.isPending}
               data-test="edit-channel-submit-button"
             >
-              Save
+              {t('common:save')}
             </Button>
           </ModalFooter>
         </form>

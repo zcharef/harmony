@@ -9,19 +9,23 @@ import {
 } from '@heroui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation } from '@tanstack/react-query'
+import type { TFunction } from 'i18next'
 import { Users } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import type { InvitePreviewResponse } from '@/lib/api'
 import { previewInvite } from '@/lib/api'
 import { useJoinServer } from './hooks/use-join-server'
 
-const inviteCodeSchema = z.object({
-  code: z.string().min(1, 'Invite code is required'),
-})
+function inviteCodeSchema(t: TFunction<'servers'>) {
+  return z.object({
+    code: z.string().min(1, t('inviteCodeRequired')),
+  })
+}
 
-type InviteCodeForm = z.infer<typeof inviteCodeSchema>
+type InviteCodeForm = z.infer<ReturnType<typeof inviteCodeSchema>>
 
 interface JoinServerDialogProps {
   isOpen: boolean
@@ -30,9 +34,11 @@ interface JoinServerDialogProps {
 }
 
 export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialogProps) {
+  const { t } = useTranslation('servers')
   const [preview, setPreview] = useState<InvitePreviewResponse | null>(null)
   const [previewCode, setPreviewCode] = useState('')
   const joinServer = useJoinServer()
+  const schema = inviteCodeSchema(t)
 
   const previewMutation = useMutation({
     mutationFn: async (code: string) => {
@@ -50,7 +56,7 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
     reset,
     formState: { errors },
   } = useForm<InviteCodeForm>({
-    resolver: zodResolver(inviteCodeSchema),
+    resolver: zodResolver(schema),
     defaultValues: { code: '' },
   })
 
@@ -99,7 +105,7 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
       <ModalContent>
         {preview !== null ? (
           <>
-            <ModalHeader>Join Server</ModalHeader>
+            <ModalHeader>{t('joinServerTitle')}</ModalHeader>
             <ModalBody>
               <div className="flex flex-col items-center gap-3 py-2">
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary">
@@ -112,40 +118,50 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
                       .toUpperCase()}
                   </span>
                 </div>
-                <span className="text-lg font-semibold text-foreground" data-test="join-server-name">{preview.serverName}</span>
+                <span
+                  className="text-lg font-semibold text-foreground"
+                  data-test="join-server-name"
+                >
+                  {preview.serverName}
+                </span>
                 <div className="flex items-center gap-1.5 text-sm text-default-500">
                   <Users className="h-4 w-4" />
                   <span data-test="join-server-member-count">
-                    {preview.memberCount} {preview.memberCount === 1 ? 'member' : 'members'}
+                    {t('memberCount', { count: preview.memberCount })}
                   </span>
                 </div>
               </div>
               {joinServer.isError && (
                 <p className="text-center text-sm text-danger" data-test="join-server-error">
-                  Failed to join server. The invite may be expired or invalid.
+                  {t('failedToJoinServer')}
                 </p>
               )}
             </ModalBody>
             <ModalFooter>
               <Button variant="light" onPress={handleBack} data-test="join-server-back-button">
-                Back
+                {t('common:back')}
               </Button>
-              <Button color="primary" onPress={onJoin} isLoading={joinServer.isPending} data-test="join-server-confirm-button">
-                Join
+              <Button
+                color="primary"
+                onPress={onJoin}
+                isLoading={joinServer.isPending}
+                data-test="join-server-confirm-button"
+              >
+                {t('common:join')}
               </Button>
             </ModalFooter>
           </>
         ) : (
           <form onSubmit={handleSubmit(onPreview)}>
-            <ModalHeader>Join a Server</ModalHeader>
+            <ModalHeader>{t('joinServer')}</ModalHeader>
             <ModalBody>
               <Input
-                label="Invite code"
-                placeholder="Enter an invite code"
+                label={t('inviteCode')}
+                placeholder={t('inviteCodePlaceholder')}
                 isInvalid={errors.code !== undefined || previewMutation.isError}
                 errorMessage={
                   errors.code?.message ??
-                  (previewMutation.isError ? 'Invite not found or expired' : undefined)
+                  (previewMutation.isError ? t('inviteNotFound') : undefined)
                 }
                 autoFocus
                 data-test="invite-code-input"
@@ -154,10 +170,15 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
             </ModalBody>
             <ModalFooter>
               <Button variant="light" onPress={handleClose} data-test="join-server-cancel-button">
-                Cancel
+                {t('common:cancel')}
               </Button>
-              <Button type="submit" color="primary" isLoading={previewMutation.isPending} data-test="join-server-preview-button">
-                Preview
+              <Button
+                type="submit"
+                color="primary"
+                isLoading={previewMutation.isPending}
+                data-test="join-server-preview-button"
+              >
+                {t('common:preview')}
               </Button>
             </ModalFooter>
           </form>

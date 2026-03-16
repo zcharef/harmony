@@ -1,0 +1,7 @@
+{
+  "sending": "Sending...",
+  "edited": "(edited)",
+  "todayAt": "Today at {{time}}",
+  "dateAt": "{{date}} at {{time}}",
+  "escapeToCancel": "escape to <cancel>cancel</cancel> \u2022 enter to <save>save</save>"
+}

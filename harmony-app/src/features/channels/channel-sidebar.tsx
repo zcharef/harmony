@@ -10,6 +10,7 @@ import {
 } from '@heroui/react'
 import { ChevronDown, Hash, Headphones, Mic, Settings, UserPlus, Volume2 } from 'lucide-react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/features/auth'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { CreateInviteDialog } from '@/features/server-nav'
@@ -33,6 +34,8 @@ function ChannelButton({
   onEdit: () => void
   onDelete: () => void
 }) {
+  const { t } = useTranslation('channels')
+
   return (
     <div className="group flex items-center">
       <Button
@@ -66,14 +69,14 @@ function ChannelButton({
           </Button>
         </DropdownTrigger>
         <DropdownMenu
-          aria-label="Channel options"
+          aria-label={t('channelOptions')}
           onAction={(key) => {
             if (key === 'edit') onEdit()
             if (key === 'delete') onDelete()
           }}
         >
           <DropdownItem key="edit" data-test="channel-edit-item">
-            Edit Channel
+            {t('editChannel')}
           </DropdownItem>
           <DropdownItem
             key="delete"
@@ -81,7 +84,7 @@ function ChannelButton({
             color="danger"
             data-test="channel-delete-item"
           >
-            Delete Channel
+            {t('deleteChannel')}
           </DropdownItem>
         </DropdownMenu>
       </Dropdown>
@@ -102,6 +105,7 @@ export function ChannelSidebar({
   selectedChannelId,
   onSelectChannel,
 }: ChannelSidebarProps) {
+  const { t } = useTranslation('channels')
   const { data: channels, isPending, isError } = useChannels(serverId)
   const [isInviteOpen, setIsInviteOpen] = useState(false)
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false)
@@ -115,7 +119,14 @@ export function ChannelSidebar({
       ? user.user_metadata.display_name
       : undefined) ??
     user?.email?.split('@')[0] ??
-    'You'
+    t('youFallback')
+
+  const statusLabels = {
+    online: t('statusOnline'),
+    idle: t('statusIdle'),
+    dnd: t('statusDnd'),
+    offline: t('statusOffline'),
+  } as const
 
   return (
     <div data-test="channel-sidebar" className="flex h-full flex-col bg-default-100">
@@ -128,13 +139,13 @@ export function ChannelSidebar({
               className="flex h-full flex-1 items-center justify-between px-4 font-semibold text-foreground transition-colors hover:bg-default-200"
             >
               <span data-test="server-name-header" className="truncate">
-                {serverName ?? 'Select a server'}
+                {serverName ?? t('selectServer')}
               </span>
               <ChevronDown className="h-4 w-4 shrink-0 text-default-500" />
             </button>
           </DropdownTrigger>
           <DropdownMenu
-            aria-label="Server options"
+            aria-label={t('serverOptions')}
             className="w-56"
             onAction={(key) => {
               if (key === 'invite' && serverId !== null) {
@@ -146,7 +157,7 @@ export function ChannelSidebar({
             }}
           >
             <DropdownSection showDivider>
-              <DropdownItem key="boost">Server Boost</DropdownItem>
+              <DropdownItem key="boost">{t('serverBoost')}</DropdownItem>
             </DropdownSection>
             <DropdownSection showDivider>
               <DropdownItem
@@ -154,16 +165,16 @@ export function ChannelSidebar({
                 startContent={<UserPlus className="h-4 w-4" />}
                 data-test="server-menu-invite-item"
               >
-                Invite People
+                {t('servers:invitePeople')}
               </DropdownItem>
-              <DropdownItem key="settings">Server Settings</DropdownItem>
+              <DropdownItem key="settings">{t('serverSettings')}</DropdownItem>
               <DropdownItem key="create-channel" data-test="server-menu-create-channel-item">
-                Create Channel
+                {t('createChannel')}
               </DropdownItem>
             </DropdownSection>
             <DropdownSection>
               <DropdownItem key="leave" className="text-danger" color="danger">
-                Leave Server
+                {t('leaveServer')}
               </DropdownItem>
             </DropdownSection>
           </DropdownMenu>
@@ -179,14 +190,14 @@ export function ChannelSidebar({
             </div>
           )}
 
-          {isError && <p className="px-2 text-xs text-danger">Failed to load channels</p>}
+          {isError && <p className="px-2 text-xs text-danger">{t('failedToLoadChannels')}</p>}
 
           {serverId === null && (
-            <p className="px-2 text-xs text-default-500">Select a server to view channels</p>
+            <p className="px-2 text-xs text-default-500">{t('selectServerToViewChannels')}</p>
           )}
 
           {channels !== undefined && channels.length === 0 && (
-            <p className="px-2 text-xs text-default-500">No channels yet</p>
+            <p className="px-2 text-xs text-default-500">{t('noChannelsYet')}</p>
           )}
 
           {channels?.map((channel) => (
@@ -197,7 +208,7 @@ export function ChannelSidebar({
               onSelect={() => onSelectChannel(channel.id)}
               onEdit={() => setEditChannel(channel)}
               onDelete={() => {
-                if (window.confirm(`Delete #${channel.name}? This cannot be undone.`)) {
+                if (window.confirm(t('deleteConfirm', { channelName: channel.name }))) {
                   deleteChannelMutation.mutate(channel.id)
                 }
               }}
@@ -225,9 +236,7 @@ export function ChannelSidebar({
         </div>
         <div className="flex flex-1 flex-col overflow-hidden">
           <span className="truncate text-sm font-medium text-foreground">{username}</span>
-          <span className="truncate text-xs text-default-500">
-            {status === 'dnd' ? 'Do Not Disturb' : status.charAt(0).toUpperCase() + status.slice(1)}
-          </span>
+          <span className="truncate text-xs text-default-500">{statusLabels[status]}</span>
         </div>
         <div className="flex items-center">
           <Button variant="light" isIconOnly size="sm" className="h-8 w-8">

@@ -12,6 +12,7 @@ import {
   Users,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { useAuthStore } from '@/features/auth'
 import type { MessageResponse } from '@/lib/api'
@@ -117,6 +118,7 @@ const userMetaSchema = z.object({
 })
 
 function useCurrentUser() {
+  const { t } = useTranslation('chat')
   const user = useAuthStore((s) => s.user)
   const id = user?.id ?? ''
   const meta = userMetaSchema.safeParse(user?.user_metadata)
@@ -124,7 +126,7 @@ function useCurrentUser() {
     (meta.success ? meta.data.username : undefined) ??
     (meta.success ? meta.data.display_name : undefined) ??
     user?.email?.split('@')[0] ??
-    'Unknown'
+    t('unknownUser')
   return { id, username }
 }
 
@@ -172,6 +174,7 @@ function useMessageActions(channelId: string | null, currentUserId: string) {
 }
 
 export function ChatArea({ channelId, channelName }: ChatAreaProps) {
+  const { t } = useTranslation('chat')
   const currentUser = useCurrentUser()
 
   const { data, isPending, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
@@ -219,9 +222,12 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
 
   if (channelId === null) {
     return (
-      <div data-test="chat-placeholder" className="flex h-full flex-col items-center justify-center bg-background">
+      <div
+        data-test="chat-placeholder"
+        className="flex h-full flex-col items-center justify-center bg-background"
+      >
         <Hash className="h-16 w-16 text-default-300" />
-        <p className="mt-2 text-default-500">Select a channel to start chatting</p>
+        <p className="mt-2 text-default-500">{t('selectChannel')}</p>
       </div>
     )
   }
@@ -232,7 +238,9 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
       <div className="flex h-12 items-center justify-between border-b border-divider px-4 shadow-sm">
         <div className="flex items-center gap-2">
           <Hash className="h-5 w-5 text-default-500" />
-          <span className="font-semibold text-foreground">{channelName ?? 'channel'}</span>
+          <span className="font-semibold text-foreground">
+            {channelName ?? t('channelFallback')}
+          </span>
         </div>
         <div className="flex items-center gap-1">
           <Button variant="light" isIconOnly size="sm">
@@ -249,7 +257,7 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
           </Button>
           <div className="ml-2 flex h-6 items-center rounded bg-default-100 px-1.5">
             <Search className="h-4 w-4 text-default-500" />
-            <span className="ml-1 text-xs text-default-500">Search</span>
+            <span className="ml-1 text-xs text-default-500">{t('common:search')}</span>
           </div>
         </div>
       </div>
@@ -257,7 +265,12 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
       <Divider />
 
       {/* Virtualized message list */}
-      <div data-test="message-list" ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
+      <div
+        data-test="message-list"
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto"
+      >
         {/* WHY: These elements are OUTSIDE the virtualizer container (normal flow)
             so they don't interfere with absolute-positioned virtual items. */}
 
@@ -273,10 +286,10 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
               <Hash className="h-10 w-10 text-default-500" />
             </div>
             <h2 className="mt-2 text-3xl font-bold text-foreground">
-              Welcome to #{channelName ?? 'channel'}
+              {t('welcomeToChannel', { channelName: channelName ?? t('channelFallback') })}
             </h2>
             <p className="mt-1 text-sm text-default-500">
-              This is the start of the #{channelName ?? 'channel'} channel.
+              {t('channelStart', { channelName: channelName ?? t('channelFallback') })}
             </p>
             <Divider className="mt-4" />
           </div>
@@ -288,7 +301,7 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
           </div>
         )}
 
-        {isError && <p className="px-4 text-sm text-danger">Failed to load messages</p>}
+        {isError && <p className="px-4 text-sm text-danger">{t('failedToLoadMessages')}</p>}
 
         {messages.length === 0 && !isPending && !isError && (
           <div className="px-4 pt-4">
@@ -296,11 +309,9 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
               <Hash className="h-10 w-10 text-default-500" />
             </div>
             <h2 className="mt-2 text-3xl font-bold text-foreground">
-              Welcome to #{channelName ?? 'channel'}
+              {t('welcomeToChannel', { channelName: channelName ?? t('channelFallback') })}
             </h2>
-            <p className="mt-1 text-sm text-default-500">
-              No messages yet. Start the conversation!
-            </p>
+            <p className="mt-1 text-sm text-default-500">{t('noMessagesYet')}</p>
           </div>
         )}
 
@@ -350,7 +361,9 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
           </Button>
           <Textarea
             data-test="message-input"
-            placeholder={`Message #${channelName ?? 'channel'}`}
+            placeholder={t('messagePlaceholder', {
+              channelName: channelName ?? t('channelFallback'),
+            })}
             variant="flat"
             minRows={1}
             maxRows={6}
