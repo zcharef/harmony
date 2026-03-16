@@ -415,6 +415,19 @@ fn request_dtos_deny_unknown_fields() {
                     .and_then(|rest| rest.split(|c: char| !c.is_alphanumeric() && c != '_').next())
                     .unwrap_or("unknown");
 
+                // Only check structs that follow request DTO naming conventions.
+                // Response DTOs may also derive Deserialize (e.g., for testing)
+                // but should NOT require deny_unknown_fields.
+                let is_request_dto = struct_name.ends_with("Request")
+                    || struct_name.ends_with("Input")
+                    || struct_name.ends_with("Command")
+                    || struct_name.starts_with("Create")
+                    || struct_name.starts_with("Update");
+
+                if !is_request_dto {
+                    continue;
+                }
+
                 // Check if this struct derives Deserialize (it's a request DTO)
                 let has_deserialize = (i.saturating_sub(5)..i)
                     .any(|j| lines.get(j).is_some_and(|l| l.contains("Deserialize")));
@@ -742,9 +755,11 @@ fn sql_aggregates_must_be_cast() {
             for agg in aggregates {
                 // Case-insensitive check for SQL aggregate functions
                 let upper = line.to_uppercase();
-                if upper.contains(agg) {
-                    // Check current line and next line for :: cast
-                    let has_cast = line.contains("::")
+                if let Some(agg_pos) = upper.find(agg) {
+                    // Only check for :: cast AFTER the aggregate position,
+                    // not before it (avoids false positive on Rust's `sqlx::query!`)
+                    let after_agg = &line[agg_pos..];
+                    let has_cast = after_agg.contains("::")
                         || lines
                             .get(line_num + 1)
                             .is_some_and(|next| next.contains("::"));

@@ -195,4 +195,73 @@ describe('React Patterns', () => {
       ).toEqual([])
     })
   })
+
+  describe('query_key_factory_enforcement', () => {
+    it('should use query key factory, not inline arrays (ADR-029)', () => {
+      const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
+      const violations: string[] = []
+
+      for (const filePath of files) {
+        const content = readFileSync(filePath, 'utf-8')
+        const lines = content.split('\n')
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          // Skip comment lines
+          if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) continue
+
+          // Flag inline query key arrays: queryKey: ['...' or queryKey: ["...
+          if (/queryKey:\s*\[/.test(line)) {
+            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
+          }
+        }
+      }
+
+      expect(
+        violations,
+        `Inline queryKey arrays found. Use queryKeys factory from @/lib/query-keys instead (ADR-029).\nViolations:\n${violations.join('\n')}`,
+      ).toEqual([])
+    })
+  })
+
+  describe('type_assertion_enforcement', () => {
+    it('should use satisfies over as Type assertions (ADR-035)', () => {
+      const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
+      const violations: string[] = []
+
+      for (const filePath of files) {
+        const content = readFileSync(filePath, 'utf-8')
+        const lines = content.split('\n')
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          const trimmed = line.trimStart()
+
+          // Skip comment lines
+          if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
+            continue
+          }
+
+          // Skip lines with import aliasing (import { X as Y })
+          if (/\bimport\s/.test(line)) continue
+
+          // Check for ' as ' that is NOT an allowed usage
+          if (/ as /.test(line)) {
+            // Allowed: as const, as unknown, as never, as React.*
+            if (/ as const\b/.test(line)) continue
+            if (/ as unknown\b/.test(line)) continue
+            if (/ as never\b/.test(line)) continue
+            if (/ as React\./.test(line)) continue
+
+            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
+          }
+        }
+      }
+
+      expect(
+        violations,
+        `Type assertions with 'as Type' found. Use 'satisfies Type' or fix the actual type (ADR-035).\nViolations:\n${violations.join('\n')}`,
+      ).toEqual([])
+    })
+  })
 })

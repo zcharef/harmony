@@ -241,6 +241,68 @@ fn main_wires_dependencies_at_composition_root() {
     println!("Architecture check passed: main.rs acts as composition root.");
 }
 
+/// Test: Source code must not contain `#[automock]` or `#[derive(Mock)]`.
+///
+/// ADR-018: No mock testing strategy. Tests use real infrastructure
+/// (testcontainers, wiremock) instead of mock frameworks like mockall.
+#[test]
+fn no_automock_attribute_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let src_dir = Path::new(manifest_dir).join("src");
+
+    let rust_files = collect_rust_files(&src_dir);
+    assert!(
+        !rust_files.is_empty(),
+        "No Rust files found in src directory: {}",
+        src_dir.display()
+    );
+
+    let forbidden_mock_patterns: &[&str] = &["#[automock]", "#[derive(Mock)]"];
+
+    let mut violations: Vec<Violation> = Vec::new();
+
+    for file in &rust_files {
+        let content = fs::read_to_string(file).unwrap_or_else(|e| {
+            panic!("Failed to read {}: {}", file.display(), e);
+        });
+
+        for (line_number, line) in content.lines().enumerate() {
+            let line_num = line_number + 1;
+            for pattern in forbidden_mock_patterns {
+                if line.contains(pattern) {
+                    violations.push(Violation {
+                        file: file.clone(),
+                        line_number: line_num,
+                        line_content: line.to_string(),
+                        pattern: (*pattern).to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        let messages: Vec<String> = violations
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
+        panic!(
+            "\n\nADR-018 Violation: Mock attributes are forbidden!\n\n\
+            Use real infrastructure (testcontainers) instead of mock frameworks.\n\
+            External HTTP services should use wiremock.\n\n\
+            Violations found ({}):\n{}\n\n\
+            Fix: Remove mock attributes and use real implementations in tests.\n",
+            violations.len(),
+            messages.join("\n")
+        );
+    }
+
+    println!(
+        "Architecture check passed: {} source files verified, no mock attributes found.",
+        rust_files.len()
+    );
+}
+
 #[cfg(test)]
 mod architecture_summary {
     //! Summary of hexagonal architecture rules enforced by these tests.

@@ -65,6 +65,6 @@ let user = sqlx::query_as!(
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans all `.rs` files in `src/infra/` for banned patterns: `sqlx::query(`, `sqlx::query_as(`, `sqlx::query_scalar(`, `sqlx::query_with(`
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans all `.rs` files in `src/infra/` for banned patterns: `sqlx::query(`, `sqlx::query_as(`, `sqlx::query_scalar(`, `sqlx::query_with(`
 - **CI:** Builds with `SQLX_OFFLINE=true` — if offline data is stale, compilation fails
 - **Command:** `cargo sqlx prepare --check` in CI verifies offline data is up to date

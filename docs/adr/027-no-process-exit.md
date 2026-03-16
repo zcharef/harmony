@@ -70,5 +70,5 @@ async fn main() -> anyhow::Result<()> {
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans all `.rs` files in `src/` for `process::exit` and `process::abort` — test fails if found
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans all `.rs` files in `src/` for `process::exit` and `process::abort` — test fails if found
 - **Code review:** Any use of `std::process::exit` or `std::process::abort` is rejected with a pointer to this ADR

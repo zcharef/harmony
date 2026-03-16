@@ -72,5 +72,5 @@ This applies to both request DTOs (`Deserialize`) and response DTOs (`Serialize`
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans all structs in `src/api/dto/` that derive `Serialize` or `Deserialize` and verifies they include `#[serde(rename_all = "camelCase")]` — test fails if missing
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans all structs in `src/api/dto/` that derive `Serialize` or `Deserialize` and verifies they include `#[serde(rename_all = "camelCase")]` — test fails if missing
 - **OpenAPI verification:** The generated `openapi.json` is checked for camelCase field names in CI

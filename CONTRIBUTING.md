@@ -75,12 +75,16 @@ Every quality property is enforced by automated tests, not just documentation. S
 | Rule | Enforcement | ADR |
 |------|-------------|-----|
 | No `any` | Biome `noExplicitAny: error` | -- |
-| No `console.log` | Biome `noConsole: error` | -- |
+| No `console.*` | Biome `noConsole: error` | [042](./docs/adr/042-structured-logging.md) |
 | Module boundaries | `eslint-plugin-boundaries` | -- |
 | No circular deps | `madge` | -- |
 | Feature barrel exports | `tests/arch/feature-structure.test.ts` | -- |
 | No direct Supabase data access | `tests/arch/type-safety.test.ts` | 015 |
 | No inline styles | `tests/arch/react-patterns.test.ts` | 032 |
+| No logic in barrel `index.ts` | `tests/arch/react-patterns.test.ts` | 030 |
+| No complex boolean state | `tests/arch/react-patterns.test.ts` | 031 |
+| No raw fetch | `tests/arch/type-safety.test.ts` | -- |
+| `throwOnError: true` on SDK calls | CLAUDE.md enforcement | -- |
 | Query key factory | `tests/arch/react-patterns.test.ts` | 029 |
 
 **Rust API (Hexagonal Architecture):**
@@ -133,6 +137,16 @@ docs: update architecture overview
 - Do not add dependencies without discussion in an issue first
 - Do not modify `src/components/ui/` (Shadcn-managed)
 - Do not modify `src/lib/api/` (auto-generated)
+
+### Database Changes
+
+All database schema changes follow the Supabase local-first workflow (ADR-043).
+
+- **Never modify the database via the Supabase Dashboard.** Migrations are the single source of truth.
+- Create migrations with `supabase migration new <name>` and write idempotent SQL (`IF NOT EXISTS`, `IF EXISTS`).
+- Migrations must be **non-destructive**: no `DROP COLUMN`, no `DROP TABLE`, no `optional -> required` changes (ADR-019).
+- RLS must be enabled on every new table (ADR-040).
+- Test migrations locally with `supabase db reset` before pushing.
 
 ## Pull Request Process
 

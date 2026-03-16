@@ -53,7 +53,7 @@ just env                # Copy .env.example → .env
 - **Auth:** Supabase JWT (HS256) verified server-side via `jsonwebtoken` crate.
   Session cookies use HMAC-SHA256 tokens.
 - **Observability:** Structured JSON logs via `tracing`. Propagate Trace IDs
-  (OpenTelemetry).
+  (OpenTelemetry) (ADR-017).
 - **Compile-Time SQL:** All queries use `sqlx::query!` or `sqlx::query_as!`.
   Runtime `sqlx::query(` is forbidden (ADR-016).
 - **PostgreSQL Aggregates:** `SUM(bigint)` returns NUMERIC — always cast
@@ -73,6 +73,17 @@ just env                # Copy .env.example → .env
   construct DTOs inline in handlers (ADR-023).
 - **Server Timestamps:** Clients never send `created_at`/`updated_at`. Server
   generates all temporal fields (ADR-028).
+
+### Database
+
+- **RLS on every table:** Row-Level Security must be enabled on all tables (ADR-040).
+- **Pool timeouts required:** `acquire_timeout` and `statement_timeout` must be
+  configured on every connection pool (ADR-041).
+- **Migrations are SSoT:** Never modify the database via the Supabase Dashboard.
+  All schema changes go through migration files (ADR-043).
+- **Idempotent & non-destructive migrations:** Use `IF NOT EXISTS`, `IF EXISTS`.
+  No `DROP COLUMN`/`DROP TABLE` (ADR-019).
+- **API versioning:** All routes live under `/v1/` (ADR-020).
 
 ## Tech Stack
 
@@ -107,6 +118,7 @@ src/
 7. **No mocks:** Tests use real DB (testcontainers) and real HTTP. `mockall`/`mock_derive` are banned. External HTTP only via `wiremock` (ADR-018).
 8. **Cursor pagination only:** No SQL `OFFSET`. Use `WHERE created_at < $cursor` (ADR-036).
 9. **Soft deletes for messages:** `UPDATE SET deleted_at = now()`, never `DELETE FROM messages` (ADR-038).
+10. **Supabase workflow:** Never modify the database via the Dashboard. All schema changes go through migration files; migrations are the SSoT (ADR-043).
 
 ## OpenAPI SSoT Pipeline
 
@@ -152,7 +164,7 @@ Before pushing code, verify every applicable item:
 - [ ] Single resource: `(StatusCode::OK, Json(response))` — no `{ data: ... }` wrapper
 - [ ] Creation: `(StatusCode::CREATED, Json(entity))`
 - [ ] Empty action: `StatusCode::NO_CONTENT` (zero body)
-- [ ] Collections: envelope `{ items: [...], total, page }` — never bare arrays
+- [ ] Collections: envelope `{ items: [...], total, nextCursor }` — never bare arrays (ADR-036)
 
 ### OpenAPI SSoT
 - [ ] Every handler has `#[utoipa::path]`, every DTO has `#[derive(ToSchema)]`

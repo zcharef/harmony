@@ -88,5 +88,5 @@ CREATE TABLE IF NOT EXISTS messages (
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans all request DTO structs (`Deserialize` structs in `src/api/dto/`) for fields named `created_at`, `updated_at`, `edited_at`, or `joined_at` — test fails if found (with an allowlist for `expires_at`)
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans all request DTO structs (`Deserialize` structs in `src/api/dto/`) for fields named `created_at`, `updated_at`, `edited_at`, or `joined_at` — test fails if found (with an allowlist for `expires_at`)
 - **Database:** `DEFAULT now()` on all timestamp columns ensures server-generated values even if application code is buggy

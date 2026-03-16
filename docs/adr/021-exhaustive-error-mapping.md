@@ -62,5 +62,5 @@ This leverages Rust's exhaustive pattern matching: adding a new `DomainError` va
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans the `From<DomainError> for ApiError` implementation for `_ =>` — test fails if a wildcard is found
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans the `From<DomainError> for ApiError` implementation for `_ =>` — test fails if a wildcard is found
 - **Compiler:** Rust's exhaustive match checking prevents missing variants at compile time (the primary enforcement mechanism)

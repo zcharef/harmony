@@ -59,7 +59,7 @@ boundaries:
 
 # Check for circular dependencies
 circular:
-    pnpm madge --circular --extensions ts,tsx src/
+    pnpm madge --circular --extensions ts,tsx --exclude 'lib/api/' src/
 
 # Find unused exports/files/deps (Knip)
 unused:

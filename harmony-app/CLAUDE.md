@@ -167,7 +167,10 @@ harmony-app/
 │   │   ├── api/                # Generated API client (DO NOT EDIT)
 │   │   ├── api-client.ts       # Runtime API config
 │   │   ├── env.ts              # Zod-validated env vars
+│   │   ├── logger.ts           # Structured logger (ADR-042)
+│   │   ├── query-keys.ts       # Query key factory (ADR-029)
 │   │   ├── routes.ts           # Route constants SSoT
+│   │   ├── supabase.ts         # Supabase client (Auth only)
 │   │   └── utils.ts            # cn() helper
 │   │
 │   └── hooks/                  # Generic technical hooks
@@ -292,7 +295,7 @@ function MyFormContent({ data }: { data: Data | undefined }) {
 - Pass IDs between features, NOT full objects
 - Side effects handled by API (not cross-feature function calls)
 
-### 4.6 Query Key Factory (MANDATORY)
+### 4.6 Query Key Factory (MANDATORY) (ADR-029)
 
 ```typescript
 // FORBIDDEN: inline query keys
@@ -303,16 +306,16 @@ import { queryKeys } from '@/lib/query-keys'
 queryKey: queryKeys.messages.byChannel(channelId)
 ```
 
-### 4.7 Error Boundaries (MANDATORY)
+### 4.7 Error Boundaries (MANDATORY) (ADR-034)
 
 Every feature route wrapped in `<FeatureErrorBoundary>` from `@/components/shared/error-boundary`.
 
-### 4.8 Styling (MANDATORY)
+### 4.8 Styling (MANDATORY) (ADR-032)
 
 - No inline `style={{}}` -- Tailwind via `className` only (ADR-032).
 - Shadcn UI primitives are the only exception for Radix positioning.
 
-### 4.9 Type Assertions (MANDATORY)
+### 4.9 Type Assertions (MANDATORY) (ADR-035)
 
 - Never use `as Type` (lies to compiler). Use `satisfies Type` or fix the actual type.
 - Allowed: `as const`, `as unknown`, `as never` (exhaustive switches).
@@ -326,6 +329,8 @@ Validated at startup via Zod (`src/lib/env.ts`). Build crashes on misconfigurati
 | Variable | Description |
 |----------|-------------|
 | `VITE_API_URL` | Rust API base URL (e.g., `http://localhost:3000`) |
+| `VITE_SUPABASE_URL` | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anonymous/public key |
 
 All client vars must be prefixed with `VITE_` (Vite convention).
 
@@ -361,7 +366,7 @@ export function useLeaveServer() {
 ### Rules
 
 - No stack traces exposed to user
-- Structured logging only — no `console.log` ad-hoc
+- No `console.*` calls — use `logger` from `@/lib/logger` (ADR-042)
 - Zero PII in logs
 
 ---

@@ -91,5 +91,5 @@ sqlx::query!("DELETE FROM messages WHERE author_id = $1", user_id.as_uuid())
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans all `.rs` files in `src/infra/` for `DELETE FROM messages` — test fails if found (hard deletes must go through a dedicated GDPR erasure path, not normal repository methods)
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans all `.rs` files in `src/infra/` for `DELETE FROM messages` — test fails if found (hard deletes must go through a dedicated GDPR erasure path, not normal repository methods)
 - **Partial index:** `idx_messages_not_deleted` ensures queries filtering `deleted_at IS NULL` remain fast even as soft-deleted rows accumulate

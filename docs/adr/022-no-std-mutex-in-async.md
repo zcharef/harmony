@@ -69,5 +69,5 @@ async fn get_or_fetch(cache: Arc<Mutex<HashMap<String, String>>>, key: &str) -> 
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans all `.rs` files in `src/` for `std::sync::Mutex` and `std::sync::RwLock` — test fails if found (with an allowlist for `OnceLock` and `LazyLock`)
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans all `.rs` files in `src/` for `std::sync::Mutex` and `std::sync::RwLock` — test fails if found (with an allowlist for `OnceLock` and `LazyLock`)
 - **Code review:** PRs introducing synchronization primitives require justification for the chosen type

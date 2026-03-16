@@ -79,7 +79,31 @@ fn all_handler_functions_have_utoipa_path() {
                     continue;
                 }
 
-                // Check if any of the preceding 5 lines contain #[utoipa::path]
+                // Skip functions with `// not-a-handler` in the 3 lines above
+                let has_opt_out = (i.saturating_sub(3)..i)
+                    .any(|j| lines.get(j).is_some_and(|l| l.contains("// not-a-handler")));
+                if has_opt_out {
+                    continue;
+                }
+
+                // Skip functions that don't take Axum extractors (not handlers)
+                // Collect the full signature by joining lines until we find the closing `)`
+                let axum_extractors = &["State(", "Json(", "Path(", "Query("];
+                let mut signature = String::new();
+                for j in i..lines.len().min(i + 10) {
+                    if let Some(sig_line) = lines.get(j) {
+                        signature.push_str(sig_line);
+                        if sig_line.contains(')') {
+                            break;
+                        }
+                    }
+                }
+                let has_extractor = axum_extractors.iter().any(|ext| signature.contains(ext));
+                if !has_extractor {
+                    continue;
+                }
+
+                // Check if any of the preceding 10 lines contain #[utoipa::path]
                 let has_utoipa = (i.saturating_sub(10)..i)
                     .any(|j| lines.get(j).is_some_and(|l| l.contains("#[utoipa::path")));
 
@@ -144,14 +168,19 @@ fn all_dto_structs_derive_to_schema() {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
-            // Look for struct definitions (pub struct Foo { or pub struct Foo;)
-            if trimmed.starts_with("pub struct ") {
-                let struct_name = trimmed
-                    .strip_prefix("pub struct ")
-                    .and_then(|rest| {
-                        rest.split(|c: char| !c.is_alphanumeric() && c != '_')
-                            .next()
-                    })
+            // Look for struct and enum definitions in DTO files
+            let type_name = if trimmed.starts_with("pub struct ") {
+                trimmed.strip_prefix("pub struct ")
+            } else if trimmed.starts_with("pub enum ") {
+                trimmed.strip_prefix("pub enum ")
+            } else {
+                None
+            };
+
+            if let Some(rest) = type_name {
+                let name = rest
+                    .split(|c: char| !c.is_alphanumeric() && c != '_')
+                    .next()
                     .unwrap_or("unknown");
 
                 // Check if any of the preceding 5 lines contain ToSchema
@@ -163,7 +192,7 @@ fn all_dto_structs_derive_to_schema() {
                         "  {}:{} - `{}` missing #[derive(ToSchema)]",
                         file.display(),
                         i + 1,
-                        struct_name
+                        name
                     ));
                 }
             }
@@ -172,18 +201,18 @@ fn all_dto_structs_derive_to_schema() {
 
     if !missing_derive.is_empty() {
         panic!(
-            "\n\nOpenAPI SSoT Violation: DTO structs without ToSchema!\n\n\
-            Every public struct in src/api/dto/ must derive `utoipa::ToSchema`\n\
+            "\n\nOpenAPI SSoT Violation: DTO types without ToSchema!\n\n\
+            Every public struct and enum in src/api/dto/ must derive `utoipa::ToSchema`\n\
             so it appears in the OpenAPI components section.\n\n\
             Missing derive ({}):\n{}\n\n\
-            Fix: Add `#[derive(ToSchema)]` (from utoipa) to each DTO struct.\n",
+            Fix: Add `#[derive(ToSchema)]` (from utoipa) to each DTO struct and enum.\n",
             missing_derive.len(),
             missing_derive.join("\n")
         );
     }
 
     println!(
-        "OpenAPI enforcement passed: all DTO structs in {} files derive ToSchema.",
+        "OpenAPI enforcement passed: all DTO types in {} files derive ToSchema.",
         rust_files.len()
     );
 }

@@ -95,6 +95,6 @@ impl Config {
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans all `.rs` files outside `src/config.rs` for `std::env::var` or `env::var` — test fails if found
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans all `.rs` files outside `src/config.rs` for `std::env::var` or `env::var` — test fails if found
 - **Code review:** Config fields with sensitive names (`*_key`, `*_secret`, `*_token`, `*_password`, `*_dsn`) that are not `SecretString` are rejected
 - **CI:** Application startup in CI validates all required env vars are present

@@ -67,5 +67,5 @@ pub struct CreateServerRequest {
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans all structs in `src/api/dto/` that derive `Deserialize` and verifies they also have `#[serde(deny_unknown_fields)]`
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans all structs in `src/api/dto/` that derive `Deserialize` and verifies they also have `#[serde(deny_unknown_fields)]`
 - **CI:** The enforcement test runs as part of `cargo test`

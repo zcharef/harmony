@@ -92,6 +92,6 @@ pub struct PaginatedResponse<T: Serialize> {
 
 ## Enforcement
 
-- **Enforcement test (backend):** `tests/architecture_test.rs` scans all `.rs` files in `src/infra/` for `OFFSET` in SQL strings — test fails if found
-- **Enforcement test (backend):** `tests/architecture_test.rs` scans request DTOs in `src/api/dto/` for fields named `page`, `page_number`, or `offset` — test fails if found
+- **Enforcement test (backend):** `tests/api_convention_test.rs` scans all `.rs` files in `src/infra/` for `OFFSET` in SQL strings — test fails if found
+- **Enforcement test (backend):** `tests/api_convention_test.rs` scans request DTOs in `src/api/dto/` for fields named `page`, `page_number`, or `offset` — test fails if found
 - **Type system:** `PaginatedResponse<T>` uses `next_cursor: Option<String>`, not page numbers

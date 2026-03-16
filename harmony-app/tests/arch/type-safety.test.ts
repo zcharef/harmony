@@ -115,4 +115,68 @@ describe('Type Safety', () => {
       ).toEqual([])
     })
   })
+
+  describe('route_constants_enforcement', () => {
+    it('should not hardcode route paths in features (ADR-033)', () => {
+      const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
+      const violations: string[] = []
+
+      // Known route segments that should use ROUTES.* constants
+      const ROUTE_SEGMENTS = ['servers', 'channels', 'settings', 'auth']
+      // Match template literals like `/servers/${` or `/channels/${`
+      const routePatterns = ROUTE_SEGMENTS.map(
+        (segment) => new RegExp('`[^`]*/' + segment + '/\\$\\{'),
+      )
+
+      for (const filePath of files) {
+        const content = readFileSync(filePath, 'utf-8')
+        const lines = content.split('\n')
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          // Skip comment lines
+          if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) continue
+
+          for (const pattern of routePatterns) {
+            if (pattern.test(line)) {
+              violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
+              break
+            }
+          }
+        }
+      }
+
+      expect(
+        violations,
+        `Hardcoded route paths found. Use ROUTES.* constants from @/lib/routes instead (ADR-033).\nViolations:\n${violations.join('\n')}`,
+      ).toEqual([])
+    })
+  })
+
+  describe('logger_bypass_enforcement', () => {
+    it('should not bypass noConsole via biome-ignore outside logger.ts (ADR-042)', () => {
+      const AUTHORIZED_FILE = join(SRC_DIR, 'lib/logger.ts')
+      const files = getAllFiles(SRC_DIR, ['.ts', '.tsx'])
+      const violations: string[] = []
+
+      for (const filePath of files) {
+        // Only logger.ts is authorized to suppress the noConsole rule
+        if (filePath === AUTHORIZED_FILE) continue
+
+        const content = readFileSync(filePath, 'utf-8')
+        const lines = content.split('\n')
+
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes('biome-ignore lint/suspicious/noConsole')) {
+            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
+          }
+        }
+      }
+
+      expect(
+        violations,
+        `Unauthorized noConsole bypass found. Only src/lib/logger.ts may suppress biome noConsole (ADR-042).\nViolations:\n${violations.join('\n')}`,
+      ).toEqual([])
+    })
+  })
 })

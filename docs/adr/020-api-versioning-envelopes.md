@@ -86,6 +86,6 @@ pub struct PaginatedResponse<T: Serialize> {
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans the router definition to verify all non-system routes are nested under `/v1/`
+- **Enforcement test:** `tests/api_convention_test.rs` scans the router definition to verify all non-system routes are nested under `/v1/`
 - **Type system:** `PaginatedResponse<T>` is the only return type for collection endpoints — returning a bare `Vec<T>` is a compile-time type mismatch
 - **OpenAPI:** `utoipa` generates the envelope schema, ensuring frontend types match

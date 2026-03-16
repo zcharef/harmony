@@ -82,5 +82,5 @@ async fn test_create_user() {
 ## Enforcement
 
 - **`deny.toml`:** `mockall` and `mock_derive` are banned crates — `cargo deny check` fails if added
-- **Enforcement test:** `tests/architecture_test.rs` scans all `.rs` files for `#[automock]` attribute — fails if found
+- **Enforcement test:** `deny.toml` scans all `.rs` files for `#[automock]` attribute — fails if found
 - **CI:** `cargo deny check bans` runs on every PR

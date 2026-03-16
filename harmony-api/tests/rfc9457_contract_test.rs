@@ -168,109 +168,89 @@ mod contract_tests {
     }
 }
 
-/// Unit tests that don't require app initialization.
-/// These verify the `ProblemDetails` struct serialization directly.
+/// Unit tests that verify actual `ProblemDetails` struct serialization.
+/// These catch real serialization regressions (field renames, missing fields, wrong types).
 mod serialization_tests {
-    use serde_json::json;
+    use axum::http::StatusCode;
+    use harmony_api::api::errors::ProblemDetails;
 
     /// Test: `ProblemDetails` serialization matches RFC 9457.
     #[test]
-    fn problem_details_serializes_correctly() {
-        // Simulate what ProblemDetails::new produces
-        let problem = json!({
-            "type": "about:blank",
-            "title": "Bad Request",
-            "status": 400,
-            "detail": "Email is invalid"
-        });
+    fn problem_details_serializes_to_rfc9457_format() {
+        let problem = ProblemDetails::new(StatusCode::BAD_REQUEST, "Bad Request", "Email is invalid");
+        let json = serde_json::to_value(&problem).expect("ProblemDetails should serialize");
 
-        // Verify structure
-        assert_eq!(problem["type"], "about:blank");
-        assert_eq!(problem["title"], "Bad Request");
-        assert_eq!(problem["status"], 400);
-        assert_eq!(problem["detail"], "Email is invalid");
-
-        // instance is optional and should be absent when None
-        assert!(problem.get("instance").is_none());
-    }
-
-    /// Test: `ProblemDetails` with instance URI serializes correctly.
-    #[test]
-    fn problem_details_with_instance_serializes_correctly() {
-        let problem = json!({
-            "type": "about:blank",
-            "title": "Not Found",
-            "status": 404,
-            "detail": "User with id 'abc123' not found",
-            "instance": "/v1/users/abc123"
-        });
-
-        assert_eq!(problem["instance"], "/v1/users/abc123");
+        assert_eq!(json["type"], "about:blank");
+        assert_eq!(json["title"], "Bad Request");
+        assert_eq!(json["status"], 400);
+        assert_eq!(json["detail"], "Email is invalid");
     }
 
     /// Test: Status codes are numbers, not strings.
     #[test]
-    fn status_is_numeric_not_string() {
-        let problem = json!({
-            "type": "about:blank",
-            "title": "Bad Request",
-            "status": 400,
-            "detail": "Invalid input"
-        });
+    fn problem_details_status_is_numeric() {
+        let problem = ProblemDetails::new(StatusCode::NOT_FOUND, "Not Found", "User not found");
+        let json = serde_json::to_value(&problem).expect("ProblemDetails should serialize");
 
-        // status MUST be a number per RFC 9457
-        assert!(problem["status"].is_number());
-        assert!(!problem["status"].is_string());
+        assert!(json["status"].is_number(), "status must be numeric, not string");
+        assert_eq!(json["status"], 404);
+    }
+
+    /// Test: `instance` is omitted from JSON when `None`.
+    #[test]
+    fn problem_details_instance_is_optional() {
+        let problem = ProblemDetails::new(StatusCode::FORBIDDEN, "Forbidden", "No access");
+        let json = serde_json::to_value(&problem).expect("ProblemDetails should serialize");
+
+        assert!(json.get("instance").is_none(), "instance should be omitted when None");
+    }
+
+    /// Test: `instance` appears in JSON when set via builder.
+    #[test]
+    fn problem_details_with_instance() {
+        let problem = ProblemDetails::new(StatusCode::BAD_REQUEST, "Bad Request", "Invalid")
+            .with_instance("/v1/users/123");
+        let json = serde_json::to_value(&problem).expect("ProblemDetails should serialize");
+
+        assert_eq!(json["instance"], "/v1/users/123");
     }
 
     /// Test: Type defaults to "about:blank" per RFC 9457.
     #[test]
-    fn type_defaults_to_about_blank() {
-        let problem = json!({
-            "type": "about:blank",
-            "title": "Error",
-            "status": 500,
-            "detail": "Something went wrong"
-        });
+    fn problem_details_type_defaults_to_about_blank() {
+        let problem = ProblemDetails::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error", "Something went wrong");
+        let json = serde_json::to_value(&problem).expect("ProblemDetails should serialize");
 
-        // When no specific problem type URI, use "about:blank"
-        assert_eq!(problem["type"], "about:blank");
+        assert_eq!(json["type"], "about:blank");
     }
 }
 
-/// Macro test: verify that our `ApiError` produces valid RFC 9457 JSON.
+/// Tests that verify `ApiError` factory methods produce valid RFC 9457 JSON.
 #[cfg(test)]
 mod api_error_tests {
-    /// Test: `ApiError::bad_request` produces valid RFC 9457.
+    use harmony_api::api::errors::ApiError;
+
+    /// Test: `ApiError::bad_request` produces valid RFC 9457 `ProblemDetails`.
     #[test]
     fn api_error_bad_request_produces_valid_json() {
-        // This test verifies the shape without needing the actual crate
-        // The real verification happens in integration tests
+        let error = ApiError::bad_request("Email is required");
+        let json = serde_json::to_value(&error.problem).expect("ProblemDetails should serialize");
 
-        let expected_shape = serde_json::json!({
-            "type": "about:blank",
-            "title": "Bad Request",
-            "status": 400,
-            "detail": "Email is required"
-        });
-
-        // Verify all required fields exist
-        assert!(expected_shape.get("type").is_some());
-        assert!(expected_shape.get("title").is_some());
-        assert!(expected_shape.get("status").is_some());
-        assert!(expected_shape.get("detail").is_some());
-
-        // Status must be numeric
-        assert!(expected_shape["status"].is_u64());
+        assert_eq!(json["type"], "about:blank");
+        assert_eq!(json["title"], "Bad Request");
+        assert_eq!(json["status"], 400);
+        assert_eq!(json["detail"], "Email is required");
     }
 
     /// Test: `ApiError::not_found` includes resource info in detail.
     #[test]
     fn api_error_not_found_includes_resource_info() {
-        let detail = format!("{} with id '{}' not found", "User", "abc123");
+        let error = ApiError::not_found("User with id 'abc123' not found");
+        let json = serde_json::to_value(&error.problem).expect("ProblemDetails should serialize");
 
-        assert!(detail.contains("User"));
-        assert!(detail.contains("abc123"));
-        assert!(detail.contains("not found"));
+        assert_eq!(json["status"], 404);
+        let detail = json["detail"].as_str().expect("detail should be a string");
+        assert!(detail.contains("User"), "detail should mention the resource type");
+        assert!(detail.contains("abc123"), "detail should mention the resource id");
     }
 }

@@ -64,5 +64,5 @@ The `"alias!"` syntax tells sqlx the column is non-nullable (because `COALESCE` 
 
 ## Enforcement
 
-- **Enforcement test:** `tests/architecture_test.rs` scans all `.rs` files in `src/infra/` for SQL strings containing `SUM(`, `AVG(`, or `ARRAY_AGG(` and verifies they include an explicit `::` cast
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans all `.rs` files in `src/infra/` for SQL strings containing `SUM(`, `AVG(`, or `ARRAY_AGG(` and verifies they include an explicit `::` cast
 - **Code review:** Aggregate queries without `COALESCE` and explicit casts are rejected with a pointer to this ADR

@@ -76,5 +76,5 @@ pub async fn get_messages(
 ## Enforcement
 
 - **Clippy lints:** `print_stdout = "deny"`, `print_stderr = "deny"`, `dbg_macro = "deny"` in workspace lint configuration
-- **Enforcement test:** `tests/architecture_test.rs` scans all `pub async fn` handlers in `src/api/handlers/` for `#[tracing::instrument]` attribute
+- **Enforcement test:** `tests/rust_patterns_test.rs` scans all `pub async fn` handlers in `src/api/handlers/` for `#[tracing::instrument]` attribute
 - **CI:** `cargo clippy -- -D warnings` fails the build if any print macro is used
