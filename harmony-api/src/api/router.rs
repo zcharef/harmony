@@ -1,0 +1,100 @@
+//! HTTP router with middleware stack.
+
+use std::time::Duration;
+
+use axum::{
+    Router,
+    http::{HeaderValue, Method, header},
+    routing::get,
+};
+use sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
+use tower_http::{
+    compression::CompressionLayer,
+    cors::{AllowOrigin, CorsLayer},
+    limit::RequestBodyLimitLayer,
+    request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
+    set_header::SetResponseHeaderLayer,
+    timeout::TimeoutLayer,
+    trace::TraceLayer,
+};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
+
+use super::handlers;
+use super::middleware::rate_limit::RateLimitLayer;
+use super::openapi::ApiDoc;
+use super::state::AppState;
+
+/// Build the main application router with production middleware stack.
+///
+/// Layers are applied in reverse order of declaration:
+/// ```text
+/// Request  → SentryHub → RequestId → Tracing → Timeout → BodyLimit → Handler
+/// Response ← Compression ← SecurityHeaders ← CORS ← Handler
+/// ```
+#[allow(deprecated)] // TimeoutLayer::new is deprecated; upgrade when tower-http 0.7 releases
+pub fn build_router(state: AppState) -> Router {
+    let request_id_header = header::HeaderName::from_static("x-request-id");
+
+    let cors = CorsLayer::new()
+        .allow_origin(if state.is_production {
+            AllowOrigin::list([
+                // SAFETY: hardcoded valid header value
+                HeaderValue::from_static("https://harmony.app"),
+            ])
+        } else {
+            AllowOrigin::mirror_request()
+        })
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION, header::ACCEPT])
+        .allow_credentials(true);
+
+    // ── Authenticated v1 routes (example placeholder) ───────────
+    // Uncomment and add routes as features are implemented:
+    // let authenticated_routes = Router::new()
+    //     .route("/example", get(handlers::example))
+    //     .route_layer(middleware::from_fn_with_state(
+    //         state.clone(),
+    //         super::middleware::auth::require_auth,
+    //     ))
+    //     .with_state(state.clone());
+
+    Router::new()
+        // Swagger UI
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        // System endpoints
+        .route("/health", get(handlers::health_check))
+        // Versioned API namespace
+        // .nest("/v1", authenticated_routes)
+        .with_state(state)
+        .fallback(handlers::not_found_fallback)
+        // Middleware layers (applied in REVERSE order - last declared = runs first)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"),
+        ))
+        .layer(cors)
+        .layer(CompressionLayer::new())
+        .layer(RateLimitLayer::new(60, 300))
+        .layer(RequestBodyLimitLayer::new(2 * 1024 * 1024))
+        .layer(TimeoutLayer::new(Duration::from_secs(30)))
+        .layer(TraceLayer::new_for_http())
+        .layer(PropagateRequestIdLayer::new(request_id_header.clone()))
+        .layer(SetRequestIdLayer::new(request_id_header, MakeRequestUuid))
+        .layer(SentryHttpLayer::default().enable_transaction())
+        .layer(NewSentryLayer::new_from_top())
+}

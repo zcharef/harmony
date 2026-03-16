@@ -1,0 +1,233 @@
+#![warn(
+    dead_code,
+    unused_variables,
+    unused_imports,
+    unused_mut,
+    unreachable_code
+)]
+// WHY: main.rs is the composition root — process::exit on fatal startup errors is acceptable.
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+use harmony_api::{api, config, infra};
+
+use std::net::SocketAddr;
+
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::{SpanExporter, WithExportConfig};
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use secrecy::{ExposeSecret, SecretString};
+use sentry::integrations::tracing::EventFilter;
+use tokio::signal;
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use api::AppState;
+use api::router::build_router;
+use config::Config;
+
+#[tokio::main]
+async fn main() {
+    // 1. Load configuration (fail-fast if invalid)
+    let config = Config::init();
+
+    // 2. Initialize Sentry (must be before tracing!)
+    let _sentry_guard = init_sentry(&config);
+
+    // 3. Initialize tracing
+    let tracer_provider = init_tracing(&config);
+
+    tracing::info!(
+        port = config.server_port,
+        environment = %config.environment,
+        otel_enabled = tracer_provider.is_some(),
+        "Starting Harmony API"
+    );
+
+    // 4. Initialize infrastructure services
+    let state = init_app_state(&config).await;
+
+    // 5. Build router with middleware stack
+    let app = build_router(state);
+
+    // 6. Start server with graceful shutdown
+    let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind to address");
+
+    tracing::info!("Listening on {}", addr);
+    tracing::info!(
+        "Swagger UI available at http://localhost:{}/swagger-ui",
+        config.server_port
+    );
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("Server error");
+
+    // Flush pending OTel spans before exit
+    if let Some(provider) = tracer_provider
+        && let Err(e) = provider.shutdown()
+    {
+        tracing::error!(error = %e, "OpenTelemetry shutdown error");
+    }
+}
+
+/// Initialize application state with Postgres pool and JWT config.
+async fn init_app_state(config: &Config) -> AppState {
+    // Initialize Postgres connection pool
+    let pool = infra::postgres::create_pool(&config.database_url, config.max_db_connections).await;
+    tracing::info!("Postgres connection pool initialized");
+
+    // Verify database connectivity at startup
+    if let Err(e) = infra::postgres::ping(&pool).await {
+        tracing::error!(error = %e, "Database connectivity check failed at startup");
+        panic!("Cannot connect to Postgres: {}", e);
+    }
+    tracing::info!("Database connectivity verified");
+
+    // Session secret (required — stateless HMAC session tokens)
+    let session_secret: SecretString = config.session_secret.clone().unwrap_or_else(|| {
+        if config.is_production() {
+            panic!("SESSION_SECRET must be set in production");
+        }
+        tracing::warn!("SESSION_SECRET not set — using insecure default for development");
+        SecretString::from("dev-only-insecure-session-secret-do-not-use-in-prod!!")
+    });
+
+    AppState {
+        pool,
+        jwt_secret: config.supabase_jwt_secret.clone(),
+        session_secret,
+        is_production: config.is_production(),
+    }
+}
+
+/// Initialize Sentry for crash reporting and proactive alerting.
+fn init_sentry(config: &Config) -> Option<sentry::ClientInitGuard> {
+    let dsn = config.sentry_dsn.as_ref()?;
+
+    let dsn_str = dsn.expose_secret();
+    if dsn_str.is_empty() {
+        return None;
+    }
+
+    let guard = sentry::init((
+        dsn_str.to_string(),
+        sentry::ClientOptions {
+            release: sentry::release_name!(),
+            environment: Some(config.environment.clone().into()),
+            traces_sample_rate: if config.is_production() { 0.1 } else { 1.0 },
+            ..Default::default()
+        },
+    ));
+
+    Some(guard)
+}
+
+/// Initialize tracing subscriber with JSON output for production.
+fn init_tracing(config: &Config) -> Option<SdkTracerProvider> {
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        "info,harmony_api=debug,tower_http=debug"
+            .parse()
+            .expect("hardcoded filter string is valid")
+    });
+
+    let tracer_provider = init_otel_provider(config);
+
+    if config.is_production() {
+        let sentry_layer =
+            sentry::integrations::tracing::layer().event_filter(|md| match *md.level() {
+                tracing::Level::ERROR => EventFilter::Event,
+                tracing::Level::WARN => EventFilter::Breadcrumb,
+                _ => EventFilter::Ignore,
+            });
+
+        let otel_layer = tracer_provider
+            .as_ref()
+            .map(|p| OpenTelemetryLayer::new(p.tracer("harmony-api")));
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().json())
+            .with(sentry_layer)
+            .with(otel_layer)
+            .init();
+    } else {
+        let sentry_layer =
+            sentry::integrations::tracing::layer().event_filter(|md| match *md.level() {
+                tracing::Level::ERROR => EventFilter::Event,
+                _ => EventFilter::Ignore,
+            });
+
+        let otel_layer = tracer_provider
+            .as_ref()
+            .map(|p| OpenTelemetryLayer::new(p.tracer("harmony-api")));
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().pretty())
+            .with(sentry_layer)
+            .with(otel_layer)
+            .init();
+    }
+
+    tracer_provider
+}
+
+/// Build an `OTel` `SdkTracerProvider` if `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+fn init_otel_provider(config: &Config) -> Option<SdkTracerProvider> {
+    let endpoint = config.otel_exporter_otlp_endpoint.as_deref()?;
+    if endpoint.is_empty() {
+        return None;
+    }
+
+    let service_name = config
+        .otel_service_name
+        .clone()
+        .unwrap_or_else(|| "harmony-api".to_string());
+
+    let exporter = SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint(endpoint)
+        .build()
+        .expect("Failed to create OTLP span exporter");
+
+    let provider = SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
+        .with_resource(Resource::builder().with_service_name(service_name).build())
+        .build();
+
+    opentelemetry::global::set_tracer_provider(provider.clone());
+
+    Some(provider)
+}
+
+/// Graceful shutdown handler.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    tracing::info!("Shutdown signal received, starting graceful shutdown...");
+}

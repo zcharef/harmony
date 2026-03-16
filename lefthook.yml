@@ -1,0 +1,90 @@
+# Harmony monorepo — Quality Wall
+# Run manually: lefthook run pre-commit
+# Skip once: LEFTHOOK=0 git commit -m "..."
+
+# ============================================================================
+# PRE-COMMIT: Fast checks on staged files only (<5s target)
+# ============================================================================
+pre-commit:
+  parallel: true
+  commands:
+    # --- Tauri App (harmony-app) ---
+    biome:
+      root: harmony-app/
+      glob: "*.{js,ts,cjs,mjs,jsx,tsx,json,jsonc}"
+      run: pnpm biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+
+    # --- Rust API (harmony-api) ---
+    rust-fmt:
+      root: harmony-api/
+      glob: "*.rs"
+      run: $HOME/.cargo/bin/cargo fmt --check
+      fail_text: "Run 'cargo fmt' to fix formatting"
+
+    rust-clippy:
+      root: harmony-api/
+      glob: "*.rs"
+      run: $HOME/.cargo/bin/cargo clippy --all-targets -- -D warnings
+      fail_text: "Fix clippy warnings before committing"
+
+# ============================================================================
+# COMMIT-MSG: Conventional Commits enforcement
+# ============================================================================
+commit-msg:
+  commands:
+    commitlint:
+      root: harmony-app/
+      run: pnpm commitlint --edit {1}
+
+# ============================================================================
+# PRE-PUSH: Heavy checks that MUST pass before code reaches remote
+# ============================================================================
+pre-push:
+  parallel: true
+  commands:
+    # --- Tauri App (harmony-app) ---
+    typecheck:
+      root: harmony-app/
+      run: pnpm tsc --noEmit
+      fail_text: "TypeScript errors found. Fix before pushing."
+
+    boundaries:
+      root: harmony-app/
+      run: pnpm eslint --config eslint.config.mjs src/
+      fail_text: "Module boundary violations. Deep imports are forbidden."
+
+    circular:
+      root: harmony-app/
+      run: pnpm madge --circular --extensions ts,tsx src/
+      fail_text: "Circular dependencies detected."
+
+    web-architecture:
+      root: harmony-app/
+      run: pnpm vitest run --config vitest.config.arch.ts
+      fail_text: "Architecture tests failed. Check feature structure."
+
+    knip:
+      root: harmony-app/
+      run: pnpm knip --no-progress
+      fail_text: "Dead code detected. Run 'pnpm knip' to see unused files/exports/deps."
+
+    # --- Rust API (harmony-api) ---
+    openapi-freshness:
+      root: harmony-api/
+      run: $HOME/.cargo/bin/cargo run --bin export_openapi | diff openapi.json - >/dev/null
+      fail_text: "openapi.json is stale. Run 'just export-openapi' and commit the result."
+
+    rust-test:
+      root: harmony-api/
+      run: $HOME/.cargo/bin/cargo test
+      fail_text: "Rust tests failed. Run 'just wall' for details."
+
+    # --- Monorepo-wide ---
+    lint-migrations:
+      run: bash scripts/lint-migrations.sh
+      fail_text: "Migration lint failed. See ADR-019 (non-destructive) and ADR-040 (RLS)."
+
+    check-adr-index:
+      run: bash scripts/check-adr-index.sh
+      fail_text: "ADR index out of date. Add missing entries to docs/adr/README.md."

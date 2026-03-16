@@ -1,0 +1,28 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["src/main.tsx"],
+  "project": ["src/**/*.{ts,tsx}"],
+  "ignore": ["src/components/ui/**", "src/lib/api/**"],
+  "postcss": {
+    "config": ["postcss.config.js"]
+  },
+  "commitlint": {
+    "config": ["commitlint.config.js"]
+  },
+  "rules": {
+    "files": "warn",
+    "dependencies": "error",
+    "unlisted": "warn",
+    "exports": "warn",
+    "types": "warn"
+  },
+  "ignoreDependencies": [
+    "postcss",
+    "@commitlint/cli",
+    "autoprefixer",
+    "tailwindcss",
+    "tailwindcss-animate",
+    "@hey-api/client-fetch",
+    "jsdom"
+  ]
+}

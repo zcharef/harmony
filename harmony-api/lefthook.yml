@@ -1,0 +1,46 @@
+# Lefthook configuration for harmony-api
+# DISABLED: Rename to lefthook.yml when API is stable
+#
+# This file enforces code quality gates before commits:
+# - Format check (cargo fmt)
+# - Lint (clippy with warnings as errors)
+# - All tests including architecture and enforcement tests
+#
+# To enable: mv lefthook.yml.disabled lefthook.yml && lefthook install
+
+pre-commit:
+  parallel: false
+  commands:
+    fmt-check:
+      run: cargo fmt --check
+      fail_text: "Code not formatted. Run 'cargo fmt' to fix."
+
+    clippy:
+      run: cargo clippy -- -D warnings
+      fail_text: "Clippy found issues. Run 'cargo clippy --fix' to fix."
+
+    test-unit:
+      run: cargo test --lib
+      fail_text: "Unit tests failed."
+
+    test-arch:
+      run: cargo test --test architecture_test
+      fail_text: "Architecture boundary tests failed. Check hexagonal layer violations."
+
+    test-openapi:
+      run: cargo test --test openapi_enforcement_test
+      fail_text: "OpenAPI documentation missing. Add #[utoipa::path] to handlers."
+
+    test-rfc9457:
+      run: cargo test --test rfc9457_contract_test
+      fail_text: "RFC 9457 contract tests failed. Check error response format."
+
+pre-push:
+  parallel: false
+  commands:
+    full-wall:
+      run: just wall
+      fail_text: "Quality wall failed. Fix issues before pushing."
+
+# Skip hooks for specific patterns (emergency commits)
+# Usage: git commit --no-verify -m "hotfix: ..."

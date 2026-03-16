@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust-quality:
+    name: Rust Quality Wall
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harmony-api
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: harmony_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: harmony-api
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/harmony_test
+          SUPABASE_JWT_SECRET: test-secret-with-at-least-32-characters-long-for-ci
+          SUPABASE_URL: http://localhost:9999
+          ENVIRONMENT: test
+          SERVER_PORT: "3000"
+        run: cargo test --all-targets
+
+      - name: OpenAPI freshness check
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/harmony_test
+          SUPABASE_JWT_SECRET: test-secret-with-at-least-32-characters-long-for-ci
+          SUPABASE_URL: http://localhost:9999
+          ENVIRONMENT: test
+          SERVER_PORT: "3000"
+        run: |
+          cargo run --bin export_openapi > /tmp/openapi-fresh.json
+          diff -u openapi.json /tmp/openapi-fresh.json || (echo "ERROR: openapi.json is stale. Run 'just export-openapi' and commit." && exit 1)
+
+  rust-security:
+    name: Rust Security Audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harmony-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93"
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+      - name: Check licenses and bans
+        run: cargo deny check
+
+      - name: Audit dependencies for vulnerabilities
+        run: |
+          cargo install cargo-audit --locked || true
+          cargo audit
+
+  app-quality:
+    name: App Quality Wall
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harmony-app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: harmony-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Biome lint
+        run: pnpm lint
+
+      - name: TypeScript check
+        run: pnpm typecheck
+
+      - name: Module boundaries
+        run: pnpm lint:boundaries
+
+      - name: Circular dependencies
+        run: pnpm circular
+
+      - name: Architecture tests
+        run: pnpm test:arch
+
+      - name: Dead code check
+        run: pnpm knip
+
+      - name: Generated TypeScript client compiles
+        run: |
+          pnpm run gen:api
+          pnpm tsc --noEmit
+
+  migration-quality:
+    name: Migration Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint migrations
+        run: |
+          chmod +x scripts/lint-migrations.sh
+          ./scripts/lint-migrations.sh
+
+      - name: Check ADR index freshness
+        run: |
+          chmod +x scripts/check-adr-index.sh
+          ./scripts/check-adr-index.sh
+
+  commit-quality:
+    name: Commit Message Lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: harmony-app/pnpm-lock.yaml
+
+      - name: Install commitlint
+        working-directory: ./harmony-app
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate commit messages
+        working-directory: ./harmony-app
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npx commitlint --from "$BASE_SHA" --to "$HEAD_SHA"
