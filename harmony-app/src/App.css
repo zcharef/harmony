@@ -1,88 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@plugin "../hero.ts";
+@source "../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";
+@custom-variant dark (&:is(.dark *));
 
-@layer base {
-  :root {
-    /* --- HARMONY LIGHT THEME --- */
-    --background: 60 17% 97%;
-    --foreground: 204 19% 26%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 204 19% 26%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 204 19% 26%;
-
-    --primary: 182 25% 50%;
-    --primary-foreground: 0 0% 100%;
-
-    --secondary: 155 23% 71%;
-    --secondary-foreground: 204 19% 26%;
-
-    --muted: 60 56% 91%;
-    --muted-foreground: 204 19% 40%;
-
-    --accent: 60 56% 91%;
-    --accent-foreground: 204 19% 26%;
-
-    --destructive: 0 60% 65%;
-    --destructive-foreground: 0 0% 100%;
-
-    --border: 155 23% 85%;
-    --input: 155 23% 85%;
-    --ring: 182 25% 50%;
-
-    --chart-1: 182 25% 50%;
-    --chart-2: 155 23% 71%;
-    --chart-3: 204 19% 26%;
-    --chart-4: 60 56% 70%;
-    --chart-5: 0 60% 65%;
-
-    --radius: 1rem;
-  }
-
-  .dark {
-    /* --- HARMONY DARK THEME --- */
-    --background: 204 20% 15%;
-    --foreground: 60 17% 97%;
-
-    --card: 204 20% 18%;
-    --card-foreground: 60 17% 97%;
-
-    --popover: 204 20% 18%;
-    --popover-foreground: 60 17% 97%;
-
-    --primary: 182 25% 50%;
-    --primary-foreground: 0 0% 100%;
-
-    --secondary: 204 20% 25%;
-    --secondary-foreground: 60 17% 97%;
-
-    --muted: 204 20% 25%;
-    --muted-foreground: 155 23% 71%;
-
-    --accent: 204 20% 25%;
-    --accent-foreground: 60 17% 97%;
-
-    --destructive: 0 62% 30%;
-    --destructive-foreground: 0 0% 100%;
-
-    --border: 204 20% 25%;
-    --input: 204 20% 25%;
-    --ring: 182 25% 50%;
-
-    --chart-1: 182 30% 55%;
-    --chart-2: 155 28% 60%;
-    --chart-3: 60 17% 97%;
-    --chart-4: 60 40% 55%;
-    --chart-5: 0 55% 55%;
-  }
+@theme {
+  --font-sans: "Nunito Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
 }
 
 @layer base {
   * {
-    @apply border-border;
+    @apply border-divider;
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;

@@ -7,7 +7,7 @@ import tseslint from 'typescript-eslint'
  *
  * Boundaries rules enforce the Public API Pattern:
  * - Deep imports into features are FORBIDDEN (must use barrel exports)
- * - Features can only import from: lib/, hooks/, components/ui/, components/shared/
+ * - Features can only import from: lib/, hooks/, components/shared/
  * - Cross-feature imports must go through index.ts
  *
  * Run with: just boundaries
@@ -55,11 +55,6 @@ export default tseslint.config(
           type: 'shared',
           pattern: 'src/components/shared/*',
         },
-        // Shadcn UI primitives (do not modify)
-        {
-          type: 'ui',
-          pattern: 'src/components/ui/*',
-        },
         // Layout components (app shell)
         {
           type: 'layout',
@@ -102,7 +97,7 @@ export default tseslint.config(
             // Features can import from:
             // - Their own internals (same feature)
             // - Other features ONLY via index.ts (barrel export)
-            // - lib/, hooks/, ui/, shared/
+            // - lib/, hooks/, shared/
             {
               from: 'feature',
               allow: [
@@ -110,24 +105,18 @@ export default tseslint.config(
                 ['feature', { featureName: '!${from.featureName}' }],
                 'lib',
                 'hooks',
-                'ui',
                 'shared',
               ],
             },
-            // Shared components can import from: ui, lib, hooks
+            // Shared components can import from: lib, hooks
             {
               from: 'shared',
-              allow: ['ui', 'lib', 'hooks'],
+              allow: ['lib', 'hooks'],
             },
-            // UI primitives: only lib (utils like cn())
-            {
-              from: 'ui',
-              allow: ['lib', 'ui'],
-            },
-            // Layout components: features (via barrel), shared, ui, lib, hooks
+            // Layout components: features (via barrel), shared, lib, hooks
             {
               from: 'layout',
-              allow: ['feature', 'shared', 'ui', 'lib', 'hooks'],
+              allow: ['feature', 'shared', 'lib', 'hooks'],
             },
             // Lib can import from other lib
             {
@@ -142,7 +131,7 @@ export default tseslint.config(
             // Pages can import from everything
             {
               from: 'pages',
-              allow: ['feature', 'shared', 'ui', 'lib', 'hooks', 'layout'],
+              allow: ['feature', 'shared', 'lib', 'hooks', 'layout'],
             },
             // Router can import from pages, lib
             {

@@ -1,10 +1,13 @@
+import { HeroUIProvider } from '@heroui/react'
 import { MainLayout } from '@/components/layout/main-layout'
 
 function App() {
   return (
-    <div className="dark">
-      <MainLayout />
-    </div>
+    <HeroUIProvider>
+      <main className="dark text-foreground bg-background">
+        <MainLayout />
+      </main>
+    </HeroUIProvider>
   )
 }
 

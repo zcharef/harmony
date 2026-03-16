@@ -1,6 +1,6 @@
 # ADR-032: Tailwind-Only Styling
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-044](./044-heroui-component-library.md)
 **Date:** 2026-03-16
 
 ## Context

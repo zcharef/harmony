@@ -1,3 +1,4 @@
+import { Button } from '@heroui/react'
 import { type FallbackProps, ErrorBoundary as ReactErrorBoundary } from 'react-error-boundary'
 
 function DefaultErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
@@ -9,15 +10,11 @@ function DefaultErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 p-8">
-      <h2 className="text-lg font-semibold text-destructive">{title}</h2>
-      <p className="text-sm text-muted-foreground">{String(detail)}</p>
-      <button
-        type="button"
-        onClick={resetErrorBoundary}
-        className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
-      >
+      <h2 className="text-lg font-semibold text-danger">{title}</h2>
+      <p className="text-sm text-default-500">{String(detail)}</p>
+      <Button color="primary" variant="flat" onPress={resetErrorBoundary}>
         Try again
-      </button>
+      </Button>
     </div>
   )
 }

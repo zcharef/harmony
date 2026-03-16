@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -20,7 +20,6 @@ function getAllFiles(dir: string, extensions: string[]): string[] {
   const files: string[] = []
   if (!existsSync(dir)) return files
 
-  const { readdirSync, statSync } = require('node:fs')
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const fullPath = join(dir, entry.name)
     if (entry.isDirectory()) {
@@ -82,10 +81,7 @@ describe('Type Safety', () => {
 
   describe('no_hardcoded_urls', () => {
     it('should not contain hardcoded http:// or https:// URLs in source', () => {
-      const ALLOWLIST = [
-        join(SRC_DIR, 'lib/env.ts'),
-        join(SRC_DIR, 'lib/api-client.ts'),
-      ]
+      const ALLOWLIST = [join(SRC_DIR, 'lib/env.ts'), join(SRC_DIR, 'lib/api-client.ts')]
       const files = getAllFiles(SRC_DIR, ['.ts', '.tsx'])
       const violations: string[] = []
 
@@ -94,7 +90,7 @@ describe('Type Safety', () => {
         // Exclude test files
         if (filePath.includes('.test.') || filePath.includes('.spec.')) continue
         // Exclude generated API client
-        if (filePath.includes(join('lib', 'api') + '/')) continue
+        if (filePath.includes(`${join('lib', 'api')}/`)) continue
 
         const content = readFileSync(filePath, 'utf-8')
         const lines = content.split('\n')
@@ -176,6 +172,123 @@ describe('Type Safety', () => {
       expect(
         violations,
         `Unauthorized noConsole bypass found. Only src/lib/logger.ts may suppress biome noConsole (ADR-042).\nViolations:\n${violations.join('\n')}`,
+      ).toEqual([])
+    })
+  })
+
+  describe('no_shadcn_imports', () => {
+    it('should not import from @/components/ui/ (Task 4.2 — HeroUI migration)', () => {
+      const files = getAllFiles(SRC_DIR, ['.ts', '.tsx'])
+      const violations: string[] = []
+
+      for (const filePath of files) {
+        const content = readFileSync(filePath, 'utf-8')
+        const lines = content.split('\n')
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          // Skip comment lines
+          if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) continue
+
+          if (/from ['"]@\/components\/ui\//.test(line)) {
+            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
+          }
+        }
+      }
+
+      expect(
+        violations,
+        `Shadcn UI imports found. Use HeroUI components instead of @/components/ui/*.\nViolations:\n${violations.join('\n')}`,
+      ).toEqual([])
+    })
+  })
+
+  describe('no_radix_imports', () => {
+    it('should not import @radix-ui packages (Task 4.3 — HeroUI migration)', () => {
+      const COMPONENTS_DIR = join(SRC_DIR, 'components')
+      const featureFiles = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
+      const componentFiles = getAllFiles(COMPONENTS_DIR, ['.ts', '.tsx'])
+      const files = [...featureFiles, ...componentFiles]
+      const violations: string[] = []
+
+      for (const filePath of files) {
+        const content = readFileSync(filePath, 'utf-8')
+        const lines = content.split('\n')
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          // Skip comment lines
+          if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) continue
+
+          if (/@radix-ui/.test(line)) {
+            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
+          }
+        }
+      }
+
+      expect(
+        violations,
+        `Direct @radix-ui imports found. Use HeroUI components instead.\nViolations:\n${violations.join('\n')}`,
+      ).toEqual([])
+    })
+  })
+
+  describe('no_hardcoded_tailwind_colors', () => {
+    it('should not use hardcoded Tailwind color classes (Task 4.4 — HeroUI migration)', () => {
+      const COMPONENTS_DIR = join(SRC_DIR, 'components')
+      const RESIZABLE_HANDLE = join(COMPONENTS_DIR, 'layout/resizable-handle.tsx')
+      const featureFiles = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
+      const componentFiles = getAllFiles(COMPONENTS_DIR, ['.ts', '.tsx'])
+      const files = [...featureFiles, ...componentFiles]
+      const violations: string[] = []
+
+      // Hardcoded color prefixes that should use semantic tokens instead
+      const COLOR_PREFIXES = [
+        'bg-emerald-',
+        'bg-red-',
+        'bg-amber-',
+        'bg-zinc-',
+        'bg-gray-',
+        'bg-slate-',
+        'text-emerald-',
+        'text-red-',
+        'text-amber-',
+        'text-zinc-',
+        'text-gray-',
+        'text-slate-',
+        'text-white',
+        'border-emerald-',
+        'border-red-',
+        'border-amber-',
+        'border-zinc-',
+      ]
+
+      // Build a single regex from all prefixes for efficient matching
+      const colorPattern = new RegExp(COLOR_PREFIXES.map((p) => p.replace('-', '\\-')).join('|'))
+
+      for (const filePath of files) {
+        // Exclude resizable-handle.tsx (layout primitive may need raw colors)
+        if (filePath === RESIZABLE_HANDLE) continue
+
+        const content = readFileSync(filePath, 'utf-8')
+        const lines = content.split('\n')
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          // Skip comment lines
+          if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) continue
+          // Escape hatch: allow explicit override annotation
+          if (line.includes('// heroui-color-override')) continue
+
+          if (colorPattern.test(line)) {
+            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
+          }
+        }
+      }
+
+      expect(
+        violations,
+        `Hardcoded Tailwind color classes found. Use HeroUI semantic color tokens (e.g. bg-danger, text-foreground) instead.\nViolations:\n${violations.join('\n')}`,
       ).toEqual([])
     })
   })

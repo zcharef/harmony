@@ -1,4 +1,5 @@
 import path from 'node:path'
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
@@ -6,7 +7,13 @@ const host = process.env.TAURI_DEV_HOST
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [tailwindcss(), react()],
+  css: {
+    // Disable PostCSS — @tailwindcss/vite handles CSS processing directly.
+    // Without this, Vite's built-in PostCSS picks up tailwindcss@3 (a transitive
+    // dep of HeroUI) and conflicts with our Tailwind v4 CSS-first config.
+    postcss: {},
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

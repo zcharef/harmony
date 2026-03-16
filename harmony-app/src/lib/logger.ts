@@ -12,7 +12,6 @@
 export const logger = {
   error(message: string, context?: Record<string, unknown>) {
     if (import.meta.env.DEV) {
-      // biome-ignore lint/suspicious/noConsole: logger is the only authorized console access
       console.error(message, context)
     }
     // TODO: Sentry.addBreadcrumb({ message, data: context, level: 'error' })
@@ -20,13 +19,11 @@ export const logger = {
   },
   warn(message: string, context?: Record<string, unknown>) {
     if (import.meta.env.DEV) {
-      // biome-ignore lint/suspicious/noConsole: logger is the only authorized console access
       console.warn(message, context)
     }
   },
   info(message: string, context?: Record<string, unknown>) {
     if (import.meta.env.DEV) {
-      // biome-ignore lint/suspicious/noConsole: logger is the only authorized console access
       console.info(message, context)
     }
   },

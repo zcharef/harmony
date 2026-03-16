@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -9,7 +9,7 @@ const FEATURES_DIR = join(SRC_DIR, 'features')
  * Architecture tests for React coding patterns.
  *
  * These validate rules that enforce consistency and prevent common pitfalls:
- * - No inline styles outside Shadcn UI components
+ * - No inline styles in feature code
  * - Barrel exports must be pure re-exports (no logic)
  * - No reset() inside useEffect (load-then-render pattern required)
  * - No complex boolean state combinations with negation
@@ -34,15 +34,11 @@ function getAllFiles(dir: string, extensions: string[]): string[] {
 
 describe('React Patterns', () => {
   describe('no_inline_styles', () => {
-    it('should not use inline styles in tsx files outside components/ui/', () => {
-      const UI_DIR = join(SRC_DIR, 'components/ui')
+    it('should not use inline styles in tsx files', () => {
       const files = getAllFiles(SRC_DIR, ['.tsx'])
       const violations: string[] = []
 
       for (const filePath of files) {
-        // Allowlist: Shadcn UI components may need inline styles for Radix
-        if (filePath.startsWith(UI_DIR)) continue
-
         const content = readFileSync(filePath, 'utf-8')
         const lines = content.split('\n')
 
@@ -130,9 +126,9 @@ describe('React Patterns', () => {
 
         // Find useEffect blocks and check for reset( inside them
         const useEffectRegex = /useEffect\(\s*\(\)\s*=>\s*\{/g
-        let match: RegExpExecArray | null
+        let match: RegExpExecArray | null = useEffectRegex.exec(content)
 
-        while ((match = useEffectRegex.exec(content)) !== null) {
+        while (match !== null) {
           const startIndex = match.index + match[0].length
           // Track brace depth to find the end of the useEffect callback
           let depth = 1
@@ -149,6 +145,7 @@ describe('React Patterns', () => {
             const lineNumber = content.slice(0, match.index).split('\n').length
             violations.push(`${relative(SRC_DIR, filePath)}:${lineNumber}`)
           }
+          match = useEffectRegex.exec(content)
         }
       }
 

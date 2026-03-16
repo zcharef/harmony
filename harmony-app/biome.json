@@ -89,20 +89,6 @@
       }
     },
     {
-      "includes": ["src/components/ui/**"],
-      "linter": {
-        "rules": {
-          "a11y": {
-            "useSemanticElements": "off",
-            "useKeyWithClickEvents": "off"
-          },
-          "suspicious": {
-            "noArrayIndexKey": "off"
-          }
-        }
-      }
-    },
-    {
       "includes": ["src/lib/logger.ts"],
       "linter": {
         "rules": {

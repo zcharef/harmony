@@ -60,7 +60,7 @@
 
 | Level | Location | Responsibility | Rules |
 |-------|----------|----------------|-------|
-| **Level 1 (Agnostic)** | `src/components/ui/`, `src/hooks/`, `src/lib/` | Pure tech, framework-agnostic | Zero business logic, zero domain knowledge |
+| **Level 1 (Agnostic)** | `src/hooks/`, `src/lib/` | Pure tech, framework-agnostic. HeroUI components come from `@heroui/react` (external package, ADR-044). | Zero business logic, zero domain knowledge |
 | **Level 2 (Shared Domain)** | `src/components/shared/` | **PURE UI ONLY** | Props only, NO hooks, NO side effects, NO data fetching |
 | **Level 3 (Cross-Feature)** | `src/features/*/index.ts` | Public API Pattern | ONLY export what other features need |
 
@@ -100,7 +100,7 @@ export { MessageItem } from './message-item'
 |------|-------------|
 | Direct Supabase SDK data access | **FORBIDDEN** (use API client) |
 | Manual API fetch calls | **FORBIDDEN** (use generated client for type safety) |
-| Direct `radix-ui` / `@radix-ui/*` imports in feature code | **FORBIDDEN** (use `@/components/ui/*` shadcn layer) |
+| Direct `@radix-ui/*` imports | **FORBIDDEN** — use `@heroui/react` (ADR-044) |
 | SDK calls without `throwOnError: true` in `queryFn`/`mutationFn` | **FORBIDDEN** (enforced by arch test) |
 | Manual API type definitions (`interface Message { ... }`) | **FORBIDDEN** — import from `@/lib/api` only (ADR-015, enforced by arch test) |
 
@@ -121,8 +121,8 @@ Any new library requires explicit approval.
 | Data Fetching | TanStack Query v5 + API Client |
 | Global State | Zustand |
 | Validation | Zod (for UX, API is authoritative) |
-| UI Components | Shadcn UI + Radix |
-| Styling | Tailwind CSS 3 |
+| UI Components | HeroUI (ADR-044) |
+| Styling | Tailwind CSS 4 |
 | Icons | Lucide React |
 | Forms | React Hook Form + Zod Resolver |
 | Linter/Formatter | Biome |
@@ -148,7 +148,6 @@ harmony-app/
 │   ├── App.tsx                 # Root component (providers, router)
 │   │
 │   ├── components/
-│   │   ├── ui/                 # Shadcn primitives — DO NOT MODIFY
 │   │   ├── shared/             # Cross-feature pure UI components
 │   │   └── layout/             # App shell (sidebar, header, panels)
 │   │
@@ -310,10 +309,13 @@ queryKey: queryKeys.messages.byChannel(channelId)
 
 Every feature route wrapped in `<FeatureErrorBoundary>` from `@/components/shared/error-boundary`.
 
-### 4.8 Styling (MANDATORY) (ADR-032)
+### 4.8 Styling (MANDATORY) (ADR-044)
 
-- No inline `style={{}}` -- Tailwind via `className` only (ADR-032).
-- Shadcn UI primitives are the only exception for Radix positioning.
+- **HeroUI prop-based styling first**: Use component props (`color="primary"`, `variant="flat"`, `size="sm"`) over Tailwind classes.
+- **`className`/`classNames` for layout only**: Flexbox, margins, positioning that HeroUI props cannot express.
+- **Semantic color tokens only**: Use `primary`, `secondary`, `success`, `danger`, `warning`, `default` — never hardcode Tailwind color names.
+- **No inline `style={{}}`** in application code — Tailwind via `className` only.
+- **No `dark:` color overrides** — HeroUI handles dark mode color switching automatically.
 
 ### 4.9 Type Assertions (MANDATORY) (ADR-035)
 
@@ -430,7 +432,7 @@ export function useLeaveServer() {
 ### Feature-First & Module Boundaries
 - [ ] Business code lives in `src/features/`, not root-level folders
 - [ ] Each feature has `index.ts` barrel export — no deep imports
-- [ ] No direct `@radix-ui/*` imports in feature code — use `@/components/ui/*`
+- [ ] No `@radix-ui/*` or `@/components/ui/*` imports — use `@heroui/react` (ADR-044)
 - [ ] Cross-feature: pass IDs, not full objects
 
 ### State Management

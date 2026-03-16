@@ -37,7 +37,7 @@ An ADR is a document that captures an important architectural decision made alon
 | [029](./029-query-key-factory.md) | Query Key Factory Pattern | Accepted |
 | [030](./030-no-logic-in-barrels.md) | No Logic in Barrel Exports | Accepted |
 | [031](./031-discriminated-unions-async-state.md) | Discriminated Unions for Async State | Accepted |
-| [032](./032-tailwind-only-styling.md) | Tailwind-Only Styling | Accepted |
+| [032](./032-tailwind-only-styling.md) | ~~Tailwind-Only Styling~~ → HeroUI (ADR-044) | Superseded |
 | [033](./033-route-constants-ssot.md) | Route Constants SSoT | Accepted |
 | [034](./034-error-boundaries-per-route.md) | Error Boundaries Per Feature Route | Accepted |
 | [035](./035-satisfies-over-as.md) | satisfies Over as Type Assertions | Accepted |
@@ -49,6 +49,7 @@ An ADR is a document that captures an important architectural decision made alon
 | [041](./041-database-query-timeouts.md) | Database Query Timeouts | Accepted |
 | [042](./042-frontend-structured-logging.md) | Frontend Structured Logging — No Raw console.* | Accepted |
 | [043](./043-supabase-deterministic-workflow.md) | Supabase Deterministic Workflow — Migrations as SSoT | Accepted |
+| [044](./044-heroui-component-library.md) | HeroUI Component Library — Single UI Primitive Source | Accepted |
 
 ## Template
 

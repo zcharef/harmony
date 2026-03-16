@@ -98,7 +98,7 @@ Every quality property is enforced by automated tests, not just documentation. S
 **Tauri App (Feature-First):**
 - Business code lives in `src/features/`, not root-level folders
 - Each feature has an `index.ts` barrel export — deep imports are build errors
-- No direct `@radix-ui/*` imports — use `@/components/ui/*` (Shadcn layer)
+- No `@radix-ui/*` or `@/components/ui/*` imports — use `@heroui/react` (ADR-044)
 - All API calls use the generated client with `throwOnError: true`
 - No manual TypeScript type definitions for API data — import from `@/lib/api`
 - State management: TanStack Query (server), React Hook Form (forms), useState (ephemeral), Zustand (global, sparingly)
@@ -135,7 +135,7 @@ docs: update architecture overview
 - Do not use `unsafe` in Rust — it's forbidden (Cargo lint)
 - Do not bypass git hooks with `--no-verify`
 - Do not add dependencies without discussion in an issue first
-- Do not modify `src/components/ui/` (Shadcn-managed)
+- UI primitives come from `@heroui/react` — see ADR-044. No copy-pasted component wrappers.
 - Do not modify `src/lib/api/` (auto-generated)
 
 ### Database Changes
