@@ -227,6 +227,9 @@ describe('React Patterns', () => {
       const violations: string[] = []
 
       for (const filePath of files) {
+        // Skip test files — mock objects legitimately need `as` casts
+        if (filePath.includes('.test.')) continue
+
         const content = readFileSync(filePath, 'utf-8')
         const lines = content.split('\n')
 
