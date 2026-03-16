@@ -1,4 +1,5 @@
 import { Button, Divider, Spinner, Textarea } from '@heroui/react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   Bell,
   Hash,
@@ -10,7 +11,7 @@ import {
   Sticker,
   Users,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMessages } from './hooks/use-messages'
 import { useRealtimeMessages } from './hooks/use-realtime-messages'
 import { useSendMessage } from './hooks/use-send-message'
@@ -21,15 +22,74 @@ interface ChatAreaProps {
   channelName: string | null
 }
 
+/**
+ * WHY useMemo for flattening: useInfiniteQuery stores pages as an array of
+ * arrays. We flatten into a single reversed array (oldest-first for display)
+ * so the virtualizer sees one contiguous list. Memoized to avoid re-flattening
+ * on every render.
+ */
+function useFlatMessages(data: ReturnType<typeof useMessages>['data']) {
+  return useMemo(() => {
+    if (!data) return []
+    // WHY: API returns DESC (newest first per page). Reverse so oldest are at top.
+    return data.pages.flatMap((page) => page.items).reverse()
+  }, [data])
+}
+
 export function ChatArea({ channelId, channelName }: ChatAreaProps) {
-  const { data: messageList, isPending, isError } = useMessages(channelId)
+  const { data, isPending, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
+    useMessages(channelId)
   const sendMessage = useSendMessage(channelId ?? '')
   const [messageContent, setMessageContent] = useState('')
 
-  // WHY: Subscribe to realtime inserts so new messages appear instantly
   useRealtimeMessages(channelId ?? '')
 
-  const messages = messageList?.items
+  const messages = useFlatMessages(data)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const prevMessageCountRef = useRef(0)
+
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 52, // WHY: Estimated row height in px — virtualizer adjusts after measure
+    overscan: 10, // WHY: Pre-render 10 items above/below viewport for smooth scrolling
+  })
+
+  // WHY: Auto-scroll to bottom when new messages arrive (not when loading old pages)
+  useEffect(() => {
+    const prevCount = prevMessageCountRef.current
+    const currentCount = messages.length
+
+    if (currentCount > prevCount && prevCount > 0) {
+      // WHY: Only auto-scroll if user was already near the bottom (within 200px)
+      const el = scrollRef.current
+      if (el) {
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+        if (distanceFromBottom < 200) {
+          virtualizer.scrollToIndex(currentCount - 1, { align: 'end' })
+        }
+      }
+    }
+
+    prevMessageCountRef.current = currentCount
+  }, [messages.length, virtualizer])
+
+  // WHY: Scroll to bottom on initial load
+  useEffect(() => {
+    if (messages.length > 0 && prevMessageCountRef.current === 0) {
+      virtualizer.scrollToIndex(messages.length - 1, { align: 'end' })
+    }
+  }, [messages.length, virtualizer])
+
+  // WHY: Fetch older messages when user scrolls near the top
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    // WHY: 200px threshold gives time to fetch before hitting the top
+    if (el.scrollTop < 200 && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage()
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
   function handleSend() {
     const trimmed = messageContent.trim()
@@ -41,7 +101,6 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    // WHY: Enter sends, Shift+Enter creates newline (Discord convention)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -87,23 +146,32 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
 
       <Divider />
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-1 py-4">
-          {/* Welcome block */}
-          <div className="px-4 pb-6">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-default-100">
-              <Hash className="h-10 w-10 text-default-500" />
+      {/* Virtualized message list */}
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
+        {/* WHY: relative container with dynamic height lets the virtualizer control scroll space */}
+        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+          {/* Loading older messages indicator */}
+          {isFetchingNextPage && (
+            <div className="flex justify-center py-2">
+              <Spinner size="sm" />
             </div>
-            <h2 className="mt-2 text-3xl font-bold text-foreground">
-              Welcome to #{channelName ?? 'channel'}
-            </h2>
-            <p className="mt-1 text-sm text-default-500">
-              This is the start of the #{channelName ?? 'channel'} channel.
-            </p>
-          </div>
+          )}
 
-          <Divider className="mx-4 mb-4" />
+          {/* Welcome block — only when we've loaded all history */}
+          {!hasNextPage && messages.length > 0 && (
+            <div className="px-4 pb-6 pt-4">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-default-100">
+                <Hash className="h-10 w-10 text-default-500" />
+              </div>
+              <h2 className="mt-2 text-3xl font-bold text-foreground">
+                Welcome to #{channelName ?? 'channel'}
+              </h2>
+              <p className="mt-1 text-sm text-default-500">
+                This is the start of the #{channelName ?? 'channel'} channel.
+              </p>
+              <Divider className="mt-4" />
+            </div>
+          )}
 
           {isPending && (
             <div className="flex justify-center py-8">
@@ -113,15 +181,42 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
 
           {isError && <p className="px-4 text-sm text-danger">Failed to load messages</p>}
 
-          {messages !== undefined && messages.length === 0 && (
-            <p className="px-4 text-sm text-default-500">
-              No messages yet. Start the conversation!
-            </p>
+          {messages.length === 0 && !isPending && !isError && (
+            <div className="px-4 pt-4">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-default-100">
+                <Hash className="h-10 w-10 text-default-500" />
+              </div>
+              <h2 className="mt-2 text-3xl font-bold text-foreground">
+                Welcome to #{channelName ?? 'channel'}
+              </h2>
+              <p className="mt-1 text-sm text-default-500">
+                No messages yet. Start the conversation!
+              </p>
+            </div>
           )}
 
-          {messages?.map((message) => (
-            <MessageItem key={message.id} message={message} />
-          ))}
+          {/* WHY: virtualItems are only the visible rows — this is the performance win */}
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const message = messages[virtualRow.index]
+            if (!message) return null
+
+            return (
+              <div
+                key={message.id}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <MessageItem message={message} />
+              </div>
+            )
+          })}
         </div>
       </div>
 

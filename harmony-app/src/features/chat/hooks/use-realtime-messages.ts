@@ -1,3 +1,4 @@
+import type { InfiniteData } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import type { MessageListResponse, MessageResponse } from '@/lib/api'
@@ -11,10 +12,9 @@ import { supabase } from '@/lib/supabase'
  * WHY direct cache update instead of invalidation: avoids a network
  * round-trip per message, keeping the chat feel instant.
  *
- * WHY deduplication: the sendMessage mutation already invalidates the
- * query cache, so the same message could arrive twice (once from the
- * mutation's onSuccess invalidation, once from Realtime). We skip
- * messages that already exist in the cache.
+ * WHY page 0 (first page): useInfiniteQuery stores pages newest-first.
+ * Page 0 contains the most recent messages, so new realtime messages
+ * are prepended to page 0's items array.
  */
 export function useRealtimeMessages(channelId: string) {
   const queryClient = useQueryClient()
@@ -33,7 +33,7 @@ export function useRealtimeMessages(channelId: string) {
         (payload) => {
           const row = payload.new as Record<string, unknown>
 
-          // Transform snake_case DB row to camelCase MessageResponse
+          // WHY: Transform snake_case DB row to camelCase MessageResponse
           const message: MessageResponse = {
             id: row.id as string,
             channelId: row.channel_id as string,
@@ -43,16 +43,26 @@ export function useRealtimeMessages(channelId: string) {
             editedAt: (row.edited_at as string | null) ?? undefined,
           }
 
-          queryClient.setQueryData<MessageListResponse>(
+          queryClient.setQueryData<InfiniteData<MessageListResponse>>(
             queryKeys.messages.byChannel(channelId),
             (old) => {
               if (!old) return undefined
 
-              // Deduplicate: skip if message already exists in cache
-              const alreadyExists = old.items.some((m) => m.id === message.id)
+              const firstPage = old.pages[0]
+              if (!firstPage) return old
+
+              // WHY: Deduplicate — sendMessage mutation invalidation can race with Realtime
+              const alreadyExists = firstPage.items.some((m) => m.id === message.id)
               if (alreadyExists) return old
 
-              return { ...old, items: [...old.items, message] }
+              // WHY: Prepend to page 0 — API returns DESC, so newest items are first
+              return {
+                ...old,
+                pages: [
+                  { ...firstPage, items: [message, ...firstPage.items] },
+                  ...old.pages.slice(1),
+                ],
+              }
             },
           )
         },
