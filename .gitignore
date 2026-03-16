@@ -36,6 +36,12 @@ harmony-app/src-tauri/gen/schemas
 
 # Local dev
 *.local
+.mcp.json
+
+# E2E test screenshots
+*.png
+!harmony-app/src-tauri/icons/*.png
+!harmony-app/public/*.png
 
 tsc-cache/
 
