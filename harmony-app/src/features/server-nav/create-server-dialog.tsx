@@ -52,7 +52,7 @@ export function CreateServerDialog({ isOpen, onClose, onCreated }: CreateServerD
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} size="sm">
+    <Modal isOpen={isOpen} onClose={handleClose} size="sm" data-test="create-server-dialog">
       <ModalContent>
         <form onSubmit={handleSubmit(onSubmit)}>
           <ModalHeader>Create a Server</ModalHeader>
@@ -63,14 +63,15 @@ export function CreateServerDialog({ isOpen, onClose, onCreated }: CreateServerD
               isInvalid={errors.name !== undefined}
               errorMessage={errors.name?.message}
               autoFocus
+              data-test="server-name-input"
               {...register('name')}
             />
           </ModalBody>
           <ModalFooter>
-            <Button variant="light" onPress={handleClose}>
+            <Button variant="light" onPress={handleClose} data-test="create-server-cancel-button">
               Cancel
             </Button>
-            <Button type="submit" color="primary" isLoading={createServer.isPending}>
+            <Button type="submit" color="primary" isLoading={createServer.isPending} data-test="create-server-submit-button">
               Create
             </Button>
           </ModalFooter>

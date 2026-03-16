@@ -78,7 +78,7 @@ export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDi
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} size="sm">
+    <Modal isOpen={isOpen} onClose={handleClose} size="sm" data-test="create-invite-dialog">
       <ModalContent>
         {generatedCode !== null ? (
           <>
@@ -93,8 +93,9 @@ export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDi
                   isReadOnly
                   variant="bordered"
                   classNames={{ input: 'font-mono text-lg' }}
+                  data-test="invite-code-display"
                 />
-                <Button isIconOnly variant="flat" onPress={handleCopy}>
+                <Button isIconOnly variant="flat" onPress={handleCopy} data-test="invite-copy-button">
                   {copied ? (
                     <Check className="h-4 w-4 text-success" />
                   ) : (
@@ -104,7 +105,7 @@ export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDi
               </div>
             </ModalBody>
             <ModalFooter>
-              <Button color="primary" onPress={handleClose}>
+              <Button color="primary" onPress={handleClose} data-test="invite-done-button">
                 Done
               </Button>
             </ModalFooter>
@@ -118,11 +119,13 @@ export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDi
                 placeholder="Leave empty for unlimited"
                 type="number"
                 min={1}
+                data-test="invite-max-uses-input"
                 {...register('maxUses')}
               />
               <Select
                 label="Expire after"
                 defaultSelectedKeys={['24']}
+                data-test="invite-expires-select"
                 {...register('expiresInHours')}
               >
                 {EXPIRY_OPTIONS.map((option) => (
@@ -131,10 +134,10 @@ export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDi
               </Select>
             </ModalBody>
             <ModalFooter>
-              <Button variant="light" onPress={handleClose}>
+              <Button variant="light" onPress={handleClose} data-test="invite-cancel-button">
                 Cancel
               </Button>
-              <Button type="submit" color="primary" isLoading={createInvite.isPending}>
+              <Button type="submit" color="primary" isLoading={createInvite.isPending} data-test="invite-submit-button">
                 Create Invite
               </Button>
             </ModalFooter>

@@ -101,7 +101,7 @@ export function ChannelSidebar({
               <DropdownItem key="boost">Server Boost</DropdownItem>
             </DropdownSection>
             <DropdownSection showDivider>
-              <DropdownItem key="invite" startContent={<UserPlus className="h-4 w-4" />}>
+              <DropdownItem key="invite" startContent={<UserPlus className="h-4 w-4" />} data-test="server-menu-invite-item">
                 Invite People
               </DropdownItem>
               <DropdownItem key="settings">Server Settings</DropdownItem>

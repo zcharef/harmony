@@ -115,10 +115,11 @@ export const MessageItem = memo(function MessageItem({
                 input: 'text-sm',
               }}
               autoFocus
+              data-test="message-edit-input"
             />
             <span className="text-xs text-default-500">
               escape to{' '}
-              <button type="button" onClick={onCancelEdit} className="text-primary hover:underline">
+              <button type="button" onClick={onCancelEdit} className="text-primary hover:underline" data-test="message-edit-cancel">
                 cancel
               </button>
               {' \u2022 '}
@@ -132,6 +133,7 @@ export const MessageItem = memo(function MessageItem({
                   }
                 }}
                 className="text-primary hover:underline"
+                data-test="message-edit-save"
               >
                 save
               </button>
@@ -141,7 +143,7 @@ export const MessageItem = memo(function MessageItem({
           <p data-test="message-content" className="text-sm text-foreground/90">
             {message.content}
             {message.editedAt !== undefined && message.editedAt !== null && (
-              <span className="ml-1 text-xs text-default-400">(edited)</span>
+              <span className="ml-1 text-xs text-default-400" data-test="message-edited-indicator">(edited)</span>
             )}
           </p>
         )}
@@ -150,11 +152,11 @@ export const MessageItem = memo(function MessageItem({
       {/* WHY: Hover actions only for own messages, hidden during edit mode.
           Uses group-hover to appear on row hover — avoids per-message state. */}
       {isOwnMessage && !isEditing && !isPending && (
-        <div className="absolute -top-3 right-4 hidden gap-0.5 rounded-md border border-divider bg-background shadow-sm group-hover:flex">
-          <Button variant="light" isIconOnly size="sm" onPress={onStartEdit}>
+        <div data-test="message-actions" className="absolute -top-3 right-4 hidden gap-0.5 rounded-md border border-divider bg-background shadow-sm group-hover:flex">
+          <Button variant="light" isIconOnly size="sm" onPress={onStartEdit} data-test="message-edit-button">
             <Pencil className="h-4 w-4 text-default-500" />
           </Button>
-          <Button variant="light" isIconOnly size="sm" onPress={onDelete}>
+          <Button variant="light" isIconOnly size="sm" onPress={onDelete} data-test="message-delete-button">
             <Trash2 className="h-4 w-4 text-danger" />
           </Button>
         </div>

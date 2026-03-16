@@ -136,6 +136,7 @@ export function ServerList({ selectedServerId, onSelectServer }: ServerListProps
               ),
               icon: 'text-current',
             }}
+            data-test="add-server-button"
             onClick={() => setIsCreateOpen(true)}
           />
         </div>
@@ -153,6 +154,7 @@ export function ServerList({ selectedServerId, onSelectServer }: ServerListProps
               ),
               icon: 'text-current',
             }}
+            data-test="join-server-button"
             onClick={() => setIsJoinOpen(true)}
           />
         </div>

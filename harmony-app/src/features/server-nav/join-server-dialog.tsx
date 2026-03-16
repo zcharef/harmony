@@ -95,7 +95,7 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} size="sm">
+    <Modal isOpen={isOpen} onClose={handleClose} size="sm" data-test="join-server-dialog">
       <ModalContent>
         {preview !== null ? (
           <>
@@ -112,25 +112,25 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
                       .toUpperCase()}
                   </span>
                 </div>
-                <span className="text-lg font-semibold text-foreground">{preview.serverName}</span>
+                <span className="text-lg font-semibold text-foreground" data-test="join-server-name">{preview.serverName}</span>
                 <div className="flex items-center gap-1.5 text-sm text-default-500">
                   <Users className="h-4 w-4" />
-                  <span>
+                  <span data-test="join-server-member-count">
                     {preview.memberCount} {preview.memberCount === 1 ? 'member' : 'members'}
                   </span>
                 </div>
               </div>
               {joinServer.isError && (
-                <p className="text-center text-sm text-danger">
+                <p className="text-center text-sm text-danger" data-test="join-server-error">
                   Failed to join server. The invite may be expired or invalid.
                 </p>
               )}
             </ModalBody>
             <ModalFooter>
-              <Button variant="light" onPress={handleBack}>
+              <Button variant="light" onPress={handleBack} data-test="join-server-back-button">
                 Back
               </Button>
-              <Button color="primary" onPress={onJoin} isLoading={joinServer.isPending}>
+              <Button color="primary" onPress={onJoin} isLoading={joinServer.isPending} data-test="join-server-confirm-button">
                 Join
               </Button>
             </ModalFooter>
@@ -148,14 +148,15 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
                   (previewMutation.isError ? 'Invite not found or expired' : undefined)
                 }
                 autoFocus
+                data-test="invite-code-input"
                 {...register('code')}
               />
             </ModalBody>
             <ModalFooter>
-              <Button variant="light" onPress={handleClose}>
+              <Button variant="light" onPress={handleClose} data-test="join-server-cancel-button">
                 Cancel
               </Button>
-              <Button type="submit" color="primary" isLoading={previewMutation.isPending}>
+              <Button type="submit" color="primary" isLoading={previewMutation.isPending} data-test="join-server-preview-button">
                 Preview
               </Button>
             </ModalFooter>
