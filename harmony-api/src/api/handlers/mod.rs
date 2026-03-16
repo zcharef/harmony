@@ -1,6 +1,8 @@
 //! HTTP handlers for API endpoints.
 
 pub mod channels;
+pub mod invites;
+pub mod members;
 pub mod messages;
 pub mod profiles;
 pub mod servers;

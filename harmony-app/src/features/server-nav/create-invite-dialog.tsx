@@ -1,0 +1,146 @@
+import {
+  Button,
+  Input,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  Select,
+  SelectItem,
+} from '@heroui/react'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { Check, Copy } from 'lucide-react'
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { z } from 'zod'
+import { useCreateInvite } from './hooks/use-create-invite'
+
+const EXPIRY_OPTIONS = [
+  { label: '30 minutes', value: '0.5' },
+  { label: '1 hour', value: '1' },
+  { label: '6 hours', value: '6' },
+  { label: '12 hours', value: '12' },
+  { label: '1 day', value: '24' },
+  { label: '7 days', value: '168' },
+  { label: 'Never', value: '' },
+] as const
+
+const createInviteSchema = z.object({
+  maxUses: z.string(),
+  expiresInHours: z.string(),
+})
+
+type CreateInviteForm = z.infer<typeof createInviteSchema>
+
+interface CreateInviteDialogProps {
+  serverId: string
+  isOpen: boolean
+  onClose: () => void
+}
+
+export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDialogProps) {
+  const createInvite = useCreateInvite(serverId)
+  const [generatedCode, setGeneratedCode] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const { register, handleSubmit, reset } = useForm<CreateInviteForm>({
+    resolver: zodResolver(createInviteSchema),
+    defaultValues: { maxUses: '', expiresInHours: '24' },
+  })
+
+  function onSubmit(values: CreateInviteForm) {
+    const maxUses = values.maxUses === '' ? null : Number(values.maxUses)
+    const expiresInHours = values.expiresInHours === '' ? null : Number(values.expiresInHours)
+
+    createInvite.mutate(
+      { maxUses, expiresInHours },
+      {
+        onSuccess: (data) => {
+          setGeneratedCode(data.code)
+        },
+      },
+    )
+  }
+
+  function handleCopy() {
+    if (generatedCode === null) return
+    navigator.clipboard.writeText(generatedCode)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  function handleClose() {
+    reset()
+    setGeneratedCode(null)
+    setCopied(false)
+    onClose()
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} size="sm">
+      <ModalContent>
+        {generatedCode !== null ? (
+          <>
+            <ModalHeader>Your Invite Code</ModalHeader>
+            <ModalBody>
+              <p className="text-sm text-default-500">
+                Share this code with others so they can join your server.
+              </p>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={generatedCode}
+                  isReadOnly
+                  variant="bordered"
+                  classNames={{ input: 'font-mono text-lg' }}
+                />
+                <Button isIconOnly variant="flat" onPress={handleCopy}>
+                  {copied ? (
+                    <Check className="h-4 w-4 text-success" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </ModalBody>
+            <ModalFooter>
+              <Button color="primary" onPress={handleClose}>
+                Done
+              </Button>
+            </ModalFooter>
+          </>
+        ) : (
+          <form onSubmit={handleSubmit(onSubmit)}>
+            <ModalHeader>Invite People</ModalHeader>
+            <ModalBody>
+              <Input
+                label="Max uses"
+                placeholder="Leave empty for unlimited"
+                type="number"
+                min={1}
+                {...register('maxUses')}
+              />
+              <Select
+                label="Expire after"
+                defaultSelectedKeys={['24']}
+                {...register('expiresInHours')}
+              >
+                {EXPIRY_OPTIONS.map((option) => (
+                  <SelectItem key={option.value}>{option.label}</SelectItem>
+                ))}
+              </Select>
+            </ModalBody>
+            <ModalFooter>
+              <Button variant="light" onPress={handleClose}>
+                Cancel
+              </Button>
+              <Button type="submit" color="primary" isLoading={createInvite.isPending}>
+                Create Invite
+              </Button>
+            </ModalFooter>
+          </form>
+        )}
+      </ModalContent>
+    </Modal>
+  )
+}

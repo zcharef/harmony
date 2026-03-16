@@ -83,6 +83,171 @@
         ]
       }
     },
+    "/v1/channels/{channel_id}/messages/{message_id}": {
+      "delete": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Soft-delete a message. Only the author can delete (ADR-038).",
+        "description": "# Errors\nReturns `ApiError` on authorization failure or repository error.",
+        "operationId": "delete_message",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MessageId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Message deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the message author",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Edit a message's content. Only the author can edit.",
+        "description": "# Errors\nReturns `ApiError` on validation failure, authorization failure, or repository error.",
+        "operationId": "edit_message",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MessageId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Message edited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the message author",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/channels/{id}/messages": {
       "get": {
         "tags": [
@@ -224,6 +389,49 @@
             "bearer_auth": []
           }
         ]
+      }
+    },
+    "/v1/invites/{code}": {
+      "get": {
+        "tags": [
+          "Invites"
+        ],
+        "summary": "Preview an invite by code (no authentication required).",
+        "description": "Returns the server name and member count so a user can decide whether to join.\n\n# Errors\nReturns `ApiError` if the invite is not found or a repository error occurs.",
+        "operationId": "preview_invite",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "description": "Invite code",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/InviteCode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invite preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitePreviewResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Invite not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/profiles/me": {
@@ -480,6 +688,211 @@
           }
         ]
       }
+    },
+    "/v1/servers/{id}/invites": {
+      "post": {
+        "tags": [
+          "Invites"
+        ],
+        "summary": "Create a new invite for a server.",
+        "description": "The authenticated user must be a member of the server. Returns a shareable\ninvite code that can be used by others to join.\n\n# Errors\nReturns `ApiError` on validation failure, permission denial, or repository error.",
+        "operationId": "create_invite",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInviteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Invite created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a server member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers/{id}/members": {
+      "get": {
+        "tags": [
+          "Members"
+        ],
+        "summary": "List all members of a server.",
+        "description": "# Errors\nReturns `ApiError` on repository error.",
+        "operationId": "list_members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Member list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Members"
+        ],
+        "summary": "Join a server via an invite code.",
+        "description": "Validates the invite, checks that the user is not already a member,\nand adds them to the server.\n\n# Errors\nReturns `ApiError` on invalid invite, expired invite, or conflict.",
+        "operationId": "join_server",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinServerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Joined successfully"
+          },
+          "400": {
+            "description": "Invalid or expired invite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already a member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -592,6 +1005,29 @@
           }
         }
       },
+      "CreateInviteRequest": {
+        "type": "object",
+        "description": "Request body for creating a new invite.",
+        "properties": {
+          "expiresInHours": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Invite expires after this many hours. `None` means it never expires."
+          },
+          "maxUses": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Maximum number of times this invite can be used. `None` means unlimited."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateServerRequest": {
         "type": "object",
         "description": "Request body for creating a new server.",
@@ -602,6 +1038,20 @@
           "name": {
             "type": "string",
             "description": "Server name (required, non-empty)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "EditMessageRequest": {
+        "type": "object",
+        "description": "Request body for editing a message.",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Updated message content (required, non-empty)."
           }
         },
         "additionalProperties": false
@@ -633,6 +1083,143 @@
           "version": {
             "type": "string",
             "description": "API version from Cargo.toml"
+          }
+        }
+      },
+      "InviteCode": {
+        "type": "string",
+        "description": "Invite code for joining a server.",
+        "example": "abc123XY"
+      },
+      "InvitePreviewResponse": {
+        "type": "object",
+        "description": "Public invite preview (no auth required).\n\nContains just enough information for a user to decide whether to join.",
+        "required": [
+          "code",
+          "serverName",
+          "memberCount"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/InviteCode"
+          },
+          "memberCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "serverName": {
+            "type": "string"
+          }
+        }
+      },
+      "InviteResponse": {
+        "type": "object",
+        "description": "Invite response returned to API consumers.",
+        "required": [
+          "code",
+          "serverId",
+          "creatorId",
+          "useCount",
+          "createdAt"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/InviteCode"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "creatorId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "maxUses": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "serverId": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "useCount": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "JoinServerRequest": {
+        "type": "object",
+        "description": "Request body for joining a server via invite code.",
+        "required": [
+          "inviteCode"
+        ],
+        "properties": {
+          "inviteCode": {
+            "type": "string",
+            "description": "The invite code to use."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MemberListResponse": {
+        "type": "object",
+        "description": "Envelope for a list of server members (ADR-036).",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberResponse"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "MemberResponse": {
+        "type": "object",
+        "description": "Server member response returned to API consumers.",
+        "required": [
+          "userId",
+          "username",
+          "joinedAt"
+        ],
+        "properties": {
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "nickname": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "username": {
+            "type": "string"
           }
         }
       },
@@ -922,6 +1509,14 @@
     {
       "name": "Channels",
       "description": "Channel management within servers"
+    },
+    {
+      "name": "Invites",
+      "description": "Server invite management"
+    },
+    {
+      "name": "Members",
+      "description": "Server member management"
     },
     {
       "name": "Messages",

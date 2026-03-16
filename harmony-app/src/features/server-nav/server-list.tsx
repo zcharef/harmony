@@ -1,10 +1,11 @@
 import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
-import { Plus } from 'lucide-react'
+import { LogIn, Plus } from 'lucide-react'
 import { useState } from 'react'
 import type { ServerResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CreateServerDialog } from './create-server-dialog'
 import { useServers } from './hooks/use-servers'
+import { JoinServerDialog } from './join-server-dialog'
 
 function ServerIcon({
   server,
@@ -69,6 +70,7 @@ interface ServerListProps {
 export function ServerList({ selectedServerId, onSelectServer }: ServerListProps) {
   const { data: servers, isPending, isError } = useServers()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [isJoinOpen, setIsJoinOpen] = useState(false)
 
   if (isPending) {
     return (
@@ -137,10 +139,33 @@ export function ServerList({ selectedServerId, onSelectServer }: ServerListProps
         </div>
       </Tooltip>
 
+      {/* Join server button */}
+      <Tooltip content="Join a Server" placement="right" offset={8}>
+        <div className="mt-2 flex items-center justify-center">
+          <Avatar
+            icon={<LogIn className="h-5 w-5" />}
+            classNames={{
+              base: cn(
+                'h-12 w-12 cursor-pointer rounded-[24px] bg-default-100 text-default-foreground',
+                'transition-all duration-200 hover:rounded-2xl hover:bg-primary hover:text-primary-foreground',
+              ),
+              icon: 'text-current',
+            }}
+            onClick={() => setIsJoinOpen(true)}
+          />
+        </div>
+      </Tooltip>
+
       <CreateServerDialog
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         onCreated={(serverId) => onSelectServer(serverId)}
+      />
+
+      <JoinServerDialog
+        isOpen={isJoinOpen}
+        onClose={() => setIsJoinOpen(false)}
+        onJoined={() => {}}
       />
     </div>
   )

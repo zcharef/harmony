@@ -106,11 +106,17 @@ async fn init_app_state(config: &Config) -> AppState {
     let server_repo = Arc::new(infra::postgres::PgServerRepository::new(pool.clone()));
     let message_repo = Arc::new(infra::postgres::PgMessageRepository::new(pool.clone()));
     let channel_repo = Arc::new(infra::postgres::PgChannelRepository::new(pool.clone()));
+    let invite_repo = Arc::new(infra::postgres::PgInviteRepository::new(pool.clone()));
+    let member_repo = Arc::new(infra::postgres::PgMemberRepository::new(pool.clone()));
 
     // Construct domain services (injected with repository ports)
     let profile_service = Arc::new(domain::services::ProfileService::new(profile_repo));
     let server_service = Arc::new(domain::services::ServerService::new(server_repo));
     let message_service = Arc::new(domain::services::MessageService::new(message_repo));
+    let invite_service = Arc::new(domain::services::InviteService::new(
+        invite_repo,
+        member_repo.clone(),
+    ));
 
     tracing::info!("Domain services initialized");
 
@@ -123,7 +129,9 @@ async fn init_app_state(config: &Config) -> AppState {
         profile_service,
         server_service,
         message_service,
+        invite_service,
         channel_repo,
+        member_repo,
     )
 }
 

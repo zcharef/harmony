@@ -40,8 +40,10 @@ function toMessageResponse(row: z.infer<typeof realtimeMessageSchema>): MessageR
 }
 
 /**
- * Subscribes to Supabase Realtime Postgres Changes for new messages
- * in a given channel, and updates the TanStack Query cache on INSERT.
+ * Subscribes to Supabase Realtime Postgres Changes for messages
+ * in a given channel, and updates the TanStack Query cache on:
+ * - INSERT: new message prepended to page 0
+ * - UPDATE: edited message replaced in-place, or removed if soft-deleted
  *
  * WHY direct cache update instead of invalidation: avoids a network
  * round-trip per message, keeping the chat feel instant.
@@ -98,6 +100,61 @@ export function useRealtimeMessages(channelId: string) {
                   { ...firstPage, items: [message, ...firstPage.items] },
                   ...old.pages.slice(1),
                 ],
+              }
+            },
+          )
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `channel_id=eq.${channelId}`,
+        },
+        (payload) => {
+          const parsed = realtimeMessageSchema.safeParse(payload.new)
+          if (!parsed.success) {
+            logger.error('Malformed realtime message update payload', {
+              channelId,
+              error: parsed.error.message,
+            })
+            return
+          }
+
+          // WHY: Soft delete sets deleted_at — remove the message from cache
+          // instead of updating it, so it disappears for all connected clients.
+          if (parsed.data.deleted_at) {
+            queryClient.setQueryData<InfiniteData<MessageListResponse>>(
+              queryKeys.messages.byChannel(channelId),
+              (old) => {
+                if (!old) return undefined
+                return {
+                  ...old,
+                  pages: old.pages.map((page) => ({
+                    ...page,
+                    items: page.items.filter((m) => m.id !== parsed.data.id),
+                  })),
+                }
+              },
+            )
+            return
+          }
+
+          // WHY: Update in-place across all pages — keeps edited content in sync
+          // for all connected clients without a full refetch.
+          const message = toMessageResponse(parsed.data)
+          queryClient.setQueryData<InfiniteData<MessageListResponse>>(
+            queryKeys.messages.byChannel(channelId),
+            (old) => {
+              if (!old) return undefined
+              return {
+                ...old,
+                pages: old.pages.map((page) => ({
+                  ...page,
+                  items: page.items.map((m) => (m.id === message.id ? message : m)),
+                })),
               }
             },
           )

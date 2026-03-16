@@ -8,7 +8,11 @@ import {
   DropdownTrigger,
   Spinner,
 } from '@heroui/react'
-import { ChevronDown, Hash, Headphones, Mic, Settings, Volume2 } from 'lucide-react'
+import { ChevronDown, Hash, Headphones, Mic, Settings, UserPlus, Volume2 } from 'lucide-react'
+import { useState } from 'react'
+import { useAuthStore } from '@/features/auth'
+import { StatusIndicator, useUserStatus } from '@/features/presence'
+import { CreateInviteDialog } from '@/features/server-nav'
 import type { ChannelResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useChannels } from './hooks/use-channels'
@@ -57,36 +61,56 @@ export function ChannelSidebar({
   onSelectChannel,
 }: ChannelSidebarProps) {
   const { data: channels, isPending, isError } = useChannels(serverId)
+  const [isInviteOpen, setIsInviteOpen] = useState(false)
+  const user = useAuthStore((s) => s.user)
+  const status = useUserStatus(user?.id ?? '')
+  const username =
+    (user?.user_metadata?.username as string | undefined) ??
+    (user?.user_metadata?.display_name as string | undefined) ??
+    user?.email?.split('@')[0] ??
+    'You'
 
   return (
     <div className="flex h-full flex-col bg-default-100">
       {/* Server header */}
-      <Dropdown>
-        <DropdownTrigger>
-          <button
-            type="button"
-            className="flex h-12 w-full items-center justify-between border-b border-divider px-4 font-semibold text-foreground shadow-sm transition-colors hover:bg-default-200"
+      <div className="flex h-12 items-center border-b border-divider shadow-sm">
+        <Dropdown>
+          <DropdownTrigger>
+            <button
+              type="button"
+              className="flex h-full flex-1 items-center justify-between px-4 font-semibold text-foreground transition-colors hover:bg-default-200"
+            >
+              <span className="truncate">{serverName ?? 'Select a server'}</span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-default-500" />
+            </button>
+          </DropdownTrigger>
+          <DropdownMenu
+            aria-label="Server options"
+            className="w-56"
+            onAction={(key) => {
+              if (key === 'invite' && serverId !== null) {
+                setIsInviteOpen(true)
+              }
+            }}
           >
-            <span className="truncate">{serverName ?? 'Select a server'}</span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-default-500" />
-          </button>
-        </DropdownTrigger>
-        <DropdownMenu aria-label="Server options" className="w-56">
-          <DropdownSection showDivider>
-            <DropdownItem key="boost">Server Boost</DropdownItem>
-          </DropdownSection>
-          <DropdownSection showDivider>
-            <DropdownItem key="invite">Invite People</DropdownItem>
-            <DropdownItem key="settings">Server Settings</DropdownItem>
-            <DropdownItem key="create-channel">Create Channel</DropdownItem>
-          </DropdownSection>
-          <DropdownSection>
-            <DropdownItem key="leave" className="text-danger" color="danger">
-              Leave Server
-            </DropdownItem>
-          </DropdownSection>
-        </DropdownMenu>
-      </Dropdown>
+            <DropdownSection showDivider>
+              <DropdownItem key="boost">Server Boost</DropdownItem>
+            </DropdownSection>
+            <DropdownSection showDivider>
+              <DropdownItem key="invite" startContent={<UserPlus className="h-4 w-4" />}>
+                Invite People
+              </DropdownItem>
+              <DropdownItem key="settings">Server Settings</DropdownItem>
+              <DropdownItem key="create-channel">Create Channel</DropdownItem>
+            </DropdownSection>
+            <DropdownSection>
+              <DropdownItem key="leave" className="text-danger" color="danger">
+                Leave Server
+              </DropdownItem>
+            </DropdownSection>
+          </DropdownMenu>
+        </Dropdown>
+      </div>
 
       {/* Channel list */}
       <div className="flex-1 overflow-y-auto px-2">
@@ -122,7 +146,7 @@ export function ChannelSidebar({
       <div className="flex items-center gap-2 border-t border-divider bg-content1 p-2">
         <div className="relative">
           <Avatar
-            name="You"
+            name={username}
             size="sm"
             color="primary"
             showFallback
@@ -131,11 +155,15 @@ export function ChannelSidebar({
               name: 'text-xs text-primary-foreground',
             }}
           />
-          <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-content1 bg-success" />
+          <div className="absolute -bottom-0.5 -right-0.5">
+            <StatusIndicator status={status} size="lg" />
+          </div>
         </div>
         <div className="flex flex-1 flex-col overflow-hidden">
-          <span className="truncate text-sm font-medium text-foreground">You</span>
-          <span className="truncate text-xs text-default-500">Online</span>
+          <span className="truncate text-sm font-medium text-foreground">{username}</span>
+          <span className="truncate text-xs text-default-500">
+            {status === 'dnd' ? 'Do Not Disturb' : status.charAt(0).toUpperCase() + status.slice(1)}
+          </span>
         </div>
         <div className="flex items-center">
           <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
@@ -149,6 +177,14 @@ export function ChannelSidebar({
           </Button>
         </div>
       </div>
+
+      {serverId !== null && (
+        <CreateInviteDialog
+          serverId={serverId}
+          isOpen={isInviteOpen}
+          onClose={() => setIsInviteOpen(false)}
+        />
+      )}
     </div>
   )
 }

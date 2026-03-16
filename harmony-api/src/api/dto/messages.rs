@@ -14,6 +14,14 @@ pub struct SendMessageRequest {
     pub content: String,
 }
 
+/// Request body for editing a message.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditMessageRequest {
+    /// Updated message content (required, non-empty).
+    pub content: String,
+}
+
 /// Message response returned to API consumers.
 ///
 /// Excludes `deleted_at` — soft-deleted messages are filtered server-side.

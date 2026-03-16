@@ -3,11 +3,15 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use axum::extract::Query;
 
-use crate::api::dto::{MessageListQuery, MessageListResponse, MessageResponse, SendMessageRequest};
+use serde::Deserialize;
+
+use crate::api::dto::{
+    EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, SendMessageRequest,
+};
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::ChannelId;
+use crate::domain::models::{ChannelId, MessageId};
 
 /// Default message page size.
 const DEFAULT_MESSAGE_LIMIT: i64 = 50;
@@ -100,4 +104,82 @@ pub async fn list_messages(
     };
 
     Ok((StatusCode::OK, Json(MessageListResponse::from_messages(messages, next_cursor))))
+}
+
+/// Path parameters for message-specific operations.
+#[derive(Debug, Deserialize)]
+pub struct MessagePath {
+    pub channel_id: ChannelId,
+    pub message_id: MessageId,
+}
+
+/// Edit a message's content. Only the author can edit.
+///
+/// # Errors
+/// Returns `ApiError` on validation failure, authorization failure, or repository error.
+#[utoipa::path(
+    patch,
+    path = "/v1/channels/{channel_id}/messages/{message_id}",
+    tag = "Messages",
+    security(("bearer_auth" = [])),
+    params(
+        ("channel_id" = ChannelId, Path, description = "Channel ID"),
+        ("message_id" = MessageId, Path, description = "Message ID"),
+    ),
+    request_body = EditMessageRequest,
+    responses(
+        (status = 200, description = "Message edited", body = MessageResponse),
+        (status = 400, description = "Validation error", body = ProblemDetails),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Not the message author", body = ProblemDetails),
+        (status = 404, description = "Message not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state, req))]
+pub async fn edit_message(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(path): ApiPath<MessagePath>,
+    ApiJson(req): ApiJson<EditMessageRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let message = state
+        .message_service()
+        .edit_message(&path.message_id, &user_id, req.content)
+        .await?;
+
+    Ok((StatusCode::OK, Json(MessageResponse::from(message))))
+}
+
+/// Soft-delete a message. Only the author can delete (ADR-038).
+///
+/// # Errors
+/// Returns `ApiError` on authorization failure or repository error.
+#[utoipa::path(
+    delete,
+    path = "/v1/channels/{channel_id}/messages/{message_id}",
+    tag = "Messages",
+    security(("bearer_auth" = [])),
+    params(
+        ("channel_id" = ChannelId, Path, description = "Channel ID"),
+        ("message_id" = MessageId, Path, description = "Message ID"),
+    ),
+    responses(
+        (status = 204, description = "Message deleted"),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Not the message author", body = ProblemDetails),
+        (status = 404, description = "Message not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn delete_message(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(path): ApiPath<MessagePath>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .message_service()
+        .delete_message(&path.message_id, &user_id)
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }

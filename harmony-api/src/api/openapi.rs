@@ -5,14 +5,15 @@
 use utoipa::OpenApi;
 
 use super::dto::{
-    ChannelListResponse, ChannelResponse, CreateServerRequest, MessageListQuery,
-    MessageListResponse, MessageResponse, ProfileResponse, SendMessageRequest, ServerListResponse,
-    ServerResponse,
+    ChannelListResponse, ChannelResponse, CreateInviteRequest, CreateServerRequest,
+    EditMessageRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest,
+    MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse, MessageResponse,
+    ProfileResponse, SendMessageRequest, ServerListResponse, ServerResponse,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse};
 use crate::domain::models::{
-    CategoryId, ChannelId, ChannelType, MessageId, ServerId, UserId, UserStatus,
+    CategoryId, ChannelId, ChannelType, InviteCode, MessageId, ServerId, UserId, UserStatus,
 };
 
 /// `OpenAPI` documentation for Harmony API.
@@ -40,9 +41,17 @@ use crate::domain::models::{
         handlers::servers::get_server,
         // Channels
         handlers::channels::list_channels,
+        // Invites
+        handlers::invites::create_invite,
+        handlers::invites::preview_invite,
+        handlers::invites::join_server,
+        // Members
+        handlers::members::list_members,
         // Messages
         handlers::messages::send_message,
         handlers::messages::list_messages,
+        handlers::messages::edit_message,
+        handlers::messages::delete_message,
     ),
     components(
         schemas(
@@ -56,6 +65,7 @@ use crate::domain::models::{
             ChannelId,
             MessageId,
             CategoryId,
+            InviteCode,
             // Domain enums
             UserStatus,
             ChannelType,
@@ -68,8 +78,17 @@ use crate::domain::models::{
             // Channel DTOs
             ChannelResponse,
             ChannelListResponse,
+            // Invite DTOs
+            CreateInviteRequest,
+            InviteResponse,
+            InvitePreviewResponse,
+            JoinServerRequest,
+            // Member DTOs
+            MemberResponse,
+            MemberListResponse,
             // Message DTOs
             SendMessageRequest,
+            EditMessageRequest,
             MessageResponse,
             MessageListResponse,
             MessageListQuery,
@@ -81,6 +100,8 @@ use crate::domain::models::{
         (name = "Profiles", description = "User profile endpoints"),
         (name = "Servers", description = "Server (guild) management"),
         (name = "Channels", description = "Channel management within servers"),
+        (name = "Invites", description = "Server invite management"),
+        (name = "Members", description = "Server member management"),
         (name = "Messages", description = "Messaging within channels"),
     ),
     modifiers(&SecurityAddon)

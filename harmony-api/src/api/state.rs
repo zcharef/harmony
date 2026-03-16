@@ -6,8 +6,8 @@ use jsonwebtoken::DecodingKey;
 use secrecy::SecretString;
 use sqlx::PgPool;
 
-use crate::domain::ports::ChannelRepository;
-use crate::domain::services::{MessageService, ProfileService, ServerService};
+use crate::domain::ports::{ChannelRepository, MemberRepository};
+use crate::domain::services::{InviteService, MessageService, ProfileService, ServerService};
 
 /// Application state shared across all handlers.
 ///
@@ -30,8 +30,12 @@ pub struct AppState {
     server_service: Arc<ServerService>,
     /// Message domain service.
     message_service: Arc<MessageService>,
+    /// Invite domain service.
+    invite_service: Arc<InviteService>,
     /// Channel repository (no service layer — accessed directly per hexagonal design).
     channel_repository: Arc<dyn ChannelRepository>,
+    /// Member repository (accessed directly for simple queries; invite logic lives in InviteService).
+    member_repository: Arc<dyn MemberRepository>,
 }
 
 // WHY: Manual Debug because `dyn ChannelRepository` is Debug but Arc<dyn Trait> needs explicit impl.
@@ -43,7 +47,9 @@ impl std::fmt::Debug for AppState {
             .field("profile_service", &self.profile_service)
             .field("server_service", &self.server_service)
             .field("message_service", &self.message_service)
+            .field("invite_service", &self.invite_service)
             .field("channel_repository", &self.channel_repository)
+            .field("member_repository", &self.member_repository)
             .finish()
     }
 }
@@ -61,7 +67,9 @@ impl AppState {
         profile_service: Arc<ProfileService>,
         server_service: Arc<ServerService>,
         message_service: Arc<MessageService>,
+        invite_service: Arc<InviteService>,
         channel_repository: Arc<dyn ChannelRepository>,
+        member_repository: Arc<dyn MemberRepository>,
     ) -> Self {
         Self {
             pool,
@@ -72,7 +80,9 @@ impl AppState {
             profile_service,
             server_service,
             message_service,
+            invite_service,
             channel_repository,
+            member_repository,
         }
     }
 
@@ -94,9 +104,21 @@ impl AppState {
         &self.message_service
     }
 
+    /// Access the invite domain service.
+    #[must_use]
+    pub fn invite_service(&self) -> &InviteService {
+        &self.invite_service
+    }
+
     /// Access the channel repository directly (no service layer needed).
     #[must_use]
     pub fn channel_repository(&self) -> &dyn ChannelRepository {
         &*self.channel_repository
+    }
+
+    /// Access the member repository directly (simple queries; invite logic in InviteService).
+    #[must_use]
+    pub fn member_repository(&self) -> &dyn MemberRepository {
+        &*self.member_repository
     }
 }

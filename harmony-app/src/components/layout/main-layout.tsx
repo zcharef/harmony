@@ -2,9 +2,11 @@ import { GripVertical } from 'lucide-react'
 import { useState } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 
+import { useAuthStore } from '@/features/auth'
 import { ChannelSidebar, useChannels } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
 import { MemberList } from '@/features/members'
+import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 
 function ResizeHandle() {
@@ -20,6 +22,11 @@ function ResizeHandle() {
 export function MainLayout() {
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null)
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null)
+
+  // WHY: Mount presence subscription at layout level so it tracks the active server.
+  // Subscribes/unsubscribes automatically as selectedServerId changes.
+  const userId = useAuthStore((s) => s.user?.id ?? null)
+  usePresence(selectedServerId, userId)
 
   // WHY: Derive server/channel names from query cache to display in headers.
   // This avoids passing full objects between features (CLAUDE.md 4.5: pass IDs, not objects).
@@ -60,7 +67,7 @@ export function MainLayout() {
         <ResizeHandle />
 
         <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">
-          <MemberList />
+          <MemberList serverId={selectedServerId} />
         </Panel>
       </Group>
     </div>

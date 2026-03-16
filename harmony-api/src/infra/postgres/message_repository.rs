@@ -145,4 +145,110 @@ impl MessageRepository for PgMessageRepository {
 
         Ok(messages)
     }
+
+    async fn find_by_id(&self, message_id: &MessageId) -> Result<Option<Message>, DomainError> {
+        let mid = message_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                id,
+                channel_id,
+                author_id,
+                content,
+                edited_at,
+                deleted_at,
+                created_at
+            FROM messages
+            WHERE id = $1 AND deleted_at IS NULL
+            "#,
+            mid,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(row.map(|r| {
+            MessageRow {
+                id: r.id,
+                channel_id: r.channel_id,
+                author_id: r.author_id,
+                content: r.content,
+                edited_at: r.edited_at,
+                deleted_at: r.deleted_at,
+                created_at: r.created_at,
+            }
+            .into_message()
+        }))
+    }
+
+    async fn update_content(
+        &self,
+        message_id: &MessageId,
+        content: String,
+    ) -> Result<Message, DomainError> {
+        let mid = message_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            UPDATE messages
+            SET content = $2, is_edited = true, edited_at = now()
+            WHERE id = $1 AND deleted_at IS NULL
+            RETURNING
+                id,
+                channel_id,
+                author_id,
+                content,
+                edited_at,
+                deleted_at,
+                created_at
+            "#,
+            mid,
+            content,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| DomainError::Internal(e.to_string()))?
+        .ok_or_else(|| DomainError::NotFound {
+            resource_type: "Message",
+            id: message_id.to_string(),
+        })?;
+
+        let msg = MessageRow {
+            id: row.id,
+            channel_id: row.channel_id,
+            author_id: row.author_id,
+            content: row.content,
+            edited_at: row.edited_at,
+            deleted_at: row.deleted_at,
+            created_at: row.created_at,
+        };
+
+        Ok(msg.into_message())
+    }
+
+    async fn soft_delete(&self, message_id: &MessageId) -> Result<(), DomainError> {
+        let mid = message_id.0;
+
+        let result = sqlx::query!(
+            r#"
+            UPDATE messages
+            SET deleted_at = now()
+            WHERE id = $1 AND deleted_at IS NULL
+            "#,
+            mid,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(DomainError::NotFound {
+                resource_type: "Message",
+                id: message_id.to_string(),
+            });
+        }
+
+        Ok(())
+    }
 }

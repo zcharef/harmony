@@ -12,11 +12,17 @@ import {
   Users,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { z } from 'zod'
+import { useAuthStore } from '@/features/auth'
 import type { MessageResponse } from '@/lib/api'
+import { useDeleteMessage } from './hooks/use-delete-message'
+import { useEditMessage } from './hooks/use-edit-message'
 import { useMessages } from './hooks/use-messages'
 import { useRealtimeMessages } from './hooks/use-realtime-messages'
 import { useSendMessage } from './hooks/use-send-message'
+import { useTypingIndicator } from './hooks/use-typing-indicator'
 import { MessageItem } from './message-item'
+import { TypingIndicator } from './typing-indicator'
 
 interface ChatAreaProps {
   channelId: string | null
@@ -46,13 +52,41 @@ function useFlatMessages(data: ReturnType<typeof useMessages>['data']) {
   }, [data])
 }
 
+/**
+ * WHY Zod: user_metadata is external data from Supabase Auth (CLAUDE.md §1.2).
+ * Using `as string` would lie to the compiler if the shape ever changes.
+ * Fallback to email prefix ensures a display name always exists.
+ */
+const userMetaSchema = z.object({
+  username: z.string().optional(),
+  display_name: z.string().optional(),
+})
+
+function useCurrentUser() {
+  const user = useAuthStore((s) => s.user)
+  const id = user?.id ?? ''
+  const meta = userMetaSchema.safeParse(user?.user_metadata)
+  const username =
+    (meta.success ? meta.data.username : undefined) ??
+    (meta.success ? meta.data.display_name : undefined) ??
+    user?.email?.split('@')[0] ??
+    'Unknown'
+  return { id, username }
+}
+
 export function ChatArea({ channelId, channelName }: ChatAreaProps) {
+  const currentUser = useCurrentUser()
+
   const { data, isPending, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useMessages(channelId)
-  const sendMessage = useSendMessage(channelId ?? '')
+  const sendMessage = useSendMessage(channelId ?? '', currentUser.id)
+  const editMessageMutation = useEditMessage(channelId ?? '')
+  const deleteMessageMutation = useDeleteMessage(channelId ?? '')
   const [messageContent, setMessageContent] = useState('')
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
 
   useRealtimeMessages(channelId ?? '')
+  const { typingUsers, sendTyping } = useTypingIndicator(channelId ?? '', currentUser.id)
 
   const messages = useFlatMessages(data)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -112,13 +146,40 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
     }, 100)
   }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
+  const handleStartEdit = useCallback((messageId: string) => {
+    setEditingMessageId(messageId)
+  }, [])
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(null)
+  }, [])
+
+  const handleSaveEdit = useCallback(
+    (messageId: string, content: string) => {
+      editMessageMutation.mutate(
+        { messageId, content },
+        { onSuccess: () => setEditingMessageId(null) },
+      )
+    },
+    [editMessageMutation],
+  )
+
+  const handleDelete = useCallback(
+    (messageId: string) => {
+      deleteMessageMutation.mutate(messageId)
+    },
+    [deleteMessageMutation],
+  )
+
   function handleSend() {
     const trimmed = messageContent.trim()
     if (trimmed.length === 0 || channelId === null) return
 
-    sendMessage.mutate(trimmed, {
-      onSuccess: () => setMessageContent(''),
-    })
+    // WHY clear before mutate: With optimistic updates, the message appears
+    // instantly in the list. Waiting for onSuccess would leave stale text in
+    // the input until the server round-trip completes (~200ms of confusion).
+    setMessageContent('')
+    sendMessage.mutate(trimmed)
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -242,6 +303,9 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
         </div>
       </div>
 
+      {/* Typing indicator */}
+      <TypingIndicator typingUsers={typingUsers} />
+
       {/* Message input */}
       <div className="px-4 pb-6 pt-1">
         <div className="relative flex items-center rounded-lg bg-default-100">
@@ -254,7 +318,10 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
             minRows={1}
             maxRows={6}
             value={messageContent}
-            onValueChange={setMessageContent}
+            onValueChange={(value) => {
+              setMessageContent(value)
+              sendTyping(currentUser.username)
+            }}
             onKeyDown={handleKeyDown}
             classNames={{
               base: 'flex-1',
