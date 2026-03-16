@@ -1,8 +1,10 @@
 //! Supabase JWT authentication adapter.
 //!
-//! Verifies Supabase-issued JWTs using the project's JWT secret (HS256).
+//! Verifies Supabase-issued JWTs using either HS256 (legacy HMAC secret) or
+//! ES256 (ECDSA P-256 via JWKS), depending on the token's `alg` header.
+//! Newer Supabase CLI versions sign tokens with ES256.
 
-use jsonwebtoken::{DecodingKey, TokenData, Validation, decode};
+use jsonwebtoken::{Algorithm, DecodingKey, TokenData, Validation, decode, decode_header};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use thiserror::Error;
@@ -41,19 +43,49 @@ pub struct AuthenticatedUser {
 
 /// Verify a Supabase JWT and extract user information.
 ///
+/// Supports both HS256 (legacy HMAC secret) and ES256 (ECDSA via JWKS).
+/// The algorithm is determined by inspecting the token's header:
+/// - HS256: verified using `jwt_secret` (Supabase JWT secret).
+/// - ES256: verified using `es256_key` (public key from Supabase JWKS endpoint).
+///
 /// # Errors
 /// Returns [`AuthError::TokenExpired`] if the token's `exp` claim is in the past,
-/// or [`AuthError::InvalidToken`] for any other verification failure (bad signature, wrong audience, malformed).
+/// or [`AuthError::InvalidToken`] for any other verification failure (bad signature,
+/// wrong audience, malformed, or unsupported algorithm).
 pub fn verify_supabase_jwt(
     token: &str,
     jwt_secret: &SecretString,
+    es256_key: Option<&DecodingKey>,
 ) -> Result<AuthenticatedUser, AuthError> {
-    let key = DecodingKey::from_secret(jwt_secret.expose_secret().as_bytes());
+    // WHY: Peek at the JWT header to determine which verification key to use.
+    // Newer Supabase CLI versions sign with ES256 instead of HS256.
+    let header = decode_header(token)
+        .map_err(|e| AuthError::InvalidToken(format!("malformed JWT header: {e}")))?;
 
-    let mut validation = Validation::default();
+    let (key, algorithm) = match header.alg {
+        Algorithm::HS256 => {
+            let key = DecodingKey::from_secret(jwt_secret.expose_secret().as_bytes());
+            (key, Algorithm::HS256)
+        }
+        Algorithm::ES256 => {
+            let key = es256_key
+                .ok_or_else(|| {
+                    AuthError::InvalidToken(
+                        "ES256 token received but no JWKS public key configured".to_string(),
+                    )
+                })?
+                .clone();
+            (key, Algorithm::ES256)
+        }
+        other => {
+            return Err(AuthError::InvalidToken(format!(
+                "unsupported JWT algorithm: {other:?}"
+            )));
+        }
+    };
+
+    let mut validation = Validation::new(algorithm);
     validation.set_audience(&["authenticated"]);
-    // Supabase uses HS256 by default
-    validation.algorithms = vec![jsonwebtoken::Algorithm::HS256];
 
     let token_data: TokenData<SupabaseClaims> =
         decode(token, &key, &validation).map_err(|e| match e.kind() {

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use jsonwebtoken::DecodingKey;
 use secrecy::SecretString;
 use sqlx::PgPool;
 
@@ -15,8 +16,10 @@ use crate::domain::services::{MessageService, ProfileService, ServerService};
 pub struct AppState {
     /// Postgres connection pool (Supabase).
     pub pool: PgPool,
-    /// Supabase JWT secret for token verification.
+    /// Supabase JWT secret for HS256 token verification.
     pub jwt_secret: SecretString,
+    /// ES256 public key from Supabase JWKS (for newer Supabase CLI versions).
+    pub es256_key: Option<DecodingKey>,
     /// Session secret for signing HMAC session tokens.
     pub session_secret: SecretString,
     /// Whether the server is running in production mode.
@@ -52,6 +55,7 @@ impl AppState {
     pub fn new(
         pool: PgPool,
         jwt_secret: SecretString,
+        es256_key: Option<DecodingKey>,
         session_secret: SecretString,
         is_production: bool,
         profile_service: Arc<ProfileService>,
@@ -62,6 +66,7 @@ impl AppState {
         Self {
             pool,
             jwt_secret,
+            es256_key,
             session_secret,
             is_production,
             profile_service,

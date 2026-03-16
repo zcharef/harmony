@@ -1,16 +1,17 @@
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { sendMessage } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
 
 /**
- * WHY no invalidation: Supabase Realtime delivers the INSERT event to
- * useRealtimeMessages, which updates the cache directly. Invalidation
- * would trigger a redundant full refetch of all pages AND race with
- * the realtime event, producing duplicate messages.
- *
- * The deduplication in useFlatMessages (chat-area.tsx) is a safety net,
- * but avoiding the race entirely is better.
+ * WHY invalidation on success: Realtime delivers INSERT events but can be
+ * unreliable (WebSocket failures, race conditions). Invalidation ensures
+ * the user always sees their own message. The deduplication in
+ * useFlatMessages (chat-area.tsx) handles the case where both Realtime
+ * and invalidation fire.
  */
 export function useSendMessage(channelId: string) {
+  const queryClient = useQueryClient()
+
   return useMutation({
     mutationFn: async (content: string) => {
       const { data } = await sendMessage({
@@ -19,6 +20,9 @@ export function useSendMessage(channelId: string) {
         throwOnError: true,
       })
       return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.messages.byChannel(channelId) })
     },
   })
 }

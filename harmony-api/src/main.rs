@@ -89,6 +89,9 @@ async fn init_app_state(config: &Config) -> AppState {
     }
     tracing::info!("Database connectivity verified");
 
+    // Fetch ES256 public key from Supabase JWKS (newer CLI versions sign with ECDSA)
+    let es256_key = fetch_supabase_jwks(config).await;
+
     // Session secret (required — stateless HMAC session tokens)
     let session_secret: SecretString = config.session_secret.clone().unwrap_or_else(|| {
         if config.is_production() {
@@ -114,6 +117,7 @@ async fn init_app_state(config: &Config) -> AppState {
     AppState::new(
         pool,
         config.supabase_jwt_secret.clone(),
+        es256_key,
         session_secret,
         config.is_production(),
         profile_service,
@@ -121,6 +125,61 @@ async fn init_app_state(config: &Config) -> AppState {
         message_service,
         channel_repo,
     )
+}
+
+/// Fetch the ES256 public key from the Supabase JWKS endpoint.
+///
+/// Returns `None` (with a warning log) if `SUPABASE_URL` is not set or the JWKS
+/// endpoint is unreachable. This keeps HS256-only setups working without breakage.
+async fn fetch_supabase_jwks(config: &Config) -> Option<jsonwebtoken::DecodingKey> {
+    let supabase_url = config.supabase_url.as_deref()?;
+    let jwks_url = format!("{supabase_url}/auth/v1/.well-known/jwks.json");
+
+    tracing::info!(url = %jwks_url, "Fetching Supabase JWKS for ES256 support");
+
+    let response = match reqwest::get(&jwks_url).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                url = %jwks_url,
+                "Failed to fetch Supabase JWKS — ES256 tokens will be rejected. \
+                 HS256 tokens still work via SUPABASE_JWT_SECRET."
+            );
+            return None;
+        }
+    };
+
+    let jwks: jsonwebtoken::jwk::JwkSet = match response.json().await {
+        Ok(jwks) => jwks,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "Failed to parse Supabase JWKS response — ES256 tokens will be rejected"
+            );
+            return None;
+        }
+    };
+
+    // WHY: Use the first key in the set. Supabase JWKS typically contains a single signing key.
+    let jwk = jwks.keys.first()?;
+
+    match jsonwebtoken::DecodingKey::from_jwk(jwk) {
+        Ok(key) => {
+            tracing::info!(
+                kid = ?jwk.common.key_id,
+                "ES256 public key loaded from Supabase JWKS"
+            );
+            Some(key)
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "Failed to construct DecodingKey from Supabase JWK — ES256 tokens will be rejected"
+            );
+            None
+        }
+    }
 }
 
 /// Initialize Sentry for crash reporting and proactive alerting.

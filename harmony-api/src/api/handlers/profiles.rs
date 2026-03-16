@@ -35,12 +35,20 @@ pub async fn sync_profile(
         .email
         .ok_or_else(|| ApiError::bad_request("JWT must contain an email claim"))?;
 
-    // WHY: Derive username from email prefix as a sensible default.
-    let username = email
-        .split('@')
-        .next()
-        .unwrap_or("user")
-        .to_string();
+    // WHY: Derive username from email prefix, sanitized to match DB constraint
+    // (^[a-z0-9_]{3,32}$). Replace non-alphanumeric chars with underscore, ensure min length.
+    let raw_prefix = email.split('@').next().unwrap_or("user");
+    let sanitized: String = raw_prefix
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .take(32)
+        .collect();
+    let username = if sanitized.len() < 3 {
+        format!("{sanitized}{}", "_".repeat(3 - sanitized.len()))
+    } else {
+        sanitized
+    };
 
     let profile = state
         .profile_service()

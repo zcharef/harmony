@@ -23,7 +23,6 @@ async function syncProfile(accessToken: string, isSyncing: React.RefObject<boole
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
       },
     })
   } finally {
