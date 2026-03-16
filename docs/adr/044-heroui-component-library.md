@@ -103,6 +103,32 @@ export default heroui({
 });
 ```
 
+### Provider Configuration
+
+`<HeroUIProvider>` wraps the app root in `App.tsx` with these mandatory props:
+
+```tsx
+<HeroUIProvider
+  reducedMotion="user"
+  disableRipple
+  validationBehavior="aria"
+>
+```
+
+| Prop | Value | Rationale |
+|---|---|---|
+| `reducedMotion` | `"user"` | Respects the OS-level `prefers-reduced-motion` setting. Default `"never"` ignores accessibility preferences. |
+| `disableRipple` | `true` | Discord-style UIs do not use Material ripple effects. Removes visual noise and ~2KB from the animation budget. |
+| `validationBehavior` | `"aria"` | We validate with React Hook Form + Zod, not HTML5 native validation. `"aria"` avoids double-validation and lets RHF control error display. |
+
+**Future props** (add when client-side routing is implemented):
+- `navigate` — wire to router's `navigate()` so HeroUI `Link`, `Tabs`, and `Menu` integrate with SPA routing
+- `useHref` — transform HeroUI hrefs to match the router's URL scheme
+
+**Props intentionally left at defaults:**
+- `locale` — `"en-US"` is correct for initial release. Add i18n prop when localization is needed.
+- `disableAnimation` — `false`. Animations improve UX; `reducedMotion="user"` handles accessibility.
+
 ## Consequences
 
 **Positive:**
