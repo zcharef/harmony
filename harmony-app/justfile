@@ -38,6 +38,22 @@ test-watch:
     pnpm vitest
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# E2E TESTING
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Run Playwright E2E tests
+e2e:
+    pnpm exec playwright test
+
+# Run Playwright E2E tests with UI mode
+e2e-ui:
+    pnpm exec playwright test --ui
+
+# Show Playwright test report
+e2e-report:
+    pnpm exec playwright show-report
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CODE QUALITY (Biome + ESLint boundaries)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

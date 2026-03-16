@@ -43,6 +43,12 @@ harmony-app/src-tauri/gen/schemas
 !harmony-app/src-tauri/icons/*.png
 !harmony-app/public/*.png
 
+# Playwright
+harmony-app/test-results/
+harmony-app/playwright-report/
+harmony-app/blob-report/
+harmony-app/playwright/.cache/
+
 tsc-cache/
 
 dev/active/

@@ -27,6 +27,8 @@ function ServerIcon({
   return (
     <Tooltip content={server.name} placement="right" offset={8}>
       <button
+        data-test="server-button"
+        data-server-id={server.id}
         type="button"
         onClick={onSelect}
         className="relative flex w-full items-center justify-center group"
@@ -94,7 +96,7 @@ export function ServerList({ selectedServerId, onSelectServer }: ServerListProps
   const homeServer = dmServers[0]
 
   return (
-    <div className="flex h-full w-[72px] flex-col items-center bg-content1 py-3">
+    <div data-test="server-list" className="flex h-full w-[72px] flex-col items-center bg-content1 py-3">
       {/* Home / DMs */}
       {homeServer !== undefined && (
         <ServerIcon

@@ -219,7 +219,7 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
 
   if (channelId === null) {
     return (
-      <div className="flex h-full flex-col items-center justify-center bg-background">
+      <div data-test="chat-placeholder" className="flex h-full flex-col items-center justify-center bg-background">
         <Hash className="h-16 w-16 text-default-300" />
         <p className="mt-2 text-default-500">Select a channel to start chatting</p>
       </div>
@@ -227,7 +227,7 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
   }
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div data-test="chat-area" className="flex h-full flex-col bg-background">
       {/* Channel header */}
       <div className="flex h-12 items-center justify-between border-b border-divider px-4 shadow-sm">
         <div className="flex items-center gap-2">
@@ -257,7 +257,7 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
       <Divider />
 
       {/* Virtualized message list */}
-      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
+      <div data-test="message-list" ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
         {/* WHY: These elements are OUTSIDE the virtualizer container (normal flow)
             so they don't interfere with absolute-positioned virtual items. */}
 
@@ -349,6 +349,7 @@ export function ChatArea({ channelId, channelName }: ChatAreaProps) {
             <PlusCircle className="h-5 w-5 text-default-500" />
           </Button>
           <Textarea
+            data-test="message-input"
             placeholder={`Message #${channelName ?? 'channel'}`}
             variant="flat"
             minRows={1}

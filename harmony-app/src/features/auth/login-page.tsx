@@ -35,18 +35,19 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div data-test="login-page" className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="flex flex-col items-center gap-1 pb-0 pt-6">
-          <h1 className="text-2xl font-bold text-foreground">Harmony</h1>
-          <p className="text-sm text-default-500">
+          <h1 data-test="login-heading" className="text-2xl font-bold text-foreground">Harmony</h1>
+          <p data-test="login-subtitle" className="text-sm text-default-500">
             {mode === 'login' ? 'Welcome back!' : 'Create your account'}
           </p>
         </CardHeader>
 
         <CardBody className="gap-4 px-6 pb-6">
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <form data-test="login-form" onSubmit={handleSubmit} className="flex flex-col gap-4">
             <Input
+              data-test="login-email-input"
               label="Email"
               type="email"
               placeholder="you@example.com"
@@ -57,6 +58,7 @@ export function LoginPage() {
             />
 
             <Input
+              data-test="login-password-input"
               label="Password"
               type="password"
               placeholder="Enter your password"
@@ -66,9 +68,9 @@ export function LoginPage() {
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
             />
 
-            {error !== null && <p className="text-sm text-danger">{error}</p>}
+            {error !== null && <p data-test="login-error-message" className="text-sm text-danger">{error}</p>}
 
-            <Button type="submit" color="primary" isLoading={isSubmitting} className="mt-2">
+            <Button data-test="login-submit-button" type="submit" color="primary" isLoading={isSubmitting} className="mt-2">
               {mode === 'login' ? 'Sign In' : 'Sign Up'}
             </Button>
           </form>
@@ -78,6 +80,7 @@ export function LoginPage() {
           <p className="text-center text-sm text-default-500">
             {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
             <button
+              data-test="login-toggle-button"
               type="button"
               onClick={toggleMode}
               className="font-medium text-primary hover:underline"

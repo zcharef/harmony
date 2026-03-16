@@ -73,9 +73,9 @@ export function MemberList({ serverId }: MemberListProps) {
   }
 
   return (
-    <div className="flex h-full flex-col bg-default-100">
+    <div data-test="member-list" className="flex h-full flex-col bg-default-100">
       <div className="flex h-12 items-center border-b border-divider px-4">
-        <span className="font-semibold text-foreground">Members — {total}</span>
+        <span data-test="member-count" className="font-semibold text-foreground">Members — {total}</span>
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {onlineMembers.length > 0 && (
@@ -119,7 +119,7 @@ function MemberRow({ member, status }: { member: MemberResponse; status: UserSta
   const displayName = member.nickname ?? member.username
 
   return (
-    <div className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-default-200">
+    <div data-test="member-item" data-user-id={member.userId} className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-default-200">
       <div className="relative">
         <Avatar
           name={displayName}
@@ -129,12 +129,12 @@ function MemberRow({ member, status }: { member: MemberResponse; status: UserSta
           classNames={{ base: 'h-8 w-8', name: 'text-xs' }}
         />
         {status !== null && (
-          <div className="absolute -bottom-0.5 -right-0.5">
+          <div data-test="member-status" className="absolute -bottom-0.5 -right-0.5">
             <StatusIndicator status={status} size="sm" />
           </div>
         )}
       </div>
-      <span className="truncate text-sm text-foreground">{displayName}</span>
+      <span data-test="member-username" className="truncate text-sm text-foreground">{displayName}</span>
     </div>
   )
 }

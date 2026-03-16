@@ -77,6 +77,8 @@ export const MessageItem = memo(function MessageItem({
 
   return (
     <div
+      data-test="message-item"
+      data-message-id={message.id}
       className={`group relative flex gap-4 px-4 py-1 hover:bg-default-200/50${isPending ? ' opacity-60' : ''}`}
     >
       <Avatar
@@ -90,7 +92,7 @@ export const MessageItem = memo(function MessageItem({
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-baseline gap-2">
-          <span className="cursor-pointer font-medium text-foreground hover:underline">
+          <span data-test="message-author" className="cursor-pointer font-medium text-foreground hover:underline">
             {authorLabel}
           </span>
           <span className="text-xs text-default-500">
@@ -136,7 +138,7 @@ export const MessageItem = memo(function MessageItem({
             </span>
           </div>
         ) : (
-          <p className="text-sm text-foreground/90">
+          <p data-test="message-content" className="text-sm text-foreground/90">
             {message.content}
             {message.editedAt !== undefined && message.editedAt !== null && (
               <span className="ml-1 text-xs text-default-400">(edited)</span>

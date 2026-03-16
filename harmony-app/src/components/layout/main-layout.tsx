@@ -44,7 +44,7 @@ export function MainLayout() {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
       {/* Server nav - fixed width, outside resizable group */}
       <ServerList selectedServerId={selectedServerId} onSelectServer={handleSelectServer} />
 

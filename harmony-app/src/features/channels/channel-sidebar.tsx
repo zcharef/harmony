@@ -28,6 +28,8 @@ function ChannelButton({
 }) {
   return (
     <Button
+      data-test="channel-button"
+      data-channel-id={channel.id}
       key={channel.id}
       variant="light"
       size="sm"
@@ -73,7 +75,7 @@ export function ChannelSidebar({
     'You'
 
   return (
-    <div className="flex h-full flex-col bg-default-100">
+    <div data-test="channel-sidebar" className="flex h-full flex-col bg-default-100">
       {/* Server header */}
       <div className="flex h-12 items-center border-b border-divider shadow-sm">
         <Dropdown>
@@ -82,7 +84,7 @@ export function ChannelSidebar({
               type="button"
               className="flex h-full flex-1 items-center justify-between px-4 font-semibold text-foreground transition-colors hover:bg-default-200"
             >
-              <span className="truncate">{serverName ?? 'Select a server'}</span>
+              <span data-test="server-name-header" className="truncate">{serverName ?? 'Select a server'}</span>
               <ChevronDown className="h-4 w-4 shrink-0 text-default-500" />
             </button>
           </DropdownTrigger>
