@@ -53,15 +53,15 @@ These checks also run automatically via git hooks (Lefthook) and CI.
 
 #### Enforcement Rules (Machine-Verified)
 
-Every quality property is enforced by automated tests, not just documentation. See [`docs/adr/013-enforcement-tests.md`](./docs/adr/013-enforcement-tests.md).
+Every quality property is enforced by automated tests, not just documentation (ADR-013).
 
 **Rust API (`harmony-api/`):**
 
 | Rule | Enforcement | ADR |
 |------|-------------|-----|
-| Domain layer purity | `tests/architecture_test.rs` | [003](./docs/adr/003-hexagonal-architecture.md) |
-| All handlers have `#[utoipa::path]` | `tests/openapi_enforcement_test.rs` | [007](./docs/adr/007-code-first-openapi.md) |
-| RFC 9457 error format | `tests/rfc9457_contract_test.rs` | [008](./docs/adr/008-rfc9457-problem-details.md) |
+| Domain layer purity | `tests/architecture_test.rs` | 003 |
+| All handlers have `#[utoipa::path]` | `tests/openapi_enforcement_test.rs` | 007 |
+| RFC 9457 error format | `tests/rfc9457_contract_test.rs` | 008 |
 | No `println!`/`dbg!` | Clippy `print_stdout = "deny"` | 017 |
 | Compile-time SQL only | `tests/rust_patterns_test.rs` | 016 |
 | No `std::sync::Mutex` in async | `tests/rust_patterns_test.rs` | 022 |
@@ -75,7 +75,7 @@ Every quality property is enforced by automated tests, not just documentation. S
 | Rule | Enforcement | ADR |
 |------|-------------|-----|
 | No `any` | Biome `noExplicitAny: error` | -- |
-| No `console.*` | Biome `noConsole: error` | [042](./docs/adr/042-structured-logging.md) |
+| No `console.*` | Biome `noConsole: error` | 042 |
 | Module boundaries | `eslint-plugin-boundaries` | -- |
 | No circular deps | `madge` | -- |
 | Feature barrel exports | `tests/arch/feature-structure.test.ts` | -- |

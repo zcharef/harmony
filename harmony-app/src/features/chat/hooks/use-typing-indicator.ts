@@ -16,7 +16,7 @@ export type TypingUser = z.infer<typeof typingUserSchema>
  * unnecessary writes and latency. Supabase Broadcast is fire-and-forget
  * over the existing WebSocket — zero DB round-trips.
  *
- * See: docs/architecture/03-realtime.md lines 151-213
+ * Design: Supabase Broadcast (fire-and-forget over existing WebSocket)
  */
 export function useTypingIndicator(channelId: string, currentUserId: string) {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([])

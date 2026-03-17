@@ -51,8 +51,8 @@ harmony-app/playwright/.cache/
 
 tsc-cache/
 
-dev/active/
-dev/strategy/
+dev/
+docs/
 
 # Playwright MCP
 .playwright-mcp/

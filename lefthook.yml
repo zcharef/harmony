@@ -85,6 +85,3 @@ pre-push:
       run: bash scripts/lint-migrations.sh
       fail_text: "Migration lint failed. See ADR-019 (non-destructive) and ADR-040 (RLS)."
 
-    check-adr-index:
-      run: bash scripts/check-adr-index.sh
-      fail_text: "ADR index out of date. Add missing entries to docs/adr/README.md."

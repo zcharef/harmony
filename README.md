@@ -92,8 +92,6 @@ Harmony isn't just for gaming communities. Small teams and co-workers who want p
 - **RFC 9457** — All API errors are machine-readable `ProblemDetails` JSON.
 - **Single binary** — The API is one Rust binary. No microservice orchestration, no message queues, no cache servers. Simpler to deploy, debug, and maintain.
 
-> Full architecture docs: [`docs/architecture/`](docs/architecture/) · ADRs: [`docs/adr/`](docs/adr/)
-
 ---
 
 ## Quick Start
@@ -161,11 +159,7 @@ harmony/
 │   │   └── lib/         Generated API client, utils
 │   └── src-tauri/       Tauri Rust runtime
 │
-├── supabase/            Supabase config + PostgreSQL migrations
-│
-└── docs/
-    ├── architecture/    System design documents
-    └── adr/             Architecture Decision Records
+└── supabase/            Supabase config + PostgreSQL migrations
 ```
 
 ---
@@ -181,8 +175,6 @@ docker compose up
 No MongoDB. No Redis. No RabbitMQ. No MinIO. Just PostgreSQL and one API binary.
 
 Self-hosting gives you the complete product with no feature restrictions. Unlimited users, unlimited history, all features. Your server, your rules.
-
-Full guide: [`docs/architecture/06-self-hosting.md`](docs/architecture/06-self-hosting.md)
 
 ---
 
@@ -214,8 +206,6 @@ Full guide: [`docs/architecture/06-self-hosting.md`](docs/architecture/06-self-h
 | **3 — Voice & Files** | LiveKit voice/video, file uploads, public beta | Planned |
 | **4 — SaaS Launch** | Harmony Cloud, server discovery, push notifications | Planned |
 | **5 — Growth** | E2EE, mobile app, web client, bot API | Planned |
-
-> Full roadmap: [`docs/architecture/07-roadmap.md`](docs/architecture/07-roadmap.md)
 
 ---
 
