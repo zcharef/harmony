@@ -53,11 +53,16 @@ test.describe('Authentication', () => {
     await passwordInput.fill('wrongpass')
     await expect(passwordInput).toHaveValue('wrongpass')
 
+    // WHY: Submit button is disabled until Turnstile widget resolves.
+    // With test site key (1x00000000000000000000AA), it auto-passes.
+    const submitButton = page.locator('[data-test="login-submit-button"]')
+    await expect(submitButton).toBeEnabled({ timeout: 10000 })
+
     const responsePromise = page.waitForResponse((response) =>
       response.url().includes('/auth/v1/token'),
     )
 
-    await page.locator('[data-test="login-submit-button"]').click()
+    await submitButton.click()
 
     const response = await responsePromise
     expect(response.status()).toBeGreaterThanOrEqual(400)
@@ -78,11 +83,15 @@ test.describe('Authentication', () => {
     await passwordInput.fill('password123')
     await expect(passwordInput).toHaveValue('password123')
 
+    // WHY: Wait for Turnstile to resolve before submitting
+    const submitButton = page.locator('[data-test="login-submit-button"]')
+    await expect(submitButton).toBeEnabled({ timeout: 10000 })
+
     const responsePromise = page.waitForResponse((response) =>
       response.url().includes('/auth/v1/token'),
     )
 
-    await page.locator('[data-test="login-submit-button"]').click()
+    await submitButton.click()
 
     const response = await responsePromise
     expect(response.status()).toBeLessThan(400)
