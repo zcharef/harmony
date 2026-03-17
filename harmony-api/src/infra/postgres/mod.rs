@@ -1,5 +1,6 @@
 //! `PostgreSQL` adapter (Supabase Postgres via `SQLx`).
 
+mod ban_repository;
 mod channel_repository;
 mod invite_repository;
 mod member_repository;
@@ -7,6 +8,7 @@ mod message_repository;
 mod profile_repository;
 mod server_repository;
 
+pub use ban_repository::PgBanRepository;
 pub use channel_repository::PgChannelRepository;
 pub use invite_repository::PgInviteRepository;
 pub use member_repository::PgMemberRepository;

@@ -5,11 +5,11 @@
 use utoipa::OpenApi;
 
 use super::dto::{
-    ChannelListResponse, ChannelResponse, CreateChannelRequest, CreateInviteRequest,
-    CreateServerRequest, EditMessageRequest, InvitePreviewResponse, InviteResponse,
-    JoinServerRequest, MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse,
-    MessageResponse, ProfileResponse, SendMessageRequest, ServerListResponse, ServerResponse,
-    UpdateChannelRequest,
+    BanListResponse, BanResponse, BanUserRequest, ChannelListResponse, ChannelResponse,
+    CreateChannelRequest, CreateInviteRequest, CreateServerRequest, EditMessageRequest,
+    InvitePreviewResponse, InviteResponse, JoinServerRequest, MemberListResponse, MemberResponse,
+    MessageListQuery, MessageListResponse, MessageResponse, ProfileResponse, SendMessageRequest,
+    ServerListResponse, ServerResponse, UpdateChannelRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse};
@@ -51,6 +51,11 @@ use crate::domain::models::{
         handlers::invites::join_server,
         // Members
         handlers::members::list_members,
+        handlers::members::kick_member,
+        // Bans (Moderation)
+        handlers::bans::list_bans,
+        handlers::bans::ban_member,
+        handlers::bans::unban_member,
         // Messages
         handlers::messages::send_message,
         handlers::messages::list_messages,
@@ -92,6 +97,10 @@ use crate::domain::models::{
             // Member DTOs
             MemberResponse,
             MemberListResponse,
+            // Ban DTOs
+            BanUserRequest,
+            BanResponse,
+            BanListResponse,
             // Message DTOs
             SendMessageRequest,
             EditMessageRequest,
@@ -108,6 +117,7 @@ use crate::domain::models::{
         (name = "Channels", description = "Channel management within servers"),
         (name = "Invites", description = "Server invite management"),
         (name = "Members", description = "Server member management"),
+        (name = "Moderation", description = "Server moderation (bans, kicks)"),
         (name = "Messages", description = "Messaging within channels"),
     ),
     modifiers(&SecurityAddon)

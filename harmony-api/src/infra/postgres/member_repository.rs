@@ -128,4 +128,27 @@ impl MemberRepository for PgMemberRepository {
 
         Ok(())
     }
+
+    async fn remove_member(
+        &self,
+        server_id: &ServerId,
+        user_id: &UserId,
+    ) -> Result<(), DomainError> {
+        let sid = server_id.0;
+        let uid = user_id.0;
+
+        sqlx::query!(
+            r#"
+            DELETE FROM server_members
+            WHERE server_id = $1 AND user_id = $2
+            "#,
+            sid,
+            uid,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
 }

@@ -40,4 +40,14 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
 
     /// Soft-delete a message (ADR-038). Sets `deleted_at=now()`.
     async fn soft_delete(&self, message_id: &MessageId) -> Result<(), DomainError>;
+
+    /// Count non-deleted messages by an author in a channel within the last `window_secs` seconds.
+    ///
+    /// Used for per-channel rate limiting in `MessageService::create`.
+    async fn count_recent(
+        &self,
+        channel_id: &ChannelId,
+        author_id: &UserId,
+        window_secs: i64,
+    ) -> Result<i64, DomainError>;
 }

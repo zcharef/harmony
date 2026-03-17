@@ -251,4 +251,33 @@ impl MessageRepository for PgMessageRepository {
 
         Ok(())
     }
+
+    async fn count_recent(
+        &self,
+        channel_id: &ChannelId,
+        author_id: &UserId,
+        window_secs: i64,
+    ) -> Result<i64, DomainError> {
+        let cid = channel_id.0;
+        let aid = author_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            SELECT COALESCE(COUNT(*)::BIGINT, 0) AS "count!"
+            FROM messages
+            WHERE channel_id = $1
+              AND author_id = $2
+              AND deleted_at IS NULL
+              AND created_at > now() - make_interval(secs => $3::double precision)
+            "#,
+            cid,
+            aid,
+            window_secs as f64,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(row.count)
+    }
 }

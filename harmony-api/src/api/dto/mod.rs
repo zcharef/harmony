@@ -1,5 +1,6 @@
 //! Data Transfer Objects (request/response types).
 
+pub mod bans;
 pub mod channels;
 pub mod invites;
 pub mod members;
@@ -8,7 +9,10 @@ pub mod pagination;
 pub mod profiles;
 pub mod servers;
 
-pub use channels::{ChannelListResponse, ChannelResponse, CreateChannelRequest, UpdateChannelRequest};
+pub use bans::{BanListResponse, BanResponse, BanUserRequest};
+pub use channels::{
+    ChannelListResponse, ChannelResponse, CreateChannelRequest, UpdateChannelRequest,
+};
 pub use invites::{CreateInviteRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest};
 pub use members::{MemberListResponse, MemberResponse};
 pub use messages::{

@@ -83,10 +83,17 @@ pub async fn list_servers(
 )]
 #[tracing::instrument(skip(state))]
 pub async fn get_server(
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
     ApiPath(id): ApiPath<ServerId>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let is_member = state.member_repository().is_member(&id, &user_id).await?;
+    if !is_member {
+        return Err(ApiError::forbidden(
+            "You must be a server member to view this server",
+        ));
+    }
+
     let server = state.server_service().get_by_id(&id).await?;
 
     Ok((StatusCode::OK, Json(ServerResponse::from(server))))

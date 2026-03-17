@@ -27,4 +27,7 @@ pub enum DomainError {
 
     #[error("External service error: {0}")]
     ExternalService(String),
+
+    #[error("Rate limited: {0}")]
+    RateLimited(String),
 }

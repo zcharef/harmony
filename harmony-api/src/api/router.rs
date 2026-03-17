@@ -6,7 +6,7 @@ use axum::{
     Router,
     http::{HeaderValue, Method, header},
     middleware,
-    routing::{get, patch, post},
+    routing::{delete, get, patch, post},
 };
 use sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
 use tower_http::{
@@ -81,10 +81,23 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/servers/{id}/invites",
             post(handlers::invites::create_invite),
         )
-        // Members (join + list)
+        // Members (join + list + kick)
         .route(
             "/v1/servers/{id}/members",
             post(handlers::invites::join_server).get(handlers::members::list_members),
+        )
+        .route(
+            "/v1/servers/{id}/members/{user_id}",
+            delete(handlers::members::kick_member),
+        )
+        // Bans (moderation)
+        .route(
+            "/v1/servers/{id}/bans",
+            post(handlers::bans::ban_member).get(handlers::bans::list_bans),
+        )
+        .route(
+            "/v1/servers/{id}/bans/{user_id}",
+            delete(handlers::bans::unban_member),
         )
         // Messages
         .route(

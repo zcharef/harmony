@@ -64,10 +64,7 @@ impl ChannelService {
     ///
     /// # Errors
     /// Returns a repository error on failure.
-    pub async fn list_for_server(
-        &self,
-        server_id: &ServerId,
-    ) -> Result<Vec<Channel>, DomainError> {
+    pub async fn list_for_server(&self, server_id: &ServerId) -> Result<Vec<Channel>, DomainError> {
         self.repo.list_for_server(server_id).await
     }
 

@@ -7,7 +7,7 @@ use rand::Rng;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Invite, InviteCode, ServerId, UserId};
-use crate::domain::ports::{InviteRepository, MemberRepository};
+use crate::domain::ports::{BanRepository, InviteRepository, MemberRepository};
 
 /// Length of generated invite codes (alphanumeric).
 const INVITE_CODE_LENGTH: usize = 8;
@@ -21,6 +21,7 @@ const INVITE_CODE_CHARSET: &[u8] =
 pub struct InviteService {
     invite_repo: Arc<dyn InviteRepository>,
     member_repo: Arc<dyn MemberRepository>,
+    ban_repo: Arc<dyn BanRepository>,
 }
 
 impl InviteService {
@@ -28,10 +29,12 @@ impl InviteService {
     pub fn new(
         invite_repo: Arc<dyn InviteRepository>,
         member_repo: Arc<dyn MemberRepository>,
+        ban_repo: Arc<dyn BanRepository>,
     ) -> Self {
         Self {
             invite_repo,
             member_repo,
+            ban_repo,
         }
     }
 
@@ -111,6 +114,14 @@ impl InviteService {
         if !invite.is_valid() {
             return Err(DomainError::ValidationError(
                 "Invite is expired or has reached its maximum uses".to_string(),
+            ));
+        }
+
+        let is_banned = self.ban_repo.is_banned(&invite.server_id, user_id).await?;
+
+        if is_banned {
+            return Err(DomainError::Forbidden(
+                "You are banned from this server".to_string(),
             ));
         }
 

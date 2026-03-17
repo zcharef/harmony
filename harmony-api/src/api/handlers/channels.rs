@@ -29,10 +29,20 @@ use crate::domain::models::{ChannelId, ServerId};
 )]
 #[tracing::instrument(skip(state))]
 pub async fn list_channels(
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
     ApiPath(server_id): ApiPath<ServerId>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let is_member = state
+        .member_repository()
+        .is_member(&server_id, &user_id)
+        .await?;
+    if !is_member {
+        return Err(ApiError::forbidden(
+            "You must be a server member to view channels",
+        ));
+    }
+
     let channels = state.channel_service().list_for_server(&server_id).await?;
 
     Ok((StatusCode::OK, Json(ChannelListResponse::from(channels))))
@@ -57,11 +67,18 @@ pub async fn list_channels(
 )]
 #[tracing::instrument(skip(state, req))]
 pub async fn create_channel(
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
     ApiPath(server_id): ApiPath<ServerId>,
     ApiJson(req): ApiJson<CreateChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let server = state.server_service().get_by_id(&server_id).await?;
+    if server.owner_id != user_id {
+        return Err(ApiError::forbidden(
+            "Only the server owner can create channels",
+        ));
+    }
+
     let channel = state
         .channel_service()
         .create_channel(server_id, req.name, req.channel_type)
@@ -100,11 +117,18 @@ pub struct ChannelPathParams {
 )]
 #[tracing::instrument(skip(state, req))]
 pub async fn update_channel(
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
     ApiPath(params): ApiPath<ChannelPathParams>,
     ApiJson(req): ApiJson<UpdateChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let server = state.server_service().get_by_id(&params.id).await?;
+    if server.owner_id != user_id {
+        return Err(ApiError::forbidden(
+            "Only the server owner can update channels",
+        ));
+    }
+
     let channel = state
         .channel_service()
         .update_channel(&params.channel_id, req.name, req.topic)
@@ -135,10 +159,17 @@ pub async fn update_channel(
 )]
 #[tracing::instrument(skip(state))]
 pub async fn delete_channel(
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
     ApiPath(params): ApiPath<ChannelPathParams>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let server = state.server_service().get_by_id(&params.id).await?;
+    if server.owner_id != user_id {
+        return Err(ApiError::forbidden(
+            "Only the server owner can delete channels",
+        ));
+    }
+
     state
         .channel_service()
         .delete_channel(&params.channel_id)

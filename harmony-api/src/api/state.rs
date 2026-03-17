@@ -6,7 +6,7 @@ use jsonwebtoken::DecodingKey;
 use secrecy::SecretString;
 use sqlx::PgPool;
 
-use crate::domain::ports::MemberRepository;
+use crate::domain::ports::{BanRepository, MemberRepository};
 use crate::domain::services::{
     ChannelService, InviteService, MessageService, ProfileService, ServerService,
 };
@@ -38,6 +38,8 @@ pub struct AppState {
     channel_service: Arc<ChannelService>,
     /// Member repository (accessed directly for simple queries; invite logic lives in `InviteService`).
     member_repository: Arc<dyn MemberRepository>,
+    /// Ban repository (accessed directly by moderation handlers).
+    ban_repository: Arc<dyn BanRepository>,
 }
 
 // WHY: Manual Debug because `dyn MemberRepository` needs explicit impl through Arc.
@@ -52,6 +54,7 @@ impl std::fmt::Debug for AppState {
             .field("invite_service", &self.invite_service)
             .field("channel_service", &self.channel_service)
             .field("member_repository", &self.member_repository)
+            .field("ban_repository", &self.ban_repository)
             .finish()
     }
 }
@@ -72,6 +75,7 @@ impl AppState {
         invite_service: Arc<InviteService>,
         channel_service: Arc<ChannelService>,
         member_repository: Arc<dyn MemberRepository>,
+        ban_repository: Arc<dyn BanRepository>,
     ) -> Self {
         Self {
             pool,
@@ -85,6 +89,7 @@ impl AppState {
             invite_service,
             channel_service,
             member_repository,
+            ban_repository,
         }
     }
 
@@ -122,5 +127,11 @@ impl AppState {
     #[must_use]
     pub fn member_repository(&self) -> &dyn MemberRepository {
         &*self.member_repository
+    }
+
+    /// Access the ban repository directly (moderation handlers).
+    #[must_use]
+    pub fn ban_repository(&self) -> &dyn BanRepository {
+        &*self.ban_repository
     }
 }

@@ -73,7 +73,7 @@ pub async fn send_message(
 )]
 #[tracing::instrument(skip(state))]
 pub async fn list_messages(
-    AuthUser(_user_id): AuthUser,
+    AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
     ApiPath(channel_id): ApiPath<ChannelId>,
     Query(query): Query<MessageListQuery>,
@@ -94,7 +94,7 @@ pub async fn list_messages(
 
     let messages = state
         .message_service()
-        .list_for_channel(&channel_id, cursor, limit)
+        .list_for_channel(&channel_id, &user_id, cursor, limit)
         .await?;
 
     // WHY: If we received exactly `limit` rows, there may be more — provide a cursor.

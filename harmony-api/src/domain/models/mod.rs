@@ -2,6 +2,7 @@
 //!
 //! These are pure domain entities with no infrastructure dependencies.
 
+mod ban;
 mod channel;
 mod ids;
 mod invite;
@@ -10,6 +11,7 @@ mod message;
 mod profile;
 mod server;
 
+pub use ban::ServerBan;
 pub use channel::{Channel, ChannelType};
 pub use ids::{CategoryId, ChannelId, InviteCode, MessageId, RoleId, ServerId, UserId};
 pub use invite::Invite;

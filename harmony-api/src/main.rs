@@ -108,14 +108,21 @@ async fn init_app_state(config: &Config) -> AppState {
     let channel_repo = Arc::new(infra::postgres::PgChannelRepository::new(pool.clone()));
     let invite_repo = Arc::new(infra::postgres::PgInviteRepository::new(pool.clone()));
     let member_repo = Arc::new(infra::postgres::PgMemberRepository::new(pool.clone()));
+    let ban_repo = Arc::new(infra::postgres::PgBanRepository::new(pool.clone()));
 
     // Construct domain services (injected with repository ports)
     let profile_service = Arc::new(domain::services::ProfileService::new(profile_repo));
-    let server_service = Arc::new(domain::services::ServerService::new(server_repo));
-    let message_service = Arc::new(domain::services::MessageService::new(message_repo));
+    let server_service = Arc::new(domain::services::ServerService::new(server_repo.clone()));
+    let message_service = Arc::new(domain::services::MessageService::new(
+        message_repo,
+        channel_repo.clone(),
+        server_repo,
+        member_repo.clone(),
+    ));
     let invite_service = Arc::new(domain::services::InviteService::new(
         invite_repo,
         member_repo.clone(),
+        ban_repo.clone(),
     ));
     let channel_service = Arc::new(domain::services::ChannelService::new(channel_repo));
 
@@ -133,6 +140,7 @@ async fn init_app_state(config: &Config) -> AppState {
         invite_service,
         channel_service,
         member_repo,
+        ban_repo,
     )
 }
 
