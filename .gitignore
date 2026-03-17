@@ -52,6 +52,18 @@ harmony-app/playwright/.cache/
 tsc-cache/
 
 dev/active/
+dev/strategy/
+
+# Playwright MCP
+.playwright-mcp/
+
+# Root-level test artifacts
+/e2e_members_test.js
+/login-page-snapshot.md
+/test2_filled_form.md
+/pretest-login-page.png
+/package.json
+/pnpm-lock.yaml
 
 # Generated API client (OpenAPI SSoT)
 harmony-app/src/lib/api/

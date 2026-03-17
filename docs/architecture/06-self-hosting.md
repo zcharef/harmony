@@ -7,9 +7,8 @@
 | Mode | For | Infrastructure |
 |------|-----|----------------|
 | **Development** | You, right now | `supabase start` + `cargo run` + `pnpm dev` |
-| **Harmony Cloud (SaaS)** | Your paying customers | Supabase Cloud + Kubernetes (Helm) + LiveKit Cloud |
-| **Self-Hosted CE** | Open source users | Single `docker-compose.yml` on any VPS |
-| **Self-Hosted EE** | Enterprise customers | Same Docker Compose + license key env var |
+| **Harmony Cloud (SaaS)** | Managed hosting users | Supabase Cloud + Kubernetes (Helm) + LiveKit Cloud |
+| **Self-Hosted** | Open source users | Single `docker-compose.yml` on any VPS |
 
 ---
 
@@ -114,8 +113,6 @@ services:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-changeme}@postgres:5432/harmony
       SUPABASE_JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-token-with-at-least-32-characters-long}
       SUPABASE_URL: http://supabase-auth:9999
-      # EE only (optional):
-      # LICENSE_KEY: ${LICENSE_KEY}
 
   # ── LiveKit (Voice/Video) ──────────────────────────
   livekit:

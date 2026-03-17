@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">Harmony</h1>
   <p align="center">
-    <strong>The Discord that doesn't eat your RAM.</strong>
+    <strong>Your chat app shouldn't sell your data.</strong>
     <br />
     Open-source, privacy-first group communication — Discord's UX with Signal's principles.
   </p>
@@ -12,20 +12,39 @@
   </p>
 </p>
 
+> **Status:** Alpha — actively developed. Core chat works. Contributions welcome.
+
 ---
 
 ## Why Harmony?
 
-| | Discord | Revolt | **Harmony** |
-|--|---------|--------|-------------|
-| Client | Electron (~500 MB RAM) | Electron | **Tauri (~80 MB RAM)** |
-| Backend | Proprietary | Rust (open) | **Rust (open)** |
-| Self-hostable | No | Yes | **Yes** |
+| | Discord | Stoat (Revolt) | **Harmony** |
+|--|---------|----------------|-------------|
+| Client | Electron (~500 MB RAM) | Solid.js PWA | **Tauri native app (~80 MB RAM)** |
+| Backend | Proprietary | Rust (6 microservices) | **Rust (single binary)** |
+| Database | Proprietary | MongoDB + Redis + RabbitMQ | **PostgreSQL only** |
+| Self-host complexity | N/A | 6 services + MongoDB + Redis + RabbitMQ + MinIO | **`docker compose up` (PostgreSQL only)** |
+| Data privacy | Scans messages, shares data | Good | **No data collection, fully auditable** |
+| ID verification | Requiring it | No | **Never** |
 | E2EE | No | No | **Planned (DMs)** |
-| Business model | Nitro + Ads | Donations | **Open Core** |
-| Voice / Video | Proprietary | Vortex | **LiveKit** |
+| Sustainable business model | Nitro + Ads | Donations (unclear sustainability) | **Open source + SaaS** |
+| Voice / Video | Proprietary | Vortex | **LiveKit (open-source SFU)** |
 
-**Open Core (GitLab model):** Community Edition is fully open source under AGPL-3.0. Enterprise features (SSO, audit logs) are sold separately.
+### Privacy that you can verify
+
+Your conversations are yours. Harmony is fully open source under AGPL-3.0 — you don't have to take our word for it, you can read every line of code that handles your data. We don't scan your messages, sell your data to advertisers, train AI on your conversations, or require ID verification to use the app. Chatting with your friends or running your community shouldn't cost you your privacy.
+
+### Self-hosting that actually works
+
+Other alternatives require you to deploy and maintain MongoDB, Redis, RabbitMQ, MinIO, and half a dozen interconnected services just to send a message. Harmony runs on PostgreSQL. That's it. One database, one API binary, one `docker compose up`. If you can run Postgres, you can run Harmony.
+
+### Built to last
+
+Open source projects that rely on donations alone often struggle to survive long-term. Harmony is designed as a sustainable business from day one: a generous free tier for everyone, optional cosmetics for supporters, and managed cloud hosting for those who prefer convenience. Your community platform shouldn't disappear because funding dried up.
+
+### For teams, too
+
+Harmony isn't just for gaming communities. Small teams and co-workers who want private group chat without Slack's per-seat pricing or Microsoft Teams' bloat can self-host Harmony for free. Full features, unlimited users, zero cost.
 
 ---
 
@@ -39,7 +58,7 @@
 │  │  ├─ Generated TypeScript API client   │  │
 │  │  ├─ TanStack Query                    │  │
 │  │  ├─ Zustand                           │  │
-│  │  └─ Shadcn UI + Tailwind             │  │
+│  │  └─ HeroUI + Tailwind               │  │
 │  └──────────────┬─────────────────────────┘  │
 │                 │ HTTP (Bearer JWT)           │
 │  ┌──────────────┴─────────────────────────┐  │
@@ -71,6 +90,7 @@
 - **Hexagonal architecture** — Domain logic has zero infrastructure imports. Swap the DB without touching business rules.
 - **Supabase Realtime** for push — no custom WebSocket/SSE server. Writes go through REST; Supabase pushes changes to clients.
 - **RFC 9457** — All API errors are machine-readable `ProblemDetails` JSON.
+- **Single binary** — The API is one Rust binary. No microservice orchestration, no message queues, no cache servers. Simpler to deploy, debug, and maintain.
 
 > Full architecture docs: [`docs/architecture/`](docs/architecture/) · ADRs: [`docs/adr/`](docs/adr/)
 
@@ -137,15 +157,15 @@ harmony/
 ├── harmony-app/         Tauri desktop app (React 19 + Vite)
 │   ├── src/
 │   │   ├── features/    Feature-first business domains
-│   │   ├── components/  UI primitives (Shadcn) + shared + layout
+│   │   ├── components/  UI primitives (HeroUI) + shared + layout
 │   │   └── lib/         Generated API client, utils
 │   └── src-tauri/       Tauri Rust runtime
 │
 ├── supabase/            Supabase config + PostgreSQL migrations
 │
 └── docs/
-    ├── architecture/    System design (8 documents)
-    └── adr/             Architecture Decision Records (10 ADRs)
+    ├── architecture/    System design documents
+    └── adr/             Architecture Decision Records
 ```
 
 ---
@@ -158,6 +178,10 @@ Harmony is designed to be self-hosted with a single command:
 docker compose up
 ```
 
+No MongoDB. No Redis. No RabbitMQ. No MinIO. Just PostgreSQL and one API binary.
+
+Self-hosting gives you the complete product with no feature restrictions. Unlimited users, unlimited history, all features. Your server, your rules.
+
 Full guide: [`docs/architecture/06-self-hosting.md`](docs/architecture/06-self-hosting.md)
 
 ---
@@ -167,7 +191,7 @@ Full guide: [`docs/architecture/06-self-hosting.md`](docs/architecture/06-self-h
 | Layer | Technology |
 |-------|-----------|
 | Desktop client | Tauri 2 (Rust + WebView) |
-| Frontend | React 19, Vite, TypeScript, Tailwind, Shadcn UI |
+| Frontend | React 19, Vite, TypeScript, Tailwind, HeroUI |
 | State management | TanStack Query (server), Zustand (client) |
 | Backend | Rust, Axum 0.8, SQLx |
 | Database | PostgreSQL (via Supabase) |
@@ -180,31 +204,18 @@ Full guide: [`docs/architecture/06-self-hosting.md`](docs/architecture/06-self-h
 
 ---
 
-## Open Core Model
-
-| | Community (CE) | Enterprise (EE) | Harmony Cloud |
-|--|----------------|-----------------|---------------|
-| License | AGPL-3.0 | Proprietary | EE on our infra |
-| Core features | All | All | All |
-| SSO / SAML | — | Yes | Yes (Business plan) |
-| Audit logs | Basic | Advanced | Advanced |
-| Priority support | — | Yes | Yes |
-| Cost | Free | License fee | [Subscription](https://harmony.app) |
-
----
-
 ## Roadmap
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| **0 — Walking Skeleton** | Sign up, create server, send message | In progress |
-| **1 — Real-Time** | Two users chatting live | Planned |
-| **2 — Roles & DMs** | Permissions, private messages | Planned |
-| **3 — Voice & Files** | LiveKit voice/video, file uploads | Planned |
-| **4 — SaaS Launch** | Harmony Cloud, subscriptions | Planned |
-| **5 — Enterprise** | SSO, audit logs, mobile app, E2EE | Planned |
+| **0 — Walking Skeleton** | Sign up, create server, send message | Done |
+| **1 — Real-Time** | Two users chatting live, invites, presence | Done |
+| **2 — Roles & DMs** | Permissions, private messages | In progress |
+| **3 — Voice & Files** | LiveKit voice/video, file uploads, public beta | Planned |
+| **4 — SaaS Launch** | Harmony Cloud, server discovery, push notifications | Planned |
+| **5 — Growth** | E2EE, mobile app, web client, bot API | Planned |
 
-Full roadmap: [`docs/architecture/07-roadmap.md`](docs/architecture/07-roadmap.md)
+> Full roadmap: [`docs/architecture/07-roadmap.md`](docs/architecture/07-roadmap.md)
 
 ---
 
@@ -227,6 +238,4 @@ Found a vulnerability? Please report it responsibly. See [`SECURITY.md`](SECURIT
 
 ## License
 
-Harmony Community Edition is licensed under [AGPL-3.0](LICENSE).
-
-Enterprise modules (when released) will be under a separate proprietary license.
+Harmony is licensed under [AGPL-3.0](LICENSE). You can use, modify, and self-host it freely. If you run a modified version as a network service, you must release your source code.

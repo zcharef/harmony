@@ -49,7 +49,7 @@ When a project uses three styling approaches, developers must learn all three, c
 </button>
 ```
 
-**Exception:** Shadcn UI components in `src/components/ui/` may use inline `style={{}}` for Radix UI positioning requirements (e.g., dropdown menus, popovers, tooltips). These are library-internal concerns, not application styling.
+**Exception:** HeroUI components may use inline `style={{}}` for positioning requirements (e.g., dropdown menus, popovers, tooltips). These are library-internal concerns, not application styling.
 
 **Banned in application code:**
 - `style={{}}` inline styles

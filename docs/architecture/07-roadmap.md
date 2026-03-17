@@ -2,7 +2,7 @@
 
 ---
 
-## Phase 0: Walking Skeleton (Current → Week 2)
+## Phase 0: Walking Skeleton (Done)
 
 > **Goal:** A user can sign up, create a server, and send a text message.
 
@@ -35,7 +35,7 @@ You can open the Tauri app, log in, create a server, and chat with yourself in #
 
 ---
 
-## Phase 1: Real-Time & Multi-User (Weeks 3–5)
+## Phase 1: Real-Time & Multi-User (Done)
 
 > **Goal:** Two users can chat in real-time.
 
@@ -59,7 +59,7 @@ You invite a friend. They join your server. You chat in real-time. Messages appe
 
 ---
 
-## Phase 2: Roles, Permissions & DMs (Weeks 6–9)
+## Phase 2: Roles, Permissions & DMs
 
 > **Goal:** Server administration and private messaging.
 
@@ -90,7 +90,7 @@ Server owners can manage roles and permissions. Users can DM each other. Online 
 
 ---
 
-## Phase 3: Voice, Files & Polish (Weeks 10–14)
+## Phase 3: Voice, Files & Polish
 
 > **Goal:** Feature parity with a basic Discord experience.
 
@@ -132,53 +132,66 @@ Public beta. Users can text chat, voice chat, share files, and manage servers. S
 
 ---
 
-## Phase 4: SaaS Launch & Monetization (Weeks 15–20)
+## Phase 4: SaaS Launch
 
-> **Goal:** Revenue starts flowing.
+> **Goal:** Harmony Cloud goes live. First revenue.
 
 ### Product
-- [ ] Harmony Cloud launch (hosted SaaS)
-- [ ] Stripe/LemonSqueezy integration for subscriptions
-- [ ] Free tier limits (1 server, 100 members, 7-day history)
-- [ ] Pro plan ($5/server/month)
-- [ ] Usage metering (storage, member count)
-- [ ] Landing page (harmony.app)
-- [ ] Tauri app download page
+- [ ] Harmony Cloud launch (harmony.app)
+- [ ] Landing page and download page
+- [ ] Free and Pro SaaS tiers
+- [ ] Subscription integration
+- [ ] Plan enforcement (member limits, storage, history)
 
 ### Infrastructure
-- [ ] Kubernetes deployment (Helm charts exist)
+- [ ] Production deployment
 - [ ] Supabase Cloud project setup
 - [ ] LiveKit Cloud or self-hosted LiveKit
 - [ ] CDN for file delivery
+- [ ] Push notification infrastructure
 - [ ] Monitoring dashboards
 
+### SaaS Network Features
+- [ ] Server discovery directory (browse public servers)
+- [ ] Cross-server friend system
+- [ ] Verified badges
+
 ### Marketing
-- [ ] Reddit launch posts (r/selfhosted, r/privacy, r/rust, r/technology)
-- [ ] Hacker News "Show HN" post
-- [ ] GitHub README with screenshots/GIF
-- [ ] Comparison page: Harmony vs Discord vs Revolt vs Matrix
+- [ ] Reddit launch (r/selfhosted, r/privacy, r/rust, r/opensource)
+- [ ] Hacker News "Show HN"
+- [ ] Comparison page (Harmony vs Discord vs Revolt vs Matrix)
 
 ### Milestone
-Harmony Cloud is live. Users can sign up, create servers, and pay for Pro plans. Self-hosted version is available on GitHub.
+Harmony Cloud is live. Users can sign up, create servers, and use the product. Self-hosted version is available on GitHub.
 
 ---
 
-## Phase 5: Enterprise & Growth (Months 6+)
+## Phase 4.5: Cosmetics & Boosts
 
-> **Goal:** Enterprise revenue and community growth.
+> **Goal:** Individual and community monetization.
 
-- [ ] `harmony-enterprise` crate (SSO, audit logs, compliance)
-- [ ] SAML/OIDC integration for SSO
-- [ ] Advanced audit logs (who did what, when)
-- [ ] Data retention policies (auto-delete old messages)
+- [ ] Harmony+ subscription system (animated avatars, badges, themes)
+- [ ] Server Boost system (community-funded server upgrades)
+- [ ] Custom emoji system (global emoji for Harmony+ subscribers)
+- [ ] Profile customization (banners, themes)
+
+### Milestone
+Users can subscribe to Harmony+. Communities can boost servers for better quality.
+
+---
+
+## Phase 5: Growth & Enterprise
+
+> **Goal:** Expand the platform. Enterprise as secondary revenue.
+
 - [ ] E2EE for DMs (Signal Protocol via libsignal)
-- [ ] Web client (cloud.harmony.app) — for users who don't want to install the desktop app
+- [ ] Web client (cloud.harmony.app)
 - [ ] Mobile app (Tauri Mobile or React Native)
 - [ ] Threads / forum channels
 - [ ] Bot API (programmable bots, webhooks)
-- [ ] Custom emoji system
-- [ ] Patron tier (animated avatars, badges)
 - [ ] Plugin/extension system
+- [ ] Enterprise features: SSO (SAML/OIDC), audit logs, compliance export
+- [ ] Enterprise self-hosted license system
 
 ---
 
@@ -186,7 +199,7 @@ Harmony Cloud is live. Users can sign up, create servers, and pay for Pro plans.
 
 1. **Text chat must be perfect before adding voice.** A laggy chat kills the product.
 2. **Self-hosting must be easy.** One `docker compose up`. If it takes more than 5 minutes, you've lost the user.
-3. **Don't build EE before someone asks for it.** Revenue starts with SaaS, not enterprise licenses.
+3. **Don't build enterprise features before someone asks for it.** Revenue starts with SaaS, not licenses.
 4. **Ship weekly.** Small, frequent releases beat big, delayed ones.
 5. **Dogfood it.** Use Harmony for your own dev communication as soon as Phase 1 is complete.
 

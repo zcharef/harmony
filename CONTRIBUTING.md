@@ -171,4 +171,4 @@ All database schema changes follow the Supabase local-first workflow (ADR-043).
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the project's AGPL-3.0 license (for Community Edition code). See [LICENSE](./LICENSE).
+By contributing, you agree that your contributions will be licensed under the project's AGPL-3.0 license. See [LICENSE](./LICENSE).

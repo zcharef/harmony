@@ -2,20 +2,21 @@
 
 > **Working Name:** Harmony
 > **Tagline:** "The Discord that doesn't eat your RAM."
-> **Vision:** Open-source, privacy-first group communication — Discord's UX with Signal's principles and GitLab's business model.
+> **Vision:** Open-source, privacy-first group communication — Discord's UX with Signal's principles.
 
 ---
 
 ## 1. Product Positioning
 
-| Attribute | Discord | Revolt | **Harmony** |
-|-----------|---------|--------|-------------|
-| Client | Electron (~500MB RAM) | Electron | **Tauri (~80MB RAM)** |
-| Backend | Proprietary | Rust (open) | **Rust (open)** |
-| Self-hostable | No | Yes | **Yes** |
-| E2EE | No | No | **Planned (DMs)** |
-| Business model | Nitro + Ads | Donations | **Open Core (GitLab model)** |
-| Voice/Video | Proprietary | Vortex | **LiveKit** |
+| Attribute | Discord | Stoat (Revolt) | **Harmony** |
+|-----------|---------|----------------|-------------|
+| Client | Electron (~500MB RAM) | Solid.js PWA | **Tauri native (~80MB RAM)** |
+| Backend | Proprietary | Rust (6 microservices) | **Rust (single binary)** |
+| Database | Proprietary | MongoDB + Redis + RabbitMQ | **PostgreSQL only** |
+| Self-host complexity | N/A | 6 services + Mongo + Redis + RabbitMQ + MinIO | **`docker compose up` (Postgres only)** |
+| Data privacy | Scans messages, shares data | Good | **No data collection** |
+| Business model | Nitro + Ads | Donations | **Open Source + SaaS** |
+| Voice/Video | Proprietary | Vortex | **LiveKit (open-source SFU)** |
 
 ---
 
@@ -29,7 +30,7 @@
 │  │  ├─ Generated TypeScript API client (OpenAPI SSoT)│  │
 │  │  ├─ TanStack Query (server state cache)           │  │
 │  │  ├─ Zustand (client state)                        │  │
-│  │  └─ Shadcn UI + Tailwind                          │  │
+│  │  └─ HeroUI + Tailwind                          │  │
 │  └──────────────────┬────────────────────────────────┘  │
 │                     │ HTTP (Bearer Token)                │
 │  ┌──────────────────┴────────────────────────────────┐  │
@@ -100,7 +101,7 @@ harmony/
 ├── harmony-app/          # Tauri desktop app (React + Vite)
 │   ├── src/
 │   │   ├── features/     # Feature-first business domains
-│   │   ├── components/   # UI primitives (Shadcn) + shared + layout
+│   │   ├── components/   # UI primitives (HeroUI) + shared + layout
 │   │   └── lib/          # Generated API client, utils
 │   └── src-tauri/        # Tauri Rust runtime
 │
@@ -130,25 +131,24 @@ Federation (connecting self-hosted instances) is explicitly **out of scope** and
 
 1. **Privacy promise:** Self-hosters want complete control. Their instance should not "phone home."
 2. **Simplicity:** Federation (ActivityPub, Matrix protocol) is a multi-year engineering effort.
-3. **Business model:** Drives users toward Harmony Cloud for convenience.
+3. **Convenience:** Drives users toward Harmony Cloud for managed hosting and network features.
 
 ---
 
-## 6. Open Core Model
+## 6. Open Source Model
 
 See [05-open-core.md](./05-open-core.md) for full details.
 
 **Summary:**
 
-| | Community Edition (CE) | Enterprise Edition (EE) | Harmony Cloud |
-|--|------------------------|------------------------|---------------|
-| Code | Open Source (AGPL-3.0) | Proprietary modules | EE on Harmony infra |
-| Hosting | User's VPS | User's VPS | Harmony-managed |
-| Core features | All | All | All |
-| SSO / SAML | — | Yes | Yes (Pro plan) |
-| Audit logs | Basic | Advanced | Advanced |
-| Priority support | — | Yes | Yes |
-| Cost | Free | License fee | Subscription |
+| | Self-Hosted (Free) | Harmony Cloud (SaaS) |
+|--|-------------------|----------------------|
+| License | AGPL-3.0 | Hosted |
+| Core features | All | All |
+| Feature restrictions | None | Plan-based limits |
+| Network features (discovery, friends, push) | — | Yes |
+| Hosting | Your infrastructure | Harmony-managed |
+| Cost | Free | Free tier + paid plans |
 
 ---
 
@@ -161,6 +161,6 @@ See [05-open-core.md](./05-open-core.md) for full details.
 | [02-api-design.md](./02-api-design.md) | REST API endpoints, DTOs, error contracts |
 | [03-realtime.md](./03-realtime.md) | Supabase Realtime architecture, LiveKit voice/video |
 | [04-auth-and-permissions.md](./04-auth-and-permissions.md) | Auth flow, RBAC, permission bitmasks |
-| [05-open-core.md](./05-open-core.md) | Business model, CE vs EE, monetization |
+| [05-open-core.md](./05-open-core.md) | Open source model, self-hosted vs SaaS, licensing |
 | [06-self-hosting.md](./06-self-hosting.md) | Docker Compose, deployment, ops |
 | [07-roadmap.md](./07-roadmap.md) | Phased development plan, milestones |
