@@ -8,7 +8,7 @@ use sqlx::PgPool;
 
 use crate::domain::ports::{BanRepository, MemberRepository};
 use crate::domain::services::{
-    ChannelService, InviteService, MessageService, ProfileService, ServerService,
+    ChannelService, InviteService, MessageService, ModerationService, ProfileService, ServerService,
 };
 
 /// Application state shared across all handlers.
@@ -36,6 +36,8 @@ pub struct AppState {
     invite_service: Arc<InviteService>,
     /// Channel domain service.
     channel_service: Arc<ChannelService>,
+    /// Moderation domain service (ban/kick/unban).
+    moderation_service: Arc<ModerationService>,
     /// Member repository (accessed directly for simple queries; invite logic lives in `InviteService`).
     member_repository: Arc<dyn MemberRepository>,
     /// Ban repository (accessed directly by moderation handlers).
@@ -53,6 +55,7 @@ impl std::fmt::Debug for AppState {
             .field("message_service", &self.message_service)
             .field("invite_service", &self.invite_service)
             .field("channel_service", &self.channel_service)
+            .field("moderation_service", &self.moderation_service)
             .field("member_repository", &self.member_repository)
             .field("ban_repository", &self.ban_repository)
             .finish()
@@ -74,6 +77,7 @@ impl AppState {
         message_service: Arc<MessageService>,
         invite_service: Arc<InviteService>,
         channel_service: Arc<ChannelService>,
+        moderation_service: Arc<ModerationService>,
         member_repository: Arc<dyn MemberRepository>,
         ban_repository: Arc<dyn BanRepository>,
     ) -> Self {
@@ -88,6 +92,7 @@ impl AppState {
             message_service,
             invite_service,
             channel_service,
+            moderation_service,
             member_repository,
             ban_repository,
         }
@@ -121,6 +126,12 @@ impl AppState {
     #[must_use]
     pub fn channel_service(&self) -> &ChannelService {
         &self.channel_service
+    }
+
+    /// Access the moderation domain service.
+    #[must_use]
+    pub fn moderation_service(&self) -> &ModerationService {
+        &self.moderation_service
     }
 
     /// Access the member repository directly (simple queries; invite logic in `InviteService`).

@@ -22,6 +22,18 @@ use secrecy::{ExposeSecret, SecretString};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
+use crate::domain::errors::DomainError;
+
+/// Convert a sqlx error to a `DomainError::Internal`, logging the real error.
+///
+/// WHY: Centralizes DB error logging so every repository adapter
+/// automatically traces the raw sqlx error at the point of failure.
+#[allow(clippy::needless_pass_by_value)] // WHY: map_err provides owned values
+pub(crate) fn db_err(e: sqlx::Error) -> DomainError {
+    tracing::error!(error = %e, "Database query failed");
+    DomainError::Internal(e.to_string())
+}
+
 /// Create a connection pool to the Supabase Postgres database.
 ///
 /// # Panics

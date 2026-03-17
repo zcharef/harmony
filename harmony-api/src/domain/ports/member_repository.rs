@@ -17,7 +17,9 @@ pub trait MemberRepository: Send + Sync + std::fmt::Debug {
     /// Add a user as a member of a server.
     async fn add_member(&self, server_id: &ServerId, user_id: &UserId) -> Result<(), DomainError>;
 
-    /// Remove a user from a server. Returns `Ok(())` even if the user was not a member.
+    /// Remove a user from a server.
+    ///
+    /// Returns `DomainError::NotFound` if the user was not a member.
     async fn remove_member(
         &self,
         server_id: &ServerId,

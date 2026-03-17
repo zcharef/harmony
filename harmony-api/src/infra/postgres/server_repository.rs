@@ -57,11 +57,7 @@ impl ServerRepository for PgServerRepository {
         let owner_uuid = owner_id.0;
 
         // Transaction: insert server + server_member + #general channel atomically
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
 
         // 1. Insert the server
         let server_row = sqlx::query!(
@@ -82,7 +78,7 @@ impl ServerRepository for PgServerRepository {
         )
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let server_id = server_row.id;
 
@@ -97,7 +93,7 @@ impl ServerRepository for PgServerRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         // 3. Create the default #general channel
         sqlx::query!(
@@ -109,11 +105,9 @@ impl ServerRepository for PgServerRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
-        tx.commit()
-            .await
-            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        tx.commit().await.map_err(super::db_err)?;
 
         let row = ServerRow {
             id: server_row.id,
@@ -150,7 +144,7 @@ impl ServerRepository for PgServerRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let servers = rows
             .into_iter()
@@ -191,7 +185,7 @@ impl ServerRepository for PgServerRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(row.map(|r| {
             ServerRow {

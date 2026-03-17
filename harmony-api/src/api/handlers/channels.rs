@@ -89,7 +89,7 @@ pub async fn create_channel(
 
 /// Path parameters for channel-specific operations.
 #[derive(Debug, Deserialize)]
-pub struct ChannelPathParams {
+pub struct ChannelPath {
     pub id: ServerId,
     pub channel_id: ChannelId,
 }
@@ -119,7 +119,7 @@ pub struct ChannelPathParams {
 pub async fn update_channel(
     AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
-    ApiPath(params): ApiPath<ChannelPathParams>,
+    ApiPath(params): ApiPath<ChannelPath>,
     ApiJson(req): ApiJson<UpdateChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let server = state.server_service().get_by_id(&params.id).await?;
@@ -161,7 +161,7 @@ pub async fn update_channel(
 pub async fn delete_channel(
     AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
-    ApiPath(params): ApiPath<ChannelPathParams>,
+    ApiPath(params): ApiPath<ChannelPath>,
 ) -> Result<impl IntoResponse, ApiError> {
     let server = state.server_service().get_by_id(&params.id).await?;
     if server.owner_id != user_id {

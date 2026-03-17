@@ -68,7 +68,7 @@ impl MemberRepository for PgMemberRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let members = rows
             .into_iter()
@@ -105,7 +105,7 @@ impl MemberRepository for PgMemberRepository {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(result.exists)
     }
@@ -124,7 +124,7 @@ impl MemberRepository for PgMemberRepository {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(())
     }
@@ -137,7 +137,7 @@ impl MemberRepository for PgMemberRepository {
         let sid = server_id.0;
         let uid = user_id.0;
 
-        sqlx::query!(
+        let result = sqlx::query!(
             r#"
             DELETE FROM server_members
             WHERE server_id = $1 AND user_id = $2
@@ -147,7 +147,14 @@ impl MemberRepository for PgMemberRepository {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
+
+        if result.rows_affected() == 0 {
+            return Err(DomainError::NotFound {
+                resource_type: "ServerMember",
+                id: format!("server={}, user={}", server_id, user_id),
+            });
+        }
 
         Ok(())
     }

@@ -117,6 +117,11 @@ impl InviteService {
             ));
         }
 
+        // WHY: TOCTOU race exists between this ban check and add_member below.
+        // A user could be banned between these two calls. This is acceptable:
+        // the UNIQUE constraint on server_members prevents duplicates, and the
+        // ban check is defense-in-depth. A concurrent ban will still atomically
+        // remove the membership via ban_user's transaction.
         let is_banned = self.ban_repo.is_banned(&invite.server_id, user_id).await?;
 
         if is_banned {
@@ -135,9 +140,8 @@ impl InviteService {
             ));
         }
 
-        self.invite_repo.increment_use_count(code).await?;
-        self.member_repo
-            .add_member(&invite.server_id, user_id)
+        self.invite_repo
+            .complete_join(code, &invite.server_id, user_id)
             .await?;
 
         Ok(invite.server_id)

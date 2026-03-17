@@ -116,7 +116,7 @@ async fn init_app_state(config: &Config) -> AppState {
     let message_service = Arc::new(domain::services::MessageService::new(
         message_repo,
         channel_repo.clone(),
-        server_repo,
+        server_repo.clone(),
         member_repo.clone(),
     ));
     let invite_service = Arc::new(domain::services::InviteService::new(
@@ -125,6 +125,11 @@ async fn init_app_state(config: &Config) -> AppState {
         ban_repo.clone(),
     ));
     let channel_service = Arc::new(domain::services::ChannelService::new(channel_repo));
+    let moderation_service = Arc::new(domain::services::ModerationService::new(
+        server_repo,
+        ban_repo.clone(),
+        member_repo.clone(),
+    ));
 
     tracing::info!("Domain services initialized");
 
@@ -139,6 +144,7 @@ async fn init_app_state(config: &Config) -> AppState {
         message_service,
         invite_service,
         channel_service,
+        moderation_service,
         member_repo,
         ban_repo,
     )

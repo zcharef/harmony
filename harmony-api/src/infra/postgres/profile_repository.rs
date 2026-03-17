@@ -103,7 +103,7 @@ impl ProfileRepository for PgProfileRepository {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let profile_row = ProfileRow {
             id: row.id,
@@ -140,7 +140,7 @@ impl ProfileRepository for PgProfileRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(row.map(|r| {
             ProfileRow {

@@ -58,11 +58,7 @@ impl BanRepository for PgBanRepository {
 
         // WHY: Transaction ensures ban + member removal are atomic.
         // INSERT ban first — if already banned, abort before touching membership.
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
 
         let row = sqlx::query!(
             r#"
@@ -87,7 +83,10 @@ impl BanRepository for PgBanRepository {
                     id: uid.to_string(),
                 }
             }
-            other => DomainError::Internal(other.to_string()),
+            other => {
+                tracing::error!(error = %other, "Database query failed");
+                DomainError::Internal(other.to_string())
+            }
         })?;
 
         // Remove membership (idempotent — OK if user already left)
@@ -101,11 +100,9 @@ impl BanRepository for PgBanRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
-        tx.commit()
-            .await
-            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        tx.commit().await.map_err(super::db_err)?;
 
         let ban = BanRow {
             server_id: row.server_id,
@@ -132,7 +129,7 @@ impl BanRepository for PgBanRepository {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         if result.rows_affected() == 0 {
             return Err(DomainError::NotFound {
@@ -158,7 +155,7 @@ impl BanRepository for PgBanRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let bans = rows
             .into_iter()
@@ -194,7 +191,7 @@ impl BanRepository for PgBanRepository {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(result.exists)
     }

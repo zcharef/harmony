@@ -77,7 +77,7 @@ impl InviteRepository for PgInviteRepository {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let invite_row = InviteRow {
             code: row.code,
@@ -112,7 +112,7 @@ impl InviteRepository for PgInviteRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(row.map(|r| {
             InviteRow {
@@ -126,33 +126,6 @@ impl InviteRepository for PgInviteRepository {
             }
             .into_invite()
         }))
-    }
-
-    async fn increment_use_count(&self, code: &InviteCode) -> Result<(), DomainError> {
-        let code_str = &code.0;
-
-        // Atomic: only increments if under the max_uses limit (or unlimited)
-        let result = sqlx::query!(
-            r#"
-            UPDATE invites
-            SET use_count = use_count + 1
-            WHERE code = $1
-              AND (max_uses IS NULL OR use_count < max_uses)
-            RETURNING code
-            "#,
-            code_str,
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
-
-        if result.is_none() {
-            return Err(DomainError::Conflict(
-                "invite has reached its maximum number of uses".to_string(),
-            ));
-        }
-
-        Ok(())
     }
 
     async fn list_by_server(&self, server_id: &ServerId) -> Result<Vec<Invite>, DomainError> {
@@ -176,7 +149,7 @@ impl InviteRepository for PgInviteRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let invites = rows
             .into_iter()
@@ -197,6 +170,61 @@ impl InviteRepository for PgInviteRepository {
         Ok(invites)
     }
 
+    async fn complete_join(
+        &self,
+        code: &InviteCode,
+        server_id: &ServerId,
+        user_id: &UserId,
+    ) -> Result<(), DomainError> {
+        let code_str = &code.0;
+        let sid = server_id.0;
+        let uid = user_id.0;
+
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
+
+        // WHY: Atomic increment — fails if invite is exhausted
+        let result = sqlx::query!(
+            r#"
+            UPDATE invites
+            SET use_count = use_count + 1
+            WHERE code = $1
+              AND (max_uses IS NULL OR use_count < max_uses)
+            RETURNING code
+            "#,
+            code_str,
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        if result.is_none() {
+            return Err(DomainError::Conflict(
+                "invite has reached its maximum number of uses".to_string(),
+            ));
+        }
+
+        sqlx::query!(
+            r#"
+            INSERT INTO server_members (server_id, user_id)
+            VALUES ($1, $2)
+            "#,
+            sid,
+            uid,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::Database(ref db_err) if db_err.is_unique_violation() => {
+                DomainError::Conflict("User is already a member of this server".to_string())
+            }
+            other => super::db_err(other),
+        })?;
+
+        tx.commit().await.map_err(super::db_err)?;
+
+        Ok(())
+    }
+
     async fn delete_by_code(&self, code: &InviteCode) -> Result<(), DomainError> {
         let code_str = &code.0;
 
@@ -209,7 +237,7 @@ impl InviteRepository for PgInviteRepository {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(())
     }

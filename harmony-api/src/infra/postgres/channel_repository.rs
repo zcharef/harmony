@@ -94,7 +94,7 @@ impl ChannelRepository for PgChannelRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let channels = rows
             .into_iter()
@@ -137,7 +137,7 @@ impl ChannelRepository for PgChannelRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(row.map(|r| {
             ChannelRow {
@@ -183,7 +183,7 @@ impl ChannelRepository for PgChannelRepository {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(ChannelRow {
             id: r.id,
@@ -233,7 +233,7 @@ impl ChannelRepository for PgChannelRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let r = row.ok_or_else(|| DomainError::NotFound {
             resource_type: "Channel",
@@ -272,7 +272,7 @@ impl ChannelRepository for PgChannelRepository {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         if result.rows_affected() == 0 {
             // Either channel doesn't exist, or it's the last one — check which.
@@ -302,7 +302,7 @@ impl ChannelRepository for PgChannelRepository {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(row.count)
     }

@@ -82,25 +82,9 @@ pub async fn kick_member(
     State(state): State<AppState>,
     ApiPath(path): ApiPath<MemberPath>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let server = state.server_service().get_by_id(&path.id).await?;
-
-    if server.owner_id != caller_id {
-        return Err(ApiError::forbidden(
-            "Only the server owner can kick members",
-        ));
-    }
-
-    if path.user_id == caller_id {
-        return Err(ApiError::forbidden("Cannot kick yourself"));
-    }
-
-    if path.user_id == server.owner_id {
-        return Err(ApiError::forbidden("Cannot kick the server owner"));
-    }
-
     state
-        .member_repository()
-        .remove_member(&path.id, &path.user_id)
+        .moderation_service()
+        .kick_member(&path.id, &path.user_id, &caller_id)
         .await?;
 
     Ok(StatusCode::NO_CONTENT)

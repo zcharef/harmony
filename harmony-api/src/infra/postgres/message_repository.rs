@@ -77,7 +77,7 @@ impl MessageRepository for PgMessageRepository {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let msg = MessageRow {
             id: row.id,
@@ -125,7 +125,7 @@ impl MessageRepository for PgMessageRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         let messages = rows
             .into_iter()
@@ -166,7 +166,7 @@ impl MessageRepository for PgMessageRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(row.map(|r| {
             MessageRow {
@@ -208,7 +208,7 @@ impl MessageRepository for PgMessageRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?
+        .map_err(super::db_err)?
         .ok_or_else(|| DomainError::NotFound {
             resource_type: "Message",
             id: message_id.to_string(),
@@ -240,7 +240,7 @@ impl MessageRepository for PgMessageRepository {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         if result.rows_affected() == 0 {
             return Err(DomainError::NotFound {
@@ -276,7 +276,7 @@ impl MessageRepository for PgMessageRepository {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(super::db_err)?;
 
         Ok(row.count)
     }

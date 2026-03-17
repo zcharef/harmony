@@ -32,13 +32,10 @@ pub async fn list_bans(
     State(state): State<AppState>,
     ApiPath(server_id): ApiPath<ServerId>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let server = state.server_service().get_by_id(&server_id).await?;
-
-    if server.owner_id != caller_id {
-        return Err(ApiError::forbidden("Only the server owner can view bans"));
-    }
-
-    let bans = state.ban_repository().list_bans(&server_id).await?;
+    let bans = state
+        .moderation_service()
+        .list_bans(&server_id, &caller_id)
+        .await?;
 
     Ok((StatusCode::OK, Json(BanListResponse::from_bans(bans))))
 }
@@ -69,30 +66,8 @@ pub async fn ban_member(
     ApiPath(server_id): ApiPath<ServerId>,
     ApiJson(req): ApiJson<BanUserRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let server = state.server_service().get_by_id(&server_id).await?;
-
-    if server.owner_id != caller_id {
-        return Err(ApiError::forbidden("Only the server owner can ban members"));
-    }
-
-    if req.user_id == caller_id {
-        return Err(ApiError::forbidden("Cannot ban yourself"));
-    }
-
-    if req.user_id == server.owner_id {
-        return Err(ApiError::forbidden("Cannot ban the server owner"));
-    }
-
-    if let Some(ref reason) = req.reason
-        && reason.len() > 512
-    {
-        return Err(ApiError::bad_request(
-            "Ban reason must not exceed 512 characters",
-        ));
-    }
-
     let ban = state
-        .ban_repository()
+        .moderation_service()
         .ban_user(&server_id, &req.user_id, &caller_id, req.reason)
         .await?;
 
@@ -132,17 +107,9 @@ pub async fn unban_member(
     State(state): State<AppState>,
     ApiPath(path): ApiPath<BanPath>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let server = state.server_service().get_by_id(&path.id).await?;
-
-    if server.owner_id != caller_id {
-        return Err(ApiError::forbidden(
-            "Only the server owner can unban members",
-        ));
-    }
-
     state
-        .ban_repository()
-        .unban_user(&path.id, &path.user_id)
+        .moderation_service()
+        .unban_user(&path.id, &path.user_id, &caller_id)
         .await?;
 
     Ok(StatusCode::NO_CONTENT)

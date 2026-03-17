@@ -153,10 +153,8 @@ impl From<DomainError> for ApiError {
             DomainError::ValidationError(msg) => ApiError::bad_request(msg),
             DomainError::Forbidden(msg) => ApiError::forbidden(msg),
             DomainError::Conflict(msg) => ApiError::conflict(msg),
-            DomainError::Internal(msg) => {
-                tracing::error!(error = %msg, "Internal domain error");
-                ApiError::internal("An internal error occurred")
-            }
+            // WHY: Already logged at the infrastructure layer (db_err, etc.)
+            DomainError::Internal(_) => ApiError::internal("An internal error occurred"),
             DomainError::ExternalService(msg) => ApiError::bad_gateway(msg),
             DomainError::RateLimited(msg) => ApiError::too_many_requests(msg),
         }
