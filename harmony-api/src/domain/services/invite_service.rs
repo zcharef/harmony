@@ -207,3 +207,88 @@ fn generate_invite_code() -> InviteCode {
         .collect();
     InviteCode::new(code)
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    // ── validate_invite_code ───────────────────────────────────────
+
+    #[test]
+    fn invite_code_valid_alphanumeric() {
+        assert!(validate_invite_code(&InviteCode::new("abc123XY".to_string())).is_ok());
+        assert!(validate_invite_code(&InviteCode::new("A".to_string())).is_ok());
+        assert!(validate_invite_code(&InviteCode::new("z".to_string())).is_ok());
+        assert!(validate_invite_code(&InviteCode::new("0".to_string())).is_ok());
+        assert!(validate_invite_code(&InviteCode::new("9".to_string())).is_ok());
+    }
+
+    #[test]
+    fn invite_code_max_length_boundary() {
+        // Exactly at limit: OK
+        let at_limit = "a".repeat(MAX_INVITE_CODE_LENGTH);
+        assert!(validate_invite_code(&InviteCode::new(at_limit)).is_ok());
+
+        // One over limit: rejected
+        let over_limit = "a".repeat(MAX_INVITE_CODE_LENGTH + 1);
+        assert!(validate_invite_code(&InviteCode::new(over_limit)).is_err());
+    }
+
+    #[test]
+    fn invite_code_empty_rejected() {
+        let result = validate_invite_code(&InviteCode::new(String::new()));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, DomainError::ValidationError(_)));
+    }
+
+    #[test]
+    fn invite_code_non_alphanumeric_rejected() {
+        assert!(validate_invite_code(&InviteCode::new("abc-123".to_string())).is_err()); // hyphen
+        assert!(validate_invite_code(&InviteCode::new("abc 123".to_string())).is_err()); // space
+        assert!(validate_invite_code(&InviteCode::new("abc_123".to_string())).is_err()); // underscore
+        assert!(validate_invite_code(&InviteCode::new("abc.123".to_string())).is_err()); // dot
+        assert!(validate_invite_code(&InviteCode::new("abc@123".to_string())).is_err()); // at
+        assert!(validate_invite_code(&InviteCode::new("abc!".to_string())).is_err()); // exclamation
+    }
+
+    #[test]
+    fn invite_code_unicode_rejected() {
+        assert!(validate_invite_code(&InviteCode::new("\u{00e9}".to_string())).is_err());
+        assert!(validate_invite_code(&InviteCode::new("\u{1f600}".to_string())).is_err());
+    }
+
+    // ── generate_invite_code ───────────────────────────────────────
+
+    #[test]
+    fn generated_code_has_correct_length() {
+        let code = generate_invite_code();
+        assert_eq!(code.0.len(), INVITE_CODE_LENGTH);
+    }
+
+    #[test]
+    fn generated_code_is_alphanumeric() {
+        // Run multiple times to increase confidence in randomness.
+        for _ in 0..20 {
+            let code = generate_invite_code();
+            assert!(
+                code.0.chars().all(|c| c.is_ascii_alphanumeric()),
+                "Generated code '{}' contains non-alphanumeric characters",
+                code.0,
+            );
+        }
+    }
+
+    #[test]
+    fn generated_code_passes_validation() {
+        for _ in 0..20 {
+            let code = generate_invite_code();
+            assert!(
+                validate_invite_code(&code).is_ok(),
+                "Generated code '{}' failed validation",
+                code.0,
+            );
+        }
+    }
+}

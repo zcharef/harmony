@@ -91,3 +91,77 @@ impl ServerService {
             })
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    // ── validate_server_name ───────────────────────────────────────
+
+    #[test]
+    fn server_name_valid() {
+        assert!(validate_server_name("My Server").is_ok());
+        assert!(validate_server_name("a").is_ok());
+        assert!(validate_server_name("Server 123!").is_ok());
+        assert!(validate_server_name("Caf\u{00e9}").is_ok()); // unicode allowed
+    }
+
+    #[test]
+    fn server_name_returns_trimmed() {
+        let result = validate_server_name("  My Server  ").unwrap();
+        assert_eq!(result, "My Server");
+    }
+
+    #[test]
+    fn server_name_empty_rejected() {
+        let result = validate_server_name("");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, DomainError::ValidationError(_)));
+    }
+
+    #[test]
+    fn server_name_whitespace_only_rejected() {
+        // After trim(), becomes empty.
+        assert!(validate_server_name("   ").is_err());
+        assert!(validate_server_name("\t\n").is_err());
+    }
+
+    #[test]
+    fn server_name_max_length_boundary() {
+        // Exactly at limit: OK
+        let at_limit = "a".repeat(MAX_SERVER_NAME_LENGTH);
+        assert!(validate_server_name(&at_limit).is_ok());
+
+        // One over limit: rejected
+        let over_limit = "a".repeat(MAX_SERVER_NAME_LENGTH + 1);
+        assert!(validate_server_name(&over_limit).is_err());
+    }
+
+    #[test]
+    fn server_name_control_chars_rejected() {
+        assert!(validate_server_name("Hello\x00World").is_err()); // null byte
+        assert!(validate_server_name("Hello\x01World").is_err()); // SOH
+        assert!(validate_server_name("Tab\x09Here").is_err()); // horizontal tab
+        assert!(validate_server_name("New\x0ALine").is_err()); // newline
+        assert!(validate_server_name("Return\x0DChar").is_err()); // carriage return
+        assert!(validate_server_name("\x1F").is_err()); // unit separator (last control char before space)
+    }
+
+    #[test]
+    fn server_name_space_is_allowed() {
+        // Space (0x20) is explicitly NOT a control character in this context.
+        assert!(validate_server_name("Hello World").is_ok());
+    }
+
+    #[test]
+    fn server_name_unicode_length_counted_by_chars() {
+        // Multi-byte characters should count as 1 char, not by byte length.
+        let name: String = "\u{1f600}".repeat(MAX_SERVER_NAME_LENGTH);
+        assert!(validate_server_name(&name).is_ok());
+
+        let over: String = "\u{1f600}".repeat(MAX_SERVER_NAME_LENGTH + 1);
+        assert!(validate_server_name(&over).is_err());
+    }
+}

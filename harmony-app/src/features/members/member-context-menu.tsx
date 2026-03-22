@@ -8,9 +8,9 @@ import {
 import { MessageSquare } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useCreateDm } from '@/features/dms'
+import type { AssignRoleRequest } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import { useChangeRole } from './hooks/use-change-role'
-import type { ChangeRoleRequest } from './moderation-types'
 import { type MemberRole, ROLE_HIERARCHY } from './moderation-types'
 
 interface MemberContextMenuProps {
@@ -46,7 +46,7 @@ function useAssignableRoles(callerRole: MemberRole, targetRole: MemberRole) {
   const { t } = useTranslation('members')
   const callerRank = ROLE_HIERARCHY[callerRole]
 
-  const roles: Array<{ key: ChangeRoleRequest['role']; label: string }> = []
+  const roles: Array<{ key: AssignRoleRequest['role']; label: string }> = []
   if (callerRank > ROLE_HIERARCHY.admin) {
     roles.push({ key: 'admin', label: t('roleAdmin') })
   }
@@ -84,7 +84,7 @@ export function MemberContextMenu({
   // so the menu is never empty when viewing another user.
   const canSendMessage = isSelf === false
 
-  function handleRoleChange(role: ChangeRoleRequest['role']) {
+  function handleRoleChange(role: AssignRoleRequest['role']) {
     changeRole.mutate({ userId: targetUserId, role })
   }
 
@@ -147,9 +147,9 @@ function ContextMenuActions({
 }: {
   perms: { canChangeRole: boolean; canKick: boolean; canBan: boolean }
   canSendMessage: boolean
-  assignableRoles: Array<{ key: ChangeRoleRequest['role']; label: string }>
+  assignableRoles: Array<{ key: AssignRoleRequest['role']; label: string }>
   targetUsername: string
-  onRoleChange: (role: ChangeRoleRequest['role']) => void
+  onRoleChange: (role: AssignRoleRequest['role']) => void
   onSendMessage: () => void
   onKick: () => void
   onBan: () => void

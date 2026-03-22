@@ -1,16 +1,16 @@
 /**
- * WHY: The generated OpenAPI types do not yet include the `role` field on
- * MemberResponse or the moderation endpoint types (ban, kick, role change).
- * Rather than editing auto-generated files, we define the extended types here.
+ * WHY: Re-exports and helpers that bridge SDK types with app-level concerns.
+ * `MemberRole` is an alias for the SDK's `Role` to keep a stable name across
+ * the feature. `getMemberRole()` narrows `MemberResponse.role` (typed as
+ * `string` in the SDK) to the discriminated `Role` union.
  *
- * Once the Rust API OpenAPI spec is regenerated with `just gen-api`, these
- * types should be replaced by imports from `@/lib/api`.
+ * `ROLE_HIERARCHY` is custom app logic not present in the SDK.
  */
 
-import type { MemberResponse } from '@/lib/api'
+import type { MemberResponse, Role } from '@/lib/api'
 
-/** Role values returned by the API on member responses. */
-export type MemberRole = 'owner' | 'admin' | 'moderator' | 'member'
+/** WHY: Alias keeps every consumer importing `MemberRole` stable. */
+export type MemberRole = Role
 
 /**
  * WHY: Numeric hierarchy enables simple comparison operators for permission
@@ -23,31 +23,23 @@ export const ROLE_HIERARCHY: Record<MemberRole, number> = {
   member: 1,
 } as const
 
-/** Extended member response that includes the role field. */
-export type MemberWithRole = MemberResponse & {
-  role: MemberRole
+/**
+ * WHY: Type guard narrows `string` to `MemberRole` without `as` casts (ADR-035).
+ * The SDK types `MemberResponse.role` as `string` because the OpenAPI spec uses
+ * a plain string field — this guard bridges that gap at runtime.
+ */
+function isMemberRole(value: string): value is MemberRole {
+  return value === 'owner' || value === 'admin' || value === 'moderator' || value === 'member'
 }
 
 /**
- * WHY: The API may return members without a `role` field if the generated types
- * haven't been regenerated yet. Safely reads the runtime value and defaults to 'member'.
- * Single source of truth — used by member-list, roles-tab, and use-my-member-role.
+ * WHY: Single source of truth for narrowing `MemberResponse.role` (`string`)
+ * to the discriminated `Role` union. Used by member-list, roles-tab, and
+ * use-my-member-role.
  */
 export function getMemberRole(member: MemberResponse): MemberRole {
-  const raw = (member as unknown as Record<string, unknown>).role
-  if (raw === 'owner' || raw === 'admin' || raw === 'moderator' || raw === 'member') {
-    return raw
+  if (isMemberRole(member.role)) {
+    return member.role
   }
   return 'member'
-}
-
-/** Request body for PATCH /v1/servers/{server_id}/members/{user_id}/role */
-export interface ChangeRoleRequest {
-  role: 'admin' | 'moderator' | 'member'
-}
-
-/** Request body for POST /v1/servers/{server_id}/bans */
-export interface CreateBanRequest {
-  user_id: string
-  reason?: string
 }

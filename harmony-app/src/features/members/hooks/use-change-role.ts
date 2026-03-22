@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import type { AssignRoleRequest } from '@/lib/api'
 import { client } from '@/lib/api/client.gen'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import type { ChangeRoleRequest } from '../moderation-types'
 
 /**
  * WHY: PATCH /v1/servers/{server_id}/members/{user_id}/role is not yet in the
@@ -13,7 +13,7 @@ export function useChangeRole(serverId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: ChangeRoleRequest['role'] }) => {
+    mutationFn: async ({ userId, role }: { userId: string; role: AssignRoleRequest['role'] }) => {
       const { error } = await client.patch({
         url: '/v1/servers/{server_id}/members/{user_id}/role',
         path: { server_id: serverId, user_id: userId },

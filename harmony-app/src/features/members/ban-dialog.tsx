@@ -32,7 +32,7 @@ export function BanDialog({ isOpen, onClose, serverId, targetUser, serverName }:
   function handleSubmit() {
     banMember.mutate(
       {
-        user_id: targetUser.id,
+        userId: targetUser.id,
         reason: reason.trim().length > 0 ? reason.trim() : undefined,
       },
       {

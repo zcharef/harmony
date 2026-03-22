@@ -52,6 +52,14 @@ fn validate_channel_topic(topic: &str) -> Result<(), DomainError> {
 }
 
 impl ChannelService {
+    /// Exposed for integration tests that need the channel name length limit.
+    #[cfg(test)]
+    pub const TEST_MAX_CHANNEL_NAME_LENGTH: usize = MAX_CHANNEL_NAME_LENGTH;
+
+    /// Exposed for integration tests that need the channel topic length limit.
+    #[cfg(test)]
+    pub const TEST_MAX_CHANNEL_TOPIC_LENGTH: usize = MAX_CHANNEL_TOPIC_LENGTH;
+
     #[must_use]
     pub fn new(repo: Arc<dyn ChannelRepository>) -> Self {
         Self { repo }
@@ -179,5 +187,101 @@ impl ChannelService {
         }
 
         self.repo.delete_if_not_last(channel_id).await
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    // ── validate_channel_name ──────────────────────────────────────
+
+    #[test]
+    fn channel_name_valid_lowercase_alphanumeric() {
+        assert!(validate_channel_name("general").is_ok());
+        assert!(validate_channel_name("dev-chat").is_ok());
+        assert!(validate_channel_name("channel-123").is_ok());
+        assert!(validate_channel_name("a").is_ok());
+        assert!(validate_channel_name("0").is_ok());
+        assert!(validate_channel_name("a-b-c").is_ok());
+    }
+
+    #[test]
+    fn channel_name_max_length_boundary() {
+        // Exactly at limit: OK
+        let at_limit = "a".repeat(MAX_CHANNEL_NAME_LENGTH);
+        assert!(validate_channel_name(&at_limit).is_ok());
+
+        // One over limit: rejected
+        let over_limit = "a".repeat(MAX_CHANNEL_NAME_LENGTH + 1);
+        assert!(validate_channel_name(&over_limit).is_err());
+    }
+
+    #[test]
+    fn channel_name_empty_rejected() {
+        let result = validate_channel_name("");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "Expected ValidationError, got {:?}",
+            err,
+        );
+    }
+
+    #[test]
+    fn channel_name_uppercase_rejected() {
+        assert!(validate_channel_name("General").is_err());
+        assert!(validate_channel_name("GENERAL").is_err());
+        assert!(validate_channel_name("devChat").is_err());
+    }
+
+    #[test]
+    fn channel_name_special_chars_rejected() {
+        assert!(validate_channel_name("hello world").is_err()); // space
+        assert!(validate_channel_name("hello_world").is_err()); // underscore
+        assert!(validate_channel_name("hello.world").is_err()); // dot
+        assert!(validate_channel_name("hello@world").is_err()); // at
+        assert!(validate_channel_name("#general").is_err()); // hash
+        assert!(validate_channel_name("hello!").is_err()); // exclamation
+    }
+
+    #[test]
+    fn channel_name_unicode_rejected() {
+        assert!(validate_channel_name("\u{00e9}").is_err()); // e-acute
+        assert!(validate_channel_name("\u{1f600}").is_err()); // emoji
+    }
+
+    // ── validate_channel_topic ─────────────────────────────────────
+
+    #[test]
+    fn channel_topic_valid() {
+        assert!(validate_channel_topic("Welcome to the general channel!").is_ok());
+        assert!(validate_channel_topic("").is_ok()); // empty is allowed
+        assert!(validate_channel_topic("a").is_ok());
+    }
+
+    #[test]
+    fn channel_topic_max_length_boundary() {
+        // Exactly at limit: OK
+        let at_limit: String = "a".repeat(MAX_CHANNEL_TOPIC_LENGTH);
+        assert!(validate_channel_topic(&at_limit).is_ok());
+
+        // One over limit: rejected
+        let over_limit: String = "a".repeat(MAX_CHANNEL_TOPIC_LENGTH + 1);
+        assert!(validate_channel_topic(&over_limit).is_err());
+    }
+
+    #[test]
+    fn channel_topic_unicode_counted_by_chars() {
+        // WHY: The validation uses .chars().count(), not .len().
+        // A multi-byte character should count as 1, not as its byte length.
+        // U+1F600 (grinning face) is 4 bytes but 1 char.
+        let topic: String = "\u{1f600}".repeat(MAX_CHANNEL_TOPIC_LENGTH);
+        assert!(validate_channel_topic(&topic).is_ok());
+
+        let over: String = "\u{1f600}".repeat(MAX_CHANNEL_TOPIC_LENGTH + 1);
+        assert!(validate_channel_topic(&over).is_err());
     }
 }

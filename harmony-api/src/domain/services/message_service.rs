@@ -248,3 +248,21 @@ impl MessageService {
         self.repo.soft_delete(message_id, user_id).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `MAX_MESSAGE_LENGTH` must be 4000 -- matches the DB constraint and client limits.
+    #[test]
+    fn max_message_length_constant() {
+        assert_eq!(MAX_MESSAGE_LENGTH, 4000);
+    }
+
+    /// Rate limit constants must match the documented values.
+    #[test]
+    fn rate_limit_constants() {
+        assert_eq!(MessageService::RATE_LIMIT_MAX, 5);
+        assert_eq!(MessageService::RATE_LIMIT_WINDOW_SECS, 5);
+    }
+}

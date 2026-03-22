@@ -95,26 +95,71 @@ mod tests {
     }
 
     #[test]
-    fn can_moderate_enforces_strict_hierarchy() {
-        // Owner can moderate everyone
-        assert!(Role::Owner.can_moderate(Role::Admin));
-        assert!(Role::Owner.can_moderate(Role::Moderator));
-        assert!(Role::Owner.can_moderate(Role::Member));
+    fn role_levels_have_exact_values() {
+        assert_eq!(Role::Member.level(), 1);
+        assert_eq!(Role::Moderator.level(), 2);
+        assert_eq!(Role::Admin.level(), 3);
+        assert_eq!(Role::Owner.level(), 4);
+    }
 
-        // Admin can moderate moderator and member
-        assert!(Role::Admin.can_moderate(Role::Moderator));
-        assert!(Role::Admin.can_moderate(Role::Member));
-        // Admin cannot moderate admin or owner
-        assert!(!Role::Admin.can_moderate(Role::Admin));
-        assert!(!Role::Admin.can_moderate(Role::Owner));
+    /// Full 4x4 `can_moderate` matrix (16 combinations).
+    /// `can_moderate` is strict greater-than: only returns true when
+    /// `actor.level()` > `target.level()`.
+    #[test]
+    fn can_moderate_full_matrix() {
+        let all_roles = [Role::Owner, Role::Admin, Role::Moderator, Role::Member];
 
-        // Moderator can moderate member only
-        assert!(Role::Moderator.can_moderate(Role::Member));
-        assert!(!Role::Moderator.can_moderate(Role::Moderator));
-        assert!(!Role::Moderator.can_moderate(Role::Admin));
+        // Expected results: (actor, target) -> can_moderate
+        let expected: &[(Role, Role, bool)] = &[
+            // Owner (4) vs all
+            (Role::Owner, Role::Owner, false),
+            (Role::Owner, Role::Admin, true),
+            (Role::Owner, Role::Moderator, true),
+            (Role::Owner, Role::Member, true),
+            // Admin (3) vs all
+            (Role::Admin, Role::Owner, false),
+            (Role::Admin, Role::Admin, false),
+            (Role::Admin, Role::Moderator, true),
+            (Role::Admin, Role::Member, true),
+            // Moderator (2) vs all
+            (Role::Moderator, Role::Owner, false),
+            (Role::Moderator, Role::Admin, false),
+            (Role::Moderator, Role::Moderator, false),
+            (Role::Moderator, Role::Member, true),
+            // Member (1) vs all
+            (Role::Member, Role::Owner, false),
+            (Role::Member, Role::Admin, false),
+            (Role::Member, Role::Moderator, false),
+            (Role::Member, Role::Member, false),
+        ];
 
-        // Member cannot moderate anyone
-        assert!(!Role::Member.can_moderate(Role::Member));
+        // Verify we test every combination
+        assert_eq!(expected.len(), all_roles.len() * all_roles.len());
+
+        for &(actor, target, should_moderate) in expected {
+            assert_eq!(
+                actor.can_moderate(target),
+                should_moderate,
+                "{} (level {}) can_moderate {} (level {}) should be {}",
+                actor,
+                actor.level(),
+                target,
+                target.level(),
+                should_moderate,
+            );
+        }
+    }
+
+    /// Verify that same-level roles NEVER moderate each other (diagonal is all false).
+    #[test]
+    fn same_role_cannot_moderate_self() {
+        for role in [Role::Owner, Role::Admin, Role::Moderator, Role::Member] {
+            assert!(
+                !role.can_moderate(role),
+                "{} should not be able to moderate itself",
+                role,
+            );
+        }
     }
 
     #[test]
@@ -133,6 +178,25 @@ mod tests {
         }
     }
 
+    /// Display round-trip: `Display` -> `FromStr` -> original value.
+    #[test]
+    fn display_round_trip() {
+        for role in [Role::Owner, Role::Admin, Role::Moderator, Role::Member] {
+            let displayed = format!("{}", role);
+            let parsed: Role = displayed.parse().unwrap();
+            assert_eq!(parsed, role, "Display round-trip failed for {:?}", role);
+        }
+    }
+
+    /// `as_str` must match the lowercase DB representation.
+    #[test]
+    fn as_str_matches_db_values() {
+        assert_eq!(Role::Owner.as_str(), "owner");
+        assert_eq!(Role::Admin.as_str(), "admin");
+        assert_eq!(Role::Moderator.as_str(), "moderator");
+        assert_eq!(Role::Member.as_str(), "member");
+    }
+
     #[test]
     fn invalid_role_rejected() {
         let result = "superadmin".parse::<Role>();
@@ -142,14 +206,34 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Case-sensitive: uppercase variants must be rejected.
+    #[test]
+    fn case_sensitive_role_parsing() {
+        assert!("Owner".parse::<Role>().is_err());
+        assert!("ADMIN".parse::<Role>().is_err());
+        assert!("Moderator".parse::<Role>().is_err());
+        assert!("MEMBER".parse::<Role>().is_err());
+    }
+
     #[test]
     fn serde_round_trip() {
-        let role = Role::Moderator;
-        let json = serde_json::to_string(&role).unwrap();
-        assert_eq!(json, r#""moderator""#);
+        for role in [Role::Owner, Role::Admin, Role::Moderator, Role::Member] {
+            let json = serde_json::to_string(&role).unwrap();
+            let parsed: Role = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, role, "Serde round-trip failed for {:?}", role);
+        }
+    }
 
-        let parsed: Role = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed, role);
+    /// Serde serializes to lowercase JSON strings matching DB values.
+    #[test]
+    fn serde_serializes_to_lowercase() {
+        assert_eq!(serde_json::to_string(&Role::Owner).unwrap(), r#""owner""#);
+        assert_eq!(serde_json::to_string(&Role::Admin).unwrap(), r#""admin""#);
+        assert_eq!(
+            serde_json::to_string(&Role::Moderator).unwrap(),
+            r#""moderator""#
+        );
+        assert_eq!(serde_json::to_string(&Role::Member).unwrap(), r#""member""#);
     }
 
     #[test]
