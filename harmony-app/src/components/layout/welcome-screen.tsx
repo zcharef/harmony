@@ -1,4 +1,4 @@
-import { Card, CardBody } from '@heroui/react'
+import { Card, CardBody, Chip } from '@heroui/react'
 import { LogIn, Plus, Shield } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -7,7 +7,7 @@ import { CreateServerDialog, JoinServerDialog } from '@/features/server-nav'
 
 interface WelcomeScreenProps {
   onServerCreated: (serverId: string) => void
-  onServerJoined: () => void
+  onServerJoined: (serverId: string) => void
 }
 
 export function WelcomeScreen({ onServerCreated, onServerJoined }: WelcomeScreenProps) {
@@ -26,9 +26,12 @@ export function WelcomeScreen({ onServerCreated, onServerJoined }: WelcomeScreen
       </div>
 
       {/* Heading */}
-      <h1 className="mt-6 text-4xl font-bold tracking-tight text-foreground animate-[fade-in-up_0.5s_ease-out_0.15s_both]">
-        {t('welcomeTitle')}
-      </h1>
+      <div className="mt-6 flex items-center gap-3 animate-[fade-in-up_0.5s_ease-out_0.15s_both]">
+        <h1 className="text-4xl font-bold tracking-tight text-foreground">{t('welcomeTitle')}</h1>
+        <Chip color="warning" size="sm" variant="flat">
+          {t('alphaLabel', { ns: 'common' })}
+        </Chip>
+      </div>
 
       {/* Subtitle */}
       <p className="mt-3 max-w-md text-center text-lg text-default-500 animate-[fade-in-up_0.5s_ease-out_0.25s_both]">
@@ -82,9 +85,9 @@ export function WelcomeScreen({ onServerCreated, onServerJoined }: WelcomeScreen
       <JoinServerDialog
         isOpen={isJoinOpen}
         onClose={() => setIsJoinOpen(false)}
-        onJoined={() => {
+        onJoined={(serverId) => {
           setIsJoinOpen(false)
-          onServerJoined()
+          onServerJoined(serverId)
         }}
       />
     </div>

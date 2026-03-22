@@ -1,5 +1,7 @@
+import { Chip, Tooltip } from '@heroui/react'
 import { GripVertical } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 
 import { useAuthStore } from '@/features/auth'
@@ -12,6 +14,22 @@ import { ServerList, useServers } from '@/features/server-nav'
 import { getChannelPerms, ServerSettings, useSettingsUiStore } from '@/features/settings'
 
 import { WelcomeScreen } from './welcome-screen'
+
+function AlphaBadge() {
+  const { t } = useTranslation('common')
+  return (
+    <Tooltip content={t('alphaDisclaimer')} placement="top" delay={300}>
+      <Chip
+        color="warning"
+        size="sm"
+        variant="flat"
+        className="fixed bottom-2 right-2 z-50 cursor-default opacity-70 hover:opacity-100"
+      >
+        {t('alphaLabel')}
+      </Chip>
+    </Tooltip>
+  )
+}
 
 type ViewMode = 'servers' | 'dms'
 
@@ -154,6 +172,7 @@ export function MainLayout() {
     return (
       <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
         <ServerSettings serverId={selectedServerId} />
+        <AlphaBadge />
       </div>
     )
   }
@@ -169,7 +188,8 @@ export function MainLayout() {
           onSelectServer={handleSelectServer}
           onSelectDmView={handleSelectDmView}
         />
-        <WelcomeScreen onServerCreated={handleSelectServer} onServerJoined={() => {}} />
+        <WelcomeScreen onServerCreated={handleSelectServer} onServerJoined={handleSelectServer} />
+        <AlphaBadge />
       </div>
     )
   }
@@ -215,7 +235,7 @@ export function MainLayout() {
         </Panel>
 
         {/* WHY: Hide member list in DM mode — DMs have exactly 2 members, no list needed */}
-        {!isDmView && (
+        {isDmView === false && (
           <>
             <ResizeHandle />
             <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">
@@ -228,6 +248,7 @@ export function MainLayout() {
           </>
         )}
       </Group>
+      <AlphaBadge />
     </div>
   )
 }

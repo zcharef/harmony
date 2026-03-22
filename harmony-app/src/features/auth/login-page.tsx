@@ -1,4 +1,4 @@
-import { Button, Card, CardBody, CardHeader, Divider, Input } from '@heroui/react'
+import { Button, Card, CardBody, CardHeader, Chip, Divider, Input } from '@heroui/react'
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
 import type { FormEvent } from 'react'
 import { useRef, useState } from 'react'
@@ -79,9 +79,14 @@ export function LoginPage() {
     >
       <Card className="w-full max-w-md">
         <CardHeader className="flex flex-col items-center gap-1 pb-0 pt-6">
-          <h1 data-test="login-heading" className="text-2xl font-bold text-foreground">
-            {t('appName')}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 data-test="login-heading" className="text-2xl font-bold text-foreground">
+              {t('appName')}
+            </h1>
+            <Chip color="warning" size="sm" variant="flat">
+              {t('alphaLabel', { ns: 'common' })}
+            </Chip>
+          </div>
           <p data-test="login-subtitle" className="text-sm text-default-500">
             {mode === 'login' ? t('welcomeBack') : t('createYourAccount')}
           </p>

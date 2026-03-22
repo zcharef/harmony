@@ -1,4 +1,6 @@
 {
+  "alphaLabel": "Alpha",
+  "alphaDisclaimer": "This is an early alpha build. Expect bugs, missing features, and breaking changes.",
   "cancel": "Cancel",
   "save": "Save",
   "create": "Create",
