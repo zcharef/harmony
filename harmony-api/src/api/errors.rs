@@ -22,6 +22,10 @@ pub struct ProblemDetails {
     pub detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<String>,
+    /// WHY: Drives upsell when a plan limit is exceeded. The frontend renders
+    /// an "Upgrade" CTA using this URL. Only present on `LimitExceeded` errors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upgrade_url: Option<String>,
 }
 
 #[allow(dead_code)] // with_instance will be used when specific error types need instance URIs
@@ -33,6 +37,7 @@ impl ProblemDetails {
             status: status.as_u16(),
             detail: detail.into(),
             instance: None,
+            upgrade_url: None,
         }
     }
 
@@ -157,9 +162,19 @@ impl From<DomainError> for ApiError {
                 resource,
                 plan,
                 limit,
-            } => ApiError::forbidden(format!(
-                "Server has reached the {plan} plan limit of {limit} {resource}"
-            )),
+            } => {
+                let status = StatusCode::FORBIDDEN;
+                let mut problem = ProblemDetails::new(
+                    status,
+                    "Plan Limit Exceeded",
+                    format!("Server has reached the {plan} plan limit of {limit} {resource}"),
+                );
+                // WHY: Hardcoded for now. When billing is added (Phase 4), this
+                // will come from config. YAGNI — no config mechanism until needed.
+                problem.upgrade_url =
+                    Some("https://harmony.app/pricing".to_string());
+                ApiError { status, problem }
+            }
             // WHY: Already logged at the infrastructure layer (db_err, etc.)
             DomainError::Internal(_) => ApiError::internal("An internal error occurred"),
             DomainError::ExternalService(msg) => ApiError::bad_gateway(msg),

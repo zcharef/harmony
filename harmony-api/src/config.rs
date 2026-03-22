@@ -42,7 +42,7 @@ pub struct Config {
 
     /// Enable plan limit enforcement (default: true).
     /// Self-hosted deployments should set `PLAN_ENFORCEMENT_ENABLED=false`.
-    /// When true (default), `PgPlanLimitChecker` enforces Free/Pro limits.
+    /// When true (default), `PgPlanLimitChecker` enforces Free/Pro/Community limits.
     /// When false, `AlwaysAllowedChecker` is used (no limits).
     #[serde(default = "default_plan_enforcement")]
     pub plan_enforcement_enabled: bool,

@@ -281,6 +281,47 @@ export async function unbanUser(token: string, serverId: string, userId: string)
   }
 }
 
+/**
+ * POST /v1/servers/{id}/channels — non-throwing variant that returns the raw Response.
+ * WHY: Used by tests that assert on specific HTTP status codes (e.g., 403 LimitExceeded).
+ */
+export async function createChannelRaw(
+  token: string,
+  serverId: string,
+  name: string,
+): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(`${API_URL}/v1/servers/${serverId}/channels`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({
+      name,
+      channelType: 'text',
+      isPrivate: false,
+      isReadOnly: false,
+    }),
+  })
+  const body = await res.json().catch(() => null)
+  return { status: res.status, body }
+}
+
+/**
+ * POST /v1/servers — non-throwing variant that returns the raw Response.
+ * WHY: Used by tests that assert on specific HTTP status codes (e.g., 403 LimitExceeded).
+ */
+export async function createServerRaw(
+  token: string,
+  name?: string,
+): Promise<{ status: number; body: unknown }> {
+  const serverName = name ?? `test-server-${Date.now()}`
+  const res = await fetch(`${API_URL}/v1/servers`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ name: serverName }),
+  })
+  const body = await res.json().catch(() => null)
+  return { status: res.status, body }
+}
+
 /** POST /v1/dms — create or get a DM conversation. */
 export async function createDm(
   token: string,
