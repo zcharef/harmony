@@ -75,7 +75,7 @@ governor = "0.10"
 tokio-stream = "0.1"
 
 # Sentry (Crash Reporting + Alerting) - 0.46+ required for axum 0.8 compatibility
-sentry = { version = "0.46", features = ["tower", "tower-axum-matched-path", "tracing", "rustls"] }
+sentry = { version = "0.47", features = ["tower", "tower-axum-matched-path", "tracing", "rustls"] }
 dashmap = "6.1.0"
 bitflags = "2"
 
