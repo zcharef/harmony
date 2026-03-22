@@ -2061,6 +2061,14 @@
               }
             ]
           },
+          "isPrivate": {
+            "type": "boolean",
+            "description": "Whether the channel is private (visible only to admin+ or explicit role grants)."
+          },
+          "isReadOnly": {
+            "type": "boolean",
+            "description": "Whether the channel is read-only (only admin+ can post messages)."
+          },
           "name": {
             "type": "string",
             "description": "Channel name (lowercase alphanumeric + hyphens, 1-100 chars)."
@@ -2497,7 +2505,7 @@
       },
       "MessageResponse": {
         "type": "object",
-        "description": "Message response returned to API consumers.\n\nExcludes `deleted_at` — soft-deleted messages are filtered server-side.",
+        "description": "Message response returned to API consumers.\n\nSoft-deleted messages are filtered from list queries, but `deleted_by`\nis included so realtime-delivered tombstones can distinguish self-deletes\nfrom moderator-deletes on the client.",
         "required": [
           "id",
           "channelId",
@@ -2518,6 +2526,17 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "deletedBy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "WHO deleted this message. `None` for live messages; `Some` for\nsoft-deleted messages delivered via realtime."
+              }
+            ]
           },
           "editedAt": {
             "type": [
@@ -2714,6 +2733,20 @@
         "type": "object",
         "description": "Request body for updating an existing channel.",
         "properties": {
+          "isPrivate": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Update private flag (if provided)."
+          },
+          "isReadOnly": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Update read-only flag (if provided)."
+          },
           "name": {
             "type": [
               "string",

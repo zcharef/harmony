@@ -30,6 +30,7 @@ struct MessageRow {
     content: Option<String>,
     edited_at: Option<DateTime<Utc>>,
     deleted_at: Option<DateTime<Utc>>,
+    deleted_by: Option<Uuid>,
     created_at: DateTime<Utc>,
 }
 
@@ -42,6 +43,7 @@ impl MessageRow {
             content: self.content.unwrap_or_default(),
             edited_at: self.edited_at,
             deleted_at: self.deleted_at,
+            deleted_by: self.deleted_by.map(UserId::new),
             created_at: self.created_at,
         }
     }
@@ -69,6 +71,7 @@ impl MessageRepository for PgMessageRepository {
                 content,
                 edited_at,
                 deleted_at,
+                deleted_by,
                 created_at
             "#,
             cid,
@@ -86,6 +89,7 @@ impl MessageRepository for PgMessageRepository {
             content: row.content,
             edited_at: row.edited_at,
             deleted_at: row.deleted_at,
+            deleted_by: row.deleted_by,
             created_at: row.created_at,
         };
 
@@ -111,6 +115,7 @@ impl MessageRepository for PgMessageRepository {
                 content,
                 edited_at,
                 deleted_at,
+                deleted_by,
                 created_at
             FROM messages
             WHERE channel_id = $1
@@ -137,6 +142,7 @@ impl MessageRepository for PgMessageRepository {
                     content: r.content,
                     edited_at: r.edited_at,
                     deleted_at: r.deleted_at,
+                    deleted_by: r.deleted_by,
                     created_at: r.created_at,
                 }
                 .into_message()
@@ -158,6 +164,7 @@ impl MessageRepository for PgMessageRepository {
                 content,
                 edited_at,
                 deleted_at,
+                deleted_by,
                 created_at
             FROM messages
             WHERE id = $1 AND deleted_at IS NULL
@@ -176,6 +183,7 @@ impl MessageRepository for PgMessageRepository {
                 content: r.content,
                 edited_at: r.edited_at,
                 deleted_at: r.deleted_at,
+                deleted_by: r.deleted_by,
                 created_at: r.created_at,
             }
             .into_message()
@@ -201,6 +209,7 @@ impl MessageRepository for PgMessageRepository {
                 content,
                 edited_at,
                 deleted_at,
+                deleted_by,
                 created_at
             "#,
             mid,
@@ -221,22 +230,29 @@ impl MessageRepository for PgMessageRepository {
             content: row.content,
             edited_at: row.edited_at,
             deleted_at: row.deleted_at,
+            deleted_by: row.deleted_by,
             created_at: row.created_at,
         };
 
         Ok(msg.into_message())
     }
 
-    async fn soft_delete(&self, message_id: &MessageId) -> Result<(), DomainError> {
+    async fn soft_delete(
+        &self,
+        message_id: &MessageId,
+        deleted_by: &UserId,
+    ) -> Result<(), DomainError> {
         let mid = message_id.0;
+        let dby = deleted_by.0;
 
         let result = sqlx::query!(
             r#"
             UPDATE messages
-            SET deleted_at = now()
+            SET deleted_at = now(), deleted_by = $2
             WHERE id = $1 AND deleted_at IS NULL
             "#,
             mid,
+            dby,
         )
         .execute(&self.pool)
         .await

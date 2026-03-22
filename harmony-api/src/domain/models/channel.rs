@@ -43,6 +43,8 @@ impl Channel {
         name: String,
         channel_type: ChannelType,
         position: i32,
+        is_private: bool,
+        is_read_only: bool,
     ) -> Self {
         let now = Utc::now();
         Self {
@@ -53,8 +55,8 @@ impl Channel {
             channel_type,
             position,
             category_id: None,
-            is_private: false,
-            is_read_only: false,
+            is_private,
+            is_read_only,
             created_at: now,
             updated_at: now,
         }

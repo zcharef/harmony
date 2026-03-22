@@ -26,5 +26,11 @@
   "expiry1d": "1 day",
   "expiry7d": "7 days",
   "expiryNever": "Never",
-  "invitePeople": "Invite People"
+  "invitePeople": "Invite People",
+  "welcomeTitle": "Welcome to Harmony",
+  "welcomeSubtitle": "Your space for secure, private conversations. Create a server to start your community, or join one with an invite code.",
+  "welcomeCreateTitle": "Create a Server",
+  "welcomeCreateDescription": "Start fresh. Set up your own space and invite the people who matter.",
+  "welcomeJoinTitle": "Join a Server",
+  "welcomeJoinDescription": "Got an invite code? Jump into an existing community."
 }

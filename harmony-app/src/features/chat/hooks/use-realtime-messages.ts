@@ -22,6 +22,7 @@ const realtimeMessageSchema = z.object({
   created_at: z.string(),
   edited_at: z.string().nullable().optional(),
   deleted_at: z.string().nullable().optional(),
+  deleted_by: z.string().nullable().optional(),
 })
 
 /**
@@ -36,6 +37,7 @@ function toMessageResponse(row: z.infer<typeof realtimeMessageSchema>): MessageR
     content: row.content,
     createdAt: row.created_at,
     editedAt: row.edited_at ?? undefined,
+    deletedBy: row.deleted_by ?? undefined,
   }
 }
 
@@ -123,27 +125,10 @@ export function useRealtimeMessages(channelId: string) {
             return
           }
 
-          // WHY: Soft delete sets deleted_at — remove the message from cache
-          // instead of updating it, so it disappears for all connected clients.
-          if (parsed.data.deleted_at) {
-            queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-              queryKeys.messages.byChannel(channelId),
-              (old) => {
-                if (!old) return undefined
-                return {
-                  ...old,
-                  pages: old.pages.map((page) => ({
-                    ...page,
-                    items: page.items.filter((m) => m.id !== parsed.data.id),
-                  })),
-                }
-              },
-            )
-            return
-          }
-
-          // WHY: Update in-place across all pages — keeps edited content in sync
-          // for all connected clients without a full refetch.
+          // WHY: Both soft-deletes and edits are UPDATE events. In both cases
+          // we update in-place. For soft-deletes, the message stays in cache
+          // with `deletedBy` set so the UI can show "[Message deleted]" or
+          // "[Message removed by moderator]" instead of silently disappearing.
           const message = toMessageResponse(parsed.data)
           queryClient.setQueryData<InfiniteData<MessageListResponse>>(
             queryKeys.messages.byChannel(channelId),

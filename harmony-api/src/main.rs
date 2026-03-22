@@ -117,7 +117,6 @@ async fn init_app_state(config: &Config) -> AppState {
     let message_service = Arc::new(domain::services::MessageService::new(
         message_repo,
         channel_repo.clone(),
-        server_repo.clone(),
         member_repo.clone(),
     ));
     let invite_service = Arc::new(domain::services::InviteService::new(

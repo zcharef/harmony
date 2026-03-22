@@ -24,15 +24,18 @@ pub trait ChannelRepository: Send + Sync + std::fmt::Debug {
     /// Create a new channel. Returns the created channel.
     async fn create(&self, channel: &Channel) -> Result<Channel, DomainError>;
 
-    /// Update a channel's name and/or topic. Returns the updated channel.
+    /// Update a channel's name, topic, and/or permission flags.
     ///
     /// `topic` uses `Option<Option<String>>`: outer = "was field provided?",
     /// inner = "null (clear) or a value". Follows JSON PATCH semantics.
+    /// `is_private` / `is_read_only` use `Option<bool>`: `None` = no change.
     async fn update(
         &self,
         channel_id: &ChannelId,
         name: Option<String>,
         topic: Option<Option<String>>,
+        is_private: Option<bool>,
+        is_read_only: Option<bool>,
     ) -> Result<Channel, DomainError>;
 
     /// Delete a channel by ID, unless it is the last channel in its server.

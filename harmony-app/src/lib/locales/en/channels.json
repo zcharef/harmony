@@ -24,5 +24,7 @@
   "channelNamePattern": "Only lowercase letters, numbers, and hyphens allowed",
   "topic": "Topic",
   "topicPlaceholder": "What's this channel about?",
-  "topicMaxLength": "Topic must be 1024 characters or less"
+  "topicMaxLength": "Topic must be 1024 characters or less",
+  "home": "Harmony",
+  "selectServerHint": "Pick a server from the sidebar to see its channels."
 }

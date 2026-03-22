@@ -48,6 +48,8 @@ impl ChannelService {
         server_id: ServerId,
         name: String,
         channel_type: Option<ChannelType>,
+        is_private: bool,
+        is_read_only: bool,
     ) -> Result<Channel, DomainError> {
         let normalized = name.trim().to_lowercase();
         validate_channel_name(&normalized)?;
@@ -56,7 +58,14 @@ impl ChannelService {
         let count = self.repo.count_for_server(&server_id).await?;
         let position = i32::try_from(count).unwrap_or(i32::MAX);
 
-        let channel = Channel::new(server_id, normalized, channel_type, position);
+        let channel = Channel::new(
+            server_id,
+            normalized,
+            channel_type,
+            position,
+            is_private,
+            is_read_only,
+        );
         self.repo.create(&channel).await
     }
 
@@ -88,7 +97,7 @@ impl ChannelService {
             })
     }
 
-    /// Update a channel's name and/or topic.
+    /// Update a channel's name, topic, and/or permission flags.
     ///
     /// # Errors
     /// Returns `DomainError::ValidationError` if the new name is invalid.
@@ -97,6 +106,8 @@ impl ChannelService {
         channel_id: &ChannelId,
         name: Option<String>,
         topic: Option<Option<String>>,
+        is_private: Option<bool>,
+        is_read_only: Option<bool>,
     ) -> Result<Channel, DomainError> {
         let validated_name = match name {
             Some(raw) => {
@@ -107,7 +118,9 @@ impl ChannelService {
             None => None,
         };
 
-        self.repo.update(channel_id, validated_name, topic).await
+        self.repo
+            .update(channel_id, validated_name, topic, is_private, is_read_only)
+            .await
     }
 
     /// Delete a channel.

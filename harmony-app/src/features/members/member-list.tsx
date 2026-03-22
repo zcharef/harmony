@@ -17,6 +17,7 @@ import { RoleBadge } from './role-badge'
 interface MemberListProps {
   serverId: string | null
   serverName: string | null
+  onNavigateDm: (serverId: string, channelId: string) => void
 }
 
 /** WHY: Semantic HeroUI tokens for role name colors (ADR-044). */
@@ -66,7 +67,7 @@ function useGroupedMembers(members: MemberResponse[]) {
  * Members are grouped by role (owner, admin, moderator, member) with role
  * badges and color-coded display names.
  */
-export function MemberList({ serverId, serverName }: MemberListProps) {
+export function MemberList({ serverId, serverName, onNavigateDm }: MemberListProps) {
   const { t } = useTranslation('members')
   const { data, isPending, isError } = useMembers(serverId)
   const presenceMap = usePresenceStore((s) => s.presenceMap)
@@ -154,6 +155,7 @@ export function MemberList({ serverId, serverName }: MemberListProps) {
                   serverId={serverId}
                   onKick={(target) => setKickTarget(target)}
                   onBan={(target) => setBanTarget(target)}
+                  onNavigateDm={onNavigateDm}
                 />
               ))}
             </div>
@@ -200,6 +202,7 @@ function MemberRow({
   serverId,
   onKick,
   onBan,
+  onNavigateDm,
 }: {
   member: MemberResponse
   role: MemberRole
@@ -209,6 +212,7 @@ function MemberRow({
   serverId: string
   onKick: (target: { id: string; username: string }) => void
   onBan: (target: { id: string; username: string }) => void
+  onNavigateDm: (serverId: string, channelId: string) => void
 }) {
   const displayName = member.nickname ?? member.username
   const isSelf = member.userId === currentUserId
@@ -231,6 +235,7 @@ function MemberRow({
       onOpenChange={setIsContextMenuOpen}
       onKick={() => onKick({ id: member.userId, username: member.username })}
       onBan={() => onBan({ id: member.userId, username: member.username })}
+      onNavigateDm={onNavigateDm}
     >
       <button
         type="button"

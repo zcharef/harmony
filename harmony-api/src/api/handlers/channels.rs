@@ -83,7 +83,13 @@ pub async fn create_channel(
 
     let channel = state
         .channel_service()
-        .create_channel(server_id, req.name, req.channel_type)
+        .create_channel(
+            server_id,
+            req.name,
+            req.channel_type,
+            req.is_private,
+            req.is_read_only,
+        )
         .await?;
 
     Ok((StatusCode::CREATED, Json(ChannelResponse::from(channel))))
@@ -132,7 +138,13 @@ pub async fn update_channel(
 
     let channel = state
         .channel_service()
-        .update_channel(&params.channel_id, req.name, req.topic)
+        .update_channel(
+            &params.channel_id,
+            req.name,
+            req.topic,
+            req.is_private,
+            req.is_read_only,
+        )
         .await?;
 
     Ok((StatusCode::OK, Json(ChannelResponse::from(channel))))

@@ -110,6 +110,86 @@ function ChannelButton({
   )
 }
 
+// WHY: Extracted to reduce ChannelSidebar cognitive complexity below Biome's limit of 15.
+function ServerHeader({
+  serverId,
+  serverName,
+  canAccessSettings,
+  onInvite,
+  onSettings,
+  onCreateChannel,
+}: {
+  serverId: string | null
+  serverName: string | null
+  canAccessSettings: boolean
+  onInvite: () => void
+  onSettings: () => void
+  onCreateChannel: () => void
+}) {
+  const { t } = useTranslation('channels')
+
+  if (serverId === null) {
+    return (
+      <div className="flex h-full flex-1 items-center px-4">
+        <span className="font-semibold text-foreground">{t('home')}</span>
+      </div>
+    )
+  }
+
+  return (
+    <Dropdown>
+      <DropdownTrigger>
+        <button
+          type="button"
+          className="flex h-full flex-1 items-center justify-between px-4 font-semibold text-foreground transition-colors hover:bg-default-200"
+        >
+          <span data-test="server-name-header" className="truncate">
+            {serverName ?? t('selectServer')}
+          </span>
+          <ChevronDown className="h-4 w-4 shrink-0 text-default-500" />
+        </button>
+      </DropdownTrigger>
+      <DropdownMenu
+        aria-label={t('serverOptions')}
+        className="w-56"
+        onAction={(key) => {
+          if (key === 'invite') onInvite()
+          if (key === 'settings' && canAccessSettings) onSettings()
+          if (key === 'create-channel') onCreateChannel()
+        }}
+      >
+        <DropdownSection showDivider>
+          <DropdownItem key="boost">{t('serverBoost')}</DropdownItem>
+        </DropdownSection>
+        <DropdownSection showDivider>
+          <DropdownItem
+            key="invite"
+            startContent={<UserPlus className="h-4 w-4" />}
+            data-test="server-menu-invite-item"
+          >
+            {t('servers:invitePeople')}
+          </DropdownItem>
+          <DropdownItem
+            key="settings"
+            className={canAccessSettings ? '' : 'hidden'}
+            data-test="server-menu-settings-item"
+          >
+            {t('serverSettings')}
+          </DropdownItem>
+          <DropdownItem key="create-channel" data-test="server-menu-create-channel-item">
+            {t('createChannel')}
+          </DropdownItem>
+        </DropdownSection>
+        <DropdownSection>
+          <DropdownItem key="leave" className="text-danger" color="danger">
+            {t('leaveServer')}
+          </DropdownItem>
+        </DropdownSection>
+      </DropdownMenu>
+    </Dropdown>
+  )
+}
+
 interface ChannelSidebarProps {
   serverId: string | null
   serverName: string | null
@@ -154,62 +234,14 @@ export function ChannelSidebar({
     <div data-test="channel-sidebar" className="flex h-full flex-col bg-default-100">
       {/* Server header */}
       <div className="flex h-12 items-center border-b border-divider shadow-sm">
-        <Dropdown>
-          <DropdownTrigger>
-            <button
-              type="button"
-              className="flex h-full flex-1 items-center justify-between px-4 font-semibold text-foreground transition-colors hover:bg-default-200"
-            >
-              <span data-test="server-name-header" className="truncate">
-                {serverName ?? t('selectServer')}
-              </span>
-              <ChevronDown className="h-4 w-4 shrink-0 text-default-500" />
-            </button>
-          </DropdownTrigger>
-          <DropdownMenu
-            aria-label={t('serverOptions')}
-            className="w-56"
-            onAction={(key) => {
-              if (key === 'invite' && serverId !== null) {
-                setIsInviteOpen(true)
-              }
-              if (key === 'settings' && canAccessSettings) {
-                openServerSettings()
-              }
-              if (key === 'create-channel') {
-                setIsCreateChannelOpen(true)
-              }
-            }}
-          >
-            <DropdownSection showDivider>
-              <DropdownItem key="boost">{t('serverBoost')}</DropdownItem>
-            </DropdownSection>
-            <DropdownSection showDivider>
-              <DropdownItem
-                key="invite"
-                startContent={<UserPlus className="h-4 w-4" />}
-                data-test="server-menu-invite-item"
-              >
-                {t('servers:invitePeople')}
-              </DropdownItem>
-              <DropdownItem
-                key="settings"
-                className={canAccessSettings ? '' : 'hidden'}
-                data-test="server-menu-settings-item"
-              >
-                {t('serverSettings')}
-              </DropdownItem>
-              <DropdownItem key="create-channel" data-test="server-menu-create-channel-item">
-                {t('createChannel')}
-              </DropdownItem>
-            </DropdownSection>
-            <DropdownSection>
-              <DropdownItem key="leave" className="text-danger" color="danger">
-                {t('leaveServer')}
-              </DropdownItem>
-            </DropdownSection>
-          </DropdownMenu>
-        </Dropdown>
+        <ServerHeader
+          serverId={serverId}
+          serverName={serverName}
+          canAccessSettings={canAccessSettings}
+          onInvite={() => setIsInviteOpen(true)}
+          onSettings={openServerSettings}
+          onCreateChannel={() => setIsCreateChannelOpen(true)}
+        />
       </div>
 
       {/* Channel list */}
@@ -224,7 +256,10 @@ export function ChannelSidebar({
           {isError && <p className="px-2 text-xs text-danger">{t('failedToLoadChannels')}</p>}
 
           {serverId === null && (
-            <p className="px-2 text-xs text-default-500">{t('selectServerToViewChannels')}</p>
+            <div className="flex flex-col items-center gap-2 px-4 py-8">
+              <Hash className="h-8 w-8 text-default-300" />
+              <p className="text-center text-xs text-default-500">{t('selectServerHint')}</p>
+            </div>
           )}
 
           {channels !== undefined && channels.length === 0 && (

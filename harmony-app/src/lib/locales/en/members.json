@@ -31,5 +31,7 @@
   "banReason": "Reason (optional)",
   "banReasonPlaceholder": "Why is this user being banned?",
   "banAction": "Ban",
-  "banFailed": "Failed to ban member. Please try again."
+  "banFailed": "Failed to ban member. Please try again.",
+
+  "sendMessage": "Message {{username}}"
 }

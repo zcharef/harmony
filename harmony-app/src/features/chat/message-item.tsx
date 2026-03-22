@@ -66,6 +66,8 @@ export const MessageItem = memo(function MessageItem({
   const isPending = message.id.startsWith('temp-')
 
   const isOwnMessage = message.authorId === currentUserId
+  const isDeleted = message.deletedBy !== undefined && message.deletedBy !== null
+  const isModeratorDeleted = isDeleted && message.deletedBy !== message.authorId
 
   const [editContent, setEditContent] = useState(message.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -112,7 +114,11 @@ export const MessageItem = memo(function MessageItem({
           </span>
         </div>
 
-        {isEditing ? (
+        {isDeleted ? (
+          <p data-test="message-content" className="text-sm italic text-default-400">
+            {isModeratorDeleted ? t('removedByModerator') : t('deletedMessage')}
+          </p>
+        ) : isEditing ? (
           <div className="flex flex-col gap-1">
             <Textarea
               ref={textareaRef}
@@ -172,34 +178,38 @@ export const MessageItem = memo(function MessageItem({
       </div>
 
       {/* WHY: Edit is own-message-only. Delete shows for own messages OR
-          if the current user is moderator+ (canModerateMessages). */}
-      {(isOwnMessage || canModerateMessages) && isEditing === false && isPending === false && (
-        <div
-          data-test="message-actions"
-          className="absolute -top-3 right-4 hidden gap-0.5 rounded-md border border-divider bg-background shadow-sm group-hover:flex"
-        >
-          {isOwnMessage && (
+          if the current user is moderator+ (canModerateMessages).
+          Actions are hidden for deleted messages (tombstones). */}
+      {(isOwnMessage || canModerateMessages) &&
+        isEditing === false &&
+        isPending === false &&
+        isDeleted === false && (
+          <div
+            data-test="message-actions"
+            className="absolute -top-3 right-4 hidden gap-0.5 rounded-md border border-divider bg-background shadow-sm group-hover:flex"
+          >
+            {isOwnMessage && (
+              <Button
+                variant="light"
+                isIconOnly
+                size="sm"
+                onPress={onStartEdit}
+                data-test="message-edit-button"
+              >
+                <Pencil className="h-4 w-4 text-default-500" />
+              </Button>
+            )}
             <Button
               variant="light"
               isIconOnly
               size="sm"
-              onPress={onStartEdit}
-              data-test="message-edit-button"
+              onPress={onDelete}
+              data-test="message-delete-button"
             >
-              <Pencil className="h-4 w-4 text-default-500" />
+              <Trash2 className="h-4 w-4 text-danger" />
             </Button>
-          )}
-          <Button
-            variant="light"
-            isIconOnly
-            size="sm"
-            onPress={onDelete}
-            data-test="message-delete-button"
-          >
-            <Trash2 className="h-4 w-4 text-danger" />
-          </Button>
-        </div>
-      )}
+          </div>
+        )}
     </div>
   )
 })

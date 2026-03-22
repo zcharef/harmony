@@ -17,5 +17,8 @@ pub struct Message {
     pub edited_at: Option<DateTime<Utc>>,
     /// Soft delete timestamp (ADR-038). `Some` means the message is deleted.
     pub deleted_at: Option<DateTime<Utc>>,
+    /// WHO deleted this message. Enables the frontend to distinguish
+    /// self-deletes from moderator-deletes.
+    pub deleted_by: Option<UserId>,
     pub created_at: DateTime<Utc>,
 }

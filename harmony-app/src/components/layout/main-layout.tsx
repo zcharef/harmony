@@ -1,5 +1,5 @@
 import { GripVertical } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 
 import { useAuthStore } from '@/features/auth'
@@ -10,6 +10,8 @@ import { MemberList, useMyMemberRole } from '@/features/members'
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 import { getChannelPerms, ServerSettings, useSettingsUiStore } from '@/features/settings'
+
+import { WelcomeScreen } from './welcome-screen'
 
 type ViewMode = 'servers' | 'dms'
 
@@ -23,6 +25,55 @@ function ResizeHandle() {
   )
 }
 
+// WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
+function deriveChatHeader<
+  T extends { serverId: string; recipient: { displayName?: string | null; username: string } },
+>(
+  view: ViewMode,
+  dms: T[] | undefined,
+  selectedServerId: string | null,
+  channelName: string | undefined,
+) {
+  const activeDm = view === 'dms' ? dms?.find((dm) => dm.serverId === selectedServerId) : undefined
+  const name =
+    view === 'dms' && activeDm !== undefined
+      ? (activeDm.recipient.displayName ?? activeDm.recipient.username)
+      : (channelName ?? null)
+  return { activeDm, chatHeaderName: name }
+}
+
+// WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
+function useServerAutoSelect(
+  view: ViewMode,
+  selectedServerId: string | null,
+  regularServers: { id: string }[],
+  servers: { id: string }[] | undefined,
+  setSelectedServerId: (id: string | null) => void,
+  setSelectedChannelId: (id: string | null) => void,
+) {
+  // WHY: Auto-select the first server on initial load to avoid the
+  // "no server selected" dead-end. Only fires when view is 'servers',
+  // no server is selected, and servers have finished loading.
+  useEffect(() => {
+    const firstServer = regularServers[0]
+    if (view === 'servers' && selectedServerId === null && firstServer !== undefined) {
+      setSelectedServerId(firstServer.id)
+    }
+  }, [view, selectedServerId, regularServers, setSelectedServerId])
+
+  // WHY: If the selected server was removed (e.g., user was kicked/banned),
+  // reset selection so the UI doesn't show stale data.
+  useEffect(() => {
+    if (selectedServerId !== null && servers !== undefined) {
+      const stillExists = servers.some((s) => s.id === selectedServerId)
+      if (!stillExists) {
+        setSelectedServerId(null)
+        setSelectedChannelId(null)
+      }
+    }
+  }, [selectedServerId, servers, setSelectedServerId, setSelectedChannelId])
+}
+
 export function MainLayout() {
   const [view, setView] = useState<ViewMode>('servers')
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null)
@@ -31,6 +82,10 @@ export function MainLayout() {
   // WHY: Derive server/channel names from query cache to display in headers.
   // This avoids passing full objects between features (CLAUDE.md 4.5: pass IDs, not objects).
   const { data: servers } = useServers()
+
+  // WHY: Filter DM servers so we can check if user has real servers.
+  // Same filter applied inside ServerList (server-list.tsx:106).
+  const regularServers = useMemo(() => servers?.filter((s) => !s.isDm) ?? [], [servers])
 
   // WHY: Presence subscribes to ALL servers so the user appears online to
   // friends everywhere, not just on the currently viewed server.
@@ -46,14 +101,13 @@ export function MainLayout() {
   const selectedChannel = channels?.find((c) => c.id === selectedChannelId)
   const { role: currentUserRole } = useMyMemberRole(selectedServerId)
 
-  // WHY: When in DM view, derive the chat header name from the DM recipient
-  // rather than from the channel name (which would show "dm" or similar).
-  const activeDm = view === 'dms' ? dms?.find((dm) => dm.serverId === selectedServerId) : undefined
-
-  const chatHeaderName =
-    view === 'dms' && activeDm !== undefined
-      ? (activeDm.recipient.displayName ?? activeDm.recipient.username)
-      : (selectedChannel?.name ?? null)
+  // WHY: Chat header shows DM recipient name or channel name depending on view.
+  const { activeDm, chatHeaderName } = deriveChatHeader(
+    view,
+    dms,
+    selectedServerId,
+    selectedChannel?.name,
+  )
 
   const handleSelectServer = useCallback((serverId: string) => {
     setView('servers')
@@ -73,14 +127,49 @@ export function MainLayout() {
     setSelectedChannelId(channelId)
   }, [])
 
+  // WHY: Used by MemberContextMenu "Send Message" to switch from server view
+  // into DM view and open the newly created conversation in one action.
+  const handleNavigateDm = useCallback((serverId: string, channelId: string) => {
+    setView('dms')
+    setSelectedServerId(serverId)
+    setSelectedChannelId(channelId)
+  }, [])
+
+  useServerAutoSelect(
+    view,
+    selectedServerId,
+    regularServers,
+    servers,
+    setSelectedServerId,
+    setSelectedChannelId,
+  )
+
   const isDmView = view === 'dms'
   const showServerSettings = useSettingsUiStore((s) => s.showServerSettings)
+
+  const hasNoServers = servers !== undefined && regularServers.length === 0
 
   /** WHY: Server settings replaces the entire main content area (like Discord). */
   if (showServerSettings && selectedServerId !== null) {
     return (
       <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
         <ServerSettings serverId={selectedServerId} />
+      </div>
+    )
+  }
+
+  /** WHY: Early return avoids a JSX ternary that would increase nesting complexity
+   *  for every conditional inside the Group (Biome cognitive complexity limit). */
+  if (hasNoServers) {
+    return (
+      <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+        <ServerList
+          selectedServerId={selectedServerId}
+          view={view}
+          onSelectServer={handleSelectServer}
+          onSelectDmView={handleSelectDmView}
+        />
+        <WelcomeScreen onServerCreated={handleSelectServer} onServerJoined={() => {}} />
       </div>
     )
   }
@@ -130,7 +219,11 @@ export function MainLayout() {
           <>
             <ResizeHandle />
             <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">
-              <MemberList serverId={selectedServerId} serverName={selectedServer?.name ?? null} />
+              <MemberList
+                serverId={selectedServerId}
+                serverName={selectedServer?.name ?? null}
+                onNavigateDm={handleNavigateDm}
+              />
             </Panel>
           </>
         )}

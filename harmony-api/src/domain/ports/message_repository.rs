@@ -38,8 +38,12 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         content: String,
     ) -> Result<Message, DomainError>;
 
-    /// Soft-delete a message (ADR-038). Sets `deleted_at=now()`.
-    async fn soft_delete(&self, message_id: &MessageId) -> Result<(), DomainError>;
+    /// Soft-delete a message (ADR-038). Sets `deleted_at=now()` and `deleted_by`.
+    async fn soft_delete(
+        &self,
+        message_id: &MessageId,
+        deleted_by: &UserId,
+    ) -> Result<(), DomainError>;
 
     /// Count non-deleted messages by an author in a channel within the last `window_secs` seconds.
     ///

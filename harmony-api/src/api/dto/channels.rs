@@ -67,6 +67,12 @@ pub struct CreateChannelRequest {
     /// Channel type (defaults to "text" if omitted).
     #[serde(default)]
     pub channel_type: Option<ChannelType>,
+    /// Whether the channel is private (visible only to admin+ or explicit role grants).
+    #[serde(default)]
+    pub is_private: bool,
+    /// Whether the channel is read-only (only admin+ can post messages).
+    #[serde(default)]
+    pub is_read_only: bool,
 }
 
 /// Request body for updating an existing channel.
@@ -79,4 +85,10 @@ pub struct UpdateChannelRequest {
     /// New channel topic (if provided; null clears it).
     #[serde(default)]
     pub topic: Option<Option<String>>,
+    /// Update private flag (if provided).
+    #[serde(default)]
+    pub is_private: Option<bool>,
+    /// Update read-only flag (if provided).
+    #[serde(default)]
+    pub is_read_only: Option<bool>,
 }

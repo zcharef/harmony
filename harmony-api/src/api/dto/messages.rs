@@ -24,7 +24,9 @@ pub struct EditMessageRequest {
 
 /// Message response returned to API consumers.
 ///
-/// Excludes `deleted_at` — soft-deleted messages are filtered server-side.
+/// Soft-deleted messages are filtered from list queries, but `deleted_by`
+/// is included so realtime-delivered tombstones can distinguish self-deletes
+/// from moderator-deletes on the client.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageResponse {
@@ -34,6 +36,10 @@ pub struct MessageResponse {
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edited_at: Option<DateTime<Utc>>,
+    /// WHO deleted this message. `None` for live messages; `Some` for
+    /// soft-deleted messages delivered via realtime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_by: Option<UserId>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -45,6 +51,7 @@ impl From<Message> for MessageResponse {
             author_id: m.author_id,
             content: m.content,
             edited_at: m.edited_at,
+            deleted_by: m.deleted_by,
             created_at: m.created_at,
         }
     }

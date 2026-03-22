@@ -83,6 +83,7 @@ function buildRealtimeRow(overrides: Record<string, unknown> = {}) {
     created_at: '2026-03-16T01:00:00.000Z',
     edited_at: null,
     deleted_at: null,
+    deleted_by: null,
     ...overrides,
   }
 }
@@ -234,12 +235,12 @@ describe('useRealtimeMessages', () => {
     })
   })
 
-  // -- UPDATE (soft delete): removes message from cache ----------------------
+  // -- UPDATE (soft delete): keeps tombstone in cache with deletedBy ---------
 
-  it('removes message from cache on UPDATE with deleted_at', () => {
+  it('keeps message as tombstone with deletedBy on self-delete', () => {
     const queryClient = createTestQueryClient()
     const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
-    const existingMsg = buildMessage({ id: 'msg-del' })
+    const existingMsg = buildMessage({ id: 'msg-del', authorId: 'user-42' })
     queryClient.setQueryData(messageKey, buildCacheData([existingMsg]))
 
     renderHook(() => useRealtimeMessages(CHANNEL_ID), {
@@ -250,13 +251,49 @@ describe('useRealtimeMessages', () => {
       mockChannel.handlers,
       buildRealtimeRow({
         id: 'msg-del',
+        author_id: 'user-42',
         deleted_at: '2026-03-16T03:00:00.000Z',
+        deleted_by: 'user-42',
       }),
     )
 
     const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
     const items = cacheData?.pages[0]?.items ?? []
-    expect(items).toHaveLength(0)
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      id: 'msg-del',
+      deletedBy: 'user-42',
+    })
+  })
+
+  it('keeps message as tombstone with deletedBy on moderator-delete', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const existingMsg = buildMessage({ id: 'msg-mod-del', authorId: 'user-42' })
+    queryClient.setQueryData(messageKey, buildCacheData([existingMsg]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    fireUpdate(
+      mockChannel.handlers,
+      buildRealtimeRow({
+        id: 'msg-mod-del',
+        author_id: 'user-42',
+        deleted_at: '2026-03-16T03:00:00.000Z',
+        deleted_by: 'moderator-1',
+      }),
+    )
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const items = cacheData?.pages[0]?.items ?? []
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      id: 'msg-mod-del',
+      authorId: 'user-42',
+      deletedBy: 'moderator-1',
+    })
   })
 
   // -- UPDATE (malformed): logs error and does not crash ---------------------

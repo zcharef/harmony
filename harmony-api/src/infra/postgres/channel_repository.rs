@@ -199,8 +199,8 @@ impl ChannelRepository for PgChannelRepository {
 
         let r = sqlx::query!(
             r#"
-            INSERT INTO channels (id, server_id, name, topic, channel_type, position, created_at)
-            VALUES ($1, $2, $3, $4, $5::text::channel_type, $6, $7)
+            INSERT INTO channels (id, server_id, name, topic, channel_type, position, is_private, is_read_only, created_at)
+            VALUES ($1, $2, $3, $4, $5::text::channel_type, $6, $7, $8, $9)
             RETURNING
                 id,
                 server_id,
@@ -219,6 +219,8 @@ impl ChannelRepository for PgChannelRepository {
             channel.topic,
             channel_type_str,
             channel.position,
+            channel.is_private,
+            channel.is_read_only,
             channel.created_at,
         )
         .fetch_one(&self.pool)
@@ -245,18 +247,27 @@ impl ChannelRepository for PgChannelRepository {
         channel_id: &ChannelId,
         name: Option<String>,
         topic: Option<Option<String>>,
+        is_private: Option<bool>,
+        is_read_only: Option<bool>,
     ) -> Result<Channel, DomainError> {
         let cid = channel_id.0;
         // $3: whether topic was provided at all
         let should_update_topic = topic.is_some();
         // $4: the new topic value (None = clear topic)
         let topic_value = topic.flatten();
+        // $5/$6: whether permission flags were provided
+        let should_update_private = is_private.is_some();
+        let private_value = is_private.unwrap_or(false);
+        let should_update_read_only = is_read_only.is_some();
+        let read_only_value = is_read_only.unwrap_or(false);
 
         let row = sqlx::query!(
             r#"
             UPDATE channels
             SET name = COALESCE($2, name),
-                topic = CASE WHEN $3 THEN $4 ELSE topic END
+                topic = CASE WHEN $3 THEN $4 ELSE topic END,
+                is_private = CASE WHEN $5 THEN $6 ELSE is_private END,
+                is_read_only = CASE WHEN $7 THEN $8 ELSE is_read_only END
             WHERE id = $1
             RETURNING
                 id,
@@ -274,6 +285,10 @@ impl ChannelRepository for PgChannelRepository {
             name,
             should_update_topic,
             topic_value,
+            should_update_private,
+            private_value,
+            should_update_read_only,
+            read_only_value,
         )
         .fetch_optional(&self.pool)
         .await

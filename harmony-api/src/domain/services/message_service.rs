@@ -6,16 +6,13 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Channel, ChannelId, Message, MessageId, Role, UserId};
-use crate::domain::ports::{
-    ChannelRepository, MemberRepository, MessageRepository, ServerRepository,
-};
+use crate::domain::ports::{ChannelRepository, MemberRepository, MessageRepository};
 
 /// Service for message-related business logic.
 #[derive(Debug)]
 pub struct MessageService {
     repo: Arc<dyn MessageRepository>,
     channel_repo: Arc<dyn ChannelRepository>,
-    server_repo: Arc<dyn ServerRepository>,
     member_repo: Arc<dyn MemberRepository>,
 }
 
@@ -24,13 +21,11 @@ impl MessageService {
     pub fn new(
         repo: Arc<dyn MessageRepository>,
         channel_repo: Arc<dyn ChannelRepository>,
-        server_repo: Arc<dyn ServerRepository>,
         member_repo: Arc<dyn MemberRepository>,
     ) -> Self {
         Self {
             repo,
             channel_repo,
-            server_repo,
             member_repo,
         }
     }
@@ -183,11 +178,11 @@ impl MessageService {
         self.repo.update_content(message_id, content).await
     }
 
-    /// Soft-delete a message. The author or the server owner can delete (ADR-038).
+    /// Soft-delete a message. The author or moderator+ can delete (ADR-038).
     ///
     /// # Errors
     /// Returns `DomainError::NotFound` if the message doesn't exist or is deleted,
-    /// `DomainError::Forbidden` if the caller is neither the author nor the server owner.
+    /// `DomainError::Forbidden` if the caller is neither the author nor a moderator+.
     pub async fn delete_message(
         &self,
         message_id: &MessageId,
@@ -203,45 +198,36 @@ impl MessageService {
                 })?;
 
         if message.author_id != *user_id {
-            // WHY: Server owners can delete any message in their server (moderation).
-            // Lookup chain: message.channel_id → channel.server_id → server.owner_id.
-            let is_owner = self
-                .is_server_owner_for_channel(&message.channel_id, user_id)
-                .await?;
-            if !is_owner {
+            // WHY: Moderator+ can delete any message in their server (moderation).
+            // Lookup chain: message.channel_id → channel.server_id → member.role.
+            // Matches RLS policy messages_update_moderator_softdelete.
+            let channel = self
+                .channel_repo
+                .get_by_id(&message.channel_id)
+                .await?
+                .ok_or_else(|| DomainError::NotFound {
+                    resource_type: "Channel",
+                    id: message.channel_id.to_string(),
+                })?;
+
+            let caller_role = self
+                .member_repo
+                .get_member_role(&channel.server_id, user_id)
+                .await?
+                .ok_or_else(|| {
+                    DomainError::Forbidden(
+                        "You must be a server member to delete messages in this channel"
+                            .to_string(),
+                    )
+                })?;
+
+            if caller_role.level() < Role::Moderator.level() {
                 return Err(DomainError::Forbidden(
-                    "Only the message author or server owner can delete this message".to_string(),
+                    "Only the message author or a moderator can delete this message".to_string(),
                 ));
             }
         }
 
-        self.repo.soft_delete(message_id).await
-    }
-
-    /// Check if a user is the server owner for the server containing a channel.
-    async fn is_server_owner_for_channel(
-        &self,
-        channel_id: &ChannelId,
-        user_id: &UserId,
-    ) -> Result<bool, DomainError> {
-        let channel = self
-            .channel_repo
-            .get_by_id(channel_id)
-            .await?
-            .ok_or_else(|| DomainError::NotFound {
-                resource_type: "Channel",
-                id: channel_id.to_string(),
-            })?;
-
-        let server = self
-            .server_repo
-            .get_by_id(&channel.server_id)
-            .await?
-            .ok_or_else(|| DomainError::NotFound {
-                resource_type: "Server",
-                id: channel.server_id.to_string(),
-            })?;
-
-        Ok(server.owner_id == *user_id)
+        self.repo.soft_delete(message_id, user_id).await
     }
 }
