@@ -8,8 +8,12 @@ const SRC_DIR = join(ROOT_DIR, 'src')
 /**
  * Architecture tests for dependency version coupling.
  *
- * These validate structural rules after the @hey-api/client-fetch removal
- * and version pinning strategy:
+ * These validate structural rules after the @hey-api/client-fetch npm package
+ * removal and version pinning strategy. Note: the string "@hey-api/client-fetch"
+ * still appears as a plugin identifier in openapi-ts.config.ts — that is the
+ * code-generator plugin name, NOT the npm package.
+ *
+ * Rules enforced:
  * - No runtime imports from the deprecated @hey-api/client-fetch package
  * - tailwindcss exact pin matches @tailwindcss/vite
  * - @playwright/test version matches Docker Compose image tag
@@ -49,8 +53,11 @@ describe('Dependency Version Coupling', () => {
 
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i]
-          // Match both single and double quote import styles
-          if (/from\s+['"]@hey-api\/client-fetch['"]/.test(line)) {
+          // Match static: from '@hey-api/client-fetch'
+          const hasStaticImport = /from\s+['"]@hey-api\/client-fetch['"]/.test(line)
+          // Match dynamic: import('@hey-api/client-fetch')
+          const hasDynamicImport = /import\s*\(\s*['"]@hey-api\/client-fetch['"]/.test(line)
+          if (hasStaticImport || hasDynamicImport) {
             violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
           }
         }
@@ -143,16 +150,29 @@ describe('Dependency Version Coupling', () => {
   describe('generated_client_uses_bundled_import', () => {
     it('client.gen.ts imports from local ./client, not @hey-api/client-fetch', () => {
       const clientGenPath = join(SRC_DIR, 'lib/api/client.gen.ts')
-      expect(existsSync(clientGenPath), 'src/lib/api/client.gen.ts must exist').toBe(true)
+      expect(
+        existsSync(clientGenPath),
+        'client.gen.ts not found — run `just gen-api` to generate the API client',
+      ).toBe(true)
 
       const content = readFileSync(clientGenPath, 'utf-8')
+      const lines = content.split('\n')
 
-      // Must NOT import from the deprecated external package
+      // Must NOT import from the deprecated external package (skip comment lines)
+      const forbiddenImportLines: string[] = []
+      for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim()
+        if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) continue
+        const hasStaticImport = /from\s+['"]@hey-api\/client-fetch['"]/.test(lines[i])
+        const hasDynamicImport = /import\s*\(\s*['"]@hey-api\/client-fetch['"]/.test(lines[i])
+        if (hasStaticImport || hasDynamicImport) {
+          forbiddenImportLines.push(`  L${i + 1}: ${lines[i].trim()}`)
+        }
+      }
       expect(
-        content.includes("from '@hey-api/client-fetch'") ||
-          content.includes('from "@hey-api/client-fetch"'),
-        'client.gen.ts must not import from @hey-api/client-fetch (deprecated). The generated client should use the local bundled client.',
-      ).toBe(false)
+        forbiddenImportLines,
+        `client.gen.ts must not import from @hey-api/client-fetch (deprecated). The generated client should use the local bundled client.\nViolations:\n${forbiddenImportLines.join('\n')}`,
+      ).toEqual([])
 
       // Must import from the local bundled client
       expect(

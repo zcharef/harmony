@@ -650,7 +650,8 @@ fn test_getrandom_key_hex_roundtrip() {
     let hex_key = hex::encode(key);
     assert_eq!(hex_key.len(), 64, "Hex-encoded 32-byte key should be 64 chars");
 
-    // Verify hex roundtrip
+    // Mirror the production conversion in olm.rs:38-41
     let decoded = hex::decode(&hex_key).expect("hex decode should succeed");
-    assert_eq!(decoded, key, "Hex roundtrip should preserve key bytes");
+    let roundtrip_key: [u8; 32] = decoded.try_into().expect("decoded key should be exactly 32 bytes");
+    assert_eq!(roundtrip_key, key, "Hex roundtrip should preserve key bytes");
 }
