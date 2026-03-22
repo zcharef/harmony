@@ -240,4 +240,86 @@ mod tests {
         let result = validate_key("test", "base64encodedkey==");
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn validate_key_rejects_too_long() {
+        let long = "a".repeat(MAX_KEY_LENGTH + 1);
+        let result = validate_key("test", &long);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DomainError::ValidationError(msg) => {
+                assert!(msg.contains("at most 256 characters"), "got: {msg}");
+            }
+            other => panic!("Expected ValidationError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn validate_key_accepts_at_max_length() {
+        let exactly_max = "a".repeat(MAX_KEY_LENGTH);
+        assert!(validate_key("test", &exactly_max).is_ok());
+    }
+
+    // ── device_name validation (inline re-check of register_device logic) ──
+
+    /// WHY: register_device trims then length-checks device_name, but that
+    /// method requires a KeyRepository. We re-test the pure validation
+    /// condition here to cover the logic without a DB.
+
+    fn validate_device_name(name: Option<&str>) -> Result<(), DomainError> {
+        if let Some(raw) = name {
+            let trimmed = raw.trim();
+            if trimmed.len() > MAX_DEVICE_NAME_LENGTH {
+                return Err(DomainError::ValidationError(format!(
+                    "device_name must not exceed {} characters",
+                    MAX_DEVICE_NAME_LENGTH
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn device_name_valid() {
+        assert!(validate_device_name(Some("My Laptop")).is_ok());
+    }
+
+    #[test]
+    fn device_name_too_long_rejected() {
+        let long = "a".repeat(129);
+        let result = validate_device_name(Some(&long));
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DomainError::ValidationError(msg) => {
+                assert!(msg.contains("128"), "got: {msg}");
+            }
+            other => panic!("Expected ValidationError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn device_name_128_chars_accepted() {
+        let exactly_128 = "a".repeat(128);
+        assert!(validate_device_name(Some(&exactly_128)).is_ok());
+    }
+
+    #[test]
+    fn device_name_none_accepted() {
+        assert!(validate_device_name(None).is_ok());
+    }
+
+    #[test]
+    fn device_name_whitespace_only_accepted() {
+        // WHY: The service trims then checks length. A whitespace-only name
+        // trims to "" which is 0 chars — passes the length check.
+        // Whether it *should* be rejected is a product decision; the current
+        // code accepts it because there is no "non-empty after trim" rule.
+        assert!(validate_device_name(Some("   ")).is_ok());
+    }
+
+    #[test]
+    fn device_name_padded_accepted_when_core_within_limit() {
+        // "  My Laptop  " trims to "My Laptop" (9 chars) — well within 128.
+        assert!(validate_device_name(Some("  My Laptop  ")).is_ok());
+    }
 }

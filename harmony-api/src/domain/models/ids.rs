@@ -223,9 +223,13 @@ impl DeviceId {
     /// Validated construction — returns error if device ID is empty, too long, or
     /// contains invalid characters.
     ///
-    /// WHY: This is the SSoT for DeviceId validation. `new()` is kept for backward
+    /// WHY: This is the `SSoT` for `DeviceId` validation. `new()` is kept for backward
     /// compatibility (deserialization, tests). Prefer `try_new()` at domain entry
     /// points for defense-in-depth.
+    ///
+    /// # Errors
+    /// Returns a static error message if the ID is empty, exceeds 128 characters,
+    /// or contains characters outside `[a-zA-Z0-9_-]`.
     pub fn try_new(id: String) -> Result<Self, &'static str> {
         if id.is_empty() {
             return Err("device_id cannot be empty");
@@ -278,5 +282,94 @@ impl fmt::Display for InviteCode {
 impl From<String> for InviteCode {
     fn from(code: String) -> Self {
         Self(code)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    // ── DeviceId::try_new ──────────────────────────────────────────
+
+    #[test]
+    fn device_id_valid() {
+        let result = DeviceId::try_new("my-device_123".to_string());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().0, "my-device_123");
+    }
+
+    #[test]
+    fn device_id_empty_rejected() {
+        let result = DeviceId::try_new(String::new());
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "device_id cannot be empty");
+    }
+
+    #[test]
+    fn device_id_too_long_rejected() {
+        let long = "a".repeat(129);
+        let result = DeviceId::try_new(long);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "device_id cannot exceed 128 characters"
+        );
+    }
+
+    #[test]
+    fn device_id_128_chars_accepted() {
+        let exactly_128 = "a".repeat(128);
+        let result = DeviceId::try_new(exactly_128.clone());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().0, exactly_128);
+    }
+
+    #[test]
+    fn device_id_invalid_chars_rejected() {
+        // Space and exclamation mark are not allowed.
+        let result = DeviceId::try_new("my device!".to_string());
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "device_id may only contain alphanumeric characters, hyphens, and underscores"
+        );
+    }
+
+    #[test]
+    fn device_id_path_traversal_rejected() {
+        let result = DeviceId::try_new("../../etc".to_string());
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "device_id may only contain alphanumeric characters, hyphens, and underscores"
+        );
+    }
+
+    #[test]
+    fn device_id_unicode_rejected() {
+        let result = DeviceId::try_new("caf\u{00e9}".to_string());
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "device_id may only contain alphanumeric characters, hyphens, and underscores"
+        );
+    }
+
+    #[test]
+    fn device_id_special_chars_rejected() {
+        let result = DeviceId::try_new("@#$%".to_string());
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "device_id may only contain alphanumeric characters, hyphens, and underscores"
+        );
+    }
+
+    #[test]
+    fn device_id_dash_underscore_accepted() {
+        let result = DeviceId::try_new("my-device_v2".to_string());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().0, "my-device_v2");
     }
 }

@@ -101,11 +101,14 @@ impl DmRepository for PgDmRepository {
             return Ok((ServerId::new(row.server_id), ChannelId::new(row.channel_id)));
         }
 
-        // 2. Create the DM server (is_dm=true, name is empty string for DMs)
+        // 2. Create the DM server (is_dm=true)
+        // WHY: name = 'dm' instead of '' because the servers table has a CHECK
+        // constraint `servers_name_length` requiring char_length(name) BETWEEN 2 AND 100.
+        // DM server names are never shown to users (the UI shows the recipient's name).
         let server_row = sqlx::query!(
             r#"
             INSERT INTO servers (name, owner_id, is_dm, is_public)
-            VALUES ('', $1, true, false)
+            VALUES ('dm', $1, true, false)
             RETURNING id
             "#,
             uid_a,

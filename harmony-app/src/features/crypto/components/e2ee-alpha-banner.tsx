@@ -15,6 +15,7 @@ export function E2eeAlphaBanner() {
 
   return (
     <Chip
+      data-test="e2ee-alpha-banner"
       startContent={<ShieldAlert className="ml-1 h-3 w-3" />}
       variant="flat"
       color="warning"

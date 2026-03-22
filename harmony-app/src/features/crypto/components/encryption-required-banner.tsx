@@ -17,7 +17,7 @@ export function EncryptionRequiredBanner() {
   const { t } = useTranslation('crypto')
 
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-divider bg-default-50 p-6 text-center">
+    <div data-test="encryption-required-banner" className="flex flex-col items-center gap-3 rounded-lg border border-divider bg-default-50 p-6 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
         <Lock className="h-6 w-6 text-primary" />
       </div>

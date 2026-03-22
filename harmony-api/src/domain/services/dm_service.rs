@@ -86,7 +86,16 @@ impl DmService {
             ));
         }
 
-        // WHY: Verify recipient exists before checking for existing DM or creating one.
+        // WHY: Both users must have profiles because server_members.user_id has a FK
+        // constraint referencing profiles(id). Without this check, the INSERT into
+        // server_members would fail with a FK violation if the caller hasn't called
+        // syncProfile yet.
+        if self.profile_repo.get_by_id(caller_id).await?.is_none() {
+            return Err(DomainError::ValidationError(
+                "You must sync your profile before creating a DM".to_string(),
+            ));
+        }
+
         let recipient = self
             .profile_repo
             .get_by_id(recipient_id)

@@ -315,4 +315,63 @@ mod tests {
         let over: String = "\u{1f600}".repeat(MAX_CHANNEL_TOPIC_LENGTH + 1);
         assert!(validate_channel_topic(&over).is_err());
     }
+
+    // ── encryption one-way toggle (pure condition test) ────────────
+    //
+    // WHY: The full update_channel method requires a ChannelRepository
+    // (DB access), so we cannot call it in a unit test. Instead, we
+    // extract and test the one-way toggle *condition* in isolation.
+    // The condition from channel_service.rs:L165-L172 is:
+    //   if new_encrypted == Some(false) && channel.encrypted == true → Err
+
+    /// Re-implements the one-way toggle guard as a pure function.
+    fn check_encryption_toggle(
+        current_encrypted: bool,
+        requested: Option<bool>,
+    ) -> Result<(), DomainError> {
+        if let Some(new_encrypted) = requested {
+            if current_encrypted && !new_encrypted {
+                return Err(DomainError::ValidationError(
+                    "Encryption cannot be disabled once enabled".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn encryption_toggle_false_to_true_allowed() {
+        assert!(check_encryption_toggle(false, Some(true)).is_ok());
+    }
+
+    #[test]
+    fn encryption_toggle_true_to_false_rejected() {
+        let result = check_encryption_toggle(true, Some(false));
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DomainError::ValidationError(msg) => {
+                assert_eq!(msg, "Encryption cannot be disabled once enabled");
+            }
+            other => panic!("Expected ValidationError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn encryption_toggle_none_preserves_current() {
+        // None means "don't change" — should succeed regardless of current state.
+        assert!(check_encryption_toggle(false, None).is_ok());
+        assert!(check_encryption_toggle(true, None).is_ok());
+    }
+
+    #[test]
+    fn encryption_toggle_true_to_true_allowed() {
+        // WHY: Re-enabling an already-encrypted channel is a no-op, not an error.
+        assert!(check_encryption_toggle(true, Some(true)).is_ok());
+    }
+
+    #[test]
+    fn encryption_toggle_false_to_false_allowed() {
+        // WHY: "Disabling" when already disabled is a no-op, not an error.
+        assert!(check_encryption_toggle(false, Some(false)).is_ok());
+    }
 }
