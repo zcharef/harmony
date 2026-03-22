@@ -87,7 +87,7 @@ jobs:
         with:
           toolchain: "1.94"
       - name: Install cargo-deny
-        run: cargo install cargo-deny
+        run: cargo install cargo-deny --locked
       - name: Check licenses and bans
         run: cargo deny check
 
