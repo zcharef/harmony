@@ -148,14 +148,13 @@ SELECT col_is_unique('public', 'megolm_sessions', ARRAY['channel_id', 'session_i
 SELECT fk_ok('public', 'megolm_sessions', 'channel_id', 'public', 'channels', 'id',
     'schema: megolm_sessions.channel_id FK -> channels(id)');
 
--- WHY: creator_id FK targets profiles(id) which itself FKs to auth.users(id).
--- This matches the codebase pattern where all user-referencing FKs go through
--- profiles rather than auth.users directly (see servers.owner_id, messages.author_id).
-SELECT fk_ok('public', 'megolm_sessions', 'creator_id', 'public', 'profiles', 'id',
-    'schema: megolm_sessions.creator_id FK -> profiles(id)');
+-- WHY: creator_id FK targets auth.users(id) directly per the migration
+-- (20260322190000_add_channel_encryption.sql:L33).
+SELECT fk_ok('public', 'megolm_sessions', 'creator_id', 'auth', 'users', 'id',
+    'schema: megolm_sessions.creator_id FK -> auth.users(id)');
 
-SELECT has_index('public', 'megolm_sessions', 'idx_megolm_sessions_channel',
-    'schema: index idx_megolm_sessions_channel exists');
+SELECT has_index('public', 'megolm_sessions', 'idx_megolm_sessions_channel_id',
+    'schema: index idx_megolm_sessions_channel_id exists');
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -170,16 +169,14 @@ SELECT is(
     'RLS SELECT: authenticated member can see megolm_sessions'
 );
 
--- 3.2 SELECT: authenticated non-member CAN also see megolm_sessions
--- WHY: The current policy (megolm_sessions_select_authenticated) allows any
--- authenticated user to SELECT. Channel-scoped access is enforced at the
--- API layer, not at RLS level, because the Megolm key exchange protocol
--- requires visibility for session negotiation.
+-- 3.2 SELECT: authenticated non-member CANNOT see megolm_sessions
+-- WHY: The policy (megolm_sessions_select_member) uses is_channel_member(channel_id)
+-- which requires server membership. Non-members are correctly denied at the RLS level.
 SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555'); -- Eve (non-member)
 SELECT is(
     (SELECT count(*)::int FROM megolm_sessions WHERE channel_id = '11111111-1111-1111-1111-111111111111'),
-    1,
-    'RLS SELECT: authenticated non-member can see megolm_sessions (API enforces channel scope)'
+    0,
+    'RLS SELECT: authenticated non-member cannot see megolm_sessions'
 );
 
 -- 3.3 SELECT: anonymous CANNOT see megolm_sessions

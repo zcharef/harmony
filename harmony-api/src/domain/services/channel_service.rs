@@ -41,6 +41,24 @@ fn validate_channel_name(name: &str) -> Result<(), DomainError> {
     Ok(())
 }
 
+/// Guard against disabling encryption on an already-encrypted channel.
+///
+/// WHY: Extracted from `update_channel` so that unit tests can verify the
+/// one-way toggle logic without requiring a `ChannelRepository`.
+pub(crate) fn check_encryption_toggle(
+    current_encrypted: bool,
+    requested: Option<bool>,
+) -> Result<(), DomainError> {
+    if let Some(new_encrypted) = requested {
+        if current_encrypted && !new_encrypted {
+            return Err(DomainError::ValidationError(
+                "Encryption cannot be disabled once enabled".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Validate that a channel topic does not exceed the maximum length.
 fn validate_channel_topic(topic: &str) -> Result<(), DomainError> {
     if topic.chars().count() > MAX_CHANNEL_TOPIC_LENGTH {
@@ -160,16 +178,7 @@ impl ChannelService {
             ));
         }
 
-        // WHY: One-way toggle — once encryption is enabled, it cannot be disabled
-        // to prevent accidental plaintext leaks in a previously-encrypted channel.
-        if let Some(new_encrypted) = encrypted
-            && channel.encrypted
-            && !new_encrypted
-        {
-            return Err(DomainError::ValidationError(
-                "Encryption cannot be disabled once enabled".to_string(),
-            ));
-        }
+        check_encryption_toggle(channel.encrypted, encrypted)?;
 
         let validated_name = match name {
             Some(raw) => {
@@ -316,28 +325,7 @@ mod tests {
         assert!(validate_channel_topic(&over).is_err());
     }
 
-    // ── encryption one-way toggle (pure condition test) ────────────
-    //
-    // WHY: The full update_channel method requires a ChannelRepository
-    // (DB access), so we cannot call it in a unit test. Instead, we
-    // extract and test the one-way toggle *condition* in isolation.
-    // The condition from channel_service.rs:L165-L172 is:
-    //   if new_encrypted == Some(false) && channel.encrypted == true → Err
-
-    /// Re-implements the one-way toggle guard as a pure function.
-    fn check_encryption_toggle(
-        current_encrypted: bool,
-        requested: Option<bool>,
-    ) -> Result<(), DomainError> {
-        if let Some(new_encrypted) = requested {
-            if current_encrypted && !new_encrypted {
-                return Err(DomainError::ValidationError(
-                    "Encryption cannot be disabled once enabled".to_string(),
-                ));
-            }
-        }
-        Ok(())
-    }
+    // ── encryption one-way toggle ──────────────────────────────────
 
     #[test]
     fn encryption_toggle_false_to_true_allowed() {

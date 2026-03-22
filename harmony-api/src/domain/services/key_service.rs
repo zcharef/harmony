@@ -42,17 +42,7 @@ impl KeyService {
     ) -> Result<DeviceKey, DomainError> {
         validate_key("identity_key", identity_key)?;
         validate_key("signing_key", signing_key)?;
-
-        // WHY: Trim + length-check device_name to prevent oversized display names.
-        if let Some(name) = device_name {
-            let trimmed = name.trim();
-            if trimmed.len() > MAX_DEVICE_NAME_LENGTH {
-                return Err(DomainError::ValidationError(format!(
-                    "device_name must not exceed {} characters",
-                    MAX_DEVICE_NAME_LENGTH
-                )));
-            }
-        }
+        validate_device_name(device_name)?;
 
         self.key_repo
             .register_device(user_id, device_id, identity_key, signing_key, device_name)
@@ -215,6 +205,24 @@ fn validate_key(field_name: &str, value: &str) -> Result<(), DomainError> {
     Ok(())
 }
 
+/// Validate that a device name, when present, does not exceed the length limit
+/// after trimming whitespace.
+///
+/// WHY: Extracted from `register_device` so that unit tests can verify the
+/// pure validation logic without requiring a `KeyRepository`.
+pub(crate) fn validate_device_name(name: Option<&str>) -> Result<(), DomainError> {
+    if let Some(raw) = name {
+        let trimmed = raw.trim();
+        if trimmed.len() > MAX_DEVICE_NAME_LENGTH {
+            return Err(DomainError::ValidationError(format!(
+                "device_name must not exceed {} characters",
+                MAX_DEVICE_NAME_LENGTH
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,6 +241,12 @@ mod tests {
     fn validate_key_rejects_empty() {
         let result = validate_key("test", "");
         assert!(result.is_err());
+        match result.unwrap_err() {
+            DomainError::ValidationError(msg) => {
+                assert!(msg.contains("non-empty"), "got: {msg}");
+            }
+            other => panic!("Expected ValidationError, got {:?}", other),
+        }
     }
 
     #[test]
@@ -260,24 +274,7 @@ mod tests {
         assert!(validate_key("test", &exactly_max).is_ok());
     }
 
-    // ── device_name validation (inline re-check of register_device logic) ──
-
-    /// WHY: register_device trims then length-checks device_name, but that
-    /// method requires a KeyRepository. We re-test the pure validation
-    /// condition here to cover the logic without a DB.
-
-    fn validate_device_name(name: Option<&str>) -> Result<(), DomainError> {
-        if let Some(raw) = name {
-            let trimmed = raw.trim();
-            if trimmed.len() > MAX_DEVICE_NAME_LENGTH {
-                return Err(DomainError::ValidationError(format!(
-                    "device_name must not exceed {} characters",
-                    MAX_DEVICE_NAME_LENGTH
-                )));
-            }
-        }
-        Ok(())
-    }
+    // ── device_name validation ─────────────────────────────────────
 
     #[test]
     fn device_name_valid() {

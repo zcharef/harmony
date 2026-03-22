@@ -211,8 +211,7 @@ test.describe('Encryption UI', () => {
 
     // WHY: The Textarea has isReadOnly={isInputDisabled} when isWebEncryptionBlocked is true.
     // HeroUI renders this as readonly attribute on the underlying textarea element.
-    const isReadOnly = await messageInput.getAttribute('readonly')
-    expect(isReadOnly).not.toBeNull()
+    await expect(messageInput).toHaveAttribute('readonly', '')
   })
 
   test('plain channel does NOT show encryption-required banner and allows input', async ({
@@ -234,8 +233,7 @@ test.describe('Encryption UI', () => {
     const messageInput = page.locator('[data-test="message-input"] textarea')
     await messageInput.waitFor({ timeout: 10_000 })
 
-    const isReadOnly = await messageInput.getAttribute('readonly')
-    expect(isReadOnly).toBeNull()
+    await expect(messageInput).not.toHaveAttribute('readonly')
   })
 
   // ── E2EE alpha banner in toolbar ──────────────────────────────────

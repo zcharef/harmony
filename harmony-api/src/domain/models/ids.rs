@@ -367,9 +367,12 @@ mod tests {
     }
 
     #[test]
-    fn device_id_dash_underscore_accepted() {
-        let result = DeviceId::try_new("my-device_v2".to_string());
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().0, "my-device_v2");
+    fn device_id_whitespace_padded_rejected() {
+        let result = DeviceId::try_new(" valid-id ".to_string());
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "device_id may only contain alphanumeric characters, hyphens, and underscores"
+        );
     }
 }
