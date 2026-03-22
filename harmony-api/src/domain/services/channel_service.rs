@@ -81,7 +81,12 @@ impl ChannelService {
         let normalized = name.trim().to_lowercase();
         validate_channel_name(&normalized)?;
 
-        // WHY: Check plan limit AFTER validation (no point hitting DB for invalid input)
+        // WHY: TOCTOU race exists between this limit check and the insert below.
+        // Two concurrent requests could both pass, exceeding the limit by one.
+        // Acceptable: same pattern as Discord. Plan limits are billing guard-rails,
+        // not hard DB constraints. Exact enforcement would require advisory locks.
+        //
+        // Check plan limit AFTER validation (no point hitting DB for invalid input)
         // but BEFORE resource creation to enforce billing constraints.
         self.plan_checker.check_channel_limit(&server_id).await?;
 
@@ -128,12 +133,14 @@ impl ChannelService {
             })
     }
 
-    /// Update a channel's name, topic, and/or permission flags.
+    /// Update a channel's name, topic, permission flags, and/or encryption toggle.
     ///
     /// # Errors
-    /// Returns `DomainError::ValidationError` if the new name or topic is invalid.
+    /// Returns `DomainError::ValidationError` if the new name or topic is invalid,
+    /// or if attempting to disable encryption on an already-encrypted channel.
     /// Returns `DomainError::Forbidden` if the channel does not belong to `server_id`.
     /// Returns `DomainError::NotFound` if the channel does not exist.
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_channel(
         &self,
         server_id: &ServerId,
@@ -142,6 +149,7 @@ impl ChannelService {
         topic: Option<Option<String>>,
         is_private: Option<bool>,
         is_read_only: Option<bool>,
+        encrypted: Option<bool>,
     ) -> Result<Channel, DomainError> {
         // WHY: Prevents cross-server IDOR — an admin on Server A must not
         // be able to update channels on Server B by crafting the channel_id.
@@ -149,6 +157,17 @@ impl ChannelService {
         if channel.server_id != *server_id {
             return Err(DomainError::Forbidden(
                 "Channel does not belong to this server".to_string(),
+            ));
+        }
+
+        // WHY: One-way toggle — once encryption is enabled, it cannot be disabled
+        // to prevent accidental plaintext leaks in a previously-encrypted channel.
+        if let Some(new_encrypted) = encrypted
+            && channel.encrypted
+            && !new_encrypted
+        {
+            return Err(DomainError::ValidationError(
+                "Encryption cannot be disabled once enabled".to_string(),
             ));
         }
 
@@ -167,7 +186,14 @@ impl ChannelService {
         }
 
         self.repo
-            .update(channel_id, validated_name, topic, is_private, is_read_only)
+            .update(
+                channel_id,
+                validated_name,
+                topic,
+                is_private,
+                is_read_only,
+                encrypted,
+            )
             .await
     }
 

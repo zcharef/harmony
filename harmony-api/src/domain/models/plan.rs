@@ -95,8 +95,8 @@ const FREE_LIMITS: PlanLimits = PlanLimits {
     max_channels: 50,
     max_roles: 20,
     max_voice_concurrent: 12,
-    max_storage_total_bytes: 1024 * 1024 * 1024,      // 1 GB
-    max_file_size_bytes: 8 * 1024 * 1024,              // 8 MB
+    max_storage_total_bytes: 1024 * 1024 * 1024, // 1 GB
+    max_file_size_bytes: 8 * 1024 * 1024,        // 8 MB
 };
 
 const PRO_LIMITS: PlanLimits = PlanLimits {
@@ -104,8 +104,8 @@ const PRO_LIMITS: PlanLimits = PlanLimits {
     max_channels: 500,
     max_roles: 250,
     max_voice_concurrent: 100,
-    max_storage_total_bytes: 50 * 1024 * 1024 * 1024,  // 50 GB
-    max_file_size_bytes: 50 * 1024 * 1024,              // 50 MB
+    max_storage_total_bytes: 50 * 1024 * 1024 * 1024, // 50 GB
+    max_file_size_bytes: 50 * 1024 * 1024,            // 50 MB
 };
 
 impl PlanLimits {

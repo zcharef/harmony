@@ -6,9 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{
-    ClaimedKey, DeviceId, DeviceKey, DeviceKeyId, OneTimeKey, OneTimeKeyId, PreKeyBundle, UserId,
-};
+use crate::domain::models::{DeviceId, DeviceKey, DeviceKeyId, OneTimeKey, OneTimeKeyId, UserId};
 use crate::domain::ports::KeyRepository;
 
 /// PostgreSQL-backed key repository.
@@ -24,7 +22,7 @@ impl PgKeyRepository {
     }
 }
 
-/// Intermediate row type for device_keys sqlx decoding.
+/// Intermediate row type for `device_keys` sqlx decoding.
 struct DeviceKeyRow {
     id: Uuid,
     user_id: Uuid,
@@ -51,7 +49,7 @@ impl DeviceKeyRow {
     }
 }
 
-/// Intermediate row type for one_time_keys sqlx decoding.
+/// Intermediate row type for `one_time_keys` sqlx decoding.
 struct OneTimeKeyRow {
     id: Uuid,
     user_id: Uuid,
@@ -133,10 +131,7 @@ impl KeyRepository for PgKeyRepository {
         Ok(dk.into_device_key())
     }
 
-    async fn get_devices_for_user(
-        &self,
-        user_id: &UserId,
-    ) -> Result<Vec<DeviceKey>, DomainError> {
+    async fn get_devices_for_user(&self, user_id: &UserId) -> Result<Vec<DeviceKey>, DomainError> {
         let uid = user_id.0;
 
         let rows = sqlx::query!(
@@ -225,6 +220,11 @@ impl KeyRepository for PgKeyRepository {
         let public_keys: Vec<String> = keys.iter().map(|(_, p, _)| p.clone()).collect();
         let is_fallbacks: Vec<bool> = keys.iter().map(|(_, _, f)| *f).collect();
 
+        // WHY: Transaction ensures key insert + timestamp update are atomic.
+        // Without this, a failure on the UPDATE leaves keys inserted but
+        // last_key_upload_at stale.
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
+
         sqlx::query!(
             r#"
             INSERT INTO one_time_keys (user_id, device_id, key_id, public_key, is_fallback)
@@ -240,7 +240,7 @@ impl KeyRepository for PgKeyRepository {
             &public_keys,
             &is_fallbacks,
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(super::db_err)?;
 
@@ -254,9 +254,11 @@ impl KeyRepository for PgKeyRepository {
             uid,
             did,
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(super::db_err)?;
+
+        tx.commit().await.map_err(super::db_err)?;
 
         Ok(())
     }
@@ -270,6 +272,9 @@ impl KeyRepository for PgKeyRepository {
         let did = &device_id.0;
 
         // WHY: Atomic DELETE...RETURNING ensures no two callers claim the same key.
+        // FOR UPDATE SKIP LOCKED prevents concurrent sessions from selecting the
+        // same row — a loser would see zero rows from DELETE instead of cleanly
+        // skipping to the next available key.
         let row = sqlx::query!(
             r#"
             DELETE FROM one_time_keys
@@ -280,6 +285,7 @@ impl KeyRepository for PgKeyRepository {
                   AND is_fallback = false
                 ORDER BY created_at
                 LIMIT 1
+                FOR UPDATE SKIP LOCKED
             )
             RETURNING
                 id,
@@ -381,76 +387,5 @@ impl KeyRepository for PgKeyRepository {
         .map_err(super::db_err)?;
 
         Ok(row.count)
-    }
-
-    async fn get_pre_key_bundle(
-        &self,
-        user_id: &UserId,
-    ) -> Result<Option<PreKeyBundle>, DomainError> {
-        let uid = user_id.0;
-
-        // WHY: Fetch the first registered device. In a multi-device scenario,
-        // clients should fetch bundles per-device. For now, the first device
-        // is sufficient for the walking skeleton.
-        let device = sqlx::query!(
-            r#"
-            SELECT
-                id,
-                user_id,
-                device_id,
-                identity_key,
-                signing_key,
-                device_name,
-                created_at,
-                last_key_upload_at
-            FROM device_keys
-            WHERE user_id = $1
-            ORDER BY created_at
-            LIMIT 1
-            "#,
-            uid,
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(super::db_err)?;
-
-        let device = match device {
-            Some(d) => d,
-            None => return Ok(None),
-        };
-
-        let device_id_str = device.device_id.clone();
-        let device_id = DeviceId::new(device_id_str.clone());
-
-        // WHY: Try to claim a one-time key first, then fall back to fallback key.
-        let claimed_otk = self
-            .claim_one_time_key(&UserId::new(uid), &device_id)
-            .await?;
-
-        let one_time_key = claimed_otk.as_ref().map(|k| ClaimedKey {
-            key_id: k.key_id.clone(),
-            public_key: k.public_key.clone(),
-        });
-
-        // WHY: If no OTK was available, check for a fallback key.
-        let fallback_key = if claimed_otk.is_none() {
-            self.get_fallback_key(&UserId::new(uid), &device_id)
-                .await?
-                .map(|k| ClaimedKey {
-                    key_id: k.key_id.clone(),
-                    public_key: k.public_key.clone(),
-                })
-        } else {
-            None
-        };
-
-        Ok(Some(PreKeyBundle {
-            user_id: UserId::new(device.user_id),
-            device_id: DeviceId::new(device_id_str),
-            identity_key: device.identity_key,
-            signing_key: device.signing_key,
-            one_time_key,
-            fallback_key,
-        }))
     }
 }

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{DeviceId, DeviceKey, PreKeyBundle, UserId};
+use crate::domain::models::{ClaimedKey, DeviceId, DeviceKey, PreKeyBundle, UserId};
 use crate::domain::ports::KeyRepository;
 
 /// Maximum number of one-time keys per upload batch.
@@ -84,12 +84,28 @@ impl KeyService {
             validate_key("public_key", public_key)?;
         }
 
+        // WHY: Verify the device belongs to the caller BEFORE hitting the repo.
+        // Without this, a non-existent device_id causes a Postgres FK violation
+        // that surfaces as an opaque DomainError::Internal (HTTP 500).
+        let devices = self.key_repo.get_devices_for_user(user_id).await?;
+        let device_exists = devices.iter().any(|d| d.device_id == *device_id);
+        if !device_exists {
+            return Err(DomainError::NotFound {
+                resource_type: "DeviceKey",
+                id: format!("user={}, device={}", user_id, device_id),
+            });
+        }
+
         self.key_repo
             .upload_one_time_keys(user_id, device_id, keys)
             .await
     }
 
     /// Build a pre-key bundle for a target user.
+    ///
+    /// Selects the first registered device, claims a one-time key (or falls
+    /// back to the fallback key), and assembles the bundle. This orchestration
+    /// belongs in the service layer, not the repository.
     ///
     /// # Errors
     /// - `DomainError::NotFound` if the user has no registered devices.
@@ -98,23 +114,59 @@ impl KeyService {
         &self,
         target_user_id: &UserId,
     ) -> Result<PreKeyBundle, DomainError> {
-        self.key_repo
-            .get_pre_key_bundle(target_user_id)
-            .await?
+        // WHY: Fetch all devices and pick the first (by created_at).
+        // In a multi-device scenario, clients should fetch bundles per-device.
+        // For now, the first device is sufficient for the walking skeleton.
+        let devices = self.key_repo.get_devices_for_user(target_user_id).await?;
+
+        let device = devices
+            .into_iter()
+            .next()
             .ok_or_else(|| DomainError::NotFound {
                 resource_type: "PreKeyBundle",
                 id: target_user_id.to_string(),
-            })
+            })?;
+
+        // WHY: Try to claim a one-time key first; fall back to the fallback key
+        // only when no OTKs remain. This preserves forward secrecy when possible.
+        let claimed_otk = self
+            .key_repo
+            .claim_one_time_key(target_user_id, &device.device_id)
+            .await?;
+
+        let one_time_key = claimed_otk.as_ref().map(|k| ClaimedKey {
+            key_id: k.key_id.clone(),
+            public_key: k.public_key.clone(),
+        });
+
+        // WHY: Only fetch fallback if no OTK was available.
+        let fallback_key = if claimed_otk.is_none() {
+            self.key_repo
+                .get_fallback_key(target_user_id, &device.device_id)
+                .await?
+                .map(|k| ClaimedKey {
+                    key_id: k.key_id.clone(),
+                    public_key: k.public_key.clone(),
+                })
+        } else {
+            None
+        };
+
+        Ok(PreKeyBundle {
+            user_id: device.user_id,
+            device_id: device.device_id,
+            identity_key: device.identity_key,
+            signing_key: device.signing_key,
+            one_time_key,
+            fallback_key,
+        })
     }
 
     /// List all registered devices for a user.
     ///
     /// # Errors
     /// Repository errors on failure.
-    pub async fn get_devices(
-        &self,
-        user_id: &UserId,
-    ) -> Result<Vec<DeviceKey>, DomainError> {
+    pub async fn get_devices(&self, user_id: &UserId) -> Result<Vec<DeviceKey>, DomainError> {
         self.key_repo.get_devices_for_user(user_id).await
     }
 

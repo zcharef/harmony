@@ -111,6 +111,11 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/servers/{id}/bans/{user_id}",
             delete(handlers::bans::unban_member),
         )
+        // Megolm sessions (E2EE channel encryption)
+        .route(
+            "/v1/channels/{id}/megolm-sessions",
+            post(handlers::channels::create_megolm_session),
+        )
         // Messages
         .route(
             "/v1/channels/{id}/messages",
@@ -127,10 +132,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/v1/dms/{server_id}", delete(handlers::dms::close_dm))
         // E2EE Key Distribution
-        .route(
-            "/v1/keys/device",
-            post(handlers::keys::register_device),
-        )
+        .route("/v1/keys/device", post(handlers::keys::register_device))
         .route(
             "/v1/keys/one-time",
             post(handlers::keys::upload_one_time_keys),
@@ -140,8 +142,12 @@ pub fn build_router(state: AppState) -> Router {
             get(handlers::keys::get_pre_key_bundle),
         )
         .route(
-            "/v1/keys/device/{id}",
-            get(handlers::keys::list_devices).delete(handlers::keys::remove_device),
+            "/v1/keys/devices/{user_id}",
+            get(handlers::keys::list_devices),
+        )
+        .route(
+            "/v1/keys/device/{device_id}",
+            delete(handlers::keys::remove_device),
         )
         .route("/v1/keys/count", get(handlers::keys::get_key_count))
         .route_layer(middleware::from_fn_with_state(

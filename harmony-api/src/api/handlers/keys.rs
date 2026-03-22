@@ -13,7 +13,7 @@ use crate::domain::models::{DeviceId, UserId};
 
 /// Register a device with its identity and signing keys.
 ///
-/// Upserts on (user_id, device_id) -- re-registering replaces existing keys.
+/// Upserts on (`user_id`, `device_id`) -- re-registering replaces existing keys.
 ///
 /// # Errors
 /// Returns `ApiError` on validation failure or repository error.
@@ -126,10 +126,10 @@ pub async fn get_pre_key_bundle(
 /// Returns `ApiError` on repository error.
 #[utoipa::path(
     get,
-    path = "/v1/keys/device/{id}",
+    path = "/v1/keys/devices/{user_id}",
     tag = "Keys",
     security(("bearer_auth" = [])),
-    params(("id" = UserId, Path, description = "Target user ID")),
+    params(("user_id" = UserId, Path, description = "Target user ID")),
     responses(
         (status = 200, description = "Device list", body = DeviceListResponse),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
@@ -157,10 +157,10 @@ pub async fn list_devices(
 /// Returns `ApiError` if the device does not exist or on repository error.
 #[utoipa::path(
     delete,
-    path = "/v1/keys/device/{id}",
+    path = "/v1/keys/device/{device_id}",
     tag = "Keys",
     security(("bearer_auth" = [])),
-    params(("id" = String, Path, description = "Device ID to remove")),
+    params(("device_id" = String, Path, description = "Device ID to remove")),
     responses(
         (status = 204, description = "Device removed"),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
@@ -221,7 +221,7 @@ pub async fn get_key_count(
 
 /// Query parameters for the key count endpoint.
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct KeyCountQuery {
     /// Device ID to check key count for.

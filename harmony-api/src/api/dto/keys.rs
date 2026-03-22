@@ -16,7 +16,7 @@ pub struct RegisterDeviceRequest {
     pub identity_key: String,
     /// Ed25519 signing public key (base64-encoded).
     pub signing_key: String,
-    /// Optional human-readable device name (e.g., "MacBook Pro").
+    /// Optional human-readable device name (e.g., "My Laptop").
     pub device_name: Option<String>,
 }
 

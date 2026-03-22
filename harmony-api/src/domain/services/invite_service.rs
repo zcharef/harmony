@@ -193,7 +193,12 @@ impl InviteService {
             ));
         }
 
-        // WHY: Check plan member limit AFTER already-member check (no point
+        // WHY: TOCTOU race exists between this limit check and complete_join below.
+        // Two concurrent join requests could both pass, exceeding the limit by one.
+        // Acceptable: same pattern as Discord. Plan limits are billing guard-rails,
+        // not hard DB constraints. Exact enforcement would require advisory locks.
+        //
+        // Check plan member limit AFTER already-member check (no point
         // counting limits for someone who's already in) but BEFORE the actual
         // join to enforce billing constraints.
         self.plan_checker
