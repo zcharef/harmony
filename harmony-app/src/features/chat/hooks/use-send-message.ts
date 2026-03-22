@@ -5,18 +5,52 @@ import { sendMessage } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 
+export interface SendMessageEncryption {
+  /** WHY: Async function that encrypts plaintext and returns the ciphertext envelope + deviceId. */
+  encryptFn: (plaintext: string) => Promise<{ content: string; senderDeviceId: string }>
+  /** WHY: Callback to cache the plaintext locally after successful send. */
+  cachePlaintext: (messageId: string, channelId: string, plaintext: string) => void
+}
+
 /**
  * WHY optimistic updates: The user sees their message instantly in the list
  * instead of waiting for the API round-trip + Realtime echo. On success, the
  * temp message is swapped for the real one (prevents duplicate with Realtime).
  * On error, the cache is rolled back to the snapshot taken before the mutation.
+ *
+ * WHY optional encryption param: When `encryption` is provided (DM on desktop),
+ * the hook encrypts content before sending and caches the plaintext locally.
+ * When absent (channels or web), it sends plaintext as before. This keeps the
+ * hook signature backward-compatible — no changes needed for channel message sending.
  */
-export function useSendMessage(channelId: string, userId: string) {
+export function useSendMessage(
+  channelId: string,
+  userId: string,
+  encryption?: SendMessageEncryption,
+) {
   const queryClient = useQueryClient()
   const messageQueryKey = queryKeys.messages.byChannel(channelId)
 
   return useMutation({
     mutationFn: async (content: string) => {
+      // WHY: If encryption is provided, encrypt before sending to API.
+      if (encryption !== undefined) {
+        const encrypted = await encryption.encryptFn(content)
+        const { data } = await sendMessage({
+          path: { id: channelId },
+          body: {
+            content: encrypted.content,
+            encrypted: true,
+            senderDeviceId: encrypted.senderDeviceId,
+          },
+          throwOnError: true,
+        })
+        // WHY: Cache the plaintext locally so the sender can read their own message
+        // without needing to decrypt it (sender doesn't have their own session).
+        encryption.cachePlaintext(data.id, channelId, content)
+        return data
+      }
+
       const { data } = await sendMessage({
         path: { id: channelId },
         body: { content },
@@ -38,8 +72,11 @@ export function useSendMessage(channelId: string, userId: string) {
         id: optimisticId,
         channelId: channelId,
         authorId: userId,
+        // WHY: Show plaintext in optimistic entry so user sees their message immediately.
+        // The encrypted version is what goes to the API, not what displays.
         content: content,
         createdAt: new Date().toISOString(),
+        encrypted: encryption !== undefined,
       } satisfies MessageResponse
 
       // WHY page 0: useInfiniteQuery stores pages newest-first — same pattern

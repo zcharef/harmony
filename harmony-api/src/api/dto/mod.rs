@@ -13,7 +13,8 @@ pub mod servers;
 
 pub use bans::{BanListResponse, BanResponse, BanUserRequest};
 pub use channels::{
-    ChannelListResponse, ChannelResponse, CreateChannelRequest, UpdateChannelRequest,
+    ChannelListResponse, ChannelResponse, CreateChannelRequest, CreateMegolmSessionRequest,
+    MegolmSessionResponse, UpdateChannelRequest,
 };
 pub use dms::{
     CreateDmRequest, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,

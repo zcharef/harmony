@@ -35,6 +35,7 @@ struct ChannelRow {
     position: i32,
     is_private: bool,
     is_read_only: bool,
+    encrypted: bool,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -51,6 +52,7 @@ impl ChannelRow {
             category_id: None, // DB has no category_id column yet
             is_private: self.is_private,
             is_read_only: self.is_read_only,
+            encrypted: self.encrypted,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -104,6 +106,7 @@ impl ChannelRepository for PgChannelRepository {
                 c.position,
                 c.is_private,
                 c.is_read_only,
+                c.encrypted,
                 c.created_at,
                 c.updated_at
             FROM channels c
@@ -146,6 +149,7 @@ impl ChannelRepository for PgChannelRepository {
                     position: r.position,
                     is_private: r.is_private,
                     is_read_only: r.is_read_only,
+                    encrypted: r.encrypted,
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                 }
@@ -170,6 +174,7 @@ impl ChannelRepository for PgChannelRepository {
                 position,
                 is_private,
                 is_read_only,
+                encrypted,
                 created_at,
                 updated_at
             FROM channels
@@ -191,6 +196,7 @@ impl ChannelRepository for PgChannelRepository {
                 position: r.position,
                 is_private: r.is_private,
                 is_read_only: r.is_read_only,
+                encrypted: r.encrypted,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             }
@@ -205,8 +211,8 @@ impl ChannelRepository for PgChannelRepository {
 
         let r = sqlx::query!(
             r#"
-            INSERT INTO channels (id, server_id, name, topic, channel_type, position, is_private, is_read_only, created_at)
-            VALUES ($1, $2, $3, $4, $5::text::channel_type, $6, $7, $8, $9)
+            INSERT INTO channels (id, server_id, name, topic, channel_type, position, is_private, is_read_only, encrypted, created_at)
+            VALUES ($1, $2, $3, $4, $5::text::channel_type, $6, $7, $8, $9, $10)
             RETURNING
                 id,
                 server_id,
@@ -216,6 +222,7 @@ impl ChannelRepository for PgChannelRepository {
                 position,
                 is_private,
                 is_read_only,
+                encrypted,
                 created_at,
                 updated_at
             "#,
@@ -227,6 +234,7 @@ impl ChannelRepository for PgChannelRepository {
             channel.position,
             channel.is_private,
             channel.is_read_only,
+            channel.encrypted,
             channel.created_at,
         )
         .fetch_one(&self.pool)
@@ -242,6 +250,7 @@ impl ChannelRepository for PgChannelRepository {
             position: r.position,
             is_private: r.is_private,
             is_read_only: r.is_read_only,
+            encrypted: r.encrypted,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -255,6 +264,7 @@ impl ChannelRepository for PgChannelRepository {
         topic: Option<Option<String>>,
         is_private: Option<bool>,
         is_read_only: Option<bool>,
+        encrypted: Option<bool>,
     ) -> Result<Channel, DomainError> {
         let cid = channel_id.0;
         // $3: whether topic was provided at all
@@ -266,6 +276,9 @@ impl ChannelRepository for PgChannelRepository {
         let private_value = is_private.unwrap_or(false);
         let should_update_read_only = is_read_only.is_some();
         let read_only_value = is_read_only.unwrap_or(false);
+        // $9/$10: encrypted toggle
+        let should_update_encrypted = encrypted.is_some();
+        let encrypted_value = encrypted.unwrap_or(false);
 
         let row = sqlx::query!(
             r#"
@@ -273,7 +286,8 @@ impl ChannelRepository for PgChannelRepository {
             SET name = COALESCE($2, name),
                 topic = CASE WHEN $3 THEN $4 ELSE topic END,
                 is_private = CASE WHEN $5 THEN $6 ELSE is_private END,
-                is_read_only = CASE WHEN $7 THEN $8 ELSE is_read_only END
+                is_read_only = CASE WHEN $7 THEN $8 ELSE is_read_only END,
+                encrypted = CASE WHEN $9 THEN $10 ELSE encrypted END
             WHERE id = $1
             RETURNING
                 id,
@@ -284,6 +298,7 @@ impl ChannelRepository for PgChannelRepository {
                 position,
                 is_private,
                 is_read_only,
+                encrypted,
                 created_at,
                 updated_at
             "#,
@@ -295,6 +310,8 @@ impl ChannelRepository for PgChannelRepository {
             private_value,
             should_update_read_only,
             read_only_value,
+            should_update_encrypted,
+            encrypted_value,
         )
         .fetch_optional(&self.pool)
         .await
@@ -314,6 +331,7 @@ impl ChannelRepository for PgChannelRepository {
             position: r.position,
             is_private: r.is_private,
             is_read_only: r.is_read_only,
+            encrypted: r.encrypted,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }

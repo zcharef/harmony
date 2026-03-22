@@ -13,5 +13,6 @@
   "loading": "Loading",
   "tryAgain": "Try again",
   "somethingWentWrong": "Something went wrong",
-  "anUnexpectedError": "An unexpected error occurred"
+  "anUnexpectedError": "An unexpected error occurred",
+  "dismiss": "Dismiss"
 }

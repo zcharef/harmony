@@ -31,6 +31,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     authorId: 'user-99',
     content: 'existing message',
     createdAt: '2026-03-16T00:00:00.000Z',
+    encrypted: false,
     ...overrides,
   }
 }

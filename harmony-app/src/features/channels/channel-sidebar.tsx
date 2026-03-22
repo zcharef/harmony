@@ -22,6 +22,7 @@ import {
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/features/auth'
+import { EncryptedChannelBadge } from '@/features/crypto'
 import { ROLE_HIERARCHY, useMyMemberRole } from '@/features/members'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { CreateInviteDialog } from '@/features/server-nav'
@@ -69,6 +70,7 @@ function ChannelButton({
           <Volume2 className="h-4 w-4 shrink-0 text-default-500" />
         )}
         <span className="truncate">{channel.name}</span>
+        {channel.encrypted && <EncryptedChannelBadge />}
         {channel.isPrivate && <Lock className="h-3 w-3 shrink-0 text-default-400" />}
         {channel.isReadOnly && <Megaphone className="h-3 w-3 shrink-0 text-default-400" />}
       </Button>
@@ -140,6 +142,7 @@ function ServerHeader({
     <Dropdown>
       <DropdownTrigger>
         <button
+          data-test="server-header-button"
           type="button"
           className="flex h-full flex-1 items-center justify-between px-4 font-semibold text-foreground transition-colors hover:bg-default-200"
         >
@@ -151,6 +154,7 @@ function ServerHeader({
       </DropdownTrigger>
       <DropdownMenu
         aria-label={t('serverOptions')}
+        data-test="server-dropdown-menu"
         className="w-56"
         onAction={(key) => {
           if (key === 'invite') onInvite()
@@ -185,7 +189,12 @@ function ServerHeader({
           </DropdownItem>
         </DropdownSection>
         <DropdownSection>
-          <DropdownItem key="leave" className="text-danger" color="danger">
+          <DropdownItem
+            key="leave"
+            className="text-danger"
+            color="danger"
+            data-test="server-menu-leave-item"
+          >
             {t('leaveServer')}
           </DropdownItem>
         </DropdownSection>
@@ -249,7 +258,7 @@ export function ChannelSidebar({
       </div>
 
       {/* Channel list */}
-      <div className="flex-1 overflow-y-auto px-2">
+      <div data-test="channel-list" className="flex-1 overflow-y-auto px-2">
         <div className="py-3">
           {isPending && serverId !== null && (
             <div className="flex justify-center py-4">
@@ -289,7 +298,10 @@ export function ChannelSidebar({
       </div>
 
       {/* User control panel */}
-      <div className="flex items-center gap-2 border-t border-divider bg-content1 p-2">
+      <div
+        data-test="user-control-panel"
+        className="flex items-center gap-2 border-t border-divider bg-content1 p-2"
+      >
         <div className="relative">
           <Avatar
             name={username}

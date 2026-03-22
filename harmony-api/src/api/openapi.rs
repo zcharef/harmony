@@ -7,19 +7,19 @@ use utoipa::OpenApi;
 use super::dto::{
     AssignRoleRequest, BanListResponse, BanResponse, BanUserRequest, ChannelListResponse,
     ChannelResponse, ClaimedKeyResponse, CreateChannelRequest, CreateDmRequest,
-    CreateInviteRequest, CreateServerRequest, DeviceListResponse, DeviceResponse,
-    DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse, DmRecipientResponse,
-    DmResponse, EditMessageRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest,
-    KeyCountResponse, MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse,
-    MessageResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse, RegisterDeviceRequest,
-    SendMessageRequest, ServerListResponse, ServerResponse, TransferOwnershipRequest,
-    UpdateChannelRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
+    CreateInviteRequest, CreateMegolmSessionRequest, CreateServerRequest, DeviceListResponse,
+    DeviceResponse, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,
+    DmRecipientResponse, DmResponse, EditMessageRequest, InvitePreviewResponse, InviteResponse,
+    JoinServerRequest, KeyCountResponse, MegolmSessionResponse, MemberListResponse, MemberResponse,
+    MessageListQuery, MessageListResponse, MessageResponse, OneTimeKeyDto, PreKeyBundleResponse,
+    ProfileResponse, RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
+    TransferOwnershipRequest, UpdateChannelRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse};
 use crate::domain::models::{
-    CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MessageId,
-    OneTimeKeyId, ServerId, UserId, UserStatus,
+    CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MessageId, OneTimeKeyId,
+    ServerId, UserId, UserStatus,
 };
 
 /// `OpenAPI` documentation for Harmony API.
@@ -51,6 +51,7 @@ use crate::domain::models::{
         handlers::channels::create_channel,
         handlers::channels::update_channel,
         handlers::channels::delete_channel,
+        handlers::channels::create_megolm_session,
         // Invites
         handlers::invites::create_invite,
         handlers::invites::preview_invite,
@@ -112,6 +113,8 @@ use crate::domain::models::{
             UpdateChannelRequest,
             ChannelResponse,
             ChannelListResponse,
+            CreateMegolmSessionRequest,
+            MegolmSessionResponse,
             // Invite DTOs
             CreateInviteRequest,
             InviteResponse,

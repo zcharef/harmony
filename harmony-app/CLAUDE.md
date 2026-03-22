@@ -1,50 +1,62 @@
 # HARMONY APP — TECHNICAL MANIFESTO
 
-**Scope:** Tauri Desktop App (React + Vite SPA)
+**Scope:** Web App + Tauri Desktop App (React + Vite SPA)
 **Architecture:** Pure UI Client consuming Rust REST API (harmony-api)
 
 ---
 
 ## 0. Architecture Overview
 
-> **KEY INSIGHT:** This app is a **Pure UI Client**. All business logic and data access
-> flows through the **Rust REST API** (`harmony-api`). The app does NOT access
-> Supabase directly for data — it consumes a TypeScript client auto-generated from OpenAPI.
+> **KEY INSIGHT:** This app is a **Pure UI Client** that works as both a web app and a
+> Tauri desktop app. All business logic and data access flows through the **Rust REST
+> API** (`harmony-api`). The app does NOT access Supabase directly for data — it
+> consumes a TypeScript client auto-generated from OpenAPI.
+>
+> **Dual deployment:** The same React codebase serves as a standalone web app (Vite build)
+> and a Tauri desktop app. The web app has full channel/server access. E2EE features
+> (DM encryption) are behind `isTauri()` guards and only available in the desktop app.
 
 ```
-┌─────────────────────────────────────────────┐
-│               TAURI DESKTOP APP             │
-│  ┌─────────────────────────────────────┐    │
-│  │  React SPA (Vite)                   │    │
-│  │  • Generated TypeScript API client  │    │
-│  │  • TanStack Query for caching       │    │
-│  │  • Zustand for global state         │    │
-│  └─────────────┬───────────────────────┘    │
-│                │ HTTP (Bearer Token)         │
-└────────────────┼────────────────────────────┘
-                 ▼
-       ┌───────────────────────┐
-       │    RUST REST API      │
-       │    (harmony-api)      │
-       │  • OpenAPI SSoT       │
-       │  • Supabase Auth      │
-       │  • All business logic │
-       └───────────┬───────────┘
-                   ▼
-         ┌──────────────────┐
-         │   Supabase       │
-         │   (Postgres)     │
-         └──────────────────┘
+┌───────────────────────┐  ┌─────────────────────────────────────┐
+│     WEB BROWSER       │  │         TAURI DESKTOP APP           │
+│  ┌─────────────────┐  │  │  ┌─────────────────────────────┐   │
+│  │  React SPA      │  │  │  │  React SPA (same code)     │   │
+│  │  (same code)    │  │  │  │  + E2EE (invoke → Rust)    │   │
+│  └────────┬────────┘  │  │  └──────────┬──────────────────┘   │
+└───────────┼───────────┘  │  ┌──────────┴──────────────────┐   │
+            │               │  │  Tauri Rust Runtime         │   │
+            │               │  │  vodozemac · Keychain · DB  │   │
+            │               │  └──────────┬──────────────────┘   │
+            │               └─────────────┼─────────────────────┘
+            └──────────┬──────────────────┘
+                       ▼ HTTP (Bearer Token)
+             ┌───────────────────────┐
+             │    RUST REST API      │
+             │    (harmony-api)      │
+             │  • OpenAPI SSoT       │
+             │  • Supabase Auth      │
+             │  • All business logic │
+             └───────────┬───────────┘
+                         ▼
+               ┌──────────────────┐
+               │   Supabase       │
+               │   (Postgres)     │
+               └──────────────────┘
 ```
 
 **What the App Does:**
 - Auth via Supabase (client-side login)
 - Consumes REST API via generated TypeScript client
 - UI rendering, caching, state management
+- **Desktop only:** E2EE encryption/decryption via Tauri `invoke()` commands
 
 **What the App Does NOT Do:**
 - Direct Supabase database queries
 - Business logic (validation beyond UX, authorization, etc.)
+
+**Platform detection:** Use `isTauri()` from `src/lib/platform.ts` to guard
+desktop-only features. Never import `@tauri-apps/api` unconditionally — it
+crashes in the browser.
 
 ---
 

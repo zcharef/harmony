@@ -219,6 +219,29 @@ impl DeviceId {
     pub fn new(id: String) -> Self {
         Self(id)
     }
+
+    /// Validated construction — returns error if device ID is empty, too long, or
+    /// contains invalid characters.
+    ///
+    /// WHY: This is the SSoT for DeviceId validation. `new()` is kept for backward
+    /// compatibility (deserialization, tests). Prefer `try_new()` at domain entry
+    /// points for defense-in-depth.
+    pub fn try_new(id: String) -> Result<Self, &'static str> {
+        if id.is_empty() {
+            return Err("device_id cannot be empty");
+        }
+        if id.len() > 128 {
+            return Err("device_id cannot exceed 128 characters");
+        }
+        // WHY: Restrict charset to prevent injection and encoding issues.
+        if !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err("device_id may only contain alphanumeric characters, hyphens, and underscores");
+        }
+        Ok(Self(id))
+    }
 }
 
 impl fmt::Display for DeviceId {

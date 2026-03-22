@@ -248,6 +248,94 @@
         ]
       }
     },
+    "/v1/channels/{id}/megolm-sessions": {
+      "post": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Register a Megolm session for an encrypted channel. Requires channel membership.",
+        "description": "# Errors\nReturns `ApiError` if the channel is not encrypted, or on repository error.",
+        "operationId": "create_megolm_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMegolmSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Megolm session registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MegolmSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Channel not encrypted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/channels/{id}/messages": {
       "get": {
         "tags": [
@@ -646,6 +734,328 @@
             }
           }
         }
+      }
+    },
+    "/v1/keys/bundle/{user_id}": {
+      "get": {
+        "tags": [
+          "Keys"
+        ],
+        "summary": "Fetch a pre-key bundle for a target user (Olm session establishment).",
+        "description": "Atomically claims one one-time key (or falls back to the fallback key).\n\n# Errors\nReturns `ApiError` if the user has no registered devices or on repository error.",
+        "operationId": "get_pre_key_bundle",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "Target user ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UserId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pre-key bundle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreKeyBundleResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No keys found for user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/keys/count": {
+      "get": {
+        "tags": [
+          "Keys"
+        ],
+        "summary": "Get the count of remaining non-fallback one-time keys for the caller's device.",
+        "description": "Clients use this to decide when to upload more one-time keys.\n\n# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "operationId": "get_key_count",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "query",
+            "description": "Device ID to check key count for",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyCountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing device_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/keys/device": {
+      "post": {
+        "tags": [
+          "Keys"
+        ],
+        "summary": "Register a device with its identity and signing keys.",
+        "description": "Upserts on (`user_id`, `device_id`) -- re-registering replaces existing keys.\n\n# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "operationId": "register_device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDeviceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Device registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/keys/device/{device_id}": {
+      "delete": {
+        "tags": [
+          "Keys"
+        ],
+        "summary": "Remove a device and its associated keys.",
+        "description": "Only the device owner can remove their own devices.\n\n# Errors\nReturns `ApiError` if the device does not exist or on repository error.",
+        "operationId": "remove_device",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "description": "Device ID to remove",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Device removed"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Device not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/keys/devices/{user_id}": {
+      "get": {
+        "tags": [
+          "Keys"
+        ],
+        "summary": "List all registered devices for a user.",
+        "description": "# Errors\nReturns `ApiError` on repository error.",
+        "operationId": "list_devices",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "Target user ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UserId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Device list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/keys/one-time": {
+      "post": {
+        "tags": [
+          "Keys"
+        ],
+        "summary": "Upload one-time keys (and/or fallback keys) for a device.",
+        "description": "# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "operationId": "upload_one_time_keys",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadOneTimeKeysRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Keys uploaded"
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
     "/v1/profiles/me": {
@@ -1372,7 +1782,7 @@
         "tags": [
           "Channels"
         ],
-        "summary": "Update a channel's name and/or topic. Requires admin+ role.",
+        "summary": "Update a channel's name, topic, and/or flags. Requires admin+ role.\nEnabling encryption requires owner role (one-way toggle).",
         "description": "# Errors\nReturns `ApiError` on validation failure or repository error.",
         "operationId": "update_channel",
         "parameters": [
@@ -2051,6 +2461,7 @@
           "position",
           "isPrivate",
           "isReadOnly",
+          "encrypted",
           "createdAt",
           "updatedAt"
         ],
@@ -2071,6 +2482,10 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "encrypted": {
+            "type": "boolean",
+            "description": "Whether Megolm E2EE is enabled on this channel."
           },
           "id": {
             "$ref": "#/components/schemas/ChannelId"
@@ -2110,6 +2525,22 @@
           "text",
           "voice"
         ]
+      },
+      "ClaimedKeyResponse": {
+        "type": "object",
+        "description": "A claimed key in a pre-key bundle response.",
+        "required": [
+          "keyId",
+          "publicKey"
+        ],
+        "properties": {
+          "keyId": {
+            "type": "string"
+          },
+          "publicKey": {
+            "type": "string"
+          }
+        }
       },
       "ComponentHealth": {
         "type": "object",
@@ -2199,6 +2630,20 @@
         },
         "additionalProperties": false
       },
+      "CreateMegolmSessionRequest": {
+        "type": "object",
+        "description": "Request body for registering a Megolm session on a channel.",
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The vodozemac Megolm session ID (base64-encoded Ed25519 public key)."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateServerRequest": {
         "type": "object",
         "description": "Request body for creating a new server.",
@@ -2212,6 +2657,76 @@
           }
         },
         "additionalProperties": false
+      },
+      "DeviceId": {
+        "type": "string",
+        "description": "Device identifier (client-generated string, not a UUID).",
+        "example": "ABCDEF123456"
+      },
+      "DeviceKeyId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a device key record.",
+        "example": "bb0e8400-e29b-41d4-a716-446655440006"
+      },
+      "DeviceListResponse": {
+        "type": "object",
+        "description": "Envelope for a list of devices.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceResponse"
+            }
+          }
+        }
+      },
+      "DeviceResponse": {
+        "type": "object",
+        "description": "Response for a registered device.",
+        "required": [
+          "id",
+          "userId",
+          "deviceId",
+          "identityKey",
+          "signingKey",
+          "createdAt",
+          "lastKeyUploadAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deviceId": {
+            "$ref": "#/components/schemas/DeviceId"
+          },
+          "deviceName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/DeviceKeyId"
+          },
+          "identityKey": {
+            "type": "string"
+          },
+          "lastKeyUploadAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "signingKey": {
+            "type": "string"
+          },
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          }
+        }
       },
       "DmLastMessageResponse": {
         "type": "object",
@@ -2483,6 +2998,45 @@
         },
         "additionalProperties": false
       },
+      "KeyCountResponse": {
+        "type": "object",
+        "description": "Response for one-time key count.",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "MegolmSessionResponse": {
+        "type": "object",
+        "description": "Response after registering a Megolm session.",
+        "required": [
+          "id",
+          "channelId",
+          "sessionId",
+          "createdAt"
+        ],
+        "properties": {
+          "channelId": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "description": "Server-generated record ID."
+          },
+          "sessionId": {
+            "type": "string"
+          }
+        }
+      },
       "MemberListResponse": {
         "type": "object",
         "description": "Envelope for a list of server members (ADR-036).",
@@ -2597,6 +3151,7 @@
           "channelId",
           "authorId",
           "content",
+          "encrypted",
           "createdAt"
         ],
         "properties": {
@@ -2631,8 +3186,93 @@
             ],
             "format": "date-time"
           },
+          "encrypted": {
+            "type": "boolean",
+            "description": "Whether this message contains E2EE ciphertext."
+          },
           "id": {
             "$ref": "#/components/schemas/MessageId"
+          },
+          "senderDeviceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Device ID of the sender. Present when `encrypted = true`."
+          }
+        }
+      },
+      "OneTimeKeyDto": {
+        "type": "object",
+        "description": "A single one-time key in an upload batch.",
+        "required": [
+          "keyId",
+          "publicKey",
+          "isFallback"
+        ],
+        "properties": {
+          "isFallback": {
+            "type": "boolean",
+            "description": "Whether this is a fallback key (persists until rotated)."
+          },
+          "keyId": {
+            "type": "string",
+            "description": "Unique key identifier (client-generated)."
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "Curve25519 public key (base64-encoded)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OneTimeKeyId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a one-time key record.",
+        "example": "cc0e8400-e29b-41d4-a716-446655440007"
+      },
+      "PreKeyBundleResponse": {
+        "type": "object",
+        "description": "Pre-key bundle response for Olm session establishment.",
+        "required": [
+          "userId",
+          "deviceId",
+          "identityKey",
+          "signingKey"
+        ],
+        "properties": {
+          "deviceId": {
+            "$ref": "#/components/schemas/DeviceId"
+          },
+          "fallbackKey": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ClaimedKeyResponse"
+              }
+            ]
+          },
+          "identityKey": {
+            "type": "string"
+          },
+          "oneTimeKey": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ClaimedKeyResponse"
+              }
+            ]
+          },
+          "signingKey": {
+            "type": "string"
+          },
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
           }
         }
       },
@@ -2716,6 +3356,37 @@
           }
         }
       },
+      "RegisterDeviceRequest": {
+        "type": "object",
+        "description": "Request body for registering a device with its identity keys.",
+        "required": [
+          "deviceId",
+          "identityKey",
+          "signingKey"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "description": "Client-generated device identifier."
+          },
+          "deviceName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional human-readable device name (e.g., \"My Laptop\")."
+          },
+          "identityKey": {
+            "type": "string",
+            "description": "Curve25519 identity public key (base64-encoded)."
+          },
+          "signingKey": {
+            "type": "string",
+            "description": "Ed25519 signing public key (base64-encoded)."
+          }
+        },
+        "additionalProperties": false
+      },
       "Role": {
         "type": "string",
         "description": "Strongly-typed role enum matching the `server_members.role` TEXT column.\n\nVariants are ordered by authority level (Member < Moderator < Admin < Owner).\n`PartialOrd`/`Ord` are manually avoided to prevent accidental comparisons;\nuse `level()` or `can_moderate()` for hierarchy checks.",
@@ -2735,7 +3406,21 @@
         "properties": {
           "content": {
             "type": "string",
-            "description": "Message content (required, non-empty)."
+            "description": "Message content (required, non-empty). Contains ciphertext when `encrypted = true`."
+          },
+          "encrypted": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether this message contains E2EE ciphertext. Defaults to `false`."
+          },
+          "senderDeviceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Device ID of the sending device. Required when `encrypted = true`."
           }
         },
         "additionalProperties": false
@@ -2819,6 +3504,13 @@
         "type": "object",
         "description": "Request body for updating an existing channel.",
         "properties": {
+          "encrypted": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Enable Megolm E2EE (one-way toggle: once true, cannot be set back to false)."
+          },
           "isPrivate": {
             "type": [
               "boolean",
@@ -2860,6 +3552,28 @@
               "null"
             ],
             "description": "New server name (if provided)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadOneTimeKeysRequest": {
+        "type": "object",
+        "description": "Request body for uploading one-time keys for a device.",
+        "required": [
+          "deviceId",
+          "keys"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "description": "Device identifier these keys belong to."
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OneTimeKeyDto"
+            },
+            "description": "Batch of one-time keys to upload."
           }
         },
         "additionalProperties": false
@@ -2930,6 +3644,10 @@
     {
       "name": "DirectMessages",
       "description": "Direct message conversations"
+    },
+    {
+      "name": "Keys",
+      "description": "E2EE key distribution (device keys, pre-key bundles)"
     }
   ]
 }

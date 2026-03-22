@@ -18,7 +18,10 @@ export function BansTab({ serverId, callerRole }: BansTabProps) {
 
   if (isAdmin === false) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 py-12">
+      <div
+        data-test="settings-insufficient-permissions"
+        className="flex flex-col items-center justify-center gap-2 py-12"
+      >
         <ShieldAlert className="h-10 w-10 text-default-300" />
         <p className="text-sm text-default-500">{t('insufficientPermissions')}</p>
       </div>
@@ -47,7 +50,7 @@ export function BansTab({ serverId, callerRole }: BansTabProps) {
         </div>
       )}
 
-      <div className="space-y-1">
+      <div data-test="settings-ban-list" className="space-y-1">
         {bans.map((ban) => {
           const banDate = new Date(ban.createdAt).toLocaleDateString()
 

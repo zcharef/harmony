@@ -9,11 +9,11 @@ use crate::domain::ports::KeyRepository;
 /// Maximum number of one-time keys per upload batch.
 const MAX_KEYS_PER_UPLOAD: usize = 100;
 
-/// Maximum device ID length (defense-in-depth).
-const MAX_DEVICE_ID_LENGTH: usize = 128;
-
 /// Maximum key length in base64 characters (defense-in-depth).
 const MAX_KEY_LENGTH: usize = 256;
+
+/// Maximum device name length.
+const MAX_DEVICE_NAME_LENGTH: usize = 128;
 
 /// Service for E2EE key distribution business logic.
 #[derive(Debug)]
@@ -40,9 +40,19 @@ impl KeyService {
         signing_key: &str,
         device_name: Option<&str>,
     ) -> Result<DeviceKey, DomainError> {
-        validate_device_id(device_id)?;
         validate_key("identity_key", identity_key)?;
         validate_key("signing_key", signing_key)?;
+
+        // WHY: Trim + length-check device_name to prevent oversized display names.
+        if let Some(name) = device_name {
+            let trimmed = name.trim();
+            if trimmed.len() > MAX_DEVICE_NAME_LENGTH {
+                return Err(DomainError::ValidationError(format!(
+                    "device_name must not exceed {} characters",
+                    MAX_DEVICE_NAME_LENGTH
+                )));
+            }
+        }
 
         self.key_repo
             .register_device(user_id, device_id, identity_key, signing_key, device_name)
@@ -60,8 +70,6 @@ impl KeyService {
         device_id: &DeviceId,
         keys: Vec<(String, String, bool)>,
     ) -> Result<(), DomainError> {
-        validate_device_id(device_id)?;
-
         if keys.is_empty() {
             return Err(DomainError::ValidationError(
                 "At least one key must be provided".to_string(),
@@ -180,7 +188,6 @@ impl KeyService {
         user_id: &UserId,
         device_id: &DeviceId,
     ) -> Result<(), DomainError> {
-        validate_device_id(device_id)?;
         self.key_repo.remove_device(user_id, device_id).await
     }
 
@@ -193,20 +200,8 @@ impl KeyService {
         user_id: &UserId,
         device_id: &DeviceId,
     ) -> Result<i64, DomainError> {
-        validate_device_id(device_id)?;
         self.key_repo.count_one_time_keys(user_id, device_id).await
     }
-}
-
-/// Validate that a device ID is non-empty and within length limits.
-fn validate_device_id(device_id: &DeviceId) -> Result<(), DomainError> {
-    if device_id.0.is_empty() || device_id.0.len() > MAX_DEVICE_ID_LENGTH {
-        return Err(DomainError::ValidationError(format!(
-            "device_id must be between 1 and {} characters",
-            MAX_DEVICE_ID_LENGTH
-        )));
-    }
-    Ok(())
 }
 
 /// Validate that a key value is non-empty and within length limits.
@@ -230,22 +225,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_device_id_rejects_empty() {
-        let result = validate_device_id(&DeviceId::new(String::new()));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn validate_device_id_rejects_too_long() {
-        let long = "a".repeat(MAX_DEVICE_ID_LENGTH + 1);
-        let result = validate_device_id(&DeviceId::new(long));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn validate_device_id_accepts_valid() {
-        let result = validate_device_id(&DeviceId::new("ABCDEF123456".to_string()));
-        assert!(result.is_ok());
+    fn max_device_name_length_constant() {
+        assert_eq!(MAX_DEVICE_NAME_LENGTH, 128);
     }
 
     #[test]

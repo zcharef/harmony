@@ -21,6 +21,8 @@ pub struct ChannelResponse {
     pub category_id: Option<CategoryId>,
     pub is_private: bool,
     pub is_read_only: bool,
+    /// Whether Megolm E2EE is enabled on this channel.
+    pub encrypted: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -37,6 +39,7 @@ impl From<Channel> for ChannelResponse {
             category_id: c.category_id,
             is_private: c.is_private,
             is_read_only: c.is_read_only,
+            encrypted: c.encrypted,
             created_at: c.created_at,
             updated_at: c.updated_at,
         }
@@ -91,4 +94,38 @@ pub struct UpdateChannelRequest {
     /// Update read-only flag (if provided).
     #[serde(default)]
     pub is_read_only: Option<bool>,
+    /// Enable Megolm E2EE (one-way toggle: once true, cannot be set back to false).
+    #[serde(default)]
+    pub encrypted: Option<bool>,
+}
+
+/// Request body for registering a Megolm session on a channel.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateMegolmSessionRequest {
+    /// The vodozemac Megolm session ID (base64-encoded Ed25519 public key).
+    pub session_id: String,
+}
+
+/// Response after registering a Megolm session.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MegolmSessionResponse {
+    /// Server-generated record ID.
+    pub id: String,
+    pub channel_id: ChannelId,
+    pub session_id: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl MegolmSessionResponse {
+    #[must_use]
+    pub fn new(id: uuid::Uuid, channel_id: ChannelId, session_id: String, created_at: DateTime<Utc>) -> Self {
+        Self {
+            id: id.to_string(),
+            channel_id,
+            session_id,
+            created_at,
+        }
+    }
 }

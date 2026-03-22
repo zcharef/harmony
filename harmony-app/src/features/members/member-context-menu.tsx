@@ -108,6 +108,7 @@ export function MemberContextMenu({
     <Dropdown isOpen={isOpen} onOpenChange={onOpenChange} placement="bottom-start">
       <DropdownTrigger>{children}</DropdownTrigger>
       <DropdownMenu
+        data-test="member-context-menu"
         aria-label={t('memberActions', { username: targetUsername })}
         disabledKeys={
           canSendMessage === false && hasModerationAction === false ? ['no-actions'] : []

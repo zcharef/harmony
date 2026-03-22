@@ -149,7 +149,7 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
       </div>
 
       {/* DM conversation list */}
-      <div className="flex-1 overflow-y-auto px-2">
+      <div data-test="dm-list" className="flex-1 overflow-y-auto px-2">
         <div className="py-1">
           {isPending && (
             <div className="flex justify-center py-4">
@@ -180,7 +180,10 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
       </div>
 
       {/* User control panel — matches ChannelSidebar pattern */}
-      <div className="flex items-center gap-2 border-t border-divider bg-content1 p-2">
+      <div
+        data-test="user-control-panel"
+        className="flex items-center gap-2 border-t border-divider bg-content1 p-2"
+      >
         <div className="relative">
           <Avatar
             name={username}

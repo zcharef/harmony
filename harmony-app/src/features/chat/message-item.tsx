@@ -3,6 +3,8 @@ import type { TFunction } from 'i18next'
 import { Pencil, Trash2 } from 'lucide-react'
 import { memo, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
+import type { DecryptResult } from '@/features/crypto'
+import { EncryptedMessageContent } from '@/features/crypto'
 import type { MessageResponse } from '@/lib/api'
 
 interface MessageItemProps {
@@ -15,6 +17,16 @@ interface MessageItemProps {
   onSaveEdit: (content: string) => void
   onCancelEdit: () => void
   onDelete: () => void
+  /** WHY: When true, encrypted messages are rendered via EncryptedMessageContent (DM Olm). */
+  isDm?: boolean
+  /** WHY: When true, messages use Megolm channel encryption instead of Olm. */
+  isChannelEncrypted?: boolean
+  /** WHY: Decrypt function from useEncryptedMessages (Olm DMs), passed from ChatArea. */
+  decryptMessage?: (message: MessageResponse, senderIdentityKey?: string) => Promise<DecryptResult>
+  /** WHY: Decrypt function from useChannelEncryption (Megolm channels), passed from ChatArea. */
+  decryptChannelMessage?: (message: MessageResponse) => Promise<DecryptResult>
+  /** WHY: Fast cache lookup from useEncryptedMessages or useChannelEncryption, passed from ChatArea. */
+  getCachedPlaintext?: (messageId: string) => string | undefined
 }
 
 /**
@@ -38,38 +50,33 @@ function formatTimestamp(iso: string, t: TFunction<'messages'>): string {
   })
 }
 
-/**
- * WHY React.memo: The virtualizer re-renders all visible items when the
- * messages array reference changes (on every new message via realtime or
- * pagination). Memoizing skips re-render for messages whose props haven't
- * changed — only the new message actually renders.
- */
-export const MessageItem = memo(function MessageItem({
+// WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
+function MessageContent({
   message,
-  currentUserId,
-  canModerateMessages,
+  isEncrypted,
+  isDeleted,
+  isModeratorDeleted,
   isEditing,
-  onStartEdit,
+  editContent,
+  setEditContent,
   onSaveEdit,
   onCancelEdit,
-  onDelete,
-}: MessageItemProps) {
+  decryptMessage,
+  getCachedPlaintext,
+}: {
+  message: MessageResponse
+  isEncrypted: boolean
+  isDeleted: boolean
+  isModeratorDeleted: boolean
+  isEditing: boolean
+  editContent: string
+  setEditContent: (value: string) => void
+  onSaveEdit: (content: string) => void
+  onCancelEdit: () => void
+  decryptMessage?: (msg: MessageResponse, senderIdentityKey?: string) => Promise<DecryptResult>
+  getCachedPlaintext?: (messageId: string) => string | undefined
+}) {
   const { t } = useTranslation('messages')
-  // WHY: authorId is a UUID — use first 8 chars as label fallback.
-  // A proper profile lookup would be a future enhancement.
-  const authorLabel = message.authorId.slice(0, 8)
-
-  // WHY derive from ID: Optimistic messages use `temp-*` IDs. Deriving pending
-  // state from the ID avoids an extra prop and stays in sync automatically —
-  // when the real message replaces the optimistic one, the ID changes and
-  // pending styling disappears without any manual state management.
-  const isPending = message.id.startsWith('temp-')
-
-  const isOwnMessage = message.authorId === currentUserId
-  const isDeleted = message.deletedBy !== undefined && message.deletedBy !== null
-  const isModeratorDeleted = isDeleted && message.deletedBy !== message.authorId
-
-  const [editContent, setEditContent] = useState(message.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   function handleEditKeyDown(e: React.KeyboardEvent) {
@@ -85,6 +92,140 @@ export const MessageItem = memo(function MessageItem({
       }
     }
   }
+
+  if (isDeleted) {
+    return (
+      <p
+        data-test="message-content"
+        data-test-deleted="true"
+        className="text-sm italic text-default-400"
+      >
+        {isModeratorDeleted ? t('removedByModerator') : t('deletedMessage')}
+      </p>
+    )
+  }
+
+  if (isEditing) {
+    return (
+      <div className="flex flex-col gap-1">
+        <Textarea
+          ref={textareaRef}
+          variant="flat"
+          minRows={1}
+          maxRows={6}
+          value={editContent}
+          onValueChange={setEditContent}
+          onKeyDown={handleEditKeyDown}
+          classNames={{
+            inputWrapper: 'bg-default-100',
+            input: 'text-sm',
+          }}
+          autoFocus
+          data-test="message-edit-input"
+        />
+        <span className="text-xs text-default-500">
+          <Trans
+            t={t}
+            i18nKey="escapeToCancel"
+            components={{
+              cancel: (
+                <button
+                  type="button"
+                  onClick={onCancelEdit}
+                  className="text-primary hover:underline"
+                  data-test="message-edit-cancel"
+                />
+              ),
+              save: (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const trimmed = editContent.trim()
+                    if (trimmed.length > 0) {
+                      onSaveEdit(trimmed)
+                    }
+                  }}
+                  className="text-primary hover:underline"
+                  data-test="message-edit-save"
+                />
+              ),
+            }}
+          />
+        </span>
+      </div>
+    )
+  }
+
+  if (isEncrypted && decryptMessage !== undefined && getCachedPlaintext !== undefined) {
+    return (
+      <div data-test="message-content">
+        <EncryptedMessageContent
+          message={message}
+          decryptMessage={decryptMessage}
+          getCachedPlaintext={getCachedPlaintext}
+        />
+        {message.editedAt !== undefined && message.editedAt !== null && (
+          <span className="ml-1 text-xs text-default-400" data-test="message-edited-indicator">
+            {t('edited')}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <p data-test="message-content" className="text-sm text-foreground/90">
+      {message.content}
+      {message.editedAt !== undefined && message.editedAt !== null && (
+        <span className="ml-1 text-xs text-default-400" data-test="message-edited-indicator">
+          {t('edited')}
+        </span>
+      )}
+    </p>
+  )
+}
+
+/**
+ * WHY React.memo: The virtualizer re-renders all visible items when the
+ * messages array reference changes (on every new message via realtime or
+ * pagination). Memoizing skips re-render for messages whose props haven't
+ * changed — only the new message actually renders.
+ */
+export const MessageItem = memo(function MessageItem({
+  message,
+  currentUserId,
+  canModerateMessages,
+  isEditing,
+  onStartEdit,
+  onSaveEdit,
+  onCancelEdit,
+  onDelete,
+  isDm = false,
+  isChannelEncrypted = false,
+  decryptMessage,
+  decryptChannelMessage,
+  getCachedPlaintext,
+}: MessageItemProps) {
+  const { t } = useTranslation('messages')
+  // WHY: authorId is a UUID — use first 8 chars as label fallback.
+  // A proper profile lookup would be a future enhancement.
+  const authorLabel = message.authorId.slice(0, 8)
+
+  // WHY derive from ID: Optimistic messages use `temp-*` IDs. Deriving pending
+  // state from the ID avoids an extra prop and stays in sync automatically —
+  // when the real message replaces the optimistic one, the ID changes and
+  // pending styling disappears without any manual state management.
+  const isPending = message.id.startsWith('temp-')
+
+  const isOwnMessage = message.authorId === currentUserId
+  const isDeleted = message.deletedBy !== undefined && message.deletedBy !== null
+  const isModeratorDeleted = isDeleted && message.deletedBy !== message.authorId
+  // WHY: Message is encrypted if it's a DM with encrypted flag, or in an encrypted channel.
+  const isEncrypted = message.encrypted === true && (isDm || isChannelEncrypted)
+  // WHY: Use channel decryption for encrypted channels, Olm decryption for DMs.
+  const activeDecryptFn = isChannelEncrypted ? decryptChannelMessage : decryptMessage
+
+  const [editContent, setEditContent] = useState(message.content)
 
   return (
     <div
@@ -109,72 +250,24 @@ export const MessageItem = memo(function MessageItem({
           >
             {authorLabel}
           </span>
-          <span className="text-xs text-default-500">
+          <span data-test="message-timestamp" className="text-xs text-default-500">
             {isPending ? t('sending') : formatTimestamp(message.createdAt, t)}
           </span>
         </div>
 
-        {isDeleted ? (
-          <p data-test="message-content" className="text-sm italic text-default-400">
-            {isModeratorDeleted ? t('removedByModerator') : t('deletedMessage')}
-          </p>
-        ) : isEditing ? (
-          <div className="flex flex-col gap-1">
-            <Textarea
-              ref={textareaRef}
-              variant="flat"
-              minRows={1}
-              maxRows={6}
-              value={editContent}
-              onValueChange={setEditContent}
-              onKeyDown={handleEditKeyDown}
-              classNames={{
-                inputWrapper: 'bg-default-100',
-                input: 'text-sm',
-              }}
-              autoFocus
-              data-test="message-edit-input"
-            />
-            <span className="text-xs text-default-500">
-              <Trans
-                t={t}
-                i18nKey="escapeToCancel"
-                components={{
-                  cancel: (
-                    <button
-                      type="button"
-                      onClick={onCancelEdit}
-                      className="text-primary hover:underline"
-                      data-test="message-edit-cancel"
-                    />
-                  ),
-                  save: (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const trimmed = editContent.trim()
-                        if (trimmed.length > 0) {
-                          onSaveEdit(trimmed)
-                        }
-                      }}
-                      className="text-primary hover:underline"
-                      data-test="message-edit-save"
-                    />
-                  ),
-                }}
-              />
-            </span>
-          </div>
-        ) : (
-          <p data-test="message-content" className="text-sm text-foreground/90">
-            {message.content}
-            {message.editedAt !== undefined && message.editedAt !== null && (
-              <span className="ml-1 text-xs text-default-400" data-test="message-edited-indicator">
-                {t('edited')}
-              </span>
-            )}
-          </p>
-        )}
+        <MessageContent
+          message={message}
+          isEncrypted={isEncrypted}
+          isDeleted={isDeleted}
+          isModeratorDeleted={isModeratorDeleted}
+          isEditing={isEditing}
+          editContent={editContent}
+          setEditContent={setEditContent}
+          onSaveEdit={onSaveEdit}
+          onCancelEdit={onCancelEdit}
+          decryptMessage={activeDecryptFn}
+          getCachedPlaintext={getCachedPlaintext}
+        />
       </div>
 
       {/* WHY: Edit is own-message-only. Delete shows for own messages OR

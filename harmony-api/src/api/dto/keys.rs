@@ -138,3 +138,10 @@ impl From<PreKeyBundle> for PreKeyBundleResponse {
 pub struct KeyCountResponse {
     pub count: i64,
 }
+
+impl KeyCountResponse {
+    #[must_use]
+    pub fn new(count: i64) -> Self {
+        Self { count }
+    }
+}

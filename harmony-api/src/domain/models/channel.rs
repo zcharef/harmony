@@ -31,6 +31,8 @@ pub struct Channel {
     pub is_private: bool,
     /// Whether the channel is read-only (only admin+ can post messages).
     pub is_read_only: bool,
+    /// Whether Megolm E2EE is enabled. One-way toggle: once true, cannot be set back to false.
+    pub encrypted: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -57,6 +59,7 @@ impl Channel {
             category_id: None,
             is_private,
             is_read_only,
+            encrypted: false,
             created_at: now,
             updated_at: now,
         }
@@ -76,6 +79,7 @@ impl Channel {
             category_id: None,
             is_private: false,
             is_read_only: false,
+            encrypted: false,
             created_at: now,
             updated_at: now,
         }

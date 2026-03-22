@@ -1,8 +1,8 @@
 /**
  * Global API Interceptors — Level 1 of the Three-Level Error Architecture (ADR-045).
  *
- * WHY: This module registers response/error interceptors on the @hey-api/client-fetch
- * client to handle cross-cutting concerns that no individual hook should own:
+ * WHY: This module registers response/error interceptors on the generated API client
+ * (bundled by @hey-api/openapi-ts) to handle cross-cutting concerns that no individual hook should own:
  *   - 401 Unauthorized → silent token refresh, then redirect to login on failure
  *   - 429 Rate Limited  → transparent retry respecting Retry-After header
  *   - All HTTP errors   → structured breadcrumb via logger (no PII)
@@ -48,7 +48,7 @@ export function delay(ms: number): Promise<void> {
  * Response interceptor — handles 401 and 429 transparently.
  *
  * WHY this is a response interceptor (not error):
- * In @hey-api/client-fetch, response interceptors run on every successful fetch
+ * In the generated API client, response interceptors run on every successful fetch
  * (before ok/error branching). This lets us retry the request and return a new
  * Response that the client processes normally — the caller never sees the 401/429.
  *

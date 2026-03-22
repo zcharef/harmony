@@ -47,7 +47,7 @@ function DeleteServerSection({
   }
 
   return (
-    <div className="rounded-lg border border-danger-200 p-4">
+    <div data-test="settings-danger-zone" className="rounded-lg border border-danger-200 p-4">
       <h3 className="text-lg font-semibold text-danger">{t('dangerZone')}</h3>
       <p className="mt-1 text-sm text-default-500">{t('deleteServerWarning')}</p>
       <p className="mt-3 text-sm text-default-600">
@@ -96,7 +96,7 @@ export function OverviewTab({ server, callerRole, onServerDeleted }: OverviewTab
   }
 
   return (
-    <div className="space-y-8">
+    <div data-test="settings-overview" className="space-y-8">
       <div>
         <h2 className="text-xl font-semibold text-foreground">{t('serverOverview')}</h2>
         <p className="mt-1 text-sm text-default-500">

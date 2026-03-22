@@ -23,6 +23,8 @@ const realtimeMessageSchema = z.object({
   edited_at: z.string().nullable().optional(),
   deleted_at: z.string().nullable().optional(),
   deleted_by: z.string().nullable().optional(),
+  encrypted: z.boolean().optional(),
+  sender_device_id: z.string().nullable().optional(),
 })
 
 /**
@@ -38,6 +40,8 @@ function toMessageResponse(row: z.infer<typeof realtimeMessageSchema>): MessageR
     createdAt: row.created_at,
     editedAt: row.edited_at ?? undefined,
     deletedBy: row.deleted_by ?? undefined,
+    encrypted: row.encrypted ?? false,
+    senderDeviceId: row.sender_device_id ?? undefined,
   }
 }
 

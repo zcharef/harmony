@@ -35,7 +35,8 @@ pub async fn register_device(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<RegisterDeviceRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let device_id = DeviceId::new(req.device_id);
+    let device_id =
+        DeviceId::try_new(req.device_id).map_err(|e| ApiError::bad_request(e))?;
 
     let device = state
         .key_service()
@@ -73,7 +74,8 @@ pub async fn upload_one_time_keys(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<UploadOneTimeKeysRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let device_id = DeviceId::new(req.device_id);
+    let device_id =
+        DeviceId::try_new(req.device_id).map_err(|e| ApiError::bad_request(e))?;
     let keys: Vec<(String, String, bool)> = req
         .keys
         .into_iter()
@@ -173,7 +175,8 @@ pub async fn remove_device(
     State(state): State<AppState>,
     ApiPath(device_id_str): ApiPath<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let device_id = DeviceId::new(device_id_str);
+    let device_id =
+        DeviceId::try_new(device_id_str).map_err(|e| ApiError::bad_request(e))?;
 
     state
         .key_service()
@@ -209,14 +212,15 @@ pub async fn get_key_count(
     State(state): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<KeyCountQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let device_id = DeviceId::new(params.device_id);
+    let device_id =
+        DeviceId::try_new(params.device_id).map_err(|e| ApiError::bad_request(e))?;
 
     let count = state
         .key_service()
         .get_one_time_key_count(&user_id, &device_id)
         .await?;
 
-    Ok((StatusCode::OK, Json(KeyCountResponse { count })))
+    Ok((StatusCode::OK, Json(KeyCountResponse::new(count))))
 }
 
 /// Query parameters for the key count endpoint.

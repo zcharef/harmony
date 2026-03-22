@@ -31,17 +31,14 @@ impl PgPlanLimitChecker {
     ) -> Result<(Plan, PlanLimits), DomainError> {
         let sid = server_id.0;
 
-        let row = sqlx::query!(
-            r#"SELECT plan as "plan!" FROM servers WHERE id = $1"#,
-            sid
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_err)?
-        .ok_or_else(|| DomainError::NotFound {
-            resource_type: "Server",
-            id: server_id.to_string(),
-        })?;
+        let row = sqlx::query!(r#"SELECT plan as "plan!" FROM servers WHERE id = $1"#, sid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(|| DomainError::NotFound {
+                resource_type: "Server",
+                id: server_id.to_string(),
+            })?;
 
         let plan: Plan = row.plan.parse().map_err(|e: String| {
             tracing::error!(server_id = %server_id, plan = %row.plan, "Invalid plan value in DB");

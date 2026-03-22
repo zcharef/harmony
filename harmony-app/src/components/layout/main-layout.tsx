@@ -206,7 +206,7 @@ export function MainLayout() {
 
       {/* Resizable panels for sidebar, chat, members */}
       <Group orientation="horizontal" className="flex h-full w-full flex-1">
-        <Panel defaultSize="20%" minSize="15%" maxSize="30%">
+        <Panel data-test="server-sidebar" defaultSize="20%" minSize="15%" maxSize="30%">
           {isDmView ? (
             <DmSidebar selectedServerId={selectedServerId} onSelectDm={handleSelectDm} />
           ) : (
@@ -229,6 +229,7 @@ export function MainLayout() {
             isDm={isDmView && selectedChannelId !== null}
             dmRecipient={activeDm?.recipient ?? null}
             isReadOnly={selectedChannel !== undefined ? selectedChannel.isReadOnly : false}
+            isChannelEncrypted={selectedChannel !== undefined ? selectedChannel.encrypted : false}
           />
         </Panel>
 

@@ -135,6 +135,7 @@ export function LoginPage() {
                 {/* WHY: Honeypot field — invisible to real users, auto-filled by bots.
                     Positioned off-screen, excluded from tab order and screen readers. */}
                 <input
+                  data-test="login-honeypot"
                   name="website"
                   type="text"
                   value={honeypot}
@@ -145,17 +146,19 @@ export function LoginPage() {
                   className="absolute -left-[9999px] h-0 w-0 opacity-0"
                 />
 
-                <Turnstile
-                  ref={turnstileRef}
-                  siteKey={env.VITE_TURNSTILE_SITE_KEY}
-                  onSuccess={setCaptchaToken}
-                  onExpire={() => setCaptchaToken(null)}
-                  onError={() => {
-                    setCaptchaToken(null)
-                    setError(t('captchaError'))
-                  }}
-                  options={{ theme: 'auto', size: 'flexible' }}
-                />
+                <div data-test="login-captcha-wrapper">
+                  <Turnstile
+                    ref={turnstileRef}
+                    siteKey={env.VITE_TURNSTILE_SITE_KEY}
+                    onSuccess={setCaptchaToken}
+                    onExpire={() => setCaptchaToken(null)}
+                    onError={() => {
+                      setCaptchaToken(null)
+                      setError(t('captchaError'))
+                    }}
+                    options={{ theme: 'auto', size: 'flexible' }}
+                  />
+                </div>
 
                 {error !== null && (
                   <p data-test="login-error-message" className="text-sm text-danger">

@@ -8,6 +8,7 @@ import {
   Pin,
   PlusCircle,
   Search,
+  ShieldCheck,
   SmilePlus,
   Sticker,
   Users,
@@ -16,13 +17,31 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { useAuthStore } from '@/features/auth'
+import {
+  E2eeAlphaBanner,
+  EncryptedChannelNotice,
+  EncryptionRequiredBanner,
+  TrustBadge,
+  useChannelEncryption,
+  useCryptoSession,
+  useCryptoStore,
+  useEncryptedMessages,
+  useSafetyNumber,
+  useTrustLevel,
+  VerifyIdentityModal,
+} from '@/features/crypto'
 import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import type { DmRecipientResponse, MessageResponse } from '@/lib/api'
+import { encrypt } from '@/lib/crypto'
+import { cacheMessage } from '@/lib/crypto-cache'
+import { logger } from '@/lib/logger'
+import { isTauri } from '@/lib/platform'
 import { useDeleteMessage } from './hooks/use-delete-message'
 import { useEditMessage } from './hooks/use-edit-message'
 import { useMessages } from './hooks/use-messages'
 import { useRealtimeMessages } from './hooks/use-realtime-messages'
+import type { SendMessageEncryption } from './hooks/use-send-message'
 import { useSendMessage } from './hooks/use-send-message'
 import { useTypingIndicator } from './hooks/use-typing-indicator'
 import { MessageItem } from './message-item'
@@ -38,6 +57,8 @@ interface ChatAreaProps {
   dmRecipient?: DmRecipientResponse | null
   /** WHY: When true and user role < admin, the message input is disabled. */
   isReadOnly?: boolean
+  /** WHY: When true, messages are Megolm-encrypted. Derived from channel.encrypted in parent. */
+  isChannelEncrypted?: boolean
 }
 
 /**
@@ -141,9 +162,13 @@ function useCurrentUser() {
 }
 
 // WHY extracted: Keeps ChatArea below Biome's cognitive complexity limit of 15.
-function useMessageActions(channelId: string | null, currentUserId: string) {
+function useMessageActions(
+  channelId: string | null,
+  currentUserId: string,
+  encryption?: SendMessageEncryption,
+) {
   const safeChannelId = channelId ?? ''
-  const sendMessage = useSendMessage(safeChannelId, currentUserId)
+  const sendMessage = useSendMessage(safeChannelId, currentUserId, encryption)
   const editMessageMutation = useEditMessage(safeChannelId)
   const deleteMessageMutation = useDeleteMessage(safeChannelId)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
@@ -185,11 +210,19 @@ function useMessageActions(channelId: string | null, currentUserId: string) {
 
 /**
  * WHY: Extracted header for DM conversations. Shows the recipient's avatar,
- * display name, and online status instead of a #channel-name header.
+ * display name, online status, and verification controls (desktop only).
  */
-function DmChatHeader({ recipient }: { recipient: DmRecipientResponse }) {
+function DmChatHeader({
+  recipient,
+  onOpenVerify,
+}: {
+  recipient: DmRecipientResponse
+  onOpenVerify: () => void
+}) {
   const displayName = recipient.displayName ?? recipient.username
   const status = useUserStatus(recipient.id)
+  const { t } = useTranslation('crypto')
+  const { trustLevel } = useTrustLevel(isTauri() ? recipient.id : null)
 
   return (
     <div className="flex items-center gap-2">
@@ -206,6 +239,20 @@ function DmChatHeader({ recipient }: { recipient: DmRecipientResponse }) {
         </div>
       </div>
       <span className="font-semibold text-foreground">{displayName}</span>
+      {isTauri() && <TrustBadge trustLevel={trustLevel} />}
+      {isTauri() && <E2eeAlphaBanner />}
+      {isTauri() && (
+        <Button
+          variant="light"
+          isIconOnly
+          size="sm"
+          onPress={onOpenVerify}
+          aria-label={t('verifyIdentity')}
+          data-test="verify-identity-button"
+        >
+          <ShieldCheck className="h-4 w-4 text-default-500" />
+        </Button>
+      )}
     </div>
   )
 }
@@ -215,23 +262,31 @@ function ChatToolbar({
   isDm,
   dmRecipient,
   channelName,
+  isChannelEncrypted,
+  onOpenVerify,
 }: {
   isDm: boolean
   dmRecipient: DmRecipientResponse | null
   channelName: string | null
+  isChannelEncrypted: boolean
+  onOpenVerify: () => void
 }) {
   const { t } = useTranslation('chat')
 
   return (
-    <div className="flex h-12 items-center justify-between border-b border-divider px-4 shadow-sm">
+    <div
+      data-test="chat-toolbar"
+      className="flex h-12 items-center justify-between border-b border-divider px-4 shadow-sm"
+    >
       {isDm && dmRecipient !== null ? (
-        <DmChatHeader recipient={dmRecipient} />
+        <DmChatHeader recipient={dmRecipient} onOpenVerify={onOpenVerify} />
       ) : (
         <div className="flex items-center gap-2">
           <Hash className="h-5 w-5 text-default-500" />
           <span className="font-semibold text-foreground">
             {channelName ?? t('channelFallback')}
           </span>
+          {isChannelEncrypted && <E2eeAlphaBanner />}
         </div>
       )}
       <div className="flex items-center gap-1">
@@ -386,6 +441,262 @@ function useInputPlaceholder(
   return t('messagePlaceholder', { channelName: channelName ?? t('channelFallback') })
 }
 
+/**
+ * WHY extracted: Builds the E2EE encryption parameter for DM message sending.
+ * Returns undefined when encryption is not applicable (not DM, not desktop, no session).
+ * This keeps crypto concerns out of the main ChatArea rendering logic.
+ */
+function useDmEncryption(
+  isDm: boolean,
+  recipientUserId: string | null,
+): SendMessageEncryption | undefined {
+  const { ensureSession } = useCryptoSession()
+  const isDesktop = isTauri()
+  const isInitialized = useCryptoStore((s) => s.isInitialized)
+  const deviceId = useCryptoStore((s) => s.deviceId)
+
+  return useMemo(() => {
+    if (!isDm || !isDesktop || !isInitialized || recipientUserId === null || deviceId === null) {
+      return undefined
+    }
+
+    return {
+      encryptFn: async (plaintext: string) => {
+        const { sessionId } = await ensureSession(recipientUserId)
+        const encrypted = await encrypt(sessionId, plaintext)
+        // WHY: Store as JSON envelope so the recipient can parse message_type + ciphertext.
+        const content = JSON.stringify({
+          message_type: encrypted.message_type,
+          ciphertext: encrypted.ciphertext,
+        })
+        return { content, senderDeviceId: deviceId }
+      },
+      cachePlaintext: (messageId: string, channelId: string, plaintext: string) => {
+        cacheMessage(messageId, channelId, plaintext, new Date().toISOString()).catch(
+          (err: unknown) => {
+            logger.warn('cache_plaintext_failed', {
+              messageId,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          },
+        )
+      },
+    }
+  }, [isDm, isDesktop, isInitialized, recipientUserId, deviceId, ensureSession])
+}
+
+/**
+ * WHY extracted: Builds the E2EE encryption parameter for encrypted channel messages.
+ * Returns undefined when encryption is not applicable (not encrypted, not desktop, no crypto).
+ * Follows the same pattern as useDmEncryption above.
+ */
+function useChannelEncryptionParam(
+  isChannelEncrypted: boolean,
+  channelId: string | null,
+): SendMessageEncryption | undefined {
+  const { encryptChannelMessage } = useChannelEncryption()
+  const isDesktop = isTauri()
+  const isInitialized = useCryptoStore((s) => s.isInitialized)
+  const deviceId = useCryptoStore((s) => s.deviceId)
+
+  return useMemo(() => {
+    if (
+      !isChannelEncrypted ||
+      !isDesktop ||
+      !isInitialized ||
+      channelId === null ||
+      deviceId === null
+    ) {
+      return undefined
+    }
+
+    return {
+      encryptFn: async (plaintext: string) => {
+        const result = await encryptChannelMessage(channelId, plaintext, deviceId)
+        return { content: result.content, senderDeviceId: result.senderDeviceId }
+      },
+      cachePlaintext: (messageId: string, chId: string, plaintext: string) => {
+        cacheMessage(messageId, chId, plaintext, new Date().toISOString()).catch(
+          (err: unknown) => {
+            logger.warn('cache_plaintext_failed', {
+              messageId,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          },
+        )
+      },
+    }
+  }, [isChannelEncrypted, isDesktop, isInitialized, channelId, deviceId, encryptChannelMessage])
+}
+
+/**
+ * WHY extracted: Renders the blocked contact warning and message input area.
+ * Reduces ChatArea cognitive complexity below Biome's limit of 15.
+ */
+function ChatInputSection({
+  isBlocked,
+  isInputDisabled,
+  inputPlaceholder,
+  messageContent,
+  isDmInitFailed,
+  onValueChange,
+  onKeyDown,
+  onSendTyping,
+}: {
+  isBlocked: boolean
+  isInputDisabled: boolean
+  inputPlaceholder: string
+  messageContent: string
+  /** WHY: When true, E2EE init failed and this is a DM — warn that messages will be plaintext. */
+  isDmInitFailed: boolean
+  onValueChange: (value: string) => void
+  onKeyDown: (e: React.KeyboardEvent) => void
+  onSendTyping: () => void
+}) {
+  const { t: tCrypto } = useTranslation('crypto')
+
+  return (
+    <>
+      {isDmInitFailed && (
+        <div className="px-4 py-2 text-center text-sm text-warning">
+          {tCrypto('e2eeInitFailed')}
+        </div>
+      )}
+      {isBlocked && (
+        <div className="px-4 py-2 text-center text-sm text-danger">
+          {tCrypto('blockedCannotSend')}
+        </div>
+      )}
+      <MessageInput
+        isInputDisabled={isInputDisabled}
+        placeholder={isBlocked ? tCrypto('blockedCannotSend') : inputPlaceholder}
+        value={messageContent}
+        onValueChange={onValueChange}
+        onKeyDown={onKeyDown}
+        onSendTyping={onSendTyping}
+      />
+    </>
+  )
+}
+
+/**
+ * WHY extracted: Pre-warms decryption caches when entering encrypted channels/DMs.
+ * Reduces ChatArea cognitive complexity below Biome's limit of 15.
+ */
+function useDecryptionCachePreload(
+  isDm: boolean,
+  isChannelEncrypted: boolean,
+  channelId: string | null,
+  loadCachedDecryptions: (channelId: string) => Promise<void>,
+  loadCachedChannelDecryptions: (channelId: string) => Promise<void>,
+) {
+  useEffect(() => {
+    if (channelId === null) return
+    if (!isTauri()) return
+    if (isDm) {
+      loadCachedDecryptions(channelId)
+    } else if (isChannelEncrypted) {
+      loadCachedChannelDecryptions(channelId)
+    }
+  }, [isDm, isChannelEncrypted, channelId, loadCachedDecryptions, loadCachedChannelDecryptions])
+}
+
+/**
+ * WHY extracted: Renders encryption banners for the chat welcome section.
+ * Shows EncryptionRequiredBanner on web for encrypted DMs/channels.
+ */
+function EncryptionBannerSection({
+  isDm,
+  isChannelEncrypted,
+}: {
+  isDm: boolean
+  isChannelEncrypted: boolean
+}) {
+  if ((isDm || isChannelEncrypted) && !isTauri()) {
+    return (
+      <div className="mt-4">
+        <EncryptionRequiredBanner />
+      </div>
+    )
+  }
+  return null
+}
+
+/**
+ * WHY extracted: Renders loading/welcome/empty/error states for the message list.
+ * Reduces ChatArea cognitive complexity below Biome's limit of 15.
+ */
+function MessageListStatus({
+  isDm,
+  isChannelEncrypted,
+  channelId,
+  channelName,
+  dmRecipient,
+  hasNextPage,
+  isFetchingNextPage,
+  isPending,
+  isError,
+  messageCount,
+}: {
+  isDm: boolean
+  isChannelEncrypted: boolean
+  channelId: string
+  channelName: string | null
+  dmRecipient: DmRecipientResponse | null
+  hasNextPage: boolean | undefined
+  isFetchingNextPage: boolean
+  isPending: boolean
+  isError: boolean
+  messageCount: number
+}) {
+  const { t } = useTranslation('chat')
+
+  return (
+    <>
+      {isFetchingNextPage && (
+        <div className="flex justify-center py-2">
+          <Spinner size="sm" />
+        </div>
+      )}
+
+      {!hasNextPage && messageCount > 0 && (
+        <div className="px-4 pb-6 pt-4">
+          <ChatWelcome
+            isDm={isDm}
+            dmRecipient={dmRecipient}
+            channelName={channelName}
+            subtitle={t('channelStart', { channelName: channelName ?? t('channelFallback') })}
+          />
+          <EncryptionBannerSection isDm={isDm} isChannelEncrypted={isChannelEncrypted} />
+          <Divider className="mt-4" />
+        </div>
+      )}
+
+      {isChannelEncrypted && <EncryptedChannelNotice channelId={channelId} />}
+
+      {isPending && (
+        <div className="flex justify-center py-8">
+          <Spinner size="md" />
+        </div>
+      )}
+
+      {isError && <p className="px-4 text-sm text-danger">{t('failedToLoadMessages')}</p>}
+
+      {messageCount === 0 && isPending === false && isError === false && (
+        <div data-test="empty-state" className="px-4 pt-4">
+          <ChatWelcome
+            isDm={isDm}
+            dmRecipient={dmRecipient}
+            channelName={channelName}
+            subtitle={t('noMessagesYet')}
+          />
+          <EncryptionBannerSection isDm={isDm} isChannelEncrypted={isChannelEncrypted} />
+        </div>
+      )}
+    </>
+  )
+}
+
 // WHY extracted: Reduces ChatArea cognitive complexity below Biome's limit of 15.
 function ChatPlaceholder({ isDm }: { isDm: boolean }) {
   const { t } = useTranslation('chat')
@@ -409,9 +720,22 @@ export function ChatArea({
   isDm = false,
   dmRecipient = null,
   isReadOnly = false,
+  isChannelEncrypted = false,
 }: ChatAreaProps) {
-  const { t } = useTranslation('chat')
   const currentUser = useCurrentUser()
+
+  // WHY: Build encryption param for DMs on desktop. Undefined for channels or web.
+  const dmEncryption = useDmEncryption(isDm, dmRecipient?.id ?? null)
+  // WHY: Build encryption param for encrypted channels on desktop.
+  const channelEncryption = useChannelEncryptionParam(isChannelEncrypted, channelId)
+  // WHY: Use channel encryption if available, else DM encryption, else undefined.
+  const activeEncryption = channelEncryption ?? dmEncryption
+  const { decryptMessage, loadCachedDecryptions, getCachedPlaintext } = useEncryptedMessages()
+  const {
+    decryptChannelMessage,
+    loadCachedChannelDecryptions,
+    getCachedPlaintext: getChannelCachedPlaintext,
+  } = useChannelEncryption()
 
   const { data, isPending, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useMessages(channelId)
@@ -422,8 +746,22 @@ export function ChatArea({
     handleCancelEdit,
     handleSaveEdit,
     handleDelete,
-  } = useMessageActions(channelId, currentUser.id)
+  } = useMessageActions(channelId, currentUser.id, activeEncryption)
   const [messageContent, setMessageContent] = useState('')
+  const [isVerifyOpen, setIsVerifyOpen] = useState(false)
+
+  // WHY: Safety number + trust level for DM identity verification (desktop only).
+  const recipientIdForVerify = isDm && isTauri() ? (dmRecipient?.id ?? null) : null
+  const { safetyNumber, isLoading: isLoadingSafetyNumber } = useSafetyNumber(recipientIdForVerify)
+  const { trustLevel, setLevel: setTrustLevelFn } = useTrustLevel(recipientIdForVerify)
+
+  useDecryptionCachePreload(
+    isDm,
+    isChannelEncrypted,
+    channelId,
+    loadCachedDecryptions,
+    loadCachedChannelDecryptions,
+  )
 
   useRealtimeMessages(channelId ?? '')
   const { typingUsers, sendTyping } = useTypingIndicator(channelId ?? '', currentUser.id)
@@ -442,9 +780,23 @@ export function ChatArea({
 
   const handleScroll = useThrottledScroll(scrollRef, hasNextPage, isFetchingNextPage, fetchNextPage)
 
-  /** WHY: Admin+ can always post; others are locked out of read-only channels. */
-  const isInputDisabled = isReadOnly && ROLE_HIERARCHY[currentUserRole] < ROLE_HIERARCHY.admin
-  const inputPlaceholder = useInputPlaceholder(isInputDisabled, isDm, dmRecipient, channelName)
+  /** WHY: Blocked contacts cannot receive messages from us. Read-only also disables. */
+  const isBlocked = isDm && isTauri() && trustLevel === 'blocked'
+  // WHY: Web users must not send plaintext to E2EE channels/DMs — encryption requires Tauri desktop.
+  const isWebEncryptionBlocked = !isTauri() && (isDm || isChannelEncrypted)
+  const isInputDisabled =
+    isBlocked ||
+    isWebEncryptionBlocked ||
+    (isReadOnly && ROLE_HIERARCHY[currentUserRole] < ROLE_HIERARCHY.admin)
+  // WHY: Show warning when E2EE init failed and user is in a DM on desktop.
+  const initFailed = useCryptoStore((s) => s.initFailed)
+  const isDmInitFailed = isDm && isTauri() && initFailed
+  const inputPlaceholder = useInputPlaceholder(
+    isInputDisabled && !isBlocked,
+    isDm,
+    dmRecipient,
+    channelName,
+  )
 
   function handleSend() {
     const trimmed = messageContent.trim()
@@ -466,7 +818,13 @@ export function ChatArea({
 
   return (
     <div data-test="chat-area" className="flex h-full flex-col bg-background">
-      <ChatToolbar isDm={isDm} dmRecipient={dmRecipient} channelName={channelName} />
+      <ChatToolbar
+        isDm={isDm}
+        dmRecipient={dmRecipient}
+        channelName={channelName}
+        isChannelEncrypted={isChannelEncrypted}
+        onOpenVerify={() => setIsVerifyOpen(true)}
+      />
 
       <Divider />
 
@@ -477,45 +835,18 @@ export function ChatArea({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto"
       >
-        {/* WHY: These elements are OUTSIDE the virtualizer container (normal flow)
-            so they don't interfere with absolute-positioned virtual items. */}
-
-        {isFetchingNextPage && (
-          <div className="flex justify-center py-2">
-            <Spinner size="sm" />
-          </div>
-        )}
-
-        {!hasNextPage && messages.length > 0 && (
-          <div className="px-4 pb-6 pt-4">
-            <ChatWelcome
-              isDm={isDm}
-              dmRecipient={dmRecipient}
-              channelName={channelName}
-              subtitle={t('channelStart', { channelName: channelName ?? t('channelFallback') })}
-            />
-            <Divider className="mt-4" />
-          </div>
-        )}
-
-        {isPending && (
-          <div className="flex justify-center py-8">
-            <Spinner size="md" />
-          </div>
-        )}
-
-        {isError && <p className="px-4 text-sm text-danger">{t('failedToLoadMessages')}</p>}
-
-        {messages.length === 0 && isPending === false && isError === false && (
-          <div className="px-4 pt-4">
-            <ChatWelcome
-              isDm={isDm}
-              dmRecipient={dmRecipient}
-              channelName={channelName}
-              subtitle={t('noMessagesYet')}
-            />
-          </div>
-        )}
+        <MessageListStatus
+          isDm={isDm}
+          isChannelEncrypted={isChannelEncrypted}
+          channelId={channelId}
+          channelName={channelName}
+          dmRecipient={dmRecipient}
+          hasNextPage={hasNextPage}
+          isFetchingNextPage={isFetchingNextPage}
+          isPending={isPending}
+          isError={isError}
+          messageCount={messages.length}
+        />
 
         {/* WHY: Virtualizer container is separate — only absolute-positioned items inside.
             getTotalSize() is accurate because it only accounts for measured message rows. */}
@@ -546,6 +877,13 @@ export function ChatArea({
                   onSaveEdit={(content) => handleSaveEdit(message.id, content)}
                   onCancelEdit={handleCancelEdit}
                   onDelete={() => handleDelete(message.id)}
+                  isDm={isDm}
+                  isChannelEncrypted={isChannelEncrypted}
+                  decryptMessage={decryptMessage}
+                  decryptChannelMessage={decryptChannelMessage}
+                  getCachedPlaintext={
+                    isChannelEncrypted ? getChannelCachedPlaintext : getCachedPlaintext
+                  }
                 />
               </div>
             )
@@ -556,15 +894,31 @@ export function ChatArea({
       {/* Typing indicator */}
       <TypingIndicator typingUsers={typingUsers} />
 
-      {/* Message input */}
-      <MessageInput
+      <ChatInputSection
+        isBlocked={isBlocked}
         isInputDisabled={isInputDisabled}
-        placeholder={inputPlaceholder}
-        value={messageContent}
+        inputPlaceholder={inputPlaceholder}
+        messageContent={messageContent}
+        isDmInitFailed={isDmInitFailed}
         onValueChange={setMessageContent}
         onKeyDown={handleKeyDown}
         onSendTyping={() => sendTyping(currentUser.username)}
       />
+
+      {/* Verify identity modal — only rendered on desktop DMs */}
+      {isDm && isTauri() && (
+        <VerifyIdentityModal
+          isOpen={isVerifyOpen}
+          onClose={() => setIsVerifyOpen(false)}
+          recipientName={
+            dmRecipient !== null ? (dmRecipient.displayName ?? dmRecipient.username) : ''
+          }
+          safetyNumber={safetyNumber}
+          isLoadingSafetyNumber={isLoadingSafetyNumber}
+          trustLevel={trustLevel}
+          onSetTrustLevel={setTrustLevelFn}
+        />
+      )}
     </div>
   )
 }

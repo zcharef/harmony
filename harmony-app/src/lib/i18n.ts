@@ -4,6 +4,7 @@ import auth from '@/lib/locales/en/auth.json'
 import channels from '@/lib/locales/en/channels.json'
 import chat from '@/lib/locales/en/chat.json'
 import common from '@/lib/locales/en/common.json'
+import crypto from '@/lib/locales/en/crypto.json'
 import dms from '@/lib/locales/en/dms.json'
 import members from '@/lib/locales/en/members.json'
 import messages from '@/lib/locales/en/messages.json'
@@ -18,6 +19,7 @@ export const resources = {
     common,
     auth,
     chat,
+    crypto,
     dms,
     messages,
     channels,
@@ -30,7 +32,18 @@ export const resources = {
 i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['common', 'auth', 'chat', 'dms', 'messages', 'channels', 'servers', 'members', 'settings'],
+  ns: [
+    'common',
+    'auth',
+    'chat',
+    'crypto',
+    'dms',
+    'messages',
+    'channels',
+    'servers',
+    'members',
+    'settings',
+  ],
   defaultNS,
   resources,
   interpolation: {

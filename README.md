@@ -20,19 +20,37 @@
 
 | | Discord | Stoat (Revolt) | **Harmony** |
 |--|---------|----------------|-------------|
-| Client | Electron (~500 MB RAM) | Solid.js PWA | **Tauri native app (~80 MB RAM)** |
+| Client | Electron (~500 MB RAM) | Solid.js PWA | **Web app + Tauri desktop (~80 MB RAM)** |
 | Backend | Proprietary | Rust (6 microservices) | **Rust (single binary)** |
 | Database | Proprietary | MongoDB + Redis + RabbitMQ | **PostgreSQL only** |
 | Self-host complexity | N/A | 6 services + MongoDB + Redis + RabbitMQ + MinIO | **`docker compose up` (PostgreSQL only)** |
 | Data privacy | Scans messages, shares data | Good | **No data collection, fully auditable** |
 | ID verification | Requiring it | No | **Never** |
-| E2EE | No | No | **Planned (DMs)** |
+| E2EE | No | No | **Yes (DMs) — opt-in for channels** |
 | Sustainable business model | Nitro + Ads | Donations (unclear sustainability) | **Open source + SaaS** |
 | Voice / Video | Proprietary | Vortex | **LiveKit (open-source SFU)** |
 
 ### Privacy that you can verify
 
 Your conversations are yours. Harmony is fully open source under AGPL-3.0 — you don't have to take our word for it, you can read every line of code that handles your data. We don't scan your messages, sell your data to advertisers, train AI on your conversations, or require ID verification to use the app. Chatting with your friends or running your community shouldn't cost you your privacy.
+
+### End-to-end encrypted by default
+
+Direct messages are end-to-end encrypted using the [Olm protocol](https://gitlab.matrix.org/matrix-org/olm/-/blob/master/docs/olm.md) via [vodozemac](https://github.com/matrix-org/vodozemac) (NCC Group audited). The server stores ciphertext only — even we can't read your DMs. Server owners can also enable E2EE per channel for group conversations. All cryptography runs natively in Rust inside the Tauri runtime — private keys never touch JavaScript.
+
+> **Alpha disclaimer:** E2EE is functional but the integration layer has not yet undergone a professional security audit. The underlying cryptographic library (vodozemac) has been [audited by NCC Group](https://matrix.org/media/Hodgson_vodozemac_audit.pdf). We plan to commission a full integration audit before beta. Do not rely on Harmony for sensitive communications until the audit is complete.
+
+### Web + Desktop — use Harmony anywhere
+
+Harmony works in the browser and as a native desktop app. The React frontend is the same codebase — the web app is what you get when you open Harmony in a browser, and the desktop app wraps it in [Tauri](https://tauri.app/) for native performance (~80 MB RAM vs Electron's ~500 MB).
+
+**Web app:** Full access to servers, channels, invites, members, roles, and moderation. Zero download, zero friction — just open the URL. This is how most people will first try Harmony.
+
+**Desktop app:** Everything the web app does, plus end-to-end encrypted DMs. The desktop app stores your encryption keys in your operating system's keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) and runs all cryptography natively in Rust — private keys never touch JavaScript.
+
+**Why E2EE requires the desktop app:** A web client downloads its code from the server on every page load. If the server is compromised, a modified JavaScript bundle could silently exfiltrate encryption keys. This is why Signal has never shipped a web client. We plan to add browser-based E2EE via vodozemac compiled to WebAssembly (proven in production by Element/Matrix) — but for v1, encrypted DMs are desktop-only.
+
+A mobile app is planned for a future release.
 
 ### Self-hosting that actually works
 
@@ -51,38 +69,39 @@ Harmony isn't just for gaming communities. Small teams and co-workers who want p
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────┐
-│              TAURI DESKTOP APP               │
-│  ┌────────────────────────────────────────┐  │
-│  │  React 19 (Vite)                      │  │
-│  │  ├─ Generated TypeScript API client   │  │
-│  │  ├─ TanStack Query                    │  │
-│  │  ├─ Zustand                           │  │
-│  │  └─ HeroUI + Tailwind               │  │
-│  └──────────────┬─────────────────────────┘  │
-│                 │ HTTP (Bearer JWT)           │
-│  ┌──────────────┴─────────────────────────┐  │
-│  │  Tauri Rust Runtime                    │  │
-│  │  ├─ System tray, Push-to-Talk hotkey   │  │
-│  │  └─ Native notifications              │  │
-│  └────────────────────────────────────────┘  │
-└──────────────────┬───────────────────────────┘
-                   │
-        ┌──────────▼──────────┐
-        │   HARMONY RUST API  │
-        │  (Axum · Hexagonal) │
-        │  ├─ REST /v1/*      │
-        │  ├─ Supabase JWT    │
-        │  └─ RFC 9457 errors │
-        └───┬────────────┬────┘
-            │            │
-   ┌────────▼──┐   ┌────▼───────┐
-   │ Supabase  │   │  LiveKit   │
-   │ ├ Postgres│   │  (SFU)     │
-   │ ├ Auth    │   │  Voice     │
-   │ ├ Storage │   │  Video     │
-   │ └ Realtime│   │  Screen    │
-   └───────────┘   └────────────┘
+┌─────────────────────────┐  ┌───────────────────────────────────────┐
+│       WEB BROWSER       │  │         TAURI DESKTOP APP             │
+│  ┌───────────────────┐  │  │  ┌───────────────────────────────┐   │
+│  │  React 19 (Vite)  │  │  │  │  React 19 (Vite)             │   │
+│  │  (same codebase)  │  │  │  │  (same codebase)             │   │
+│  │  Channels, servers │  │  │  │  + E2EE DMs (Olm/vodozemac) │   │
+│  └────────┬──────────┘  │  │  └────────────┬──────────────────┘   │
+│           │ HTTP         │  │               │ invoke()             │
+└───────────┼──────────────┘  │  ┌────────────┴──────────────────┐   │
+            │                 │  │  Tauri Rust Runtime            │   │
+            │                 │  │  ├─ vodozemac (Olm crypto)     │   │
+            │                 │  │  ├─ OS Keychain (key storage)  │   │
+            │                 │  │  └─ SQLCipher (message cache)  │   │
+            │                 │  └────────────┬──────────────────┘   │
+            │                 └───────────────┼─────────────────────┘
+            │                                 │
+            └──────────┬──────────────────────┘
+                       │ HTTP (Bearer JWT)
+            ┌──────────▼──────────┐
+            │   HARMONY RUST API  │
+            │  (Axum · Hexagonal) │
+            │  ├─ REST /v1/*      │
+            │  ├─ Supabase JWT    │
+            │  └─ RFC 9457 errors │
+            └───┬────────────┬────┘
+                │            │
+       ┌────────▼──┐   ┌────▼───────┐
+       │ Supabase  │   │  LiveKit   │
+       │ ├ Postgres│   │  (SFU)     │
+       │ ├ Auth    │   │  Voice     │
+       │ ├ Storage │   │  Video     │
+       │ └ Realtime│   │  Screen    │
+       └───────────┘   └────────────┘
 ```
 
 **Key decisions:**
@@ -119,10 +138,13 @@ cd harmony-api
 cp .env.example .env
 just dev                    # hot-reload on port 3000
 
-# 4. Start the Tauri app (new terminal)
+# 4a. Start the web app (new terminal)
 cd harmony-app
 pnpm install
-just dev                    # opens the desktop app
+just dev                    # opens http://localhost:1420
+
+# 4b. Or start the Tauri desktop app (for E2EE DMs)
+just tauri dev              # opens the native desktop app
 ```
 
 ### Quality wall
@@ -152,12 +174,12 @@ harmony/
 │   │   └── api/         HTTP handlers, middleware, DTOs
 │   └── tests/           Architecture boundary + OpenAPI + RFC 9457 tests
 │
-├── harmony-app/         Tauri desktop app (React 19 + Vite)
+├── harmony-app/         Web app + Tauri desktop (React 19 + Vite)
 │   ├── src/
 │   │   ├── features/    Feature-first business domains
 │   │   ├── components/  UI primitives (HeroUI) + shared + layout
 │   │   └── lib/         Generated API client, utils
-│   └── src-tauri/       Tauri Rust runtime
+│   └── src-tauri/       Tauri Rust runtime (E2EE crypto, keychain)
 │
 └── supabase/            Supabase config + PostgreSQL migrations
 ```
@@ -182,7 +204,8 @@ Self-hosting gives you the complete product with no feature restrictions. Unlimi
 
 | Layer | Technology |
 |-------|-----------|
-| Desktop client | Tauri 2 (Rust + WebView) |
+| Web client | React 19 SPA (same codebase as desktop) |
+| Desktop client | Tauri 2 (Rust + WebView) — adds E2EE via vodozemac |
 | Frontend | React 19, Vite, TypeScript, Tailwind, HeroUI |
 | State management | TanStack Query (server), Zustand (client) |
 | Backend | Rust, Axum 0.8, SQLx |
@@ -203,9 +226,10 @@ Self-hosting gives you the complete product with no feature restrictions. Unlimi
 | **0 — Walking Skeleton** | Sign up, create server, send message | Done |
 | **1 — Real-Time** | Two users chatting live, invites, presence | Done |
 | **2 — Roles & DMs** | Permissions, private messages | Done |
-| **3 — Voice & Files** | LiveKit voice/video, file uploads, public beta | Planned |
-| **4 — SaaS Launch** | Harmony Cloud, server discovery, push notifications | Planned |
-| **5 — Growth** | E2EE, mobile app, web client, bot API | Planned |
+| **3 — E2EE + Web** | E2EE DMs (desktop), web app for channels, opt-in channel E2EE | In Progress |
+| **4 — Voice & Files** | LiveKit voice/video, file uploads, public beta | Planned |
+| **5 — SaaS Launch** | Harmony Cloud, server discovery, push notifications | Planned |
+| **6 — Growth** | Mobile app, web E2EE (WASM), bot API, key backup, multi-device | Planned |
 
 ---
 

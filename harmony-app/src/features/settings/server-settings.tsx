@@ -2,6 +2,7 @@ import { Button, Spinner } from '@heroui/react'
 import { Ban, Hash, Info, Shield, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '@/features/auth'
 import { ROLE_HIERARCHY, useMyMemberRole } from '@/features/members'
 import { useServers } from '@/features/server-nav'
 import { cn } from '@/lib/utils'
@@ -30,6 +31,8 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
   const { role: callerRole } = useMyMemberRole(serverId)
   const { data: servers } = useServers()
   const server = servers?.find((s) => s.id === serverId)
+  const currentUserId = useAuthStore((s) => s.user?.id ?? '')
+  const isOwner = server?.ownerId === currentUserId
   const [activeTab, setActiveTab] = useState<SettingsTab>('overview')
 
   /** WHY: Non-admin users must not access server settings. Auto-close if they lack permission. */
@@ -106,7 +109,9 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
             />
           )}
           {activeTab === 'roles' && <RolesTab serverId={serverId} callerRole={callerRole} />}
-          {activeTab === 'channels' && <ChannelsTab serverId={serverId} callerRole={callerRole} />}
+          {activeTab === 'channels' && (
+            <ChannelsTab serverId={serverId} callerRole={callerRole} isOwner={isOwner} />
+          )}
           {activeTab === 'bans' && <BansTab serverId={serverId} callerRole={callerRole} />}
         </div>
       </div>

@@ -40,4 +40,9 @@ export const queryKeys = {
     all: ['dms'] as const,
     list: () => ['dms', 'list'] as const,
   },
+  crypto: {
+    all: ['crypto'] as const,
+    keyCount: (deviceId: string) => ['crypto', 'keyCount', deviceId] as const,
+    devices: (userId: string) => ['crypto', 'devices', userId] as const,
+  },
 } as const

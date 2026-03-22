@@ -1,5 +1,5 @@
-import { Button, Spinner, Switch } from '@heroui/react'
-import { Hash, Plus, Trash2, Volume2 } from 'lucide-react'
+import { Button, Spinner, Switch, Tooltip } from '@heroui/react'
+import { Hash, Lock, Plus, Trash2, Volume2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -8,26 +8,54 @@ import {
   useDeleteChannel,
   useUpdateChannel,
 } from '@/features/channels'
+import { useCryptoStore } from '@/features/crypto'
 import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
 import type { ChannelResponse } from '@/lib/api'
+import { createMegolmSession } from '@/lib/api'
+import { createOutboundSession } from '@/lib/crypto-megolm'
+import { logger } from '@/lib/logger'
+import { isTauri } from '@/lib/platform'
+import { toast } from '@/lib/toast'
+
+/**
+ * WHY extracted: Encapsulates the multi-step Megolm session creation workflow
+ * that runs after the API confirms encryption is enabled on the channel.
+ * Keeps ChannelRow's event handler lean.
+ */
+async function createAndRegisterMegolmSession(channelId: string): Promise<void> {
+  const session = await createOutboundSession(channelId)
+  await createMegolmSession({
+    path: { id: channelId },
+    body: { sessionId: session.session_id },
+    throwOnError: true,
+  })
+}
 
 function ChannelRow({
   channel,
   serverId,
   canManage,
+  isOwner,
   onDelete,
 }: {
   channel: ChannelResponse
   serverId: string
   canManage: boolean
+  /** WHY: Only the server owner can enable E2EE (one-way toggle). */
+  isOwner: boolean
   onDelete: () => void
 }) {
   const { t } = useTranslation('settings')
+  const { t: tCrypto } = useTranslation('crypto')
 
   const [isPrivate, setIsPrivate] = useState(channel.isPrivate)
   const [isReadOnly, setIsReadOnly] = useState(channel.isReadOnly)
+  const [isEncrypted, setIsEncrypted] = useState(channel.encrypted)
+  const [isEnabling, setIsEnabling] = useState(false)
 
   const updatePerms = useUpdateChannel(serverId, channel.id)
+  const isDesktop = isTauri()
+  const isInitialized = useCryptoStore((s) => s.isInitialized)
 
   function handlePrivateToggle(value: boolean) {
     setIsPrivate(value)
@@ -38,6 +66,59 @@ function ChannelRow({
     setIsReadOnly(value)
     updatePerms.mutate({ isReadOnly: value })
   }
+
+  async function handleEncryptionToggle(value: boolean) {
+    // WHY: One-way toggle — can only enable, never disable.
+    if (!value) return
+    if (isEncrypted) return
+
+    if (!window.confirm(tCrypto('enableEncryptionConfirm', { channelName: channel.name }))) {
+      return
+    }
+
+    setIsEnabling(true)
+    try {
+      // Step 1: Enable encryption on the channel via API
+      updatePerms.mutate(
+        { encrypted: true },
+        {
+          onSuccess: async () => {
+            try {
+              // Step 2: Create outbound Megolm session + register with API
+              await createAndRegisterMegolmSession(channel.id)
+              setIsEncrypted(true)
+              toast.success(tCrypto('encryptionEnabledSuccess', { channelName: channel.name }))
+            } catch (error) {
+              logger.error('Failed to create Megolm session after enabling encryption', {
+                channelId: channel.id,
+                error: error instanceof Error ? error.message : String(error),
+              })
+              toast.error(tCrypto('encryptionEnableFailed'))
+            } finally {
+              setIsEnabling(false)
+            }
+          },
+          onError: (error) => {
+            logger.error('Failed to enable channel encryption', {
+              channelId: channel.id,
+              error: error instanceof Error ? error.message : String(error),
+            })
+            toast.error(tCrypto('encryptionEnableFailed'))
+            setIsEnabling(false)
+          },
+        },
+      )
+    } catch (error) {
+      logger.error('Unexpected error enabling encryption', {
+        channelId: channel.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      setIsEnabling(false)
+    }
+  }
+
+  /** WHY: E2EE toggle is only shown to owner, on desktop, with crypto initialized. */
+  const canEnableEncryption = isOwner && isDesktop && isInitialized
 
   return (
     <div
@@ -51,13 +132,53 @@ function ChannelRow({
         <Volume2 className="h-4 w-4 shrink-0 text-default-500" />
       )}
       <div className="flex-1 overflow-hidden">
-        <span className="truncate text-sm font-medium text-foreground">{channel.name}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-medium text-foreground">{channel.name}</span>
+          {isEncrypted && (
+            <Lock className="h-3 w-3 shrink-0 text-success" data-test="channel-encrypted-icon" />
+          )}
+        </div>
         {channel.topic !== undefined && channel.topic !== null && (
           <p className="truncate text-xs text-default-400">{channel.topic}</p>
         )}
       </div>
       {canManage && (
         <div className="flex items-center gap-4">
+          {canEnableEncryption && (
+            <Tooltip
+              content={isEncrypted ? tCrypto('encryptionPermanent') : tCrypto('enableEncryption')}
+              placement="top"
+              delay={300}
+            >
+              <div>
+                <Switch
+                  size="sm"
+                  isSelected={isEncrypted}
+                  isDisabled={isEncrypted || isEnabling}
+                  onValueChange={handleEncryptionToggle}
+                  aria-label={tCrypto('enableEncryption')}
+                  data-test="channel-encryption-toggle"
+                >
+                  <span className="text-xs text-default-500">{tCrypto('encrypted')}</span>
+                </Switch>
+              </div>
+            </Tooltip>
+          )}
+          {!canEnableEncryption && isOwner && !isDesktop && (
+            <Tooltip content={tCrypto('encryptionDesktopOnly')} placement="top" delay={300}>
+              <div>
+                <Switch
+                  size="sm"
+                  isSelected={isEncrypted}
+                  isDisabled
+                  aria-label={tCrypto('enableEncryption')}
+                  data-test="channel-encryption-toggle-disabled"
+                >
+                  <span className="text-xs text-default-500">{tCrypto('encrypted')}</span>
+                </Switch>
+              </div>
+            </Tooltip>
+          )}
           <Switch
             size="sm"
             isSelected={isPrivate}
@@ -96,9 +217,11 @@ function ChannelRow({
 interface ChannelsTabProps {
   serverId: string
   callerRole: MemberRole
+  /** WHY: Needed to show E2EE toggle only for the server owner. */
+  isOwner: boolean
 }
 
-export function ChannelsTab({ serverId, callerRole }: ChannelsTabProps) {
+export function ChannelsTab({ serverId, callerRole, isOwner }: ChannelsTabProps) {
   const { t } = useTranslation('settings')
   const { data: channels, isPending } = useChannels(serverId)
   const deleteChannel = useDeleteChannel(serverId)
@@ -138,13 +261,14 @@ export function ChannelsTab({ serverId, callerRole }: ChannelsTabProps) {
         )}
       </div>
 
-      <div className="space-y-1">
+      <div data-test="settings-channel-list" className="space-y-1">
         {channels?.map((channel) => (
           <ChannelRow
             key={channel.id}
             channel={channel}
             serverId={serverId}
             canManage={canManage}
+            isOwner={isOwner}
             onDelete={() => handleDeleteChannel(channel)}
           />
         ))}

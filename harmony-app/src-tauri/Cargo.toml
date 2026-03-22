@@ -32,5 +32,7 @@ rand = "0.10"
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 hex = "0.4"
+getrandom = "0.3"
 sha2 = "0.10"
+tracing = "0.1"
 

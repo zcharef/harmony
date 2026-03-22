@@ -21,6 +21,8 @@ export function RoleBadge({ role }: { role: MemberRole }) {
     case 'owner':
       return (
         <Crown
+          data-test="member-role-badge"
+          data-role="owner"
           className={`h-3.5 w-3.5 shrink-0 ${ROLE_ICON_CLASS.owner}`}
           aria-label={t('roleOwner')}
         />
@@ -28,6 +30,8 @@ export function RoleBadge({ role }: { role: MemberRole }) {
     case 'admin':
       return (
         <Shield
+          data-test="member-role-badge"
+          data-role="admin"
           className={`h-3.5 w-3.5 shrink-0 ${ROLE_ICON_CLASS.admin}`}
           aria-label={t('roleAdmin')}
         />
@@ -35,6 +39,8 @@ export function RoleBadge({ role }: { role: MemberRole }) {
     case 'moderator':
       return (
         <Star
+          data-test="member-role-badge"
+          data-role="moderator"
           className={`h-3.5 w-3.5 shrink-0 ${ROLE_ICON_CLASS.moderator}`}
           aria-label={t('roleModerator')}
         />

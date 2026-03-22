@@ -273,7 +273,7 @@ export function RolesTab({ serverId, callerRole }: RolesTabProps) {
         data-test="roles-search-input"
       />
 
-      <div className="space-y-4">
+      <div data-test="settings-role-list" className="space-y-4">
         {ROLE_SECTIONS.map((role) => {
           const sectionMembers = grouped[role]
           if (sectionMembers.length === 0) return null

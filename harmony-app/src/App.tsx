@@ -2,7 +2,8 @@ import { HeroUIProvider, Spinner, ToastProvider } from '@heroui/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MainLayout } from '@/components/layout/main-layout'
 import { AuthProvider, LoginPage } from '@/features/auth'
-import { useAuthStore } from '@/features/auth/stores/auth-store'
+import { useAuthStore } from '@/features/auth'
+import { CryptoProvider } from '@/features/crypto'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,7 +39,9 @@ function App() {
       <HeroUIProvider reducedMotion="user" disableRipple validationBehavior="aria">
         <main className="dark text-foreground bg-background">
           <AuthProvider>
-            <AppContent />
+            <CryptoProvider>
+              <AppContent />
+            </CryptoProvider>
           </AuthProvider>
         </main>
         <ToastProvider placement="bottom-right" toastOffset={16} />
