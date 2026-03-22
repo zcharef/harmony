@@ -22,4 +22,11 @@ pub trait ServerRepository: Send + Sync + std::fmt::Debug {
 
     /// Get a server by ID. Returns `None` if not found.
     async fn get_by_id(&self, server_id: &ServerId) -> Result<Option<Server>, DomainError>;
+
+    /// Update a server's name. Returns the updated server, or `None` if not found.
+    async fn update_name(
+        &self,
+        server_id: &ServerId,
+        name: String,
+    ) -> Result<Option<Server>, DomainError>;
 }

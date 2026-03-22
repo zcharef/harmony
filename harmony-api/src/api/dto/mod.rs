@@ -27,4 +27,4 @@ pub use messages::{
 };
 pub use pagination::PaginatedResponse;
 pub use profiles::ProfileResponse;
-pub use servers::{CreateServerRequest, ServerListResponse, ServerResponse};
+pub use servers::{CreateServerRequest, ServerListResponse, ServerResponse, UpdateServerRequest};

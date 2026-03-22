@@ -9,17 +9,12 @@ import {
   Switch,
 } from '@heroui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useQueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
-import { getChannelPerms } from '@/features/settings'
 import type { ChannelResponse } from '@/lib/api'
-import { client } from '@/lib/api/client.gen'
-import { logger } from '@/lib/logger'
-import { queryKeys } from '@/lib/query-keys'
 import { useUpdateChannel } from './hooks/use-update-channel'
 
 function editChannelSchema(t: TFunction<'channels'>) {
@@ -45,14 +40,11 @@ interface EditChannelDialogProps {
 export function EditChannelDialog({ channel, serverId, isOpen, onClose }: EditChannelDialogProps) {
   const { t } = useTranslation('channels')
   const { t: tSettings } = useTranslation('settings')
-  const queryClient = useQueryClient()
   const updateChannel = useUpdateChannel(serverId, channel.id)
   const schema = editChannelSchema(t)
 
-  /** WHY: Read extended fields from the API response until SDK regeneration. */
-  const perms = getChannelPerms(channel)
-  const [isPrivate, setIsPrivate] = useState(perms.isPrivate)
-  const [isReadOnly, setIsReadOnly] = useState(perms.isReadOnly)
+  const [isPrivate, setIsPrivate] = useState(channel.isPrivate)
+  const [isReadOnly, setIsReadOnly] = useState(channel.isReadOnly)
 
   const {
     register,
@@ -68,32 +60,20 @@ export function EditChannelDialog({ channel, serverId, isOpen, onClose }: EditCh
   })
 
   function onSubmit(values: EditChannelForm) {
-    /**
-     * WHY: UpdateChannelRequest in the SDK doesn't include is_private/is_read_only yet.
-     * Use the raw client to send all fields together.
-     */
-    client
-      .patch({
-        url: '/v1/servers/{id}/channels/{channel_id}',
-        path: { id: serverId, channel_id: channel.id },
-        body: {
-          name: values.name,
-          topic: values.topic || null,
-          is_private: isPrivate,
-          is_read_only: isReadOnly,
+    updateChannel.mutate(
+      {
+        name: values.name,
+        topic: values.topic || null,
+        isPrivate,
+        isReadOnly,
+      },
+      {
+        onSuccess: () => {
+          reset()
+          onClose()
         },
-        headers: { 'Content-Type': 'application/json' },
-        security: [{ scheme: 'bearer', type: 'http' }],
-      })
-      .then(({ error }) => {
-        if (error) {
-          logger.error('Failed to update channel', { error: String(error) })
-          return
-        }
-        queryClient.invalidateQueries({ queryKey: queryKeys.channels.byServer(serverId) })
-        reset()
-        onClose()
-      })
+      },
+    )
   }
 
   function handleClose() {

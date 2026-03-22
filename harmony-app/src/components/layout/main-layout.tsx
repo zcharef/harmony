@@ -11,7 +11,7 @@ import { DmSidebar, useDms } from '@/features/dms'
 import { MemberList, useMyMemberRole } from '@/features/members'
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
-import { getChannelPerms, ServerSettings, useSettingsUiStore } from '@/features/settings'
+import { ServerSettings, useSettingsUiStore } from '@/features/settings'
 
 import { WelcomeScreen } from './welcome-screen'
 
@@ -228,9 +228,7 @@ export function MainLayout() {
             currentUserRole={currentUserRole}
             isDm={isDmView && selectedChannelId !== null}
             dmRecipient={activeDm?.recipient ?? null}
-            isReadOnly={
-              selectedChannel !== undefined ? getChannelPerms(selectedChannel).isReadOnly : false
-            }
+            isReadOnly={selectedChannel !== undefined ? selectedChannel.isReadOnly : false}
           />
         </Panel>
 

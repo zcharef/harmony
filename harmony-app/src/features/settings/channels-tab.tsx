@@ -2,11 +2,14 @@ import { Button, Spinner, Switch } from '@heroui/react'
 import { Hash, Plus, Trash2, Volume2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CreateChannelDialog, useChannels, useDeleteChannel } from '@/features/channels'
+import {
+  CreateChannelDialog,
+  useChannels,
+  useDeleteChannel,
+  useUpdateChannel,
+} from '@/features/channels'
 import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
 import type { ChannelResponse } from '@/lib/api'
-import { useUpdateChannelPerms } from './hooks/use-update-channel-perms'
-import { getChannelPerms } from './settings-types'
 
 function ChannelRow({
   channel,
@@ -21,15 +24,10 @@ function ChannelRow({
 }) {
   const { t } = useTranslation('settings')
 
-  /**
-   * WHY: The generated ChannelResponse doesn't include isPrivate/isReadOnly yet.
-   * We read them safely via getChannelPerms until SDK regeneration.
-   */
-  const perms = getChannelPerms(channel)
-  const [isPrivate, setIsPrivate] = useState(perms.isPrivate)
-  const [isReadOnly, setIsReadOnly] = useState(perms.isReadOnly)
+  const [isPrivate, setIsPrivate] = useState(channel.isPrivate)
+  const [isReadOnly, setIsReadOnly] = useState(channel.isReadOnly)
 
-  const updatePerms = useUpdateChannelPerms(serverId, channel.id)
+  const updatePerms = useUpdateChannel(serverId, channel.id)
 
   function handlePrivateToggle(value: boolean) {
     setIsPrivate(value)

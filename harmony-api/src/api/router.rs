@@ -67,7 +67,10 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/servers",
             post(handlers::servers::create_server).get(handlers::servers::list_servers),
         )
-        .route("/v1/servers/{id}", get(handlers::servers::get_server))
+        .route(
+            "/v1/servers/{id}",
+            get(handlers::servers::get_server).patch(handlers::servers::update_server),
+        )
         .route(
             "/v1/servers/{id}/channels",
             post(handlers::channels::create_channel).get(handlers::channels::list_channels),

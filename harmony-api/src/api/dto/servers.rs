@@ -42,6 +42,15 @@ impl From<Server> for ServerResponse {
     }
 }
 
+/// Request body for updating a server.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateServerRequest {
+    /// New server name (if provided).
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 /// Envelope for a list of servers (ADR-036).
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]

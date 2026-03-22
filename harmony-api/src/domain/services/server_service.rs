@@ -90,6 +90,36 @@ impl ServerService {
                 id: server_id.to_string(),
             })
     }
+
+    /// Update a server's name.
+    ///
+    /// # Errors
+    /// Returns `DomainError::ValidationError` if the new name is empty, too long,
+    /// or contains control characters.
+    /// Returns `DomainError::NotFound` if the server does not exist.
+    pub async fn update_server(
+        &self,
+        server_id: &ServerId,
+        name: Option<String>,
+    ) -> Result<Server, DomainError> {
+        let validated_name = match name {
+            Some(raw) => Some(validate_server_name(&raw)?),
+            None => None,
+        };
+
+        // WHY: If no fields were provided, return the current server unchanged.
+        let Some(new_name) = validated_name else {
+            return self.get_by_id(server_id).await;
+        };
+
+        self.repo
+            .update_name(server_id, new_name)
+            .await?
+            .ok_or_else(|| DomainError::NotFound {
+                resource_type: "Server",
+                id: server_id.to_string(),
+            })
+    }
 }
 
 #[cfg(test)]

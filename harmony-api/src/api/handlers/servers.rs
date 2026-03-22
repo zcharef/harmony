@@ -2,11 +2,13 @@
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
-use crate::api::dto::{CreateServerRequest, ServerListResponse, ServerResponse};
+use crate::api::dto::{
+    CreateServerRequest, ServerListResponse, ServerResponse, UpdateServerRequest,
+};
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::ServerId;
+use crate::domain::models::{Role, ServerId};
 
 /// Create a new server.
 ///
@@ -95,6 +97,42 @@ pub async fn get_server(
     }
 
     let server = state.server_service().get_by_id(&id).await?;
+
+    Ok((StatusCode::OK, Json(ServerResponse::from(server))))
+}
+
+/// Update a server's name. Requires admin+ role.
+///
+/// # Errors
+/// Returns `ApiError` on validation failure or repository error.
+#[utoipa::path(
+    patch,
+    path = "/v1/servers/{id}",
+    tag = "Servers",
+    security(("bearer_auth" = [])),
+    params(("id" = ServerId, Path, description = "Server ID")),
+    request_body = UpdateServerRequest,
+    responses(
+        (status = 200, description = "Server updated", body = ServerResponse),
+        (status = 400, description = "Validation error", body = ProblemDetails),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Insufficient role", body = ProblemDetails),
+        (status = 404, description = "Server not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state, req))]
+pub async fn update_server(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(id): ApiPath<ServerId>,
+    ApiJson(req): ApiJson<UpdateServerRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .moderation_service()
+        .require_role(&id, &user_id, Role::Admin)
+        .await?;
+
+    let server = state.server_service().update_server(&id, req.name).await?;
 
     Ok((StatusCode::OK, Json(ServerResponse::from(server))))
 }

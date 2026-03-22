@@ -202,4 +202,46 @@ impl ServerRepository for PgServerRepository {
             .into_server()
         }))
     }
+
+    async fn update_name(
+        &self,
+        server_id: &ServerId,
+        name: String,
+    ) -> Result<Option<Server>, DomainError> {
+        let sid = server_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            UPDATE servers
+            SET name = $2, updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id,
+                name,
+                icon_url,
+                owner_id,
+                is_dm,
+                created_at,
+                updated_at
+            "#,
+            sid,
+            name,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|r| {
+            ServerRow {
+                id: r.id,
+                name: r.name,
+                icon_url: r.icon_url,
+                owner_id: r.owner_id,
+                is_dm: r.is_dm,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            }
+            .into_server()
+        }))
+    }
 }

@@ -11,7 +11,7 @@ use super::dto::{
     DmRecipientResponse, DmResponse, EditMessageRequest, InvitePreviewResponse, InviteResponse,
     JoinServerRequest, MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse,
     MessageResponse, ProfileResponse, SendMessageRequest, ServerListResponse, ServerResponse,
-    TransferOwnershipRequest, UpdateChannelRequest,
+    TransferOwnershipRequest, UpdateChannelRequest, UpdateServerRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse};
@@ -42,6 +42,7 @@ use crate::domain::models::{
         handlers::servers::create_server,
         handlers::servers::list_servers,
         handlers::servers::get_server,
+        handlers::servers::update_server,
         // Channels
         handlers::channels::list_channels,
         handlers::channels::create_channel,
@@ -90,6 +91,7 @@ use crate::domain::models::{
             ProfileResponse,
             // Server DTOs
             CreateServerRequest,
+            UpdateServerRequest,
             ServerResponse,
             ServerListResponse,
             // Channel DTOs

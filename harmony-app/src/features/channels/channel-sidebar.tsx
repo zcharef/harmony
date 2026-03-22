@@ -25,7 +25,7 @@ import { useAuthStore } from '@/features/auth'
 import { ROLE_HIERARCHY, useMyMemberRole } from '@/features/members'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { CreateInviteDialog } from '@/features/server-nav'
-import { getChannelPerms, useSettingsUiStore } from '@/features/settings'
+import { useSettingsUiStore } from '@/features/settings'
 import type { ChannelResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CreateChannelDialog } from './create-channel-dialog'
@@ -69,12 +69,8 @@ function ChannelButton({
           <Volume2 className="h-4 w-4 shrink-0 text-default-500" />
         )}
         <span className="truncate">{channel.name}</span>
-        {getChannelPerms(channel).isPrivate && (
-          <Lock className="h-3 w-3 shrink-0 text-default-400" />
-        )}
-        {getChannelPerms(channel).isReadOnly && (
-          <Megaphone className="h-3 w-3 shrink-0 text-default-400" />
-        )}
+        {channel.isPrivate && <Lock className="h-3 w-3 shrink-0 text-default-400" />}
+        {channel.isReadOnly && <Megaphone className="h-3 w-3 shrink-0 text-default-400" />}
       </Button>
       {canManageChannels && (
         <Dropdown>

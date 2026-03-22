@@ -1,4 +1,4 @@
-import { Button, Divider, Input, Textarea } from '@heroui/react'
+import { Button, Divider, Input } from '@heroui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { TFunction } from 'i18next'
 import { useState } from 'react'
@@ -13,7 +13,6 @@ import { useUpdateServer } from './hooks/use-update-server'
 function serverSchema(t: TFunction<'settings'>) {
   return z.object({
     name: z.string().min(1, t('serverNameRequired')).max(100, t('serverNameMaxLength')),
-    description: z.string().max(500, t('descriptionMaxLength')),
   })
 }
 
@@ -89,15 +88,11 @@ export function OverviewTab({ server, callerRole, onServerDeleted }: OverviewTab
     resolver: zodResolver(schema),
     defaultValues: {
       name: server.name,
-      description: '',
     },
   })
 
   function onSubmit(values: ServerForm) {
-    updateServer.mutate({
-      name: values.name,
-      description: values.description || null,
-    })
+    updateServer.mutate({ name: values.name })
   }
 
   return (
@@ -117,17 +112,6 @@ export function OverviewTab({ server, callerRole, onServerDeleted }: OverviewTab
           errorMessage={errors.name?.message}
           data-test="settings-server-name-input"
           {...register('name')}
-        />
-        <Textarea
-          label={t('serverDescription')}
-          placeholder={t('serverDescriptionPlaceholder')}
-          isReadOnly={isAdmin === false}
-          isInvalid={errors.description !== undefined}
-          errorMessage={errors.description?.message}
-          minRows={3}
-          maxRows={6}
-          data-test="settings-server-description-input"
-          {...register('description')}
         />
         {isAdmin && (
           <Button
