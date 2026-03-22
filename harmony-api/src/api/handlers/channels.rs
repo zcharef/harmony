@@ -139,6 +139,7 @@ pub async fn update_channel(
     let channel = state
         .channel_service()
         .update_channel(
+            &params.id,
             &params.channel_id,
             req.name,
             req.topic,
@@ -184,7 +185,7 @@ pub async fn delete_channel(
 
     state
         .channel_service()
-        .delete_channel(&params.channel_id)
+        .delete_channel(&params.id, &params.channel_id)
         .await?;
 
     Ok(StatusCode::NO_CONTENT)

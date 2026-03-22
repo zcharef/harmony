@@ -3,6 +3,7 @@ import { Hash, Plus, Trash2, Volume2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CreateChannelDialog, useChannels, useDeleteChannel } from '@/features/channels'
+import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
 import type { ChannelResponse } from '@/lib/api'
 import { useUpdateChannelPerms } from './hooks/use-update-channel-perms'
 import { getChannelPerms } from './settings-types'
@@ -10,10 +11,12 @@ import { getChannelPerms } from './settings-types'
 function ChannelRow({
   channel,
   serverId,
+  canManage,
   onDelete,
 }: {
   channel: ChannelResponse
   serverId: string
+  canManage: boolean
   onDelete: () => void
 }) {
   const { t } = useTranslation('settings')
@@ -55,50 +58,54 @@ function ChannelRow({
           <p className="truncate text-xs text-default-400">{channel.topic}</p>
         )}
       </div>
-      <div className="flex items-center gap-4">
-        <Switch
-          size="sm"
-          isSelected={isPrivate}
-          onValueChange={handlePrivateToggle}
-          aria-label={t('privateChannel')}
-          data-test="channel-private-toggle"
-        >
-          <span className="text-xs text-default-500">{t('private')}</span>
-        </Switch>
-        <Switch
-          size="sm"
-          isSelected={isReadOnly}
-          onValueChange={handleReadOnlyToggle}
-          aria-label={t('readOnlyChannel')}
-          data-test="channel-readonly-toggle"
-        >
-          <span className="text-xs text-default-500">{t('readOnly')}</span>
-        </Switch>
-        <Button
-          variant="light"
-          isIconOnly
-          size="sm"
-          color="danger"
-          onPress={onDelete}
-          aria-label={t('channels:deleteChannel')}
-          data-test="channel-delete-button"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
+      {canManage && (
+        <div className="flex items-center gap-4">
+          <Switch
+            size="sm"
+            isSelected={isPrivate}
+            onValueChange={handlePrivateToggle}
+            aria-label={t('privateChannel')}
+            data-test="channel-private-toggle"
+          >
+            <span className="text-xs text-default-500">{t('private')}</span>
+          </Switch>
+          <Switch
+            size="sm"
+            isSelected={isReadOnly}
+            onValueChange={handleReadOnlyToggle}
+            aria-label={t('readOnlyChannel')}
+            data-test="channel-readonly-toggle"
+          >
+            <span className="text-xs text-default-500">{t('readOnly')}</span>
+          </Switch>
+          <Button
+            variant="light"
+            isIconOnly
+            size="sm"
+            color="danger"
+            onPress={onDelete}
+            aria-label={t('channels:deleteChannel')}
+            data-test="channel-delete-button"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
 
 interface ChannelsTabProps {
   serverId: string
+  callerRole: MemberRole
 }
 
-export function ChannelsTab({ serverId }: ChannelsTabProps) {
+export function ChannelsTab({ serverId, callerRole }: ChannelsTabProps) {
   const { t } = useTranslation('settings')
   const { data: channels, isPending } = useChannels(serverId)
   const deleteChannel = useDeleteChannel(serverId)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const canManage = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
 
   function handleDeleteChannel(channel: ChannelResponse) {
     if (window.confirm(t('channels:deleteConfirm', { channelName: channel.name }))) {
@@ -121,14 +128,16 @@ export function ChannelsTab({ serverId }: ChannelsTabProps) {
           <h2 className="text-xl font-semibold text-foreground">{t('channelsTitle')}</h2>
           <p className="mt-1 text-sm text-default-500">{t('channelsDescription')}</p>
         </div>
-        <Button
-          color="primary"
-          startContent={<Plus className="h-4 w-4" />}
-          onPress={() => setIsCreateOpen(true)}
-          data-test="settings-create-channel-button"
-        >
-          {t('channels:createChannel')}
-        </Button>
+        {canManage && (
+          <Button
+            color="primary"
+            startContent={<Plus className="h-4 w-4" />}
+            onPress={() => setIsCreateOpen(true)}
+            data-test="settings-create-channel-button"
+          >
+            {t('channels:createChannel')}
+          </Button>
+        )}
       </div>
 
       <div className="space-y-1">
@@ -137,6 +146,7 @@ export function ChannelsTab({ serverId }: ChannelsTabProps) {
             key={channel.id}
             channel={channel}
             serverId={serverId}
+            canManage={canManage}
             onDelete={() => handleDeleteChannel(channel)}
           />
         ))}

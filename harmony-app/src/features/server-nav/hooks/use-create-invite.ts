@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { CreateInviteRequest } from '@/lib/api'
 import { createInvite } from '@/lib/api'
+import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 
 /**
@@ -21,6 +22,11 @@ export function useCreateInvite(serverId: string) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.servers.invites(serverId) })
+    },
+    onError: (error) => {
+      logger.error('create_invite_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
     },
   })
 }

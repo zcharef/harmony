@@ -1197,6 +1197,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.8",
  "axum-extra",
+ "base64",
  "bitflags",
  "chrono",
  "config",

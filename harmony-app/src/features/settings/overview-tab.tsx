@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
-import type { MemberRole } from '@/features/members'
+import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
 import type { ServerResponse } from '@/lib/api'
 import { useDeleteServer } from './hooks/use-delete-server'
 import { useUpdateServer } from './hooks/use-update-server'
@@ -79,6 +79,7 @@ export function OverviewTab({ server, callerRole, onServerDeleted }: OverviewTab
   const { t } = useTranslation('settings')
   const updateServer = useUpdateServer(server.id)
   const schema = serverSchema(t)
+  const isAdmin = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
 
   const {
     register,
@@ -103,12 +104,15 @@ export function OverviewTab({ server, callerRole, onServerDeleted }: OverviewTab
     <div className="space-y-8">
       <div>
         <h2 className="text-xl font-semibold text-foreground">{t('serverOverview')}</h2>
-        <p className="mt-1 text-sm text-default-500">{t('serverOverviewDescription')}</p>
+        <p className="mt-1 text-sm text-default-500">
+          {isAdmin ? t('serverOverviewDescription') : t('readOnlyOverviewDescription')}
+        </p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="max-w-lg space-y-4">
         <Input
           label={t('serverName')}
+          isReadOnly={isAdmin === false}
           isInvalid={errors.name !== undefined}
           errorMessage={errors.name?.message}
           data-test="settings-server-name-input"
@@ -117,6 +121,7 @@ export function OverviewTab({ server, callerRole, onServerDeleted }: OverviewTab
         <Textarea
           label={t('serverDescription')}
           placeholder={t('serverDescriptionPlaceholder')}
+          isReadOnly={isAdmin === false}
           isInvalid={errors.description !== undefined}
           errorMessage={errors.description?.message}
           minRows={3}
@@ -124,15 +129,17 @@ export function OverviewTab({ server, callerRole, onServerDeleted }: OverviewTab
           data-test="settings-server-description-input"
           {...register('description')}
         />
-        <Button
-          type="submit"
-          color="primary"
-          isLoading={updateServer.isPending}
-          isDisabled={!isDirty}
-          data-test="settings-save-overview-button"
-        >
-          {t('common:save')}
-        </Button>
+        {isAdmin && (
+          <Button
+            type="submit"
+            color="primary"
+            isLoading={updateServer.isPending}
+            isDisabled={isDirty === false}
+            data-test="settings-save-overview-button"
+          >
+            {t('common:save')}
+          </Button>
+        )}
       </form>
 
       {callerRole === 'owner' && (

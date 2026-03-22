@@ -58,6 +58,7 @@ secrecy = { version = "0.10", features = ["serde"] }
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
+base64 = "0.22"
 
 # Utils
 uuid = { version = "1", features = ["v4", "serde"] }

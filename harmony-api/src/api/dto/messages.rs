@@ -79,6 +79,9 @@ impl MessageListResponse {
 }
 
 /// Query parameters for listing messages (cursor-based pagination).
+// WHY: Query parameter structs cannot use deny_unknown_fields because
+// Axum's query deserializer passes all URL query params to the struct,
+// and extra params (e.g., cache-busters) would cause 400 errors.
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]

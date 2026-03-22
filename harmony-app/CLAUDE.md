@@ -338,14 +338,56 @@ All client vars must be prefixed with `VITE_` (Vite convention).
 
 ---
 
-## 6. Error Handling
+## 6. Error Handling (ADR-045)
+
+### Core Principle
+
+**User intent determines feedback.** Background operations fail silently (retry). Explicit user actions get feedback. Never show an error the user cannot act on.
 
 ### API Errors (RFC 9457)
 
 All business errors originate from the Rust API as RFC 9457 ProblemDetails responses.
 
+### Error Feedback Matrix (MANDATORY)
+
+| Error | User Feedback | Retry Strategy | Client Monitoring |
+|-------|--------------|----------------|-------------------|
+| **Offline / Network drop** | Global banner ("Reconnecting...") | Auto-retry with backoff | Breadcrumb only |
+| **Timeout (mutation)** | Inline "Failed" + retry button | 3x auto, then manual | Breadcrumb only |
+| **400 / 422 (Validation)** | Inline on the input field | None (user fixes input) | Ignore |
+| **401 (Unauthorized)** | None — redirect to login | Silent token refresh 1x | Breadcrumb only |
+| **403 (Forbidden)** | Toast: permission denied | None | Ignore |
+| **404 (Not Found)** | Inline empty state | None | Ignore |
+| **409 (Conflict)** | Toast with `error.detail` | None | Analytics event |
+| **429 (Rate limit)** | Transparent retry. If user spam: inline "Too fast" | Respect `Retry-After` | Ignore |
+| **5xx (Server error)** | Toast ONLY if blocking explicit user action | Backoff 3x | Breadcrumb. **Server alerts.** |
+| **React render crash** | Error Boundary fallback UI | Prompt reload | **`captureException`** |
+
+### Three-Level Error Architecture
+
+```
+Level 1: Global API Interceptor (src/lib/api-client.ts)
+  → 401: silent token refresh → redirect to login on failure
+  → 429: transparent queue + retry with Retry-After
+  → All errors: structured breadcrumb via logger
+
+Level 2: Hook-level onError (each useMutation)
+  → MANDATORY for all mutations triggered by explicit user action
+  → Pattern: toast with error.detail or inline error state
+  → Forbidden: empty onError, missing onError on user-initiated mutations
+
+Level 3: Component Error Boundaries (FeatureErrorBoundary)
+  → Catches React render crashes
+  → Reports to Sentry via captureException
+  → Shows fallback UI with reload prompt
+```
+
+### Mutation Error Handling (MANDATORY)
+
+Every `useMutation` that is triggered by an explicit user action MUST have error feedback:
+
 ```typescript
-// Mutation with proper error handling
+// REQUIRED: mutation with error handling
 export function useLeaveServer() {
   return useMutation({
     mutationFn: async (id: string) => {
@@ -353,23 +395,37 @@ export function useLeaveServer() {
       return data
     },
     onError: (error) => {
-      toast.error(error.detail ?? 'An error occurred')
+      logger.error('leave_server_failed', { error })
+      // TODO: Replace with toast when toast system is implemented
     },
   })
 }
 ```
 
-| HTTP Status | Client Handling |
-|-------------|-----------------|
-| 401 | Redirect to login |
-| 409, 422 | Toast with `error.detail` |
-| 500 | Generic message |
+```typescript
+// FORBIDDEN: mutation without error handling on user-initiated action
+createDm.mutate(userId, {
+  onSuccess: (data) => { navigate(data) },
+  // ← onError missing = silent failure = ADR-045 violation
+})
+```
+
+### Monitoring Classification
+
+| Category | Action | Reasoning |
+|----------|--------|-----------|
+| 4xx client errors | **Never** send to Sentry | Expected business logic, not bugs |
+| 5xx server errors | Server Sentry owns this | Client adds breadcrumb only |
+| React render crash | **Always** `captureException` | Unexpected — needs engineering action |
+| All HTTP errors | `logger.error()` as breadcrumb | Trail for crash diagnosis |
 
 ### Rules
 
 - No stack traces exposed to user
 - No `console.*` calls — use `logger` from `@/lib/logger` (ADR-042)
 - Zero PII in logs
+- Prevention over reaction: disable UI before 403, don't wait for the error
+- Toasts are last resort: prefer inline → banner → toast → modal (escalating severity)
 
 ---
 

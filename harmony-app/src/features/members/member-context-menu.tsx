@@ -8,6 +8,7 @@ import {
 import { MessageSquare } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useCreateDm } from '@/features/dms'
+import { toast } from '@/lib/toast'
 import { useChangeRole } from './hooks/use-change-role'
 import type { ChangeRoleRequest } from './moderation-types'
 import { type MemberRole, ROLE_HIERARCHY } from './moderation-types'
@@ -31,7 +32,7 @@ interface MemberContextMenuProps {
 function usePermissions(callerRole: MemberRole, targetRole: MemberRole, isSelf: boolean) {
   const callerRank = ROLE_HIERARCHY[callerRole]
   const targetRank = ROLE_HIERARCHY[targetRole]
-  const outranksTarget = !isSelf && callerRank > targetRank
+  const outranksTarget = isSelf === false && callerRank > targetRank
 
   return {
     canChangeRole: outranksTarget && callerRank >= ROLE_HIERARCHY.admin,
@@ -81,7 +82,7 @@ export function MemberContextMenu({
   const hasModerationAction = perms.canChangeRole || perms.canKick || perms.canBan
   // WHY: "Send Message" is always available for non-self members,
   // so the menu is never empty when viewing another user.
-  const canSendMessage = !isSelf
+  const canSendMessage = isSelf === false
 
   function handleRoleChange(role: ChangeRoleRequest['role']) {
     changeRole.mutate({ userId: targetUserId, role })
@@ -92,6 +93,14 @@ export function MemberContextMenu({
       onSuccess: (data) => {
         onNavigateDm(data.serverId, data.channelId)
       },
+      onError: (error) => {
+        // WHY: Hook-level onError in useCreateDm already logs the raw error.
+        // This call-site handler shows user feedback and adds target context for diagnostics.
+        toast.error('Could not open DM', {
+          targetUserId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      },
     })
   }
 
@@ -100,9 +109,11 @@ export function MemberContextMenu({
       <DropdownTrigger>{children}</DropdownTrigger>
       <DropdownMenu
         aria-label={t('memberActions', { username: targetUsername })}
-        disabledKeys={!canSendMessage && !hasModerationAction ? ['no-actions'] : []}
+        disabledKeys={
+          canSendMessage === false && hasModerationAction === false ? ['no-actions'] : []
+        }
       >
-        {!canSendMessage && !hasModerationAction ? (
+        {canSendMessage === false && hasModerationAction === false ? (
           <DropdownItem key="no-actions" className="text-default-400">
             {t('noActionsAvailable')}
           </DropdownItem>
@@ -173,7 +184,7 @@ function ContextMenuActions({
           ))}
         </DropdownSection>
       )}
-      {perms.canKick && !perms.canBan && (
+      {perms.canKick && perms.canBan === false && (
         <DropdownSection>
           <DropdownItem
             key="kick"
@@ -183,19 +194,6 @@ function ContextMenuActions({
             data-test="kick-member-item"
           >
             {t('kickUser', { username: targetUsername })}
-          </DropdownItem>
-        </DropdownSection>
-      )}
-      {perms.canBan && !perms.canKick && (
-        <DropdownSection>
-          <DropdownItem
-            key="ban"
-            className="text-danger"
-            color="danger"
-            onPress={onBan}
-            data-test="ban-member-item"
-          >
-            {t('banUser', { username: targetUsername })}
           </DropdownItem>
         </DropdownSection>
       )}

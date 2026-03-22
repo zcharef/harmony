@@ -205,7 +205,7 @@ export function ServerList({
       <JoinServerDialog
         isOpen={isJoinOpen}
         onClose={() => setIsJoinOpen(false)}
-        onJoined={() => {}}
+        onJoined={(serverId) => onSelectServer(serverId)}
       />
     </div>
   )

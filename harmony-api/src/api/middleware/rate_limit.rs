@@ -18,6 +18,7 @@ use axum::{
     http::{HeaderValue, Request, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use governor::{
     Quota, RateLimiter, clock::DefaultClock, middleware::NoOpMiddleware, state::InMemoryState,
 };
@@ -201,6 +202,10 @@ fn extract_user_id_from_request(req: &Request<Body>) -> Option<String> {
 }
 
 /// Extract user ID from session cookie.
+///
+/// WHY: The session token format is `{uid}.{flags}.{expiry}.{hmac}`.
+/// We extract the uid (first segment) as a stable rate limit key instead
+/// of using the full cookie value, which changes on every session refresh.
 fn extract_user_from_cookie(req: &Request<Body>) -> Option<String> {
     let cookie_header = req.headers().get(header::COOKIE)?;
     let cookie_str = cookie_header.to_str().ok()?;
@@ -211,13 +216,21 @@ fn extract_user_from_cookie(req: &Request<Body>) -> Option<String> {
         if let Some(value) = cookie.strip_prefix(&prefix)
             && !value.is_empty()
         {
-            return Some(value.to_string());
+            // Extract uid from the first dot-separated segment of the session token.
+            let uid = value.split('.').next()?;
+            if !uid.is_empty() {
+                return Some(uid.to_string());
+            }
         }
     }
     None
 }
 
 /// Extract user ID from Authorization Bearer header.
+///
+/// WHY: We extract the `sub` claim from the JWT payload without full verification
+/// (auth middleware handles that). This ensures users who rotate tokens still
+/// share a single rate limit bucket keyed by their stable user ID.
 fn extract_user_from_bearer(req: &Request<Body>) -> Option<String> {
     let auth_header = req.headers().get(header::AUTHORIZATION)?;
     let auth_str = auth_header.to_str().ok()?;
@@ -226,7 +239,29 @@ fn extract_user_from_bearer(req: &Request<Body>) -> Option<String> {
     if token.is_empty() {
         return None;
     }
-    Some(token.to_string())
+
+    extract_sub_from_jwt(token)
+}
+
+/// Extract the `sub` claim from a JWT payload without signature verification.
+///
+/// JWTs have three base64url-encoded segments: `header.payload.signature`.
+/// We decode only the payload (middle segment) and read the `sub` field.
+fn extract_sub_from_jwt(token: &str) -> Option<String> {
+    let segments: Vec<&str> = token.splitn(4, '.').collect();
+    if segments.len() < 3 {
+        return None;
+    }
+
+    let payload_bytes = URL_SAFE_NO_PAD.decode(segments[1]).ok()?;
+    let payload: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
+    let sub = payload.get("sub")?.as_str()?;
+
+    if sub.is_empty() {
+        return None;
+    }
+
+    Some(sub.to_string())
 }
 
 /// Extract client IP from X-Forwarded-For header or peer address.
@@ -357,23 +392,70 @@ mod tests {
         assert!(state.check_user("user2").is_ok());
     }
 
+    /// Build a minimal JWT with the given `sub` claim (no signature verification needed).
+    fn build_test_jwt(sub: &str) -> String {
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(br#"{"alg":"HS256","typ":"JWT"}"#);
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(format!(r#"{{"sub":"{sub}","role":"authenticated"}}"#).as_bytes());
+        let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"fake-sig");
+        format!("{header}.{payload}.{signature}")
+    }
+
     #[test]
     fn test_extract_user_id_from_bearer() {
+        let jwt = build_test_jwt("user-uuid-123");
         let req = Request::builder()
-            .header(header::AUTHORIZATION, "Bearer test_user_123")
+            .header(header::AUTHORIZATION, format!("Bearer {jwt}"))
             .body(Body::empty())
             .unwrap();
 
         let user_id = extract_user_id_from_request(&req);
-        assert_eq!(user_id, Some("test_user_123".to_string()));
+        assert_eq!(user_id, Some("user-uuid-123".to_string()));
+    }
+
+    #[test]
+    fn test_extract_user_id_from_bearer_non_jwt_falls_back_to_none() {
+        let req = Request::builder()
+            .header(header::AUTHORIZATION, "Bearer not-a-jwt-token")
+            .body(Body::empty())
+            .unwrap();
+
+        let user_id = extract_user_id_from_request(&req);
+        assert!(user_id.is_none());
+    }
+
+    #[test]
+    fn test_extract_sub_from_jwt() {
+        let jwt = build_test_jwt("abc-def-123");
+        assert_eq!(extract_sub_from_jwt(&jwt), Some("abc-def-123".to_string()));
+    }
+
+    #[test]
+    fn test_extract_sub_from_jwt_missing_sub() {
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256"}"#);
+        let payload =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"role":"authenticated"}"#);
+        let sig = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"sig");
+        let jwt = format!("{header}.{payload}.{sig}");
+        assert_eq!(extract_sub_from_jwt(&jwt), None);
+    }
+
+    #[test]
+    fn test_extract_sub_from_jwt_invalid_base64() {
+        assert_eq!(extract_sub_from_jwt("a.!!!invalid.c"), None);
     }
 
     #[test]
     fn test_extract_user_id_from_cookie() {
+        // Session token format: {uid}.{flags}.{expiry}.{hmac}
         let req = Request::builder()
             .header(
                 header::COOKIE,
-                format!("{}=cookie_user_456; other=value", SESSION_COOKIE_NAME),
+                format!(
+                    "{}=cookie_user_456.0.9999999999.deadbeef; other=value",
+                    SESSION_COOKIE_NAME
+                ),
             )
             .body(Body::empty())
             .unwrap();

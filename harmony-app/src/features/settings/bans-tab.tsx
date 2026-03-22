@@ -1,17 +1,29 @@
 import { Avatar, Button, Spinner } from '@heroui/react'
-import { ShieldOff, UserX } from 'lucide-react'
+import { ShieldAlert, ShieldOff, UserX } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
 import { useBans, useUnbanMember } from './hooks/use-bans'
 
 interface BansTabProps {
   serverId: string
+  callerRole: MemberRole
 }
 
-export function BansTab({ serverId }: BansTabProps) {
+export function BansTab({ serverId, callerRole }: BansTabProps) {
   const { t } = useTranslation('settings')
+  const isAdmin = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
   const { data, isPending } = useBans(serverId)
   const unban = useUnbanMember(serverId)
   const bans = data?.items ?? []
+
+  if (isAdmin === false) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-12">
+        <ShieldAlert className="h-10 w-10 text-default-300" />
+        <p className="text-sm text-default-500">{t('insufficientPermissions')}</p>
+      </div>
+    )
+  }
 
   if (isPending) {
     return (

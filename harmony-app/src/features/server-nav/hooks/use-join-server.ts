@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { JoinServerRequest } from '@/lib/api'
 import { joinServer } from '@/lib/api'
+import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 
 // WHY: serverId comes from the preview response, body type from OpenAPI SSoT.
@@ -27,6 +28,11 @@ export function useJoinServer() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.servers.list() })
+    },
+    onError: (error) => {
+      logger.error('join_server_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
     },
   })
 }

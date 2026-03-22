@@ -12,9 +12,32 @@ use crate::domain::ports::{BanRepository, InviteRepository, MemberRepository, Se
 /// Length of generated invite codes (alphanumeric).
 const INVITE_CODE_LENGTH: usize = 8;
 
+/// Maximum length for an invite code (defense-in-depth against oversized input).
+const MAX_INVITE_CODE_LENGTH: usize = 32;
+
 /// Characters used for invite code generation.
 const INVITE_CODE_CHARSET: &[u8] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+/// Validate that an invite code is non-empty, within length bounds, and alphanumeric.
+fn validate_invite_code(code: &InviteCode) -> Result<(), DomainError> {
+    let s = &code.0;
+
+    if s.is_empty() || s.len() > MAX_INVITE_CODE_LENGTH {
+        return Err(DomainError::ValidationError(format!(
+            "Invite code must be between 1 and {} characters",
+            MAX_INVITE_CODE_LENGTH
+        )));
+    }
+
+    if !s.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(DomainError::ValidationError(
+            "Invite code must contain only alphanumeric characters".to_string(),
+        ));
+    }
+
+    Ok(())
+}
 
 /// Service for invite-related business logic.
 #[derive(Debug)]
@@ -94,9 +117,12 @@ impl InviteService {
     /// Preview an invite by code (no auth required).
     ///
     /// # Errors
+    /// - `DomainError::ValidationError` if the code format is invalid.
     /// - `DomainError::NotFound` if the invite does not exist.
     /// - Repository errors on failure.
     pub async fn preview_invite(&self, code: &InviteCode) -> Result<Invite, DomainError> {
+        validate_invite_code(code)?;
+
         self.invite_repo
             .get_by_code(code)
             .await?
@@ -112,6 +138,7 @@ impl InviteService {
     /// increments the use count, and adds the user as a member.
     ///
     /// # Errors
+    /// - `DomainError::ValidationError` if the code format is invalid.
     /// - `DomainError::NotFound` if the invite does not exist.
     /// - `DomainError::ValidationError` if the invite is expired or exhausted.
     /// - `DomainError::Conflict` if the user is already a member.
@@ -121,6 +148,8 @@ impl InviteService {
         code: &InviteCode,
         user_id: &UserId,
     ) -> Result<ServerId, DomainError> {
+        validate_invite_code(code)?;
+
         let invite =
             self.invite_repo
                 .get_by_code(code)

@@ -60,9 +60,15 @@ impl ChannelRow {
 /// Parse the Postgres `channel_type` enum value into the domain enum.
 fn parse_channel_type(value: &str) -> ChannelType {
     match value {
+        "text" => ChannelType::Text,
         "voice" => ChannelType::Voice,
-        // "text" and any future variants default to Text
-        _ => ChannelType::Text,
+        unknown => {
+            tracing::warn!(
+                channel_type = unknown,
+                "Unknown channel_type from database, defaulting to Text"
+            );
+            ChannelType::Text
+        }
     }
 }
 

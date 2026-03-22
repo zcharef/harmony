@@ -1,4 +1,4 @@
-import { HeroUIProvider, Spinner } from '@heroui/react'
+import { HeroUIProvider, Spinner, ToastProvider } from '@heroui/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MainLayout } from '@/components/layout/main-layout'
 import { AuthProvider, LoginPage } from '@/features/auth'
@@ -41,6 +41,7 @@ function App() {
             <AppContent />
           </AuthProvider>
         </main>
+        <ToastProvider placement="bottom-right" toastOffset={16} />
       </HeroUIProvider>
     </QueryClientProvider>
   )

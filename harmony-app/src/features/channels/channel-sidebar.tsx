@@ -36,12 +36,14 @@ import { useDeleteChannel } from './hooks/use-delete-channel'
 function ChannelButton({
   channel,
   isActive,
+  canManageChannels,
   onSelect,
   onEdit,
   onDelete,
 }: {
   channel: ChannelResponse
   isActive: boolean
+  canManageChannels: boolean
   onSelect: () => void
   onEdit: () => void
   onDelete: () => void
@@ -74,38 +76,40 @@ function ChannelButton({
           <Megaphone className="h-3 w-3 shrink-0 text-default-400" />
         )}
       </Button>
-      <Dropdown>
-        <DropdownTrigger>
-          <Button
-            variant="light"
-            isIconOnly
-            size="sm"
-            className="h-6 w-6 min-w-0 opacity-0 group-hover:opacity-100"
-            data-test="channel-settings-button"
+      {canManageChannels && (
+        <Dropdown>
+          <DropdownTrigger>
+            <Button
+              variant="light"
+              isIconOnly
+              size="sm"
+              className="h-6 w-6 min-w-0 opacity-0 group-hover:opacity-100"
+              data-test="channel-settings-button"
+            >
+              <Settings className="h-3.5 w-3.5 text-default-400" />
+            </Button>
+          </DropdownTrigger>
+          <DropdownMenu
+            aria-label={t('channelOptions')}
+            onAction={(key) => {
+              if (key === 'edit') onEdit()
+              if (key === 'delete') onDelete()
+            }}
           >
-            <Settings className="h-3.5 w-3.5 text-default-400" />
-          </Button>
-        </DropdownTrigger>
-        <DropdownMenu
-          aria-label={t('channelOptions')}
-          onAction={(key) => {
-            if (key === 'edit') onEdit()
-            if (key === 'delete') onDelete()
-          }}
-        >
-          <DropdownItem key="edit" data-test="channel-edit-item">
-            {t('editChannel')}
-          </DropdownItem>
-          <DropdownItem
-            key="delete"
-            className="text-danger"
-            color="danger"
-            data-test="channel-delete-item"
-          >
-            {t('deleteChannel')}
-          </DropdownItem>
-        </DropdownMenu>
-      </Dropdown>
+            <DropdownItem key="edit" data-test="channel-edit-item">
+              {t('editChannel')}
+            </DropdownItem>
+            <DropdownItem
+              key="delete"
+              className="text-danger"
+              color="danger"
+              data-test="channel-delete-item"
+            >
+              {t('deleteChannel')}
+            </DropdownItem>
+          </DropdownMenu>
+        </Dropdown>
+      )}
     </div>
   )
 }
@@ -155,7 +159,7 @@ function ServerHeader({
         onAction={(key) => {
           if (key === 'invite') onInvite()
           if (key === 'settings' && canAccessSettings) onSettings()
-          if (key === 'create-channel') onCreateChannel()
+          if (key === 'create-channel' && canAccessSettings) onCreateChannel()
         }}
       >
         <DropdownSection showDivider>
@@ -176,7 +180,11 @@ function ServerHeader({
           >
             {t('serverSettings')}
           </DropdownItem>
-          <DropdownItem key="create-channel" data-test="server-menu-create-channel-item">
+          <DropdownItem
+            key="create-channel"
+            className={canAccessSettings ? '' : 'hidden'}
+            data-test="server-menu-create-channel-item"
+          >
             {t('createChannel')}
           </DropdownItem>
         </DropdownSection>
@@ -271,6 +279,7 @@ export function ChannelSidebar({
               key={channel.id}
               channel={channel}
               isActive={channel.id === selectedChannelId}
+              canManageChannels={canAccessSettings}
               onSelect={() => onSelectChannel(channel.id)}
               onEdit={() => setEditChannel(channel)}
               onDelete={() => {

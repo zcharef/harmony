@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { CreateServerRequest } from '@/lib/api'
 import { createServer } from '@/lib/api'
+import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 
 /**
@@ -20,6 +21,11 @@ export function useCreateServer() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.servers.all })
+    },
+    onError: (error) => {
+      logger.error('create_server_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
     },
   })
 }

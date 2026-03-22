@@ -16,6 +16,9 @@ pub struct MessageService {
     member_repo: Arc<dyn MemberRepository>,
 }
 
+/// Maximum length for message content.
+const MAX_MESSAGE_LENGTH: usize = 4000;
+
 impl MessageService {
     #[must_use]
     pub fn new(
@@ -111,6 +114,13 @@ impl MessageService {
             ));
         }
 
+        if content.chars().count() > MAX_MESSAGE_LENGTH {
+            return Err(DomainError::ValidationError(format!(
+                "Message content must not exceed {} characters",
+                MAX_MESSAGE_LENGTH
+            )));
+        }
+
         let recent_count = self
             .repo
             .count_recent(channel_id, author_id, Self::RATE_LIMIT_WINDOW_SECS)
@@ -158,6 +168,13 @@ impl MessageService {
             return Err(DomainError::ValidationError(
                 "Message content must not be empty".to_string(),
             ));
+        }
+
+        if content.chars().count() > MAX_MESSAGE_LENGTH {
+            return Err(DomainError::ValidationError(format!(
+                "Message content must not exceed {} characters",
+                MAX_MESSAGE_LENGTH
+            )));
         }
 
         let message =

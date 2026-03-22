@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { useAuthStore } from '@/features/auth'
-import type { MemberRole } from '@/features/members'
+import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import type { DmRecipientResponse, MessageResponse } from '@/lib/api'
 import { useDeleteMessage } from './hooks/use-delete-message'
@@ -443,7 +443,7 @@ export function ChatArea({
   const handleScroll = useThrottledScroll(scrollRef, hasNextPage, isFetchingNextPage, fetchNextPage)
 
   /** WHY: Admin+ can always post; others are locked out of read-only channels. */
-  const isInputDisabled = isReadOnly && currentUserRole !== 'owner' && currentUserRole !== 'admin'
+  const isInputDisabled = isReadOnly && ROLE_HIERARCHY[currentUserRole] < ROLE_HIERARCHY.admin
   const inputPlaceholder = useInputPlaceholder(isInputDisabled, isDm, dmRecipient, channelName)
 
   function handleSend() {
@@ -540,11 +540,7 @@ export function ChatArea({
                 <MessageItem
                   message={message}
                   currentUserId={currentUser.id}
-                  canModerateMessages={
-                    currentUserRole === 'owner' ||
-                    currentUserRole === 'admin' ||
-                    currentUserRole === 'moderator'
-                  }
+                  canModerateMessages={ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.moderator}
                   isEditing={editingMessageId === message.id}
                   onStartEdit={() => handleStartEdit(message.id)}
                   onSaveEdit={(content) => handleSaveEdit(message.id, content)}

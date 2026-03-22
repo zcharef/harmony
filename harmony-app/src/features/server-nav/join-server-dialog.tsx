@@ -30,7 +30,7 @@ type InviteCodeForm = z.infer<ReturnType<typeof inviteCodeSchema>>
 interface JoinServerDialogProps {
   isOpen: boolean
   onClose: () => void
-  onJoined: () => void
+  onJoined: (serverId: string) => void
 }
 
 export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialogProps) {
@@ -79,7 +79,7 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
       {
         onSuccess: () => {
           handleClose()
-          onJoined()
+          onJoined(preview.serverId)
         },
       },
     )

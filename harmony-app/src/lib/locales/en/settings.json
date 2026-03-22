@@ -46,5 +46,8 @@
   "privateChannelHelp": "Only selected roles can see this channel.",
   "readOnlyChannelLabel": "Announcement Channel (Read-Only)",
   "readOnlyChannelHelp": "Only admins and above can send messages.",
-  "announcementPlaceholder": "This is an announcement channel"
+  "announcementPlaceholder": "This is an announcement channel",
+
+  "insufficientPermissions": "You do not have permission to view this section.",
+  "readOnlyOverviewDescription": "Only admins can edit server settings."
 }
