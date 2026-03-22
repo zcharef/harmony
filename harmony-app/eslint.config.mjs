@@ -11,6 +11,12 @@ import tseslint from 'typescript-eslint'
  * - Cross-feature imports must go through index.ts
  *
  * Run with: just boundaries
+ *
+ * Migrated to eslint-plugin-boundaries v6 (2026-03-22):
+ * - element-types -> dependencies (renamed rule)
+ * - entry-point -> merged into dependencies via disallow + internalPath
+ * - ${from.x} -> {{from.captured.x}} template syntax
+ * - string/tuple selectors -> object-based selectors ({ type, captured })
  */
 
 export default tseslint.config(
@@ -91,84 +97,105 @@ export default tseslint.config(
     },
     rules: {
       /**
-       * BOUNDARY RULE: element-types
+       * BOUNDARY RULE: dependencies (v6 — replaces element-types + entry-point)
        *
-       * Enforces what each element type can import from.
+       * Enforces what each element type can import from AND entry-point constraints.
        * Default is 'disallow' — everything is forbidden unless explicitly allowed.
+       *
+       * Entry-point enforcement for features: cross-feature imports that target
+       * anything other than index.ts/index.tsx are disallowed.
+       *
+       * ALLOWED:   import { ChatArea } from '@/features/chat'
+       * FORBIDDEN: import { ChatArea } from '@/features/chat/chat-area'
        */
-      'boundaries/element-types': [
+      'boundaries/dependencies': [
         'error',
         {
           default: 'disallow',
           rules: [
-            // Features can import from:
-            // - Their own internals (same feature)
-            // - Other features ONLY via index.ts (barrel export)
-            // - lib/, hooks/, shared/
+            // Features can import their own internals (same feature, any path)
             {
-              from: 'feature',
+              from: { type: 'feature' },
               allow: [
-                ['feature', { featureName: '${from.featureName}' }],
-                ['feature', { featureName: '!${from.featureName}' }],
-                'lib',
-                'hooks',
-                'shared',
+                {
+                  to: {
+                    type: 'feature',
+                    captured: { featureName: '{{from.captured.featureName}}' },
+                  },
+                },
+              ],
+            },
+            // Features can import other features ONLY via index.ts barrel
+            {
+              from: { type: 'feature' },
+              allow: [
+                {
+                  to: {
+                    type: 'feature',
+                    captured: { featureName: '!{{from.captured.featureName}}' },
+                    internalPath: 'index.ts',
+                  },
+                },
+                {
+                  to: {
+                    type: 'feature',
+                    captured: { featureName: '!{{from.captured.featureName}}' },
+                    internalPath: 'index.tsx',
+                  },
+                },
+              ],
+            },
+            // Features can import from lib, hooks, shared
+            {
+              from: { type: 'feature' },
+              allow: [
+                { to: { type: 'lib' } },
+                { to: { type: 'hooks' } },
+                { to: { type: 'shared' } },
               ],
             },
             // Shared components can import from: lib, hooks
             {
-              from: 'shared',
-              allow: ['lib', 'hooks'],
+              from: { type: 'shared' },
+              allow: [{ to: { type: 'lib' } }, { to: { type: 'hooks' } }],
             },
             // Layout components: features (via barrel), shared, lib, hooks
             {
-              from: 'layout',
-              allow: ['feature', 'shared', 'lib', 'hooks'],
+              from: { type: 'layout' },
+              allow: [
+                { to: { type: 'feature', internalPath: 'index.ts' } },
+                { to: { type: 'feature', internalPath: 'index.tsx' } },
+                { to: { type: 'shared' } },
+                { to: { type: 'lib' } },
+                { to: { type: 'hooks' } },
+              ],
             },
             // Lib can import from other lib
             {
-              from: 'lib',
-              allow: ['lib'],
+              from: { type: 'lib' },
+              allow: [{ to: { type: 'lib' } }],
             },
             // Hooks can import from lib and other hooks
             {
-              from: 'hooks',
-              allow: ['lib', 'hooks'],
+              from: { type: 'hooks' },
+              allow: [{ to: { type: 'lib' } }, { to: { type: 'hooks' } }],
             },
-            // Pages can import from everything
+            // Pages can import from everything (features via barrel only)
             {
-              from: 'pages',
-              allow: ['feature', 'shared', 'lib', 'hooks', 'layout'],
+              from: { type: 'pages' },
+              allow: [
+                { to: { type: 'feature', internalPath: 'index.ts' } },
+                { to: { type: 'feature', internalPath: 'index.tsx' } },
+                { to: { type: 'shared' } },
+                { to: { type: 'lib' } },
+                { to: { type: 'hooks' } },
+                { to: { type: 'layout' } },
+              ],
             },
             // Router can import from pages, lib
             {
-              from: 'router',
-              allow: ['pages', 'lib'],
-            },
-          ],
-        },
-      ],
-
-      /**
-       * BOUNDARY RULE: entry-point
-       *
-       * CRITICAL: Enforces the PUBLIC API pattern.
-       * Features can only be imported via their index.ts barrel.
-       *
-       * ALLOWED:
-       *   import { ChatArea } from '@/features/chat'
-       *
-       * FORBIDDEN (BUILD FAIL):
-       *   import { ChatArea } from '@/features/chat/chat-area'
-       */
-      'boundaries/entry-point': [
-        'error',
-        {
-          default: 'allow',
-          rules: [
-            {
-              target: 'feature',
-              allow: 'index.(ts|tsx)',
+              from: { type: 'router' },
+              allow: [{ to: { type: 'pages' } }, { to: { type: 'lib' } }],
             },
           ],
         },
