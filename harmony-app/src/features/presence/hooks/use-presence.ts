@@ -126,6 +126,7 @@ export function usePresence(
   // server, not just the one they're currently viewing.
   const serverIdsKey = serverIds.join(',')
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: serverIdsKey is a stable string serialization of serverIds — using the array directly would cause infinite re-subscribe loops since serverIds is a new reference each render
   useEffect(() => {
     if (userId === null || serverIds.length === 0) return
     const uid = userId
@@ -171,7 +172,6 @@ export function usePresence(
       }
       syncPresenceState(ownOnly)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- serverIdsKey is a stable serialization of serverIds
   }, [serverIdsKey, userId])
 
   // Effect 3: When selected server changes, immediately populate the store

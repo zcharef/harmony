@@ -2,6 +2,7 @@
 
 pub mod bans;
 pub mod channels;
+pub mod dms;
 pub mod invites;
 pub mod members;
 pub mod messages;

@@ -65,7 +65,16 @@
     }
   },
   "files": {
-    "includes": ["**", "!dist", "!node_modules", "!public", "!src-tauri", "!src/lib/api"]
+    "includes": [
+      "**",
+      "!dist",
+      "!node_modules",
+      "!public",
+      "!src-tauri",
+      "!src/lib/api",
+      "!playwright-report",
+      "!test-results"
+    ]
   },
   "overrides": [
     {

@@ -24,6 +24,7 @@ export const queryKeys = {
     channels: (serverId: string) => ['servers', serverId, 'channels'] as const,
     roles: (serverId: string) => ['servers', serverId, 'roles'] as const,
     invites: (serverId: string) => ['servers', serverId, 'invites'] as const,
+    bans: (serverId: string) => ['servers', serverId, 'bans'] as const,
   },
   channels: {
     all: ['channels'] as const,
@@ -34,5 +35,9 @@ export const queryKeys = {
     all: ['messages'] as const,
     byChannel: (channelId: string) => ['messages', 'channel', channelId] as const,
     detail: (messageId: string) => ['messages', 'detail', messageId] as const,
+  },
+  dms: {
+    all: ['dms'] as const,
+    list: () => ['dms', 'list'] as const,
   },
 } as const

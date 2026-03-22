@@ -17,9 +17,7 @@
   "paths": {
     "/health": {
       "get": {
-        "tags": [
-          "System"
-        ],
+        "tags": ["System"],
         "summary": "Deep health check endpoint.",
         "operationId": "health_check",
         "responses": {
@@ -48,9 +46,7 @@
     },
     "/v1/auth/me": {
       "post": {
-        "tags": [
-          "Auth"
-        ],
+        "tags": ["Auth"],
         "summary": "Sync (get or create) the authenticated user's profile.",
         "description": "Called after Supabase login. Creates a profile row if this is the first login,\nor returns the existing one.\n\n# Errors\nReturns `ApiError` if the JWT lacks an email claim or the upsert fails.",
         "operationId": "sync_profile",
@@ -85,9 +81,7 @@
     },
     "/v1/channels/{channel_id}/messages/{message_id}": {
       "delete": {
-        "tags": [
-          "Messages"
-        ],
+        "tags": ["Messages"],
         "summary": "Soft-delete a message. Only the author can delete (ADR-038).",
         "description": "# Errors\nReturns `ApiError` on authorization failure or repository error.",
         "operationId": "delete_message",
@@ -153,9 +147,7 @@
         ]
       },
       "patch": {
-        "tags": [
-          "Messages"
-        ],
+        "tags": ["Messages"],
         "summary": "Edit a message's content. Only the author can edit.",
         "description": "# Errors\nReturns `ApiError` on validation failure, authorization failure, or repository error.",
         "operationId": "edit_message",
@@ -250,9 +242,7 @@
     },
     "/v1/channels/{id}/messages": {
       "get": {
-        "tags": [
-          "Messages"
-        ],
+        "tags": ["Messages"],
         "summary": "List messages in a channel with cursor-based pagination.",
         "description": "Use `before` (ISO 8601) to paginate backward. Default limit is 50, max is 100.\n\n# Errors\nReturns `ApiError` if the cursor is invalid or a repository error occurs.",
         "operationId": "list_messages",
@@ -325,9 +315,7 @@
         ]
       },
       "post": {
-        "tags": [
-          "Messages"
-        ],
+        "tags": ["Messages"],
         "summary": "Send a message to a channel.",
         "description": "# Errors\nReturns `ApiError` on validation failure or repository error.",
         "operationId": "send_message",
@@ -391,11 +379,217 @@
         ]
       }
     },
+    "/v1/dms": {
+      "get": {
+        "tags": ["DirectMessages"],
+        "summary": "List DM conversations for the authenticated user.",
+        "description": "Returns DM conversations sorted by most recent activity (message or creation).\nUses cursor-based pagination.\n\n# Errors\nReturns `ApiError` if the cursor is invalid or a repository error occurs.",
+        "operationId": "list_dms",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "description": "ISO 8601 timestamp cursor -- fetch DMs with last activity before this time.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of DMs to return (1-100, default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DM list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DmListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["DirectMessages"],
+        "summary": "Create a new DM conversation or return an existing one (idempotent).",
+        "description": "If a DM already exists between the caller and the recipient, returns the\nexisting conversation with `200 OK`. Otherwise creates a new DM and returns\n`201 Created`.\n\n# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "operationId": "create_dm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Existing DM returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DmResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "DM created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DmResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot DM yourself",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recipient not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/dms/{server_id}": {
+      "delete": {
+        "tags": ["DirectMessages"],
+        "summary": "Close (leave) a DM conversation.",
+        "description": "Removes the authenticated user from the DM server. The conversation data\nis preserved for the other participant.\n\n# Errors\nReturns `ApiError` on authorization failure or repository error.",
+        "operationId": "close_dm",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "description": "DM server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "DM closed"
+          },
+          "400": {
+            "description": "Not a DM server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this DM",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "DM not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/invites/{code}": {
       "get": {
-        "tags": [
-          "Invites"
-        ],
+        "tags": ["Invites"],
         "summary": "Preview an invite by code (no authentication required).",
         "description": "Returns the server name and member count so a user can decide whether to join.\n\n# Errors\nReturns `ApiError` if the invite is not found or a repository error occurs.",
         "operationId": "preview_invite",
@@ -436,9 +630,7 @@
     },
     "/v1/profiles/me": {
       "get": {
-        "tags": [
-          "Profiles"
-        ],
+        "tags": ["Profiles"],
         "summary": "Get the authenticated user's own profile.",
         "description": "# Errors\nReturns `ApiError` if the profile is not found or a repository error occurs.",
         "operationId": "get_my_profile",
@@ -483,9 +675,7 @@
     },
     "/v1/servers": {
       "get": {
-        "tags": [
-          "Servers"
-        ],
+        "tags": ["Servers"],
         "summary": "List all servers the authenticated user is a member of.",
         "description": "# Errors\nReturns `ApiError` on repository error.",
         "operationId": "list_servers",
@@ -518,9 +708,7 @@
         ]
       },
       "post": {
-        "tags": [
-          "Servers"
-        ],
+        "tags": ["Servers"],
         "summary": "Create a new server.",
         "description": "The authenticated user becomes the owner. A default `#general` channel\nand server membership are created automatically.\n\n# Errors\nReturns `ApiError` on validation failure or repository error.",
         "operationId": "create_server",
@@ -575,9 +763,7 @@
     },
     "/v1/servers/{id}": {
       "get": {
-        "tags": [
-          "Servers"
-        ],
+        "tags": ["Servers"],
         "summary": "Get a server by ID.",
         "description": "# Errors\nReturns `ApiError` if the server is not found or a repository error occurs.",
         "operationId": "get_server",
@@ -631,11 +817,227 @@
         ]
       }
     },
+    "/v1/servers/{id}/bans": {
+      "get": {
+        "tags": ["Moderation"],
+        "summary": "List all bans for a server. Requires admin+ role.",
+        "description": "# Errors\nReturns `ApiError` on authorization failure or repository error.",
+        "operationId": "list_bans",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ban list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BanListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["Moderation"],
+        "summary": "Ban a user from a server and remove their membership.\nRequires admin+ role with hierarchy enforcement.",
+        "description": "# Errors\nReturns `ApiError` on authorization failure, conflict, or repository error.",
+        "operationId": "ban_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BanUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "User banned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BanResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role / hierarchy violation / cannot ban owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "User already banned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers/{id}/bans/{user_id}": {
+      "delete": {
+        "tags": ["Moderation"],
+        "summary": "Unban a user from a server. Requires admin+ role.",
+        "description": "# Errors\nReturns `ApiError` on authorization failure or repository error.",
+        "operationId": "unban_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User ID to unban",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UserId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "User unbanned"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ban not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/servers/{id}/channels": {
       "get": {
-        "tags": [
-          "Channels"
-        ],
+        "tags": ["Channels"],
         "summary": "List all channels in a server.",
         "description": "# Errors\nReturns `ApiError` on repository error.",
         "operationId": "list_channels",
@@ -689,10 +1091,8 @@
         ]
       },
       "post": {
-        "tags": [
-          "Channels"
-        ],
-        "summary": "Create a new channel in a server.",
+        "tags": ["Channels"],
+        "summary": "Create a new channel in a server. Requires admin+ role.",
         "description": "# Errors\nReturns `ApiError` on validation failure or repository error.",
         "operationId": "create_channel",
         "parameters": [
@@ -746,6 +1146,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Insufficient role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -757,10 +1167,8 @@
     },
     "/v1/servers/{id}/channels/{channel_id}": {
       "delete": {
-        "tags": [
-          "Channels"
-        ],
-        "summary": "Delete a channel.",
+        "tags": ["Channels"],
+        "summary": "Delete a channel. Requires admin+ role.",
         "description": "# Errors\nReturns `ApiError` if this is the last channel or the channel is not found.",
         "operationId": "delete_channel",
         "parameters": [
@@ -807,6 +1215,16 @@
               }
             }
           },
+          "403": {
+            "description": "Insufficient role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Channel not found",
             "content": {
@@ -825,10 +1243,8 @@
         ]
       },
       "patch": {
-        "tags": [
-          "Channels"
-        ],
-        "summary": "Update a channel's name and/or topic.",
+        "tags": ["Channels"],
+        "summary": "Update a channel's name and/or topic. Requires admin+ role.",
         "description": "# Errors\nReturns `ApiError` on validation failure or repository error.",
         "operationId": "update_channel",
         "parameters": [
@@ -892,6 +1308,16 @@
               }
             }
           },
+          "403": {
+            "description": "Insufficient role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Channel not found",
             "content": {
@@ -912,9 +1338,7 @@
     },
     "/v1/servers/{id}/invites": {
       "post": {
-        "tags": [
-          "Invites"
-        ],
+        "tags": ["Invites"],
         "summary": "Create a new invite for a server.",
         "description": "The authenticated user must be a member of the server. Returns a shareable\ninvite code that can be used by others to join.\n\n# Errors\nReturns `ApiError` on validation failure, permission denial, or repository error.",
         "operationId": "create_invite",
@@ -990,9 +1414,7 @@
     },
     "/v1/servers/{id}/members": {
       "get": {
-        "tags": [
-          "Members"
-        ],
+        "tags": ["Members"],
         "summary": "List all members of a server.",
         "description": "# Errors\nReturns `ApiError` on repository error.",
         "operationId": "list_members",
@@ -1046,9 +1468,7 @@
         ]
       },
       "post": {
-        "tags": [
-          "Members"
-        ],
+        "tags": ["Members"],
         "summary": "Join a server via an invite code.",
         "description": "Validates the invite, checks that the user is not already a member,\nand adds them to the server.\n\n# Errors\nReturns `ApiError` on invalid invite, expired invite, or conflict.",
         "operationId": "join_server",
@@ -1114,10 +1534,329 @@
           }
         ]
       }
+    },
+    "/v1/servers/{id}/members/{user_id}": {
+      "delete": {
+        "tags": ["Members"],
+        "summary": "Kick a member from a server. Requires moderator+ role with hierarchy enforcement.",
+        "description": "# Errors\nReturns `ApiError` on authorization failure or repository error.",
+        "operationId": "kick_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User ID to kick",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UserId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Member kicked"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role or hierarchy violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server or member not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers/{id}/members/{user_id}/role": {
+      "patch": {
+        "tags": ["Members"],
+        "summary": "Assign a role to a server member. Requires admin+ role with hierarchy enforcement.",
+        "description": "# Errors\nReturns `ApiError` on validation failure, authorization failure, or repository error.",
+        "operationId": "assign_role",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "Target user ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UserId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Role assigned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid role or self-assignment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role or hierarchy violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server or member not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers/{id}/transfer-ownership": {
+      "post": {
+        "tags": ["Members"],
+        "summary": "Transfer server ownership. Only the current owner can do this.",
+        "description": "# Errors\nReturns `ApiError` on authorization failure or repository error.",
+        "operationId": "transfer_ownership",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferOwnershipRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ownership transferred",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot transfer to self",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not server owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server or new owner not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
     }
   },
   "components": {
     "schemas": {
+      "AssignRoleRequest": {
+        "type": "object",
+        "description": "Request body for assigning a role to a server member.",
+        "required": ["role"],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "The role to assign (admin, moderator, member). Use transfer-ownership for owner."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BanListResponse": {
+        "type": "object",
+        "description": "Envelope for a list of server bans (ADR-036).",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BanResponse"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "BanResponse": {
+        "type": "object",
+        "description": "Server ban response returned to API consumers.",
+        "required": ["userId", "createdAt"],
+        "properties": {
+          "bannedBy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserId"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": ["string", "null"]
+          },
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          }
+        }
+      },
+      "BanUserRequest": {
+        "type": "object",
+        "description": "Request body for banning a user from a server.",
+        "required": ["userId"],
+        "properties": {
+          "reason": {
+            "type": ["string", "null"]
+          },
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          }
+        },
+        "additionalProperties": false
+      },
       "CategoryId": {
         "type": "string",
         "format": "uuid",
@@ -1133,9 +1872,7 @@
       "ChannelListResponse": {
         "type": "object",
         "description": "Envelope for a list of channels (ADR-036).",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -1148,15 +1885,7 @@
       "ChannelResponse": {
         "type": "object",
         "description": "Channel response returned to API consumers.",
-        "required": [
-          "id",
-          "serverId",
-          "name",
-          "channelType",
-          "position",
-          "createdAt",
-          "updatedAt"
-        ],
+        "required": ["id", "serverId", "name", "channelType", "position", "createdAt", "updatedAt"],
         "properties": {
           "categoryId": {
             "oneOf": [
@@ -1189,10 +1918,7 @@
             "$ref": "#/components/schemas/ServerId"
           },
           "topic": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "updatedAt": {
             "type": "string",
@@ -1203,18 +1929,12 @@
       "ChannelType": {
         "type": "string",
         "description": "Channel type (matches Postgres `channel_type` enum).",
-        "enum": [
-          "text",
-          "voice"
-        ]
+        "enum": ["text", "voice"]
       },
       "ComponentHealth": {
         "type": "object",
         "description": "Health status of individual components.",
-        "required": [
-          "database",
-          "api"
-        ],
+        "required": ["database", "api"],
         "properties": {
           "api": {
             "type": "string",
@@ -1229,9 +1949,7 @@
       "CreateChannelRequest": {
         "type": "object",
         "description": "Request body for creating a new channel.",
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "properties": {
           "channelType": {
             "oneOf": [
@@ -1251,23 +1969,29 @@
         },
         "additionalProperties": false
       },
+      "CreateDmRequest": {
+        "type": "object",
+        "description": "Request body for creating a new DM conversation.",
+        "required": ["recipientId"],
+        "properties": {
+          "recipientId": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The user ID of the recipient."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateInviteRequest": {
         "type": "object",
         "description": "Request body for creating a new invite.",
         "properties": {
           "expiresInHours": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "format": "int32",
             "description": "Invite expires after this many hours. `None` means it never expires."
           },
           "maxUses": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "format": "int32",
             "description": "Maximum number of times this invite can be used. `None` means unlimited."
           }
@@ -1277,9 +2001,7 @@
       "CreateServerRequest": {
         "type": "object",
         "description": "Request body for creating a new server.",
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "properties": {
           "name": {
             "type": "string",
@@ -1288,12 +2010,117 @@
         },
         "additionalProperties": false
       },
+      "DmLastMessageResponse": {
+        "type": "object",
+        "description": "Last message preview embedded in DM list items.",
+        "required": ["content", "createdAt"],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DmListItem": {
+        "type": "object",
+        "description": "A single DM conversation in the list response.",
+        "required": ["serverId", "channelId", "recipient"],
+        "properties": {
+          "channelId": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "lastMessage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DmLastMessageResponse"
+              }
+            ]
+          },
+          "recipient": {
+            "$ref": "#/components/schemas/DmRecipientResponse"
+          },
+          "serverId": {
+            "$ref": "#/components/schemas/ServerId"
+          }
+        }
+      },
+      "DmListQuery": {
+        "type": "object",
+        "description": "Query parameters for listing DMs (cursor-based pagination).",
+        "properties": {
+          "before": {
+            "type": ["string", "null"],
+            "description": "ISO 8601 timestamp cursor -- fetch DMs with last activity before this time."
+          },
+          "limit": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Maximum number of DMs to return (1-100, default 50)."
+          }
+        }
+      },
+      "DmListResponse": {
+        "type": "object",
+        "description": "Envelope for a list of DM conversations with cursor pagination (ADR-036).",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DmListItem"
+            }
+          },
+          "nextCursor": {
+            "type": ["string", "null"],
+            "description": "Cursor for the next page. `None` if this is the last page."
+          }
+        }
+      },
+      "DmRecipientResponse": {
+        "type": "object",
+        "description": "Recipient profile embedded in DM responses.",
+        "required": ["id", "username"],
+        "properties": {
+          "avatarUrl": {
+            "type": ["string", "null"]
+          },
+          "displayName": {
+            "type": ["string", "null"]
+          },
+          "id": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "DmResponse": {
+        "type": "object",
+        "description": "Response for a single DM conversation (create or get).",
+        "required": ["serverId", "channelId", "recipient"],
+        "properties": {
+          "channelId": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "recipient": {
+            "$ref": "#/components/schemas/DmRecipientResponse"
+          },
+          "serverId": {
+            "$ref": "#/components/schemas/ServerId"
+          }
+        }
+      },
       "EditMessageRequest": {
         "type": "object",
         "description": "Request body for editing a message.",
-        "required": [
-          "content"
-        ],
+        "required": ["content"],
         "properties": {
           "content": {
             "type": "string",
@@ -1305,12 +2132,7 @@
       "HealthResponse": {
         "type": "object",
         "description": "Deep health check response with component status.",
-        "required": [
-          "status",
-          "components",
-          "latency_ms",
-          "version"
-        ],
+        "required": ["status", "components", "latency_ms", "version"],
         "properties": {
           "components": {
             "$ref": "#/components/schemas/ComponentHealth",
@@ -1340,12 +2162,7 @@
       "InvitePreviewResponse": {
         "type": "object",
         "description": "Public invite preview (no auth required).\n\nContains just enough information for a user to decide whether to join.",
-        "required": [
-          "code",
-          "serverId",
-          "serverName",
-          "memberCount"
-        ],
+        "required": ["code", "serverId", "serverName", "memberCount"],
         "properties": {
           "code": {
             "$ref": "#/components/schemas/InviteCode"
@@ -1365,13 +2182,7 @@
       "InviteResponse": {
         "type": "object",
         "description": "Invite response returned to API consumers.",
-        "required": [
-          "code",
-          "serverId",
-          "creatorId",
-          "useCount",
-          "createdAt"
-        ],
+        "required": ["code", "serverId", "creatorId", "useCount", "createdAt"],
         "properties": {
           "code": {
             "$ref": "#/components/schemas/InviteCode"
@@ -1384,17 +2195,11 @@
             "$ref": "#/components/schemas/UserId"
           },
           "expiresAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "maxUses": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "format": "int32"
           },
           "serverId": {
@@ -1409,9 +2214,7 @@
       "JoinServerRequest": {
         "type": "object",
         "description": "Request body for joining a server via invite code.",
-        "required": [
-          "inviteCode"
-        ],
+        "required": ["inviteCode"],
         "properties": {
           "inviteCode": {
             "type": "string",
@@ -1423,10 +2226,7 @@
       "MemberListResponse": {
         "type": "object",
         "description": "Envelope for a list of server members (ADR-036).",
-        "required": [
-          "items",
-          "total"
-        ],
+        "required": ["items", "total"],
         "properties": {
           "items": {
             "type": "array",
@@ -1443,27 +2243,20 @@
       "MemberResponse": {
         "type": "object",
         "description": "Server member response returned to API consumers.",
-        "required": [
-          "userId",
-          "username",
-          "joinedAt"
-        ],
+        "required": ["userId", "username", "role", "joinedAt"],
         "properties": {
           "avatarUrl": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "joinedAt": {
             "type": "string",
             "format": "date-time"
           },
           "nickname": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
+          },
+          "role": {
+            "type": "string"
           },
           "userId": {
             "$ref": "#/components/schemas/UserId"
@@ -1484,17 +2277,11 @@
         "description": "Query parameters for listing messages (cursor-based pagination).",
         "properties": {
           "before": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "ISO 8601 timestamp cursor — fetch messages created before this time."
           },
           "limit": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "format": "int64",
             "description": "Maximum number of messages to return (1-100, default 50)."
           }
@@ -1503,9 +2290,7 @@
       "MessageListResponse": {
         "type": "object",
         "description": "Envelope for a list of messages with cursor pagination (ADR-036).",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -1514,10 +2299,7 @@
             }
           },
           "nextCursor": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "Cursor for the next page. `None` if this is the last page."
           }
         }
@@ -1525,13 +2307,7 @@
       "MessageResponse": {
         "type": "object",
         "description": "Message response returned to API consumers.\n\nExcludes `deleted_at` — soft-deleted messages are filtered server-side.",
-        "required": [
-          "id",
-          "channelId",
-          "authorId",
-          "content",
-          "createdAt"
-        ],
+        "required": ["id", "channelId", "authorId", "content", "createdAt"],
         "properties": {
           "authorId": {
             "$ref": "#/components/schemas/UserId"
@@ -1547,10 +2323,7 @@
             "format": "date-time"
           },
           "editedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "id": {
@@ -1561,21 +2334,13 @@
       "ProblemDetails": {
         "type": "object",
         "description": "RFC 9457 Problem Details response.\n\nAll API errors are returned in this standardized format.",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail"
-        ],
+        "required": ["type", "title", "status", "detail"],
         "properties": {
           "detail": {
             "type": "string"
           },
           "instance": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "status": {
             "type": "integer",
@@ -1593,35 +2358,20 @@
       "ProfileResponse": {
         "type": "object",
         "description": "Profile response returned to API consumers.",
-        "required": [
-          "id",
-          "username",
-          "status",
-          "createdAt",
-          "updatedAt"
-        ],
+        "required": ["id", "username", "status", "createdAt", "updatedAt"],
         "properties": {
           "avatarUrl": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
           },
           "customStatus": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "displayName": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "id": {
             "$ref": "#/components/schemas/UserId"
@@ -1641,9 +2391,7 @@
       "SendMessageRequest": {
         "type": "object",
         "description": "Request body for sending a new message.",
-        "required": [
-          "content"
-        ],
+        "required": ["content"],
         "properties": {
           "content": {
             "type": "string",
@@ -1661,9 +2409,7 @@
       "ServerListResponse": {
         "type": "object",
         "description": "Envelope for a list of servers (ADR-036).",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -1676,24 +2422,14 @@
       "ServerResponse": {
         "type": "object",
         "description": "Server response returned to API consumers.",
-        "required": [
-          "id",
-          "name",
-          "ownerId",
-          "isDm",
-          "createdAt",
-          "updatedAt"
-        ],
+        "required": ["id", "name", "ownerId", "isDm", "createdAt", "updatedAt"],
         "properties": {
           "createdAt": {
             "type": "string",
             "format": "date-time"
           },
           "iconUrl": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "id": {
             "$ref": "#/components/schemas/ServerId"
@@ -1713,22 +2449,28 @@
           }
         }
       },
+      "TransferOwnershipRequest": {
+        "type": "object",
+        "description": "Request body for transferring server ownership.",
+        "required": ["newOwnerId"],
+        "properties": {
+          "newOwnerId": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The user ID of the new owner (must be an existing member)."
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateChannelRequest": {
         "type": "object",
         "description": "Request body for updating an existing channel.",
         "properties": {
           "name": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "New channel name (if provided)."
           },
           "topic": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "New channel topic (if provided; null clears it)."
           }
         },
@@ -1743,12 +2485,7 @@
       "UserStatus": {
         "type": "string",
         "description": "User presence status.",
-        "enum": [
-          "online",
-          "idle",
-          "dnd",
-          "offline"
-        ]
+        "enum": ["online", "idle", "dnd", "offline"]
       }
     },
     "securitySchemes": {
@@ -1790,8 +2527,16 @@
       "description": "Server member management"
     },
     {
+      "name": "Moderation",
+      "description": "Server moderation (bans, kicks)"
+    },
+    {
       "name": "Messages",
       "description": "Messaging within channels"
+    },
+    {
+      "name": "DirectMessages",
+      "description": "Direct message conversations"
     }
   ]
 }

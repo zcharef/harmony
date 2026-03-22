@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{ChannelId, Message, MessageId, UserId};
+use crate::domain::models::{Channel, ChannelId, Message, MessageId, Role, UserId};
 use crate::domain::ports::{
     ChannelRepository, MemberRepository, MessageRepository, ServerRepository,
 };
@@ -41,6 +41,8 @@ impl MessageService {
     const RATE_LIMIT_WINDOW_SECS: i64 = 5;
 
     /// Verify that a user is a member of the server containing a channel.
+    /// Returns the channel on success so callers can inspect its properties
+    /// (e.g. `is_read_only`) without an extra query.
     ///
     /// # Errors
     /// Returns `DomainError::NotFound` if the channel doesn't exist,
@@ -49,7 +51,7 @@ impl MessageService {
         &self,
         channel_id: &ChannelId,
         user_id: &UserId,
-    ) -> Result<(), DomainError> {
+    ) -> Result<Channel, DomainError> {
         let channel = self
             .channel_repo
             .get_by_id(channel_id)
@@ -70,13 +72,14 @@ impl MessageService {
             ));
         }
 
-        Ok(())
+        Ok(channel)
     }
 
     /// Send a new message to a channel.
     ///
     /// # Errors
-    /// Returns `DomainError::Forbidden` if the author is not a server member,
+    /// Returns `DomainError::Forbidden` if the author is not a server member
+    /// or the channel is read-only and the author lacks admin+ role,
     /// `DomainError::ValidationError` if content is empty,
     /// `DomainError::RateLimited` if the author exceeds 5 messages per 5 seconds,
     /// or a repository error on failure.
@@ -86,8 +89,26 @@ impl MessageService {
         author_id: &UserId,
         content: String,
     ) -> Result<Message, DomainError> {
-        self.verify_channel_membership(channel_id, author_id)
+        let channel = self
+            .verify_channel_membership(channel_id, author_id)
             .await?;
+
+        // WHY: The API uses service_role which bypasses the RLS
+        // messages_insert_member policy that checks is_read_only.
+        // We must enforce read-only at the service layer.
+        if channel.is_read_only {
+            let caller_role = self
+                .member_repo
+                .get_member_role(&channel.server_id, author_id)
+                .await?
+                .unwrap_or(Role::Member);
+
+            if caller_role.level() < Role::Admin.level() {
+                return Err(DomainError::Forbidden(
+                    "This channel is read-only".to_string(),
+                ));
+            }
+        }
 
         if content.trim().is_empty() {
             return Err(DomainError::ValidationError(
@@ -121,7 +142,7 @@ impl MessageService {
         cursor: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<Message>, DomainError> {
-        self.verify_channel_membership(channel_id, user_id).await?;
+        let _channel = self.verify_channel_membership(channel_id, user_id).await?;
 
         self.repo.list_for_channel(channel_id, cursor, limit).await
     }

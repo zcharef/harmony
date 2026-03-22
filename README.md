@@ -202,7 +202,7 @@ Self-hosting gives you the complete product with no feature restrictions. Unlimi
 |-------|------|--------|
 | **0 — Walking Skeleton** | Sign up, create server, send message | Done |
 | **1 — Real-Time** | Two users chatting live, invites, presence | Done |
-| **2 — Roles & DMs** | Permissions, private messages | In progress |
+| **2 — Roles & DMs** | Permissions, private messages | Done |
 | **3 — Voice & Files** | LiveKit voice/video, file uploads, public beta | Planned |
 | **4 — SaaS Launch** | Harmony Cloud, server discovery, push notifications | Planned |
 | **5 — Growth** | E2EE, mobile app, web client, bot API | Planned |

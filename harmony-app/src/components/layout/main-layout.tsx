@@ -1,13 +1,17 @@
 import { GripVertical } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 
 import { useAuthStore } from '@/features/auth'
 import { ChannelSidebar, useChannels } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
-import { MemberList } from '@/features/members'
+import { DmSidebar, useDms } from '@/features/dms'
+import { MemberList, useMyMemberRole } from '@/features/members'
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
+import { getChannelPerms, ServerSettings, useSettingsUiStore } from '@/features/settings'
+
+type ViewMode = 'servers' | 'dms'
 
 function ResizeHandle() {
   return (
@@ -20,6 +24,7 @@ function ResizeHandle() {
 }
 
 export function MainLayout() {
+  const [view, setView] = useState<ViewMode>('servers')
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null)
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null)
 
@@ -34,42 +39,101 @@ export function MainLayout() {
   usePresence(serverIds, selectedServerId, userId)
   const { data: channels } = useChannels(selectedServerId)
 
+  // WHY: DM list needed to derive chat header info (recipient name) when in DM view
+  const { data: dms } = useDms()
+
   const selectedServer = servers?.find((s) => s.id === selectedServerId)
   const selectedChannel = channels?.find((c) => c.id === selectedChannelId)
+  const { role: currentUserRole } = useMyMemberRole(selectedServerId)
 
-  function handleSelectServer(serverId: string) {
+  // WHY: When in DM view, derive the chat header name from the DM recipient
+  // rather than from the channel name (which would show "dm" or similar).
+  const activeDm = view === 'dms' ? dms?.find((dm) => dm.serverId === selectedServerId) : undefined
+
+  const chatHeaderName =
+    view === 'dms' && activeDm !== undefined
+      ? (activeDm.recipient.displayName ?? activeDm.recipient.username)
+      : (selectedChannel?.name ?? null)
+
+  const handleSelectServer = useCallback((serverId: string) => {
+    setView('servers')
     setSelectedServerId(serverId)
     // WHY: Reset channel selection when switching servers
     setSelectedChannelId(null)
+  }, [])
+
+  const handleSelectDmView = useCallback(() => {
+    setView('dms')
+    setSelectedServerId(null)
+    setSelectedChannelId(null)
+  }, [])
+
+  const handleSelectDm = useCallback((serverId: string, channelId: string) => {
+    setSelectedServerId(serverId)
+    setSelectedChannelId(channelId)
+  }, [])
+
+  const isDmView = view === 'dms'
+  const showServerSettings = useSettingsUiStore((s) => s.showServerSettings)
+
+  /** WHY: Server settings replaces the entire main content area (like Discord). */
+  if (showServerSettings && selectedServerId !== null) {
+    return (
+      <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+        <ServerSettings serverId={selectedServerId} />
+      </div>
+    )
   }
 
   return (
     <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
       {/* Server nav - fixed width, outside resizable group */}
-      <ServerList selectedServerId={selectedServerId} onSelectServer={handleSelectServer} />
+      <ServerList
+        selectedServerId={selectedServerId}
+        view={view}
+        onSelectServer={handleSelectServer}
+        onSelectDmView={handleSelectDmView}
+      />
 
       {/* Resizable panels for sidebar, chat, members */}
       <Group orientation="horizontal" className="flex h-full w-full flex-1">
         <Panel defaultSize="20%" minSize="15%" maxSize="30%">
-          <ChannelSidebar
-            serverId={selectedServerId}
-            serverName={selectedServer?.name ?? null}
-            selectedChannelId={selectedChannelId}
-            onSelectChannel={setSelectedChannelId}
+          {isDmView ? (
+            <DmSidebar selectedServerId={selectedServerId} onSelectDm={handleSelectDm} />
+          ) : (
+            <ChannelSidebar
+              serverId={selectedServerId}
+              serverName={selectedServer?.name ?? null}
+              selectedChannelId={selectedChannelId}
+              onSelectChannel={setSelectedChannelId}
+            />
+          )}
+        </Panel>
+
+        <ResizeHandle />
+
+        <Panel defaultSize={isDmView ? '80%' : '60%'} minSize="30%">
+          <ChatArea
+            channelId={selectedChannelId}
+            channelName={chatHeaderName}
+            currentUserRole={currentUserRole}
+            isDm={isDmView && selectedChannelId !== null}
+            dmRecipient={activeDm?.recipient ?? null}
+            isReadOnly={
+              selectedChannel !== undefined ? getChannelPerms(selectedChannel).isReadOnly : false
+            }
           />
         </Panel>
 
-        <ResizeHandle />
-
-        <Panel defaultSize="60%" minSize="30%">
-          <ChatArea channelId={selectedChannelId} channelName={selectedChannel?.name ?? null} />
-        </Panel>
-
-        <ResizeHandle />
-
-        <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">
-          <MemberList serverId={selectedServerId} />
-        </Panel>
+        {/* WHY: Hide member list in DM mode — DMs have exactly 2 members, no list needed */}
+        {!isDmView && (
+          <>
+            <ResizeHandle />
+            <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">
+              <MemberList serverId={selectedServerId} serverName={selectedServer?.name ?? null} />
+            </Panel>
+          </>
+        )}
       </Group>
     </div>
   )

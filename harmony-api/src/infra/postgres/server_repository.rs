@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Server, ServerId, UserId};
+use crate::domain::models::{Role, Server, ServerId, UserId};
 use crate::domain::ports::ServerRepository;
 
 /// PostgreSQL-backed server repository.
@@ -82,14 +82,15 @@ impl ServerRepository for PgServerRepository {
 
         let server_id = server_row.id;
 
-        // 2. Add the owner as a server member
+        // 2. Add the owner as a server member with 'owner' role
         sqlx::query!(
             r#"
-            INSERT INTO server_members (server_id, user_id)
-            VALUES ($1, $2)
+            INSERT INTO server_members (server_id, user_id, role)
+            VALUES ($1, $2, $3)
             "#,
             server_id,
             owner_uuid,
+            Role::Owner.as_str(),
         )
         .execute(&mut *tx)
         .await
@@ -138,6 +139,7 @@ impl ServerRepository for PgServerRepository {
             FROM servers s
             INNER JOIN server_members sm ON sm.server_id = s.id
             WHERE sm.user_id = $1
+              AND s.is_dm = false
             ORDER BY s.created_at
             "#,
             uid,

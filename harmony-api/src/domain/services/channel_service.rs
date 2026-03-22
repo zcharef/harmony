@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Channel, ChannelId, ChannelType, ServerId};
+use crate::domain::models::{Channel, ChannelId, ChannelType, ServerId, UserId};
 use crate::domain::ports::ChannelRepository;
 
 /// Service for channel-related business logic.
@@ -60,12 +60,18 @@ impl ChannelService {
         self.repo.create(&channel).await
     }
 
-    /// List all channels in a server, ordered by position.
+    /// List channels visible to the caller in a server, ordered by position.
+    ///
+    /// Private channels are filtered out unless the caller has access.
     ///
     /// # Errors
     /// Returns a repository error on failure.
-    pub async fn list_for_server(&self, server_id: &ServerId) -> Result<Vec<Channel>, DomainError> {
-        self.repo.list_for_server(server_id).await
+    pub async fn list_for_server(
+        &self,
+        server_id: &ServerId,
+        caller_user_id: &UserId,
+    ) -> Result<Vec<Channel>, DomainError> {
+        self.repo.list_for_server(server_id, caller_user_id).await
     }
 
     /// Get a channel by ID.

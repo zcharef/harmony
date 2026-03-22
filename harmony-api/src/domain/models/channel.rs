@@ -27,6 +27,10 @@ pub struct Channel {
     pub channel_type: ChannelType,
     pub position: i32,
     pub category_id: Option<CategoryId>,
+    /// Whether the channel is private (visible only to specific roles).
+    pub is_private: bool,
+    /// Whether the channel is read-only (only admin+ can post messages).
+    pub is_read_only: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -49,6 +53,8 @@ impl Channel {
             channel_type,
             position,
             category_id: None,
+            is_private: false,
+            is_read_only: false,
             created_at: now,
             updated_at: now,
         }
@@ -66,6 +72,8 @@ impl Channel {
             channel_type: ChannelType::Text,
             position: 0,
             category_id: None,
+            is_private: false,
+            is_read_only: false,
             created_at: now,
             updated_at: now,
         }

@@ -9,7 +9,7 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ServerId, UserId};
 
-/// List all bans for a server. Owner-only.
+/// List all bans for a server. Requires admin+ role.
 ///
 /// # Errors
 /// Returns `ApiError` on authorization failure or repository error.
@@ -22,7 +22,7 @@ use crate::domain::models::{ServerId, UserId};
     responses(
         (status = 200, description = "Ban list", body = BanListResponse),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
-        (status = 403, description = "Not server owner", body = ProblemDetails),
+        (status = 403, description = "Insufficient role", body = ProblemDetails),
         (status = 404, description = "Server not found", body = ProblemDetails),
     )
 )]
@@ -40,7 +40,8 @@ pub async fn list_bans(
     Ok((StatusCode::OK, Json(BanListResponse::from_bans(bans))))
 }
 
-/// Ban a user from a server and remove their membership. Owner-only.
+/// Ban a user from a server and remove their membership.
+/// Requires admin+ role with hierarchy enforcement.
 ///
 /// # Errors
 /// Returns `ApiError` on authorization failure, conflict, or repository error.
@@ -54,7 +55,7 @@ pub async fn list_bans(
     responses(
         (status = 201, description = "User banned", body = BanResponse),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
-        (status = 403, description = "Not server owner / cannot ban owner", body = ProblemDetails),
+        (status = 403, description = "Insufficient role / hierarchy violation / cannot ban owner", body = ProblemDetails),
         (status = 404, description = "Server not found", body = ProblemDetails),
         (status = 409, description = "User already banned", body = ProblemDetails),
     )
@@ -81,7 +82,7 @@ pub struct BanPath {
     pub user_id: UserId,
 }
 
-/// Unban a user from a server. Owner-only.
+/// Unban a user from a server. Requires admin+ role.
 ///
 /// # Errors
 /// Returns `ApiError` on authorization failure or repository error.
@@ -97,7 +98,7 @@ pub struct BanPath {
     responses(
         (status = 204, description = "User unbanned"),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
-        (status = 403, description = "Not server owner", body = ProblemDetails),
+        (status = 403, description = "Insufficient role", body = ProblemDetails),
         (status = 404, description = "Ban not found", body = ProblemDetails),
     )
 )]

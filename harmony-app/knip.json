@@ -13,5 +13,13 @@
     "exports": "warn",
     "types": "warn"
   },
-  "ignoreDependencies": ["@commitlint/cli", "tailwindcss", "@hey-api/client-fetch", "jsdom"]
+  "ignoreDependencies": [
+    "@commitlint/cli",
+    "tailwindcss",
+    "@hey-api/client-fetch",
+    "@tauri-apps/api",
+    "@tauri-apps/plugin-opener",
+    "motion",
+    "react-error-boundary"
+  ]
 }

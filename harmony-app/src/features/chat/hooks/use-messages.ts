@@ -24,7 +24,7 @@ export function useMessages(channelId: string | null) {
       })
       return data
     },
-    initialPageParam: undefined as string | undefined,
+    initialPageParam: undefined satisfies string | undefined,
     getNextPageParam: (lastPage: MessageListResponse) => lastPage.nextCursor ?? undefined,
     enabled: channelId !== null,
   })

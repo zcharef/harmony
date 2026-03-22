@@ -1,7 +1,7 @@
-import { vi } from 'vitest'
 import type { InfiniteData } from '@tanstack/react-query'
 import { QueryClient } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { vi } from 'vitest'
 import type { MessageListResponse, MessageResponse } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { createQueryWrapper } from '@/tests/test-utils'
@@ -36,7 +36,6 @@ function createMutationTestClient(): QueryClient {
     },
   })
 }
-
 
 function buildCacheData(messages: MessageResponse[]): InfiniteData<MessageListResponse> {
   return {
@@ -100,7 +99,10 @@ describe('useSendMessage', () => {
     // Hold the mutation in-flight so we can inspect the optimistic state
     let resolveMutation!: (value: unknown) => void
     vi.mocked(sendMessage).mockImplementationOnce(
-      () => new Promise((resolve) => { resolveMutation = resolve }) as never,
+      () =>
+        new Promise((resolve) => {
+          resolveMutation = resolve
+        }) as never,
     )
 
     const queryClient = createMutationTestClient()

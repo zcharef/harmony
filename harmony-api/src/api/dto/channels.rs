@@ -19,6 +19,8 @@ pub struct ChannelResponse {
     pub position: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category_id: Option<CategoryId>,
+    pub is_private: bool,
+    pub is_read_only: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -33,6 +35,8 @@ impl From<Channel> for ChannelResponse {
             channel_type: c.channel_type,
             position: c.position,
             category_id: c.category_id,
+            is_private: c.is_private,
+            is_read_only: c.is_read_only,
             created_at: c.created_at,
             updated_at: c.updated_at,
         }

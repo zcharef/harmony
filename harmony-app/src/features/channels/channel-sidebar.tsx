@@ -8,12 +8,24 @@ import {
   DropdownTrigger,
   Spinner,
 } from '@heroui/react'
-import { ChevronDown, Hash, Headphones, Mic, Settings, UserPlus, Volume2 } from 'lucide-react'
+import {
+  ChevronDown,
+  Hash,
+  Headphones,
+  Lock,
+  Megaphone,
+  Mic,
+  Settings,
+  UserPlus,
+  Volume2,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/features/auth'
+import { ROLE_HIERARCHY, useMyMemberRole } from '@/features/members'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { CreateInviteDialog } from '@/features/server-nav'
+import { getChannelPerms, useSettingsUiStore } from '@/features/settings'
 import type { ChannelResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CreateChannelDialog } from './create-channel-dialog'
@@ -55,6 +67,12 @@ function ChannelButton({
           <Volume2 className="h-4 w-4 shrink-0 text-default-500" />
         )}
         <span className="truncate">{channel.name}</span>
+        {getChannelPerms(channel).isPrivate && (
+          <Lock className="h-3 w-3 shrink-0 text-default-400" />
+        )}
+        {getChannelPerms(channel).isReadOnly && (
+          <Megaphone className="h-3 w-3 shrink-0 text-default-400" />
+        )}
       </Button>
       <Dropdown>
         <DropdownTrigger>
@@ -111,6 +129,10 @@ export function ChannelSidebar({
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false)
   const [editChannel, setEditChannel] = useState<ChannelResponse | null>(null)
   const deleteChannelMutation = useDeleteChannel(serverId ?? '')
+  const openServerSettings = useSettingsUiStore((s) => s.openServerSettings)
+  const { role: callerRole } = useMyMemberRole(serverId)
+  /** WHY: Only admin+ can access server settings. */
+  const canAccessSettings = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
   const user = useAuthStore((s) => s.user)
   const status = useUserStatus(user?.id ?? '')
   const username =
@@ -151,6 +173,9 @@ export function ChannelSidebar({
               if (key === 'invite' && serverId !== null) {
                 setIsInviteOpen(true)
               }
+              if (key === 'settings' && canAccessSettings) {
+                openServerSettings()
+              }
               if (key === 'create-channel') {
                 setIsCreateChannelOpen(true)
               }
@@ -167,7 +192,13 @@ export function ChannelSidebar({
               >
                 {t('servers:invitePeople')}
               </DropdownItem>
-              <DropdownItem key="settings">{t('serverSettings')}</DropdownItem>
+              <DropdownItem
+                key="settings"
+                className={canAccessSettings ? '' : 'hidden'}
+                data-test="server-menu-settings-item"
+              >
+                {t('serverSettings')}
+              </DropdownItem>
               <DropdownItem key="create-channel" data-test="server-menu-create-channel-item">
                 {t('createChannel')}
               </DropdownItem>

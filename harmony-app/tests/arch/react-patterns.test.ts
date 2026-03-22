@@ -35,10 +35,14 @@ function getAllFiles(dir: string, extensions: string[]): string[] {
 describe('React Patterns', () => {
   describe('no_inline_styles', () => {
     it('should not use inline styles in tsx files', () => {
+      // WHY allowlist: @tanstack/react-virtual REQUIRES inline styles for dynamic
+      // pixel positioning (getTotalSize, translateY). No Tailwind equivalent exists.
+      const ALLOWLIST = [join(SRC_DIR, 'features/chat/chat-area.tsx')]
       const files = getAllFiles(SRC_DIR, ['.tsx'])
       const violations: string[] = []
 
       for (const filePath of files) {
+        if (ALLOWLIST.includes(filePath)) continue
         const content = readFileSync(filePath, 'utf-8')
         const lines = content.split('\n')
 

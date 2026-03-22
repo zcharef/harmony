@@ -81,7 +81,7 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/servers/{id}/invites",
             post(handlers::invites::create_invite),
         )
-        // Members (join + list + kick)
+        // Members (join + list + kick + role assignment)
         .route(
             "/v1/servers/{id}/members",
             post(handlers::invites::join_server).get(handlers::members::list_members),
@@ -89,6 +89,15 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/servers/{id}/members/{user_id}",
             delete(handlers::members::kick_member),
+        )
+        .route(
+            "/v1/servers/{id}/members/{user_id}/role",
+            patch(handlers::members::assign_role),
+        )
+        // Ownership transfer
+        .route(
+            "/v1/servers/{id}/transfer-ownership",
+            post(handlers::members::transfer_ownership),
         )
         // Bans (moderation)
         .route(
@@ -108,6 +117,12 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/channels/{channel_id}/messages/{message_id}",
             patch(handlers::messages::edit_message).delete(handlers::messages::delete_message),
         )
+        // Direct Messages
+        .route(
+            "/v1/dms",
+            post(handlers::dms::create_dm).get(handlers::dms::list_dms),
+        )
+        .route("/v1/dms/{server_id}", delete(handlers::dms::close_dm))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             super::middleware::auth::require_auth,

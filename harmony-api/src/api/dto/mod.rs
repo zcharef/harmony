@@ -2,6 +2,7 @@
 
 pub mod bans;
 pub mod channels;
+pub mod dms;
 pub mod invites;
 pub mod members;
 pub mod messages;
@@ -13,8 +14,14 @@ pub use bans::{BanListResponse, BanResponse, BanUserRequest};
 pub use channels::{
     ChannelListResponse, ChannelResponse, CreateChannelRequest, UpdateChannelRequest,
 };
+pub use dms::{
+    CreateDmRequest, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,
+    DmRecipientResponse, DmResponse,
+};
 pub use invites::{CreateInviteRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest};
-pub use members::{MemberListResponse, MemberResponse};
+pub use members::{
+    AssignRoleRequest, MemberListResponse, MemberResponse, TransferOwnershipRequest,
+};
 pub use messages::{
     EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, SendMessageRequest,
 };

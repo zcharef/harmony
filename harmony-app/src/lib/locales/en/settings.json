@@ -1,0 +1,50 @@
+{
+  "settingsTabs": "Server settings navigation",
+  "tabOverview": "Overview",
+  "tabRoles": "Roles",
+  "tabChannels": "Channels",
+  "tabBans": "Bans",
+  "closeSettings": "Close settings",
+
+  "serverOverview": "Server Overview",
+  "serverOverviewDescription": "Update your server's basic information.",
+  "serverName": "Server Name",
+  "serverNameRequired": "Server name is required",
+  "serverNameMaxLength": "Server name must be 100 characters or less",
+  "serverDescription": "Description",
+  "serverDescriptionPlaceholder": "Tell people what this server is about",
+  "descriptionMaxLength": "Description must be 500 characters or less",
+
+  "dangerZone": "Danger Zone",
+  "deleteServerWarning": "Deleting a server is permanent and cannot be undone. All channels, messages, and members will be lost.",
+  "deleteServerConfirmPrompt": "Type \"{{serverName}}\" to confirm deletion.",
+  "deleteServer": "Delete Server",
+
+  "rolesTitle": "Manage Roles",
+  "rolesDescription": "Change member roles and manage permissions.",
+  "searchMembers": "Search members...",
+  "you": "you",
+  "transferOwnership": "Transfer Ownership",
+  "transferOwnershipWarning": "This will make the selected member the server owner. You will be demoted to admin. This action cannot be undone.",
+  "selectNewOwner": "Select new owner",
+  "confirmTransfer": "Transfer Ownership",
+
+  "channelsTitle": "Manage Channels",
+  "channelsDescription": "Configure channel settings and permissions.",
+  "private": "Private",
+  "readOnly": "Read-Only",
+  "privateChannel": "Private channel toggle",
+  "readOnlyChannel": "Read-only channel toggle",
+  "announcementChannel": "Announcement Channel (Read-Only)",
+
+  "bansTitle": "Banned Users",
+  "bansDescription": "View and manage banned users.",
+  "noBannedUsers": "No banned users",
+  "unban": "Unban",
+
+  "privateChannelLabel": "Private Channel",
+  "privateChannelHelp": "Only selected roles can see this channel.",
+  "readOnlyChannelLabel": "Announcement Channel (Read-Only)",
+  "readOnlyChannelHelp": "Only admins and above can send messages.",
+  "announcementPlaceholder": "This is an announcement channel"
+}

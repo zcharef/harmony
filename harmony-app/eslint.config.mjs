@@ -16,7 +16,14 @@ import tseslint from 'typescript-eslint'
 export default tseslint.config(
   // Global ignores
   {
-    ignores: ['dist/**', 'node_modules/**', 'src-tauri/**', 'tests/**', 'src/lib/api/**'],
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'src-tauri/**',
+      'tests/**',
+      'src/lib/api/**',
+      '**/*.d.ts',
+    ],
   },
   // TypeScript parser for all TS/TSX files
   {

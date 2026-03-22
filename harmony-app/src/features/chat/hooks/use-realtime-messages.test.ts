@@ -1,6 +1,6 @@
-import { vi } from 'vitest'
 import type { InfiniteData } from '@tanstack/react-query'
 import { renderHook } from '@testing-library/react'
+import { vi } from 'vitest'
 import type { MessageListResponse, MessageResponse } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
@@ -47,9 +47,9 @@ function buildCacheData(messages: MessageResponse[]): InfiniteData<MessageListRe
  * so tests can invoke them directly without a real WebSocket.
  */
 function createMockChannel() {
-  const handlers: Record<string, Function> = {}
+  const handlers: Record<string, (payload: unknown) => void> = {}
   const channel = {
-    on: vi.fn((type: string, filter: { event: string }, callback: Function) => {
+    on: vi.fn((type: string, filter: { event: string }, callback: (payload: unknown) => void) => {
       const key = `${type}:${filter.event}`
       handlers[key] = callback
       return channel
@@ -60,14 +60,14 @@ function createMockChannel() {
 }
 
 /** Fires the captured INSERT handler with a given payload.new */
-function fireInsert(handlers: Record<string, Function>, row: unknown) {
+function fireInsert(handlers: Record<string, (payload: unknown) => void>, row: unknown) {
   const handler = handlers['postgres_changes:INSERT']
   if (!handler) throw new Error('INSERT handler not registered')
   handler({ new: row })
 }
 
 /** Fires the captured UPDATE handler with a given payload.new */
-function fireUpdate(handlers: Record<string, Function>, row: unknown) {
+function fireUpdate(handlers: Record<string, (payload: unknown) => void>, row: unknown) {
   const handler = handlers['postgres_changes:UPDATE']
   if (!handler) throw new Error('UPDATE handler not registered')
   handler({ new: row })
@@ -129,10 +129,7 @@ describe('useRealtimeMessages', () => {
 
   it('subscribes to the correct table, schema, and channel filter', () => {
     const queryClient = createTestQueryClient()
-    queryClient.setQueryData(
-      queryKeys.messages.byChannel(CHANNEL_ID),
-      buildCacheData([]),
-    )
+    queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
 
     renderHook(() => useRealtimeMessages(CHANNEL_ID), {
       wrapper: createQueryWrapper(queryClient),
@@ -217,12 +214,15 @@ describe('useRealtimeMessages', () => {
       wrapper: createQueryWrapper(queryClient),
     })
 
-    fireUpdate(mockChannel.handlers, buildRealtimeRow({
-      id: 'msg-edit',
-      content: 'edited content',
-      edited_at: '2026-03-16T02:00:00.000Z',
-      deleted_at: null,
-    }))
+    fireUpdate(
+      mockChannel.handlers,
+      buildRealtimeRow({
+        id: 'msg-edit',
+        content: 'edited content',
+        edited_at: '2026-03-16T02:00:00.000Z',
+        deleted_at: null,
+      }),
+    )
 
     const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
     const items = cacheData?.pages[0]?.items ?? []
@@ -246,10 +246,13 @@ describe('useRealtimeMessages', () => {
       wrapper: createQueryWrapper(queryClient),
     })
 
-    fireUpdate(mockChannel.handlers, buildRealtimeRow({
-      id: 'msg-del',
-      deleted_at: '2026-03-16T03:00:00.000Z',
-    }))
+    fireUpdate(
+      mockChannel.handlers,
+      buildRealtimeRow({
+        id: 'msg-del',
+        deleted_at: '2026-03-16T03:00:00.000Z',
+      }),
+    )
 
     const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
     const items = cacheData?.pages[0]?.items ?? []

@@ -1,5 +1,5 @@
 import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
-import { LogIn, Plus } from 'lucide-react'
+import { LogIn, MessageCircle, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ServerResponse } from '@/lib/api'
@@ -65,13 +65,23 @@ function ServerIcon({
   )
 }
 
+type ViewMode = 'servers' | 'dms'
+
 interface ServerListProps {
   selectedServerId: string | null
+  view: ViewMode
   onSelectServer: (serverId: string) => void
+  onSelectDmView: () => void
 }
 
-export function ServerList({ selectedServerId, onSelectServer }: ServerListProps) {
+export function ServerList({
+  selectedServerId,
+  view,
+  onSelectServer,
+  onSelectDmView,
+}: ServerListProps) {
   const { t } = useTranslation('servers')
+  const { t: tDms } = useTranslation('dms')
   const { data: servers, isPending, isError } = useServers()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isJoinOpen, setIsJoinOpen] = useState(false)
@@ -92,24 +102,45 @@ export function ServerList({ selectedServerId, onSelectServer }: ServerListProps
     )
   }
 
-  // WHY: Separate DM servers from regular servers for Discord-like layout
-  const dmServers = servers?.filter((s) => s.isDm) ?? []
+  // WHY: Filter out DM servers — they appear in the DM sidebar, not as server icons
   const regularServers = servers?.filter((s) => !s.isDm) ?? []
-  const homeServer = dmServers[0]
+  const isDmView = view === 'dms'
 
   return (
     <div
       data-test="server-list"
       className="flex h-full w-[72px] flex-col items-center bg-content1 py-3"
     >
-      {/* Home / DMs */}
-      {homeServer !== undefined && (
-        <ServerIcon
-          server={homeServer}
-          isActive={selectedServerId === homeServer.id}
-          onSelect={() => onSelectServer(homeServer.id)}
-        />
-      )}
+      {/* Home / DMs icon */}
+      <Tooltip content={tDms('home')} placement="right" offset={8}>
+        <button
+          data-test="dm-home-button"
+          type="button"
+          onClick={onSelectDmView}
+          className="relative flex w-full items-center justify-center group"
+        >
+          {/* Active pill indicator */}
+          <div
+            className={cn(
+              'absolute left-0 w-1 rounded-r-full bg-foreground transition-all duration-200',
+              isDmView ? 'h-10' : 'h-0 group-hover:h-5',
+            )}
+          />
+
+          <Avatar
+            icon={<MessageCircle className="h-5 w-5" />}
+            classNames={{
+              base: cn(
+                'h-12 w-12 cursor-pointer transition-all duration-200',
+                isDmView
+                  ? 'rounded-2xl bg-primary text-primary-foreground'
+                  : 'rounded-[24px] hover:rounded-2xl bg-default-100 text-default-foreground hover:bg-primary hover:text-primary-foreground',
+              ),
+              icon: 'text-current',
+            }}
+          />
+        </button>
+      </Tooltip>
 
       <Divider className="mx-auto my-2 w-8 bg-divider" />
 
@@ -120,7 +151,7 @@ export function ServerList({ selectedServerId, onSelectServer }: ServerListProps
             <ServerIcon
               key={server.id}
               server={server}
-              isActive={server.id === selectedServerId}
+              isActive={view === 'servers' && server.id === selectedServerId}
               onSelect={() => onSelectServer(server.id)}
             />
           ))}

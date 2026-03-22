@@ -8,6 +8,8 @@ import type { MessageResponse } from '@/lib/api'
 interface MessageItemProps {
   message: MessageResponse
   currentUserId: string
+  /** WHY: When true, the delete button appears on ALL messages (not just own). */
+  canModerateMessages: boolean
   isEditing: boolean
   onStartEdit: () => void
   onSaveEdit: (content: string) => void
@@ -45,6 +47,7 @@ function formatTimestamp(iso: string, t: TFunction<'messages'>): string {
 export const MessageItem = memo(function MessageItem({
   message,
   currentUserId,
+  canModerateMessages,
   isEditing,
   onStartEdit,
   onSaveEdit,
@@ -168,22 +171,24 @@ export const MessageItem = memo(function MessageItem({
         )}
       </div>
 
-      {/* WHY: Hover actions only for own messages, hidden during edit mode.
-          Uses group-hover to appear on row hover — avoids per-message state. */}
-      {isOwnMessage && !isEditing && !isPending && (
+      {/* WHY: Edit is own-message-only. Delete shows for own messages OR
+          if the current user is moderator+ (canModerateMessages). */}
+      {(isOwnMessage || canModerateMessages) && isEditing === false && isPending === false && (
         <div
           data-test="message-actions"
           className="absolute -top-3 right-4 hidden gap-0.5 rounded-md border border-divider bg-background shadow-sm group-hover:flex"
         >
-          <Button
-            variant="light"
-            isIconOnly
-            size="sm"
-            onPress={onStartEdit}
-            data-test="message-edit-button"
-          >
-            <Pencil className="h-4 w-4 text-default-500" />
-          </Button>
+          {isOwnMessage && (
+            <Button
+              variant="light"
+              isIconOnly
+              size="sm"
+              onPress={onStartEdit}
+              data-test="message-edit-button"
+            >
+              <Pencil className="h-4 w-4 text-default-500" />
+            </Button>
+          )}
           <Button
             variant="light"
             isIconOnly

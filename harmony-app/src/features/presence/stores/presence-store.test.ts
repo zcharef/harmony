@@ -1,11 +1,6 @@
 import { renderHook } from '@testing-library/react'
-
+import { usePresenceStore, useUserStatus } from '@/features/presence/stores/presence-store'
 import type { UserStatus } from '@/lib/api'
-
-import {
-  usePresenceStore,
-  useUserStatus,
-} from '@/features/presence/stores/presence-store'
 
 const initialState = usePresenceStore.getState()
 

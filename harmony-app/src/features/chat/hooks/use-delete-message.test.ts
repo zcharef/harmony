@@ -1,5 +1,5 @@
-import { vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { vi } from 'vitest'
 import { queryKeys } from '@/lib/query-keys'
 import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 import { useDeleteMessage } from './use-delete-message'

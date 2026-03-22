@@ -9,6 +9,7 @@ mod invite;
 mod member;
 mod message;
 mod profile;
+pub mod role;
 mod server;
 
 pub use ban::ServerBan;
@@ -18,4 +19,5 @@ pub use invite::Invite;
 pub use member::ServerMember;
 pub use message::Message;
 pub use profile::{Profile, UserStatus};
+pub use role::Role;
 pub use server::Server;

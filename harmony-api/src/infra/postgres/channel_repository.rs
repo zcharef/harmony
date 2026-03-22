@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Channel, ChannelId, ChannelType, ServerId};
+use crate::domain::models::{Channel, ChannelId, ChannelType, Role, ServerId, UserId};
 use crate::domain::ports::ChannelRepository;
 
 /// PostgreSQL-backed channel repository.
@@ -33,6 +33,8 @@ struct ChannelRow {
     topic: Option<String>,
     channel_type: String,
     position: i32,
+    is_private: bool,
+    is_read_only: bool,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -47,6 +49,8 @@ impl ChannelRow {
             channel_type: parse_channel_type(&self.channel_type),
             position: self.position,
             category_id: None, // DB has no category_id column yet
+            is_private: self.is_private,
+            is_read_only: self.is_read_only,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -72,25 +76,53 @@ fn channel_type_to_str(ct: &ChannelType) -> &'static str {
 
 #[async_trait]
 impl ChannelRepository for PgChannelRepository {
-    async fn list_for_server(&self, server_id: &ServerId) -> Result<Vec<Channel>, DomainError> {
+    async fn list_for_server(
+        &self,
+        server_id: &ServerId,
+        caller_user_id: &UserId,
+    ) -> Result<Vec<Channel>, DomainError> {
         let sid = server_id.0;
+        let uid = caller_user_id.0;
 
+        // WHY: Private channels must only be visible to admin+ or roles listed
+        // in channel_role_access. The API uses service_role (bypasses RLS), so
+        // we enforce this filter in the query itself.
         let rows = sqlx::query!(
             r#"
             SELECT
-                id,
-                server_id,
-                name,
-                topic,
-                channel_type as "channel_type!: String",
-                position,
-                created_at,
-                updated_at
-            FROM channels
-            WHERE server_id = $1
-            ORDER BY position
+                c.id,
+                c.server_id,
+                c.name,
+                c.topic,
+                c.channel_type as "channel_type!: String",
+                c.position,
+                c.is_private,
+                c.is_read_only,
+                c.created_at,
+                c.updated_at
+            FROM channels c
+            WHERE c.server_id = $1
+              AND (
+                  c.is_private = false
+                  OR EXISTS (
+                      SELECT 1 FROM server_members sm
+                      WHERE sm.server_id = c.server_id
+                        AND sm.user_id = $2
+                        AND (
+                            sm.role IN ($3, $4)
+                            OR EXISTS (
+                                SELECT 1 FROM channel_role_access cra
+                                WHERE cra.channel_id = c.id AND cra.role = sm.role
+                            )
+                        )
+                  )
+              )
+            ORDER BY c.position
             "#,
             sid,
+            uid,
+            Role::Owner.as_str(),
+            Role::Admin.as_str(),
         )
         .fetch_all(&self.pool)
         .await
@@ -106,6 +138,8 @@ impl ChannelRepository for PgChannelRepository {
                     topic: r.topic,
                     channel_type: r.channel_type,
                     position: r.position,
+                    is_private: r.is_private,
+                    is_read_only: r.is_read_only,
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                 }
@@ -128,6 +162,8 @@ impl ChannelRepository for PgChannelRepository {
                 topic,
                 channel_type as "channel_type!: String",
                 position,
+                is_private,
+                is_read_only,
                 created_at,
                 updated_at
             FROM channels
@@ -147,6 +183,8 @@ impl ChannelRepository for PgChannelRepository {
                 topic: r.topic,
                 channel_type: r.channel_type,
                 position: r.position,
+                is_private: r.is_private,
+                is_read_only: r.is_read_only,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             }
@@ -170,6 +208,8 @@ impl ChannelRepository for PgChannelRepository {
                 topic,
                 channel_type as "channel_type!: String",
                 position,
+                is_private,
+                is_read_only,
                 created_at,
                 updated_at
             "#,
@@ -192,6 +232,8 @@ impl ChannelRepository for PgChannelRepository {
             topic: r.topic,
             channel_type: r.channel_type,
             position: r.position,
+            is_private: r.is_private,
+            is_read_only: r.is_read_only,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -223,6 +265,8 @@ impl ChannelRepository for PgChannelRepository {
                 topic,
                 channel_type as "channel_type!: String",
                 position,
+                is_private,
+                is_read_only,
                 created_at,
                 updated_at
             "#,
@@ -247,6 +291,8 @@ impl ChannelRepository for PgChannelRepository {
             topic: r.topic,
             channel_type: r.channel_type,
             position: r.position,
+            is_private: r.is_private,
+            is_read_only: r.is_read_only,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }

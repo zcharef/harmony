@@ -7,7 +7,7 @@ use rand::Rng;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Invite, InviteCode, ServerId, UserId};
-use crate::domain::ports::{BanRepository, InviteRepository, MemberRepository};
+use crate::domain::ports::{BanRepository, InviteRepository, MemberRepository, ServerRepository};
 
 /// Length of generated invite codes (alphanumeric).
 const INVITE_CODE_LENGTH: usize = 8;
@@ -22,6 +22,7 @@ pub struct InviteService {
     invite_repo: Arc<dyn InviteRepository>,
     member_repo: Arc<dyn MemberRepository>,
     ban_repo: Arc<dyn BanRepository>,
+    server_repo: Arc<dyn ServerRepository>,
 }
 
 impl InviteService {
@@ -30,11 +31,13 @@ impl InviteService {
         invite_repo: Arc<dyn InviteRepository>,
         member_repo: Arc<dyn MemberRepository>,
         ban_repo: Arc<dyn BanRepository>,
+        server_repo: Arc<dyn ServerRepository>,
     ) -> Self {
         Self {
             invite_repo,
             member_repo,
             ban_repo,
+            server_repo,
         }
     }
 
@@ -50,6 +53,22 @@ impl InviteService {
         max_uses: Option<i32>,
         expires_at: Option<DateTime<Utc>>,
     ) -> Result<Invite, DomainError> {
+        // WHY: DM servers use direct user pairing, not invites.
+        let server = self
+            .server_repo
+            .get_by_id(&server_id)
+            .await?
+            .ok_or_else(|| DomainError::NotFound {
+                resource_type: "Server",
+                id: server_id.to_string(),
+            })?;
+
+        if server.is_dm {
+            return Err(DomainError::ValidationError(
+                "Cannot create invites for DM conversations".to_string(),
+            ));
+        }
+
         // Only members can create invites
         let is_member = self.member_repo.is_member(&server_id, &creator_id).await?;
         if !is_member {

@@ -11,11 +11,10 @@
 
 export const logger = {
   error(message: string, context?: Record<string, unknown>) {
-    if (import.meta.env.DEV) {
-      console.error(message, context)
-    }
-    // TODO: Sentry.addBreadcrumb({ message, data: context, level: 'error' })
-    // Uncomment when @sentry/react is added as a dependency
+    // WHY: Errors are always logged — in dev they appear in devtools,
+    // in production they appear in Tauri's log output for diagnostics.
+    // TODO: Route to Sentry.captureException when @sentry/react is added.
+    console.error(message, context)
   },
   warn(message: string, context?: Record<string, unknown>) {
     if (import.meta.env.DEV) {

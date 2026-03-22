@@ -9,7 +9,7 @@ use crate::api::dto::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::{ChannelId, ServerId};
+use crate::domain::models::{ChannelId, Role, ServerId};
 
 /// List all channels in a server.
 ///
@@ -43,12 +43,15 @@ pub async fn list_channels(
         ));
     }
 
-    let channels = state.channel_service().list_for_server(&server_id).await?;
+    let channels = state
+        .channel_service()
+        .list_for_server(&server_id, &user_id)
+        .await?;
 
     Ok((StatusCode::OK, Json(ChannelListResponse::from(channels))))
 }
 
-/// Create a new channel in a server.
+/// Create a new channel in a server. Requires admin+ role.
 ///
 /// # Errors
 /// Returns `ApiError` on validation failure or repository error.
@@ -63,6 +66,7 @@ pub async fn list_channels(
         (status = 201, description = "Channel created", body = ChannelResponse),
         (status = 400, description = "Validation error", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Insufficient role", body = ProblemDetails),
     )
 )]
 #[tracing::instrument(skip(state, req))]
@@ -72,12 +76,10 @@ pub async fn create_channel(
     ApiPath(server_id): ApiPath<ServerId>,
     ApiJson(req): ApiJson<CreateChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let server = state.server_service().get_by_id(&server_id).await?;
-    if server.owner_id != user_id {
-        return Err(ApiError::forbidden(
-            "Only the server owner can create channels",
-        ));
-    }
+    state
+        .moderation_service()
+        .require_role(&server_id, &user_id, Role::Admin)
+        .await?;
 
     let channel = state
         .channel_service()
@@ -94,7 +96,7 @@ pub struct ChannelPath {
     pub channel_id: ChannelId,
 }
 
-/// Update a channel's name and/or topic.
+/// Update a channel's name and/or topic. Requires admin+ role.
 ///
 /// # Errors
 /// Returns `ApiError` on validation failure or repository error.
@@ -112,6 +114,7 @@ pub struct ChannelPath {
         (status = 200, description = "Channel updated", body = ChannelResponse),
         (status = 400, description = "Validation error", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Insufficient role", body = ProblemDetails),
         (status = 404, description = "Channel not found", body = ProblemDetails),
     )
 )]
@@ -122,12 +125,10 @@ pub async fn update_channel(
     ApiPath(params): ApiPath<ChannelPath>,
     ApiJson(req): ApiJson<UpdateChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let server = state.server_service().get_by_id(&params.id).await?;
-    if server.owner_id != user_id {
-        return Err(ApiError::forbidden(
-            "Only the server owner can update channels",
-        ));
-    }
+    state
+        .moderation_service()
+        .require_role(&params.id, &user_id, Role::Admin)
+        .await?;
 
     let channel = state
         .channel_service()
@@ -137,7 +138,7 @@ pub async fn update_channel(
     Ok((StatusCode::OK, Json(ChannelResponse::from(channel))))
 }
 
-/// Delete a channel.
+/// Delete a channel. Requires admin+ role.
 ///
 /// # Errors
 /// Returns `ApiError` if this is the last channel or the channel is not found.
@@ -154,6 +155,7 @@ pub async fn update_channel(
         (status = 204, description = "Channel deleted"),
         (status = 400, description = "Cannot delete last channel", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Insufficient role", body = ProblemDetails),
         (status = 404, description = "Channel not found", body = ProblemDetails),
     )
 )]
@@ -163,12 +165,10 @@ pub async fn delete_channel(
     State(state): State<AppState>,
     ApiPath(params): ApiPath<ChannelPath>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let server = state.server_service().get_by_id(&params.id).await?;
-    if server.owner_id != user_id {
-        return Err(ApiError::forbidden(
-            "Only the server owner can delete channels",
-        ));
-    }
+    state
+        .moderation_service()
+        .require_role(&params.id, &user_id, Role::Admin)
+        .await?;
 
     state
         .channel_service()

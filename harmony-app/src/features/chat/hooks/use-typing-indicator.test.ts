@@ -1,5 +1,5 @@
-import { vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
+import { vi } from 'vitest'
 import { useTypingIndicator } from './use-typing-indicator'
 
 vi.mock('@/lib/supabase', () => ({
@@ -21,9 +21,9 @@ const CURRENT_USER_ID = 'user-me'
  * and exposes `.send()` as a spy for outgoing broadcast assertions.
  */
 function createMockChannel() {
-  let broadcastHandler: Function | null = null
+  let broadcastHandler: ((arg: unknown) => void) | null = null
   const channel = {
-    on: vi.fn((type: string, filter: { event: string }, callback: Function) => {
+    on: vi.fn((type: string, filter: { event: string }, callback: (arg: unknown) => void) => {
       if (type === 'broadcast' && filter.event === 'typing') {
         broadcastHandler = callback
       }
@@ -37,7 +37,7 @@ function createMockChannel() {
     /** Simulates an incoming broadcast event with the given inner payload */
     fireTyping: (payload: unknown) => {
       expect(broadcastHandler).not.toBeNull()
-      broadcastHandler!({ payload })
+      broadcastHandler?.({ payload })
     },
   }
 }
@@ -78,25 +78,19 @@ describe('useTypingIndicator', () => {
   // -- Typing event from other user adds to typingUsers ----------------------
 
   it('adds a remote user to typingUsers on valid typing event', () => {
-    const { result } = renderHook(() =>
-      useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID),
-    )
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
       mockChannel.fireTyping({ userId: 'user-other', username: 'Alice' })
     })
 
-    expect(result.current.typingUsers).toEqual([
-      { userId: 'user-other', username: 'Alice' },
-    ])
+    expect(result.current.typingUsers).toEqual([{ userId: 'user-other', username: 'Alice' }])
   })
 
   // -- Self-filtering: own events are ignored --------------------------------
 
   it('ignores typing events from the current user', () => {
-    const { result } = renderHook(() =>
-      useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID),
-    )
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
       mockChannel.fireTyping({ userId: CURRENT_USER_ID, username: 'Me' })
@@ -108,9 +102,7 @@ describe('useTypingIndicator', () => {
   // -- Malformed payload: silently ignored -----------------------------------
 
   it('ignores malformed typing payloads', () => {
-    const { result } = renderHook(() =>
-      useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID),
-    )
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
       mockChannel.fireTyping({ bad: 'data' })
@@ -130,9 +122,7 @@ describe('useTypingIndicator', () => {
   // -- Deduplication: same user not added twice ------------------------------
 
   it('does not create duplicate entries for the same user', () => {
-    const { result } = renderHook(() =>
-      useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID),
-    )
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
       mockChannel.fireTyping({ userId: 'user-other', username: 'Alice' })
@@ -148,9 +138,7 @@ describe('useTypingIndicator', () => {
   // -- 5-second expiry: user removed after timeout ---------------------------
 
   it('removes a typing user after 5000ms', () => {
-    const { result } = renderHook(() =>
-      useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID),
-    )
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
       mockChannel.fireTyping({ userId: 'user-other', username: 'Alice' })
@@ -174,9 +162,7 @@ describe('useTypingIndicator', () => {
   // -- 3-second throttle: sendTyping ignores rapid calls ---------------------
 
   it('throttles sendTyping to once per 3 seconds', () => {
-    const { result } = renderHook(() =>
-      useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID),
-    )
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     // First call goes through
     act(() => {
@@ -206,9 +192,7 @@ describe('useTypingIndicator', () => {
   // -- sendTyping broadcasts correct payload structure -----------------------
 
   it('sends correct broadcast payload structure', () => {
-    const { result } = renderHook(() =>
-      useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID),
-    )
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
       result.current.sendTyping('MyUsername')
@@ -224,9 +208,7 @@ describe('useTypingIndicator', () => {
   // -- Cleanup: removeChannel on unmount -------------------------------------
 
   it('calls supabase.removeChannel on unmount', () => {
-    const { unmount } = renderHook(() =>
-      useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID),
-    )
+    const { unmount } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     expect(supabase.removeChannel).not.toHaveBeenCalled()
 

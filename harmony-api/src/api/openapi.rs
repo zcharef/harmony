@@ -5,11 +5,13 @@
 use utoipa::OpenApi;
 
 use super::dto::{
-    BanListResponse, BanResponse, BanUserRequest, ChannelListResponse, ChannelResponse,
-    CreateChannelRequest, CreateInviteRequest, CreateServerRequest, EditMessageRequest,
-    InvitePreviewResponse, InviteResponse, JoinServerRequest, MemberListResponse, MemberResponse,
-    MessageListQuery, MessageListResponse, MessageResponse, ProfileResponse, SendMessageRequest,
-    ServerListResponse, ServerResponse, UpdateChannelRequest,
+    AssignRoleRequest, BanListResponse, BanResponse, BanUserRequest, ChannelListResponse,
+    ChannelResponse, CreateChannelRequest, CreateDmRequest, CreateInviteRequest,
+    CreateServerRequest, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,
+    DmRecipientResponse, DmResponse, EditMessageRequest, InvitePreviewResponse, InviteResponse,
+    JoinServerRequest, MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse,
+    MessageResponse, ProfileResponse, SendMessageRequest, ServerListResponse, ServerResponse,
+    TransferOwnershipRequest, UpdateChannelRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse};
@@ -52,6 +54,8 @@ use crate::domain::models::{
         // Members
         handlers::members::list_members,
         handlers::members::kick_member,
+        handlers::members::assign_role,
+        handlers::members::transfer_ownership,
         // Bans (Moderation)
         handlers::bans::list_bans,
         handlers::bans::ban_member,
@@ -61,6 +65,10 @@ use crate::domain::models::{
         handlers::messages::list_messages,
         handlers::messages::edit_message,
         handlers::messages::delete_message,
+        // Direct Messages
+        handlers::dms::create_dm,
+        handlers::dms::list_dms,
+        handlers::dms::close_dm,
     ),
     components(
         schemas(
@@ -97,6 +105,8 @@ use crate::domain::models::{
             // Member DTOs
             MemberResponse,
             MemberListResponse,
+            AssignRoleRequest,
+            TransferOwnershipRequest,
             // Ban DTOs
             BanUserRequest,
             BanResponse,
@@ -107,6 +117,14 @@ use crate::domain::models::{
             MessageResponse,
             MessageListResponse,
             MessageListQuery,
+            // DM DTOs
+            CreateDmRequest,
+            DmResponse,
+            DmRecipientResponse,
+            DmListItem,
+            DmLastMessageResponse,
+            DmListResponse,
+            DmListQuery,
         )
     ),
     tags(
@@ -119,6 +137,7 @@ use crate::domain::models::{
         (name = "Members", description = "Server member management"),
         (name = "Moderation", description = "Server moderation (bans, kicks)"),
         (name = "Messages", description = "Messaging within channels"),
+        (name = "DirectMessages", description = "Direct message conversations"),
     ),
     modifiers(&SecurityAddon)
 )]

@@ -1,5 +1,5 @@
-import { vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
+import { vi } from 'vitest'
 import type { MessageListResponse } from '@/lib/api'
 import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 import { useMessages } from './use-messages'

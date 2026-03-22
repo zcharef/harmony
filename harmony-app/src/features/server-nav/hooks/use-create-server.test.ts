@@ -1,7 +1,7 @@
-import { vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
-import { renderHookWithQueryClient } from '@/tests/test-utils'
+import { vi } from 'vitest'
 import { queryKeys } from '@/lib/query-keys'
+import { renderHookWithQueryClient } from '@/tests/test-utils'
 import { useCreateServer } from './use-create-server'
 
 vi.mock('@/lib/api', () => ({

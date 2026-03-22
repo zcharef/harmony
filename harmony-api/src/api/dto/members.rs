@@ -1,10 +1,10 @@
 //! Member DTOs (request/response types).
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::models::{ServerMember, UserId};
+use crate::domain::models::{Role, ServerMember, UserId};
 
 /// Server member response returned to API consumers.
 #[derive(Debug, Serialize, ToSchema)]
@@ -16,6 +16,7 @@ pub struct MemberResponse {
     pub avatar_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nickname: Option<String>,
+    pub role: String,
     pub joined_at: DateTime<Utc>,
 }
 
@@ -26,6 +27,7 @@ impl From<ServerMember> for MemberResponse {
             username: m.username,
             avatar_url: m.avatar_url,
             nickname: m.nickname,
+            role: m.role.to_string(),
             joined_at: m.joined_at,
         }
     }
@@ -49,4 +51,20 @@ impl MemberListResponse {
             total,
         }
     }
+}
+
+/// Request body for assigning a role to a server member.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssignRoleRequest {
+    /// The role to assign (admin, moderator, member). Use transfer-ownership for owner.
+    pub role: Role,
+}
+
+/// Request body for transferring server ownership.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TransferOwnershipRequest {
+    /// The user ID of the new owner (must be an existing member).
+    pub new_owner_id: UserId,
 }
