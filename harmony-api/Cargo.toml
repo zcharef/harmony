@@ -34,7 +34,7 @@ anyhow = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "migrate"] }
 
 # Auth (Supabase JWT verification)
-jsonwebtoken = "9"
+jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 
 # External Services (rustls-tls avoids OpenSSL deps in Distroless)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -44,10 +44,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 
 # Observability (OpenTelemetry - SOTA 2026)
-tracing-opentelemetry = "0.29"
-opentelemetry = "0.28"
-opentelemetry_sdk = "0.28"
-opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic"] }
+tracing-opentelemetry = "0.32"
+opentelemetry = "0.31"
+opentelemetry_sdk = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
 
 # Config
 dotenvy = "0.15"
@@ -74,8 +74,8 @@ governor = "0.10"
 # Async Streams
 tokio-stream = "0.1"
 
-# Sentry (Crash Reporting + Alerting) - 0.46+ required for axum 0.8 compatibility
-sentry = { version = "0.46", features = ["tower", "tower-axum-matched-path", "tracing", "rustls"] }
+# Sentry (Crash Reporting + Alerting) - 0.47+ required for axum 0.8 compatibility
+sentry = { version = "0.47", features = ["tower", "tower-axum-matched-path", "tracing", "rustls"] }
 dashmap = "6.1.0"
 bitflags = "2"
 

@@ -16,7 +16,6 @@
   "ignoreDependencies": [
     "@commitlint/cli",
     "tailwindcss",
-    "@hey-api/client-fetch",
     "@tauri-apps/api",
     "@tauri-apps/plugin-opener",
     "motion",
