@@ -7,7 +7,9 @@ use rand::Rng;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Invite, InviteCode, ServerId, UserId};
-use crate::domain::ports::{BanRepository, InviteRepository, MemberRepository, ServerRepository};
+use crate::domain::ports::{
+    BanRepository, InviteRepository, MemberRepository, PlanLimitChecker, ServerRepository,
+};
 
 /// Length of generated invite codes (alphanumeric).
 const INVITE_CODE_LENGTH: usize = 8;
@@ -46,6 +48,7 @@ pub struct InviteService {
     member_repo: Arc<dyn MemberRepository>,
     ban_repo: Arc<dyn BanRepository>,
     server_repo: Arc<dyn ServerRepository>,
+    plan_checker: Arc<dyn PlanLimitChecker>,
 }
 
 impl InviteService {
@@ -55,12 +58,14 @@ impl InviteService {
         member_repo: Arc<dyn MemberRepository>,
         ban_repo: Arc<dyn BanRepository>,
         server_repo: Arc<dyn ServerRepository>,
+        plan_checker: Arc<dyn PlanLimitChecker>,
     ) -> Self {
         Self {
             invite_repo,
             member_repo,
             ban_repo,
             server_repo,
+            plan_checker,
         }
     }
 
@@ -187,6 +192,13 @@ impl InviteService {
                 "User is already a member of this server".to_string(),
             ));
         }
+
+        // WHY: Check plan member limit AFTER already-member check (no point
+        // counting limits for someone who's already in) but BEFORE the actual
+        // join to enforce billing constraints.
+        self.plan_checker
+            .check_member_limit(&invite.server_id)
+            .await?;
 
         self.invite_repo
             .complete_join(code, &invite.server_id, user_id)

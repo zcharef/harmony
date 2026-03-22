@@ -126,6 +126,24 @@ pub fn build_router(state: AppState) -> Router {
             post(handlers::dms::create_dm).get(handlers::dms::list_dms),
         )
         .route("/v1/dms/{server_id}", delete(handlers::dms::close_dm))
+        // E2EE Key Distribution
+        .route(
+            "/v1/keys/device",
+            post(handlers::keys::register_device),
+        )
+        .route(
+            "/v1/keys/one-time",
+            post(handlers::keys::upload_one_time_keys),
+        )
+        .route(
+            "/v1/keys/bundle/{user_id}",
+            get(handlers::keys::get_pre_key_bundle),
+        )
+        .route(
+            "/v1/keys/device/{id}",
+            get(handlers::keys::list_devices).delete(handlers::keys::remove_device),
+        )
+        .route("/v1/keys/count", get(handlers::keys::get_key_count))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             super::middleware::auth::require_auth,

@@ -20,5 +20,10 @@ pub struct Message {
     /// WHO deleted this message. Enables the frontend to distinguish
     /// self-deletes from moderator-deletes.
     pub deleted_by: Option<UserId>,
+    /// Whether this message contains E2EE ciphertext.
+    pub encrypted: bool,
+    /// Device that sent this encrypted message. Required when `encrypted = true`
+    /// so recipients know which Olm session to use for decryption.
+    pub sender_device_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }

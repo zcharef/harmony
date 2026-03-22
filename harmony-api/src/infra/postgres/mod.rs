@@ -4,8 +4,10 @@ mod ban_repository;
 mod channel_repository;
 mod dm_repository;
 mod invite_repository;
+mod key_repository;
 mod member_repository;
 mod message_repository;
+mod plan_limit_checker;
 mod profile_repository;
 mod server_repository;
 
@@ -13,8 +15,10 @@ pub use ban_repository::PgBanRepository;
 pub use channel_repository::PgChannelRepository;
 pub use dm_repository::PgDmRepository;
 pub use invite_repository::PgInviteRepository;
+pub use key_repository::PgKeyRepository;
 pub use member_repository::PgMemberRepository;
 pub use message_repository::PgMessageRepository;
+pub use plan_limit_checker::PgPlanLimitChecker;
 pub use profile_repository::PgProfileRepository;
 pub use server_repository::PgServerRepository;
 

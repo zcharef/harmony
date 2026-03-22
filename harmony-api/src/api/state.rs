@@ -6,10 +6,10 @@ use jsonwebtoken::DecodingKey;
 use secrecy::SecretString;
 use sqlx::PgPool;
 
-use crate::domain::ports::{BanRepository, MemberRepository};
+use crate::domain::ports::{BanRepository, MemberRepository, PlanLimitChecker};
 use crate::domain::services::{
-    ChannelService, DmService, InviteService, MessageService, ModerationService, ProfileService,
-    ServerService,
+    ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
+    ProfileService, ServerService,
 };
 
 /// Application state shared across all handlers.
@@ -41,10 +41,14 @@ pub struct AppState {
     moderation_service: Arc<ModerationService>,
     /// DM domain service (create/list/close direct messages).
     dm_service: Arc<DmService>,
+    /// Key distribution domain service (E2EE device keys and pre-key bundles).
+    key_service: Arc<KeyService>,
     /// Member repository (accessed directly for simple queries; invite logic lives in `InviteService`).
     member_repository: Arc<dyn MemberRepository>,
     /// Ban repository (accessed directly by moderation handlers).
     ban_repository: Arc<dyn BanRepository>,
+    /// Plan limit checker (self-hosted: always allowed, hosted: Postgres-backed).
+    plan_limit_checker: Arc<dyn PlanLimitChecker>,
 }
 
 // WHY: Manual Debug because `dyn MemberRepository` needs explicit impl through Arc.
@@ -60,8 +64,10 @@ impl std::fmt::Debug for AppState {
             .field("channel_service", &self.channel_service)
             .field("moderation_service", &self.moderation_service)
             .field("dm_service", &self.dm_service)
+            .field("key_service", &self.key_service)
             .field("member_repository", &self.member_repository)
             .field("ban_repository", &self.ban_repository)
+            .field("plan_limit_checker", &self.plan_limit_checker)
             .finish()
     }
 }
@@ -83,8 +89,10 @@ impl AppState {
         channel_service: Arc<ChannelService>,
         moderation_service: Arc<ModerationService>,
         dm_service: Arc<DmService>,
+        key_service: Arc<KeyService>,
         member_repository: Arc<dyn MemberRepository>,
         ban_repository: Arc<dyn BanRepository>,
+        plan_limit_checker: Arc<dyn PlanLimitChecker>,
     ) -> Self {
         Self {
             pool,
@@ -99,8 +107,10 @@ impl AppState {
             channel_service,
             moderation_service,
             dm_service,
+            key_service,
             member_repository,
             ban_repository,
+            plan_limit_checker,
         }
     }
 
@@ -146,6 +156,12 @@ impl AppState {
         &self.dm_service
     }
 
+    /// Access the key distribution domain service (E2EE).
+    #[must_use]
+    pub fn key_service(&self) -> &KeyService {
+        &self.key_service
+    }
+
     /// Access the member repository directly (simple queries; invite logic in `InviteService`).
     #[must_use]
     pub fn member_repository(&self) -> &dyn MemberRepository {
@@ -156,5 +172,11 @@ impl AppState {
     #[must_use]
     pub fn ban_repository(&self) -> &dyn BanRepository {
         &*self.ban_repository
+    }
+
+    /// Access the plan limit checker (self-hosted: noop, hosted: enforces limits).
+    #[must_use]
+    pub fn plan_limit_checker(&self) -> &dyn PlanLimitChecker {
+        &*self.plan_limit_checker
     }
 }

@@ -4,6 +4,7 @@ pub mod bans;
 pub mod channels;
 pub mod dms;
 pub mod invites;
+pub mod keys;
 pub mod members;
 pub mod messages;
 pub mod pagination;
@@ -19,6 +20,10 @@ pub use dms::{
     DmRecipientResponse, DmResponse,
 };
 pub use invites::{CreateInviteRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest};
+pub use keys::{
+    ClaimedKeyResponse, DeviceListResponse, DeviceResponse, KeyCountResponse, OneTimeKeyDto,
+    PreKeyBundleResponse, RegisterDeviceRequest, UploadOneTimeKeysRequest,
+};
 pub use members::{
     AssignRoleRequest, MemberListResponse, MemberResponse, TransferOwnershipRequest,
 };

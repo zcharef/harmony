@@ -1,5 +1,5 @@
 use axum::{
-    http::{HeaderValue, StatusCode, header},
+    http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
@@ -153,6 +153,13 @@ impl From<DomainError> for ApiError {
             DomainError::ValidationError(msg) => ApiError::bad_request(msg),
             DomainError::Forbidden(msg) => ApiError::forbidden(msg),
             DomainError::Conflict(msg) => ApiError::conflict(msg),
+            DomainError::LimitExceeded {
+                resource,
+                plan,
+                limit,
+            } => ApiError::forbidden(format!(
+                "Server has reached the {plan} plan limit of {limit} {resource}"
+            )),
             // WHY: Already logged at the infrastructure layer (db_err, etc.)
             DomainError::Internal(_) => ApiError::internal("An internal error occurred"),
             DomainError::ExternalService(msg) => ApiError::bad_gateway(msg),

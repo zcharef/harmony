@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Channel, ChannelId, ChannelType, ServerId, UserId};
-use crate::domain::ports::ChannelRepository;
+use crate::domain::ports::{ChannelRepository, PlanLimitChecker};
 
 /// Maximum length for a channel name (lowercase slug).
 const MAX_CHANNEL_NAME_LENGTH: usize = 100;
@@ -16,6 +16,7 @@ const MAX_CHANNEL_TOPIC_LENGTH: usize = 1024;
 #[derive(Debug)]
 pub struct ChannelService {
     repo: Arc<dyn ChannelRepository>,
+    plan_checker: Arc<dyn PlanLimitChecker>,
 }
 
 /// Validate that a channel name matches `^[a-z0-9-]{1,100}$`.
@@ -61,8 +62,8 @@ impl ChannelService {
     pub const TEST_MAX_CHANNEL_TOPIC_LENGTH: usize = MAX_CHANNEL_TOPIC_LENGTH;
 
     #[must_use]
-    pub fn new(repo: Arc<dyn ChannelRepository>) -> Self {
-        Self { repo }
+    pub fn new(repo: Arc<dyn ChannelRepository>, plan_checker: Arc<dyn PlanLimitChecker>) -> Self {
+        Self { repo, plan_checker }
     }
 
     /// Create a new channel in a server.
@@ -79,6 +80,10 @@ impl ChannelService {
     ) -> Result<Channel, DomainError> {
         let normalized = name.trim().to_lowercase();
         validate_channel_name(&normalized)?;
+
+        // WHY: Check plan limit AFTER validation (no point hitting DB for invalid input)
+        // but BEFORE resource creation to enforce billing constraints.
+        self.plan_checker.check_channel_limit(&server_id).await?;
 
         let channel_type = channel_type.unwrap_or(ChannelType::Text);
         let count = self.repo.count_for_server(&server_id).await?;

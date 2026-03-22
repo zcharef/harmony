@@ -158,6 +158,81 @@ impl From<Uuid> for CategoryId {
     }
 }
 
+/// Unique identifier for a device key record.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "bb0e8400-e29b-41d4-a716-446655440006")]
+#[serde(transparent)]
+pub struct DeviceKeyId(pub Uuid);
+
+impl DeviceKeyId {
+    #[must_use]
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for DeviceKeyId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for DeviceKeyId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+/// Unique identifier for a one-time key record.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "cc0e8400-e29b-41d4-a716-446655440007")]
+#[serde(transparent)]
+pub struct OneTimeKeyId(pub Uuid);
+
+impl OneTimeKeyId {
+    #[must_use]
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for OneTimeKeyId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for OneTimeKeyId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+/// Device identifier (client-generated string, not a UUID).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "ABCDEF123456")]
+#[serde(transparent)]
+pub struct DeviceId(pub String);
+
+impl DeviceId {
+    #[must_use]
+    pub fn new(id: String) -> Self {
+        Self(id)
+    }
+}
+
+impl fmt::Display for DeviceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for DeviceId {
+    fn from(id: String) -> Self {
+        Self(id)
+    }
+}
+
 /// Invite code for joining a server.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[schema(example = "abc123XY")]

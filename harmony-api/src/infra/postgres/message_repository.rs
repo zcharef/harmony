@@ -31,6 +31,8 @@ struct MessageRow {
     edited_at: Option<DateTime<Utc>>,
     deleted_at: Option<DateTime<Utc>>,
     deleted_by: Option<Uuid>,
+    encrypted: bool,
+    sender_device_id: Option<String>,
     created_at: DateTime<Utc>,
 }
 
@@ -44,6 +46,8 @@ impl MessageRow {
             edited_at: self.edited_at,
             deleted_at: self.deleted_at,
             deleted_by: self.deleted_by.map(UserId::new),
+            encrypted: self.encrypted,
+            sender_device_id: self.sender_device_id,
             created_at: self.created_at,
         }
     }
@@ -72,6 +76,8 @@ impl MessageRepository for PgMessageRepository {
                 edited_at,
                 deleted_at,
                 deleted_by,
+                encrypted,
+                sender_device_id,
                 created_at
             "#,
             cid,
@@ -90,6 +96,8 @@ impl MessageRepository for PgMessageRepository {
             edited_at: row.edited_at,
             deleted_at: row.deleted_at,
             deleted_by: row.deleted_by,
+            encrypted: row.encrypted,
+            sender_device_id: row.sender_device_id,
             created_at: row.created_at,
         };
 
@@ -116,6 +124,8 @@ impl MessageRepository for PgMessageRepository {
                 edited_at,
                 deleted_at,
                 deleted_by,
+                encrypted,
+                sender_device_id,
                 created_at
             FROM messages
             WHERE channel_id = $1
@@ -143,6 +153,8 @@ impl MessageRepository for PgMessageRepository {
                     edited_at: r.edited_at,
                     deleted_at: r.deleted_at,
                     deleted_by: r.deleted_by,
+                    encrypted: r.encrypted,
+                    sender_device_id: r.sender_device_id,
                     created_at: r.created_at,
                 }
                 .into_message()
@@ -165,6 +177,8 @@ impl MessageRepository for PgMessageRepository {
                 edited_at,
                 deleted_at,
                 deleted_by,
+                encrypted,
+                sender_device_id,
                 created_at
             FROM messages
             WHERE id = $1 AND deleted_at IS NULL
@@ -184,6 +198,8 @@ impl MessageRepository for PgMessageRepository {
                 edited_at: r.edited_at,
                 deleted_at: r.deleted_at,
                 deleted_by: r.deleted_by,
+                encrypted: r.encrypted,
+                sender_device_id: r.sender_device_id,
                 created_at: r.created_at,
             }
             .into_message()
@@ -210,6 +226,8 @@ impl MessageRepository for PgMessageRepository {
                 edited_at,
                 deleted_at,
                 deleted_by,
+                encrypted,
+                sender_device_id,
                 created_at
             "#,
             mid,
@@ -231,6 +249,8 @@ impl MessageRepository for PgMessageRepository {
             edited_at: row.edited_at,
             deleted_at: row.deleted_at,
             deleted_by: row.deleted_by,
+            encrypted: row.encrypted,
+            sender_device_id: row.sender_device_id,
             created_at: row.created_at,
         };
 

@@ -30,4 +30,11 @@ pub enum DomainError {
 
     #[error("Rate limited: {0}")]
     RateLimited(String),
+
+    #[error("Plan limit exceeded: {resource} limit of {limit} reached on {plan} plan")]
+    LimitExceeded {
+        resource: &'static str,
+        plan: String,
+        limit: u64,
+    },
 }

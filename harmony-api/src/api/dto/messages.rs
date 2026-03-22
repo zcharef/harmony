@@ -10,8 +10,12 @@ use crate::domain::models::{ChannelId, Message, MessageId, UserId};
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SendMessageRequest {
-    /// Message content (required, non-empty).
+    /// Message content (required, non-empty). Contains ciphertext when `encrypted = true`.
     pub content: String,
+    /// Whether this message contains E2EE ciphertext. Defaults to `false`.
+    pub encrypted: Option<bool>,
+    /// Device ID of the sending device. Required when `encrypted = true`.
+    pub sender_device_id: Option<String>,
 }
 
 /// Request body for editing a message.
@@ -40,6 +44,11 @@ pub struct MessageResponse {
     /// soft-deleted messages delivered via realtime.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_by: Option<UserId>,
+    /// Whether this message contains E2EE ciphertext.
+    pub encrypted: bool,
+    /// Device ID of the sender. Present when `encrypted = true`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_device_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -52,6 +61,8 @@ impl From<Message> for MessageResponse {
             content: m.content,
             edited_at: m.edited_at,
             deleted_by: m.deleted_by,
+            encrypted: m.encrypted,
+            sender_device_id: m.sender_device_id,
             created_at: m.created_at,
         }
     }

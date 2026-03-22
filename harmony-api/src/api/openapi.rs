@@ -6,17 +6,20 @@ use utoipa::OpenApi;
 
 use super::dto::{
     AssignRoleRequest, BanListResponse, BanResponse, BanUserRequest, ChannelListResponse,
-    ChannelResponse, CreateChannelRequest, CreateDmRequest, CreateInviteRequest,
-    CreateServerRequest, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,
-    DmRecipientResponse, DmResponse, EditMessageRequest, InvitePreviewResponse, InviteResponse,
-    JoinServerRequest, MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse,
-    MessageResponse, ProfileResponse, SendMessageRequest, ServerListResponse, ServerResponse,
-    TransferOwnershipRequest, UpdateChannelRequest, UpdateServerRequest,
+    ChannelResponse, ClaimedKeyResponse, CreateChannelRequest, CreateDmRequest,
+    CreateInviteRequest, CreateServerRequest, DeviceListResponse, DeviceResponse,
+    DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse, DmRecipientResponse,
+    DmResponse, EditMessageRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest,
+    KeyCountResponse, MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse,
+    MessageResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse, RegisterDeviceRequest,
+    SendMessageRequest, ServerListResponse, ServerResponse, TransferOwnershipRequest,
+    UpdateChannelRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse};
 use crate::domain::models::{
-    CategoryId, ChannelId, ChannelType, InviteCode, MessageId, ServerId, UserId, UserStatus,
+    CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MessageId,
+    OneTimeKeyId, ServerId, UserId, UserStatus,
 };
 
 /// `OpenAPI` documentation for Harmony API.
@@ -70,6 +73,13 @@ use crate::domain::models::{
         handlers::dms::create_dm,
         handlers::dms::list_dms,
         handlers::dms::close_dm,
+        // E2EE Key Distribution
+        handlers::keys::register_device,
+        handlers::keys::upload_one_time_keys,
+        handlers::keys::get_pre_key_bundle,
+        handlers::keys::list_devices,
+        handlers::keys::remove_device,
+        handlers::keys::get_key_count,
     ),
     components(
         schemas(
@@ -84,6 +94,9 @@ use crate::domain::models::{
             MessageId,
             CategoryId,
             InviteCode,
+            DeviceKeyId,
+            OneTimeKeyId,
+            DeviceId,
             // Domain enums
             UserStatus,
             ChannelType,
@@ -127,6 +140,15 @@ use crate::domain::models::{
             DmLastMessageResponse,
             DmListResponse,
             DmListQuery,
+            // Key Distribution DTOs
+            RegisterDeviceRequest,
+            UploadOneTimeKeysRequest,
+            OneTimeKeyDto,
+            DeviceResponse,
+            DeviceListResponse,
+            ClaimedKeyResponse,
+            PreKeyBundleResponse,
+            KeyCountResponse,
         )
     ),
     tags(
@@ -140,6 +162,7 @@ use crate::domain::models::{
         (name = "Moderation", description = "Server moderation (bans, kicks)"),
         (name = "Messages", description = "Messaging within channels"),
         (name = "DirectMessages", description = "Direct message conversations"),
+        (name = "Keys", description = "E2EE key distribution (device keys, pre-key bundles)"),
     ),
     modifiers(&SecurityAddon)
 )]

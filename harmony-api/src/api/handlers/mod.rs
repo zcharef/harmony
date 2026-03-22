@@ -4,6 +4,7 @@ pub mod bans;
 pub mod channels;
 pub mod dms;
 pub mod invites;
+pub mod keys;
 pub mod members;
 pub mod messages;
 pub mod profiles;

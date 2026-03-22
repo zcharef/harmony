@@ -110,6 +110,18 @@ async fn init_app_state(config: &Config) -> AppState {
     let member_repo = Arc::new(infra::postgres::PgMemberRepository::new(pool.clone()));
     let ban_repo = Arc::new(infra::postgres::PgBanRepository::new(pool.clone()));
     let dm_repo = Arc::new(infra::postgres::PgDmRepository::new(pool.clone()));
+    let key_repo = Arc::new(infra::postgres::PgKeyRepository::new(pool.clone()));
+
+    // WHY: Self-hosted deployments have no plan restrictions (AlwaysAllowedChecker).
+    // SaaS deployments enforce Free/Pro limits via Postgres queries (PgPlanLimitChecker).
+    let plan_limit_checker: Arc<dyn crate::domain::ports::PlanLimitChecker> =
+        if config.plan_enforcement_enabled {
+            tracing::info!("Plan limit enforcement ENABLED (SaaS mode)");
+            Arc::new(infra::postgres::PgPlanLimitChecker::new(pool.clone()))
+        } else {
+            tracing::info!("Plan limit enforcement DISABLED (self-hosted mode)");
+            Arc::new(infra::AlwaysAllowedChecker)
+        };
 
     // Construct domain services (injected with repository ports)
     let profile_service = Arc::new(domain::services::ProfileService::new(profile_repo.clone()));
@@ -124,8 +136,12 @@ async fn init_app_state(config: &Config) -> AppState {
         member_repo.clone(),
         ban_repo.clone(),
         server_repo.clone(),
+        plan_limit_checker.clone(),
     ));
-    let channel_service = Arc::new(domain::services::ChannelService::new(channel_repo));
+    let channel_service = Arc::new(domain::services::ChannelService::new(
+        channel_repo,
+        plan_limit_checker.clone(),
+    ));
     let moderation_service = Arc::new(domain::services::ModerationService::new(
         server_repo.clone(),
         ban_repo.clone(),
@@ -137,6 +153,7 @@ async fn init_app_state(config: &Config) -> AppState {
         server_repo,
         member_repo.clone(),
     ));
+    let key_service = Arc::new(domain::services::KeyService::new(key_repo));
 
     tracing::info!("Domain services initialized");
 
@@ -153,8 +170,10 @@ async fn init_app_state(config: &Config) -> AppState {
         channel_service,
         moderation_service,
         dm_service,
+        key_service,
         member_repo,
         ban_repo,
+        plan_limit_checker,
     )
 }
 

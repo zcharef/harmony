@@ -39,6 +39,13 @@ pub struct Config {
     /// OpenTelemetry service name reported in traces (default: "harmony-api")
     #[serde(default = "default_otel_service_name")]
     pub otel_service_name: Option<String>,
+
+    /// Enable plan limit enforcement (default: true).
+    /// Self-hosted deployments should set `PLAN_ENFORCEMENT_ENABLED=false`.
+    /// When true (default), `PgPlanLimitChecker` enforces Free/Pro limits.
+    /// When false, `AlwaysAllowedChecker` is used (no limits).
+    #[serde(default = "default_plan_enforcement")]
+    pub plan_enforcement_enabled: bool,
 }
 
 fn default_port() -> u16 {
@@ -55,6 +62,10 @@ fn default_environment() -> String {
 
 fn default_otel_service_name() -> Option<String> {
     Some("harmony-api".to_string())
+}
+
+fn default_plan_enforcement() -> bool {
+    true
 }
 
 impl Config {
@@ -100,6 +111,7 @@ impl std::fmt::Debug for Config {
                 &self.otel_exporter_otlp_endpoint,
             )
             .field("otel_service_name", &self.otel_service_name)
+            .field("plan_enforcement_enabled", &self.plan_enforcement_enabled)
             .finish()
     }
 }
