@@ -615,3 +615,42 @@ fn safety_number_with_real_olm_keys() {
     let groups: Vec<&str> = alice_sees.split(' ').collect();
     assert_eq!(groups.len(), 15, "Should have 15 groups");
 }
+
+// ── getrandom Key Generation Tests ──────────────────────────
+// WHY: Verify the dep bump migration (rand::rng() → getrandom::fill())
+// produces safe cryptographic key material matching store.rs:L66-L71 usage.
+
+#[test]
+fn test_getrandom_produces_nonzero_key() {
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).expect("getrandom should not fail on this platform");
+
+    // Key should not be all zeros (probability ~2^-256)
+    assert_ne!(key, [0u8; 32], "Generated key should not be all zeros");
+    assert_eq!(key.len(), 32, "Key should be exactly 32 bytes");
+}
+
+#[test]
+fn test_getrandom_produces_unique_keys() {
+    let mut key1 = [0u8; 32];
+    let mut key2 = [0u8; 32];
+    getrandom::fill(&mut key1).expect("getrandom fill key1");
+    getrandom::fill(&mut key2).expect("getrandom fill key2");
+
+    // Two consecutive 256-bit random keys should differ (probability ~1 - 2^-256)
+    assert_ne!(key1, key2, "Two random keys should not be identical");
+}
+
+#[test]
+fn test_getrandom_key_hex_roundtrip() {
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).expect("getrandom fill");
+
+    // Matches actual usage: hex::encode in store.rs get_or_create_db_key()
+    let hex_key = hex::encode(key);
+    assert_eq!(hex_key.len(), 64, "Hex-encoded 32-byte key should be 64 chars");
+
+    // Verify hex roundtrip
+    let decoded = hex::decode(&hex_key).expect("hex decode should succeed");
+    assert_eq!(decoded, key, "Hex roundtrip should preserve key bytes");
+}
