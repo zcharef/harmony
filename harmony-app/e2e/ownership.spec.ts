@@ -58,9 +58,13 @@ test.describe('Ownership Transfer', () => {
     await assignRole(transferOwner.token, transferServer.id, transferAdmin.id, 'admin')
 
     await authenticatePage(page, transferOwner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, transferServer.id)
+
+    // WHY: Wait for member-list to render, which proves the members query succeeded
+    // and useMyMemberRole has resolved the caller's role. Without this, the
+    // server-menu-settings-item may have class="hidden" because canAccessSettings
+    // defaults to false while the members query is still pending.
+    await page.locator('[data-test="member-list"]').waitFor({ timeout: 15_000 })
 
     // Open server settings via server header menu
     await page.locator('[data-test="server-header-button"]').click()
@@ -109,15 +113,13 @@ test.describe('Ownership Transfer', () => {
     await expect(transferModal).not.toBeVisible({ timeout: 5_000 })
 
     // WHY: After transfer, the old owner becomes admin (auto-demotion).
-    // The settings view should auto-close since the user's role changed,
-    // but they still have admin access so settings may remain open.
-    // Reload and verify the new roles via the member list.
+    // Reload to get fresh data and verify the new roles via the member list.
     await page.goto('/')
     await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, transferServer.id)
 
     const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
+    await memberList.waitFor({ timeout: 15_000 })
 
     // The new owner should have the owner badge
     const newOwnerItem = memberList.locator(
@@ -141,9 +143,11 @@ test.describe('Ownership Transfer', () => {
   test('non-owner cannot see transfer ownership button', async ({ page }) => {
     // WHY: roles-tab.tsx:255 — only callerRole === 'owner' renders the transfer button.
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
+
+    // WHY: Wait for member-list to render, proving the members query succeeded
+    // and useMyMemberRole resolved the admin role (canAccessSettings = true).
+    await page.locator('[data-test="member-list"]').waitFor({ timeout: 15_000 })
 
     // Open server settings
     await page.locator('[data-test="server-header-button"]').click()
@@ -186,12 +190,11 @@ test.describe('Ownership Transfer', () => {
 
     // Verify the owner is still the owner via the member list
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
+    // WHY: Wait for member-list to render, proving the members query succeeded.
     const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
+    await memberList.waitFor({ timeout: 15_000 })
 
     const ownerItem = memberList.locator(`[data-test="member-item"][data-user-id="${owner.id}"]`)
     await ownerItem.waitFor({ timeout: 10_000 })
