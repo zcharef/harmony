@@ -68,9 +68,10 @@ test.describe('Plan Limits — Channel Enforcement (§3)', () => {
   // ── UI shows error feedback when channel limit is exceeded ──────────
 
   test('UI shows error when creating a channel beyond the limit', async ({ page }) => {
+    // WHY: authenticatePage already navigates to / and waits for main-layout.
+    // A redundant page.goto('/') causes a full SPA reload that races with
+    // the Supabase session recovery, producing net::ERR_FAILED on API calls.
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     // Verify all 20 channels are visible

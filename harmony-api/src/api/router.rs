@@ -30,8 +30,8 @@ use super::state::AppState;
 ///
 /// Layers are applied in reverse order of declaration:
 /// ```text
-/// Request  → SentryHub → RequestId → Tracing → Timeout → BodyLimit → Handler
-/// Response ← Compression ← SecurityHeaders ← CORS ← Handler
+/// Request  → SentryHub → RequestId → Tracing → Timeout → BodyLimit → CORS → RateLimit → Handler
+/// Response ← SecurityHeaders ← Compression ← RateLimit ← CORS ← Handler
 /// ```
 #[allow(deprecated)] // TimeoutLayer::new is deprecated; upgrade when tower-http 0.7 releases
 pub fn build_router(state: AppState) -> Router {
@@ -183,9 +183,13 @@ pub fn build_router(state: AppState) -> Router {
             header::STRICT_TRANSPORT_SECURITY,
             HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"),
         ))
-        .layer(cors)
         .layer(CompressionLayer::new())
         .layer(RateLimitLayer::new(60, 300))
+        // WHY: CORS must be OUTSIDE the rate limiter. When the rate limiter
+        // short-circuits with 429, inner layers (like CORS) never run. The
+        // browser then sees the 429 as a CORS error (missing
+        // Access-Control-Allow-Origin header) instead of a rate limit.
+        .layer(cors)
         .layer(RequestBodyLimitLayer::new(2 * 1024 * 1024))
         .layer(TimeoutLayer::new(Duration::from_secs(30)))
         .layer(TraceLayer::new_for_http())
