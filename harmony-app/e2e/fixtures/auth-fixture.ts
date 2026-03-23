@@ -109,7 +109,16 @@ export async function selectServer(page: Page, serverId: string): Promise<void> 
   const btn = page.locator(`[data-test="server-button"][data-server-id="${serverId}"]`)
   await btn.waitFor({ timeout: 10_000 })
   await btn.click()
-  await page.locator('[data-test="channel-sidebar"]').waitFor({ timeout: 10_000 })
+
+  // WHY: channel-sidebar is always in the DOM even when serverId is null.
+  // Waiting for it is effectively a no-op and returns before channels load.
+  // Instead, wait for a channel-button inside channel-list which confirms:
+  // (a) server selection state propagated, (b) useChannels() resolved,
+  // (c) at least one channel rendered.
+  await page
+    .locator('[data-test="channel-list"] [data-test="channel-button"]')
+    .first()
+    .waitFor({ timeout: 15_000 })
 }
 
 /**
@@ -119,6 +128,9 @@ export async function selectChannel(page: Page, channelName: string): Promise<vo
   const channelButton = page
     .locator('[data-test="channel-button"]')
     .filter({ hasText: channelName })
+  // WHY: Channel list loads asynchronously via useChannels(). Wait for the
+  // target channel button to appear before clicking to avoid race conditions.
+  await channelButton.waitFor({ timeout: 10_000 })
   await channelButton.click()
-  await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10000 })
+  await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
 }

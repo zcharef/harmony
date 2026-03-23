@@ -429,10 +429,18 @@ test.describe('Messaging', () => {
 
     const messageInput = page.locator('[data-test="message-input"]')
 
-    // Generate a 4001-char string
+    // WHY: Generate a 4001-char string. fill() clears the input then types the
+    // full value, triggering HeroUI's onValueChange for controlled state updates.
     const longContent = 'A'.repeat(4001)
     await messageInput.fill(longContent)
 
+    // WHY: Verify the controlled state accepted the input before pressing Enter.
+    // Without this, a race between fill() and React re-render could leave
+    // messageContent empty, causing handleSend() to bail and no POST to fire.
+    await expect(messageInput).toHaveValue(longContent)
+
+    // WHY: Register the response listener BEFORE pressing Enter to avoid
+    // missing the POST response on fast connections.
     const responsePromise = page.waitForResponse(
       (response) =>
         response.url().includes(`/v1/channels/${channelId}/messages`) &&
