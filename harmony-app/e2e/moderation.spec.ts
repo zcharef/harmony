@@ -30,6 +30,36 @@ import {
 } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
 
+/** WHY: Helper to open context menu for a member by user ID.
+ * Encapsulates the wait-for-member-list -> find-item -> right-click -> wait-for-menu
+ * sequence that every context-menu test repeats. Eliminates duplication and ensures
+ * consistent timeouts across all tests. */
+async function openMemberContextMenu(
+  page: import('@playwright/test').Page,
+  userId: string,
+): Promise<void> {
+  const memberList = page.locator('[data-test="member-list"]')
+  await memberList.waitFor({ timeout: 15_000 })
+
+  const item = memberList.locator(`[data-test="member-item"][data-user-id="${userId}"]`)
+  await item.waitFor({ timeout: 10_000 })
+
+  // WHY: Dismiss any lingering popover/dropdown that could intercept the right-click.
+  await page.keyboard.press('Escape')
+
+  await item.click({ button: 'right' })
+
+  const menu = page.locator('[data-test="member-context-menu"]')
+  await menu.waitFor({ timeout: 5_000 })
+
+  // WHY: HeroUI Dropdown uses CSS transition (~150ms) for entry animation.
+  // The menu wrapper appears immediately but inner items are still transitioning
+  // (position/opacity), causing Playwright's "element is not stable" error on click.
+  // Waiting for the first visible menu item to pass Playwright's visibility check
+  // (which includes a stability assertion) guarantees the animation is done.
+  await menu.locator('[role="menuitem"]').first().waitFor({ timeout: 5_000 })
+}
+
 test.describe('Kick & Ban Moderation', () => {
   let owner: TestUser
   let admin: TestUser
@@ -59,22 +89,12 @@ test.describe('Kick & Ban Moderation', () => {
     const invite = await createInvite(owner.token, server.id)
     await joinServer(kickTarget.token, server.id, invite.code)
 
+    // WHY: authenticatePage already navigates to '/' and waits for main-layout.
+    // No need for a second page.goto('/') — it wastes time and resets query cache.
     await authenticatePage(page, mod)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
-    const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
-
-    // Right-click target to open context menu
-    const targetItem = memberList.locator(
-      `[data-test="member-item"][data-user-id="${kickTarget.id}"]`,
-    )
-    await targetItem.waitFor({ timeout: 10_000 })
-    await page.keyboard.press('Escape')
-    await targetItem.click({ button: 'right' })
-    await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
+    await openMemberContextMenu(page, kickTarget.id)
 
     // Click kick
     const kickMenuItem = page.locator('[data-test="kick-member-item"]')
@@ -98,25 +118,18 @@ test.describe('Kick & Ban Moderation', () => {
 
     // Dialog closes and member disappears from list
     await expect(kickDialog).not.toBeVisible({ timeout: 5_000 })
-    await expect(targetItem).not.toBeVisible({ timeout: 10_000 })
+    await expect(
+      page.locator(`[data-test="member-item"][data-user-id="${kickTarget.id}"]`),
+    ).not.toBeVisible({ timeout: 10_000 })
   })
 
   test('moderator cannot kick admin — kick option hidden for higher rank', async ({ page }) => {
     // WHY: member-context-menu.tsx:39 — canKick requires outranksTarget (strict >).
     // Moderator (rank 2) does NOT outrank admin (rank 3).
     await authenticatePage(page, mod)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
-    const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
-
-    const adminItem = memberList.locator(`[data-test="member-item"][data-user-id="${admin.id}"]`)
-    await adminItem.waitFor({ timeout: 10_000 })
-    await page.keyboard.press('Escape')
-    await adminItem.click({ button: 'right' })
-    await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
+    await openMemberContextMenu(page, admin.id)
 
     // Send message should be available
     const sendMessageItem = page.locator('[data-test="send-message-item"]')
@@ -136,18 +149,9 @@ test.describe('Kick & Ban Moderation', () => {
     await assignRole(owner.token, server.id, mod2.id, 'moderator')
 
     await authenticatePage(page, mod)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
-    const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
-
-    const mod2Item = memberList.locator(`[data-test="member-item"][data-user-id="${mod2.id}"]`)
-    await mod2Item.waitFor({ timeout: 10_000 })
-    await page.keyboard.press('Escape')
-    await mod2Item.click({ button: 'right' })
-    await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
+    await openMemberContextMenu(page, mod2.id)
 
     const sendMessageItem = page.locator('[data-test="send-message-item"]')
     await sendMessageItem.waitFor({ timeout: 5_000 })
@@ -158,18 +162,9 @@ test.describe('Kick & Ban Moderation', () => {
   test('admin cannot kick owner — kick option hidden', async ({ page }) => {
     // WHY: Admin (rank 3) does NOT outrank owner (rank 4).
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
-    const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
-
-    const ownerItem = memberList.locator(`[data-test="member-item"][data-user-id="${owner.id}"]`)
-    await ownerItem.waitFor({ timeout: 10_000 })
-    await page.keyboard.press('Escape')
-    await ownerItem.click({ button: 'right' })
-    await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
+    await openMemberContextMenu(page, owner.id)
 
     const sendMessageItem = page.locator('[data-test="send-message-item"]')
     await sendMessageItem.waitFor({ timeout: 5_000 })
@@ -182,19 +177,10 @@ test.describe('Kick & Ban Moderation', () => {
     // WHY: member-context-menu.tsx:39 — canKick requires callerRank >= moderator.
     // Member (rank 1) < moderator (rank 2).
     await authenticatePage(page, member)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
-    const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
-
     // Right-click a moderator
-    const modItem = memberList.locator(`[data-test="member-item"][data-user-id="${mod.id}"]`)
-    await modItem.waitFor({ timeout: 10_000 })
-    await page.keyboard.press('Escape')
-    await modItem.click({ button: 'right' })
-    await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
+    await openMemberContextMenu(page, mod.id)
 
     const sendMessageItem = page.locator('[data-test="send-message-item"]')
     await sendMessageItem.waitFor({ timeout: 5_000 })
@@ -207,19 +193,10 @@ test.describe('Kick & Ban Moderation', () => {
     // WHY: member-context-menu.tsx:35 — outranksTarget requires isSelf === false.
     // Also, canSendMessage is false for self (line 85).
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
-    const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
-
     // Right-click self
-    const selfItem = memberList.locator(`[data-test="member-item"][data-user-id="${admin.id}"]`)
-    await selfItem.waitFor({ timeout: 10_000 })
-    await page.keyboard.press('Escape')
-    await selfItem.click({ button: 'right' })
-    await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
+    await openMemberContextMenu(page, admin.id)
 
     // No kick or ban items visible
     await expect(page.locator('[data-test="kick-member-item"]')).not.toBeVisible()
@@ -236,20 +213,9 @@ test.describe('Kick & Ban Moderation', () => {
     await joinServer(banTarget.token, server.id, invite.code)
 
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
-    const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
-
-    const targetItem = memberList.locator(
-      `[data-test="member-item"][data-user-id="${banTarget.id}"]`,
-    )
-    await targetItem.waitFor({ timeout: 10_000 })
-    await page.keyboard.press('Escape')
-    await targetItem.click({ button: 'right' })
-    await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
+    await openMemberContextMenu(page, banTarget.id)
 
     const banMenuItem = page.locator('[data-test="ban-member-item"]')
     await banMenuItem.waitFor({ timeout: 5_000 })
@@ -274,7 +240,9 @@ test.describe('Kick & Ban Moderation', () => {
 
     // Dialog closes and member disappears
     await expect(banDialog).not.toBeVisible({ timeout: 5_000 })
-    await expect(targetItem).not.toBeVisible({ timeout: 10_000 })
+    await expect(
+      page.locator(`[data-test="member-item"][data-user-id="${banTarget.id}"]`),
+    ).not.toBeVisible({ timeout: 10_000 })
   })
 
   test('admin unbans user via settings bans tab', async ({ page }) => {
@@ -286,8 +254,6 @@ test.describe('Kick & Ban Moderation', () => {
     await banUser(admin.token, server.id, unbanTarget.id, 'to be unbanned')
 
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     // Open server settings via server header menu
@@ -330,18 +296,9 @@ test.describe('Kick & Ban Moderation', () => {
     // WHY: member-context-menu.tsx:40 — canBan requires outranksTarget AND callerRank >= admin.
     // Admin (3) does NOT outrank owner (4).
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
-    const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
-
-    const ownerItem = memberList.locator(`[data-test="member-item"][data-user-id="${owner.id}"]`)
-    await ownerItem.waitFor({ timeout: 10_000 })
-    await page.keyboard.press('Escape')
-    await ownerItem.click({ button: 'right' })
-    await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
+    await openMemberContextMenu(page, owner.id)
 
     const sendMessageItem = page.locator('[data-test="send-message-item"]')
     await sendMessageItem.waitFor({ timeout: 5_000 })
@@ -352,18 +309,9 @@ test.describe('Kick & Ban Moderation', () => {
   test('admin cannot ban themselves — ban option hidden for self', async ({ page }) => {
     // WHY: member-context-menu.tsx:35 — outranksTarget requires isSelf === false.
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
-    const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
-
-    const selfItem = memberList.locator(`[data-test="member-item"][data-user-id="${admin.id}"]`)
-    await selfItem.waitFor({ timeout: 10_000 })
-    await page.keyboard.press('Escape')
-    await selfItem.click({ button: 'right' })
-    await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
+    await openMemberContextMenu(page, admin.id)
 
     await expect(page.locator('[data-test="ban-member-item"]')).not.toBeVisible()
     await expect(page.locator('[data-test="kick-member-item"]')).not.toBeVisible()
@@ -373,10 +321,16 @@ test.describe('Kick & Ban Moderation', () => {
     // WHY: bans-tab.tsx:19 — isAdmin check gates the ban list. Non-admin sees
     // settings-insufficient-permissions (line 21).
 
-    // First verify admin can see the ban list
+    // WHY: Create a ban via API so the ban list has content regardless of whether
+    // earlier tests succeeded. An empty ban-list div has 0 height and is invisible.
+    const banListTarget = await createTestUser('mod-banlist-target')
+    await syncProfile(banListTarget.token)
+    const invite = await createInvite(owner.token, server.id)
+    await joinServer(banListTarget.token, server.id, invite.code)
+    await banUser(admin.token, server.id, banListTarget.id, 'ban list test')
+
+    // Verify admin can see the ban list
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     await page.locator('[data-test="server-header-button"]').click()
@@ -410,12 +364,10 @@ test.describe('Kick & Ban Moderation', () => {
 
     // Verify the user is back in the member list
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
+    await memberList.waitFor({ timeout: 15_000 })
 
     const rejoinedItem = memberList.locator(
       `[data-test="member-item"][data-user-id="${rejoinTarget.id}"]`,
@@ -449,12 +401,10 @@ test.describe('Kick & Ban Moderation', () => {
 
     // Verify the user does NOT appear in the member list
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
-    await memberList.waitFor({ timeout: 10_000 })
+    await memberList.waitFor({ timeout: 15_000 })
 
     const bannedItem = memberList.locator(
       `[data-test="member-item"][data-user-id="${bannedTarget.id}"]`,
