@@ -21,11 +21,10 @@ test.describe('Server CRUD', () => {
   // ── Create server ──────────────────────────────────────────────
 
   test('create a new server and verify it appears in server sidebar', async ({ page }) => {
+    // WHY: authenticatePage already navigates to / and waits for main-layout.
+    // A redundant page.goto('/') causes a second page load that can race with
+    // Supabase session recovery, leading to stale/cleared auth tokens.
     await authenticatePage(page, owner)
-    await page.goto('/')
-
-    const mainLayout = page.locator('[data-test="main-layout"]')
-    await expect(mainLayout).toBeVisible({ timeout: 15000 })
 
     // BEFORE: count existing server buttons
     const serverButtonsBefore = page.locator('[data-test="server-button"]')
@@ -76,10 +75,6 @@ test.describe('Server CRUD', () => {
 
   test('clicking server icon shows auto-created general channel', async ({ page }) => {
     await authenticatePage(page, owner)
-    await page.goto('/')
-
-    const mainLayout = page.locator('[data-test="main-layout"]')
-    await expect(mainLayout).toBeVisible({ timeout: 15000 })
 
     // ACTION: click the server button
     const serverButton = page.locator(`[data-test="server-button"][data-server-id="${server.id}"]`)
@@ -112,10 +107,6 @@ test.describe('Server CRUD', () => {
     const renameServer = await createServer(owner.token, `Rename Me ${Date.now()}`)
 
     await authenticatePage(page, owner)
-    await page.goto('/')
-
-    const mainLayout = page.locator('[data-test="main-layout"]')
-    await expect(mainLayout).toBeVisible({ timeout: 15000 })
 
     // Navigate to the server
     const serverButton = page.locator(
@@ -129,9 +120,14 @@ test.describe('Server CRUD', () => {
 
     // Open server settings via server header dropdown
     await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
+
+    // WHY: useMyMemberRole defaults to 'member' while the members query loads,
+    // which makes canAccessSettings=false and hides the settings item via
+    // Tailwind 'hidden' class. Once the members query resolves and the owner
+    // role is detected, canAccessSettings becomes true and the class is removed.
+    // Using state:'visible' retries until the element is no longer display:none.
     const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
+    await settingsItem.waitFor({ state: 'visible', timeout: 10_000 })
     await settingsItem.click()
 
     // AFTER: server settings page renders
@@ -176,10 +172,6 @@ test.describe('Server CRUD', () => {
 
   test('member cannot access server settings to update name', async ({ page }) => {
     await authenticatePage(page, member)
-    await page.goto('/')
-
-    const mainLayout = page.locator('[data-test="main-layout"]')
-    await expect(mainLayout).toBeVisible({ timeout: 15000 })
 
     // Navigate to the server as member
     const serverButton = page.locator(`[data-test="server-button"][data-server-id="${server.id}"]`)
@@ -191,6 +183,11 @@ test.describe('Server CRUD', () => {
 
     // Open server header dropdown
     await page.locator('[data-test="server-header-button"]').click()
+
+    // WHY: Wait for an always-visible dropdown item to confirm the menu rendered.
+    // HeroUI dropdown has animation delay; the 'leave' item is always shown.
+    const leaveItem = page.locator('[data-test="server-menu-leave-item"]')
+    await leaveItem.waitFor({ state: 'visible', timeout: 5_000 })
 
     // AFTER: settings item is hidden for members (className='hidden' when !canAccessSettings)
     const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
