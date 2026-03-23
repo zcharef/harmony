@@ -214,8 +214,10 @@ test.describe('Encryption UI', () => {
       timeout: 10_000,
     })
 
-    // Message input should be read-only on web for encrypted channels
-    const messageInput = page.locator('[data-test="message-input"] textarea')
+    // Message input should be read-only on web for encrypted channels.
+    // WHY: HeroUI Textarea passes data-test directly to the <textarea> element,
+    // not a wrapper div — so the selector targets the textarea itself.
+    const messageInput = page.locator('[data-test="message-input"]')
     await messageInput.waitFor({ timeout: 10_000 })
 
     // WHY: The Textarea has isReadOnly={isInputDisabled} when isWebEncryptionBlocked is true.
@@ -238,8 +240,9 @@ test.describe('Encryption UI', () => {
     // EncryptionRequiredBanner should NOT appear for plain channels
     await expect(page.locator('[data-test="encryption-required-banner"]')).not.toBeAttached()
 
-    // Message input should be editable
-    const messageInput = page.locator('[data-test="message-input"] textarea')
+    // Message input should be editable.
+    // WHY: HeroUI Textarea passes data-test directly to the <textarea> element.
+    const messageInput = page.locator('[data-test="message-input"]')
     await messageInput.waitFor({ timeout: 10_000 })
 
     await expect(messageInput).not.toHaveAttribute('readonly')
