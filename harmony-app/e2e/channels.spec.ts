@@ -55,8 +55,6 @@ test.describe('Channel CRUD', () => {
 
   test('admin can create a channel via the UI', async ({ page }) => {
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     // Verify initial channel count (admin sees all 4: general, extra, secret, announcements)
@@ -110,8 +108,6 @@ test.describe('Channel CRUD', () => {
 
   test('admin can edit a channel name and topic', async ({ page }) => {
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     // Hover over #extra to reveal settings cog
@@ -127,7 +123,10 @@ test.describe('Channel CRUD', () => {
     await settingsBtn.click()
 
     // Click "Edit" in dropdown
-    await page.locator('[data-test="channel-edit-item"]').click()
+    // WHY: HeroUI dropdown animates in — wait for the item to be visible and stable.
+    const editItem = page.locator('[data-test="channel-edit-item"]')
+    await editItem.waitFor({ timeout: 5_000 })
+    await editItem.click()
 
     // Edit dialog appears
     const editDialog = page.locator('[data-test="edit-channel-dialog"]')
@@ -174,8 +173,6 @@ test.describe('Channel CRUD', () => {
     const throwaway = await createChannel(admin.token, server.id, 'throwaway')
 
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     // Verify throwaway channel is visible
@@ -204,7 +201,10 @@ test.describe('Channel CRUD', () => {
         response.request().method() === 'DELETE',
     )
 
-    await page.locator('[data-test="channel-delete-item"]').click()
+    // WHY: HeroUI dropdown animates in — wait for the item to be visible and stable.
+    const deleteItem = page.locator('[data-test="channel-delete-item"]')
+    await deleteItem.waitFor({ timeout: 5_000 })
+    await deleteItem.click()
 
     const deleteResponse = await deleteResponsePromise
     expect(deleteResponse.status()).toBe(204)
@@ -225,8 +225,6 @@ test.describe('Channel CRUD', () => {
     expect(loneChannelList.items.length).toBe(1)
 
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, loneServer.id)
 
     // Verify only one channel visible
@@ -252,7 +250,10 @@ test.describe('Channel CRUD', () => {
         response.request().method() === 'DELETE',
     )
 
-    await page.locator('[data-test="channel-delete-item"]').click()
+    // WHY: HeroUI dropdown animates in — wait for the item to be visible and stable.
+    const deleteItem = page.locator('[data-test="channel-delete-item"]')
+    await deleteItem.waitFor({ timeout: 5_000 })
+    await deleteItem.click()
 
     const deleteResponse = await deleteResponsePromise
     expect(deleteResponse.status()).toBe(400)
@@ -266,8 +267,6 @@ test.describe('Channel CRUD', () => {
 
   test('member cannot see create/edit/delete channel controls', async ({ page }) => {
     await authenticatePage(page, member)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     // Wait for channels to load
@@ -297,8 +296,6 @@ test.describe('Channel CRUD', () => {
 
   test('member cannot see a private channel', async ({ page }) => {
     await authenticatePage(page, member)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     // Wait for channels to load
@@ -318,8 +315,6 @@ test.describe('Channel CRUD', () => {
 
   test('admin can see a private channel', async ({ page }) => {
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const channelButtons = page.locator('[data-test="channel-button"]')
@@ -334,8 +329,6 @@ test.describe('Channel CRUD', () => {
 
   test('member sees read-only channel but cannot post', async ({ page }) => {
     await authenticatePage(page, member)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
     await selectChannel(page, 'announcements')
 
@@ -347,18 +340,16 @@ test.describe('Channel CRUD', () => {
     const messageInput = page.locator('[data-test="message-input"]')
     await expect(messageInput).toBeVisible()
 
-    // WHY: HeroUI Textarea with isReadOnly={true} sets both data-readonly="true" on
-    // the wrapper and aria-readonly="true" on the native textarea (via React Aria).
-    // Check the wrapper's data attribute — it is explicitly set by HeroUI's getBaseProps.
-    await expect(messageInput).toHaveAttribute('data-readonly', 'true')
+    // WHY: HeroUI Textarea with isReadOnly={true} sets aria-readonly="true" on
+    // the native <textarea> element (via React Aria). data-test lands on the native
+    // textarea, so we assert on aria-readonly which lives on that same element.
+    await expect(messageInput).toHaveAttribute('aria-readonly', 'true')
   })
 
   // ── Read-only channel: admin can post ─────────────────────────────
 
   test('admin can post in a read-only channel', async ({ page }) => {
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
     await selectChannel(page, 'announcements')
 
@@ -369,8 +360,8 @@ test.describe('Channel CRUD', () => {
     // Message input should NOT be readonly for admin
     const messageInput = page.locator('[data-test="message-input"]')
     await expect(messageInput).toBeVisible()
-    // WHY: data-readonly is absent (undefined) when isReadOnly is false.
-    await expect(messageInput).not.toHaveAttribute('data-readonly', 'true')
+    // WHY: aria-readonly is absent when isReadOnly is false for admin users.
+    await expect(messageInput).not.toHaveAttribute('aria-readonly', 'true')
 
     // Admin can send a message
     await messageInput.fill('Admin announcement')

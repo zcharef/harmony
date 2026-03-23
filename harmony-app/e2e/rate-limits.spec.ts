@@ -1,15 +1,20 @@
 import { expect, test } from '@playwright/test'
-import { authenticatePage, selectChannel, selectServer } from './fixtures/auth-fixture'
 import {
   createDm,
   createServer,
   getServerChannels,
+  sendMessageRaw,
   syncProfile,
 } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
 
 /**
  * Rate limiting E2E tests.
+ *
+ * WHY API-only: Rate limits are enforced by the Rust API, not the UI.
+ * Testing via direct API calls is deterministic and fast. UI-based message
+ * sending adds ~200ms per message (fill + Enter + response), which can push
+ * 6 messages outside the 5-second window and cause false passes/failures.
  *
  * Verified limits (from domain services):
  * - Messages: 5 per 5 seconds per user per channel (MessageService::RATE_LIMIT_MAX)
@@ -22,47 +27,33 @@ test.describe('Rate Limiting', () => {
 
   test.describe('Message Rate Limit', () => {
     let sender: TestUser
-    let server: { id: string; name: string }
-    let channelName: string
+    let channelId: string
 
     test.beforeAll(async () => {
       sender = await createTestUser('rate-msg-sender')
       await syncProfile(sender.token)
-      server = await createServer(sender.token)
+      const server = await createServer(sender.token)
       const { items: channels } = await getServerChannels(sender.token, server.id)
-      channelName = channels[0].name
+      channelId = channels[0].id
     })
 
-    test('6th message within 5 seconds is rate-limited', async ({ page }) => {
-      // WHY: authenticatePage already navigates to '/' and waits for main-layout.
-      // Avoid redundant page.goto('/') which causes a reload race condition.
-      await authenticatePage(page, sender)
-      await selectServer(page, server.id)
-      await selectChannel(page, channelName)
-      await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10000 })
+    test('6th message within 5 seconds is rate-limited', async () => {
+      const statuses: number[] = []
 
-      const messageInput = page.locator('[data-test="message-input"]')
-      const responses: number[] = []
-
-      // Send 6 messages rapidly
+      // WHY: Send all 6 messages rapidly via API to stay within the 5-second window.
+      // Sequential awaits are fine — each HTTP round-trip is <50ms against localhost.
       for (let i = 1; i <= 6; i++) {
-        const content = `rate-test-msg-${i}-${Date.now()}`
-        await messageInput.fill(content)
-
-        const responsePromise = page.waitForResponse(
-          (response) =>
-            response.url().includes('/messages') && response.request().method() === 'POST',
+        const { status } = await sendMessageRaw(
+          sender.token,
+          channelId,
+          `rate-test-msg-${i}-${Date.now()}`,
         )
-
-        await messageInput.press('Enter')
-
-        const response = await responsePromise
-        responses.push(response.status())
+        statuses.push(status)
       }
 
       // First 5 should succeed (2xx), 6th should be rate-limited (429)
-      const successCount = responses.filter((s) => s >= 200 && s < 300).length
-      const rateLimitedCount = responses.filter((s) => s === 429).length
+      const successCount = statuses.filter((s) => s >= 200 && s < 300).length
+      const rateLimitedCount = statuses.filter((s) => s === 429).length
 
       expect(successCount).toBe(5)
       expect(rateLimitedCount).toBe(1)

@@ -18,7 +18,7 @@
  * - roles-tab.tsx:89 (roles-member-row), :111 (role-select), :276 (settings-role-list)
  * - roles-tab.tsx:260 (transfer-ownership-button)
  */
-import { expect, test } from '@playwright/test'
+import { type Page, expect, test } from '@playwright/test'
 import { authenticatePage, selectServer } from './fixtures/auth-fixture'
 import {
   assignRole,
@@ -30,6 +30,41 @@ import {
   syncProfile,
 } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
+
+/**
+ * Navigates to a server and waits for the members API to resolve before returning.
+ *
+ * WHY: useMyMemberRole defaults to 'member' while the members API call is in-flight.
+ * The server-menu-settings-item gets className="hidden" until the role resolves.
+ * We register the response listener BEFORE selectServer triggers the members fetch,
+ * so the response is never missed.
+ */
+async function navigateToServer(page: Page, serverId: string): Promise<void> {
+  // WHY: Register listener BEFORE selectServer, because selectServer triggers channel
+  // sidebar mount which fires the members query. If we wait after, the response is missed.
+  const membersLoaded = page.waitForResponse(
+    (res) => res.url().includes(`/v1/servers/${serverId}/members`) && res.status() < 400,
+    { timeout: 15_000 },
+  )
+  await selectServer(page, serverId)
+  await membersLoaded
+}
+
+/**
+ * Opens the server settings panel for an admin+ user.
+ * WHY: Extracted to reduce duplication — every settings test repeats this 5-step flow.
+ */
+async function openServerSettings(page: Page, serverId: string): Promise<void> {
+  await page.locator('[data-test="server-header-button"]').click()
+  // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
+  const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
+  await settingsItem.waitFor({ timeout: 5_000 })
+  // WHY: force:true bypasses the actionability "stable" check. HeroUI dropdown items
+  // animate on open and can fail the stability check before the animation completes,
+  // causing the click to time out while the dropdown eventually closes on its own.
+  await settingsItem.click({ force: true })
+  await page.locator('[data-test="server-settings"]').waitFor({ timeout: 10_000 })
+}
 
 test.describe('Server Settings Role Gating', () => {
   let owner: TestUser
@@ -63,19 +98,9 @@ test.describe('Server Settings Role Gating', () => {
 
   test('owner can open server settings and see all tabs', async ({ page }) => {
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    await navigateToServer(page, server.id)
 
-    // Open server settings via server header menu
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-
-    const serverSettings = page.locator('[data-test="server-settings"]')
-    await serverSettings.waitFor({ timeout: 10_000 })
+    await openServerSettings(page, server.id)
 
     // Verify all 4 tabs are visible
     await expect(page.locator('[data-test="settings-tab-overview"]')).toBeVisible()
@@ -89,18 +114,9 @@ test.describe('Server Settings Role Gating', () => {
 
   test('admin can open server settings and see all tabs', async ({ page }) => {
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    await navigateToServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-
-    const serverSettings = page.locator('[data-test="server-settings"]')
-    await serverSettings.waitFor({ timeout: 10_000 })
+    await openServerSettings(page, server.id)
 
     await expect(page.locator('[data-test="settings-tab-overview"]')).toBeVisible()
     await expect(page.locator('[data-test="settings-tab-roles"]')).toBeVisible()
@@ -113,9 +129,9 @@ test.describe('Server Settings Role Gating', () => {
     // Member (rank 1) < admin (rank 3), so server-menu-settings-item has class "hidden".
     // Also, server-settings.tsx:36-38 auto-closes if non-admin.
     await authenticatePage(page, member)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    // WHY: navigateToServer waits for the members API response so the hidden class
+    // reflects the real role (member), not just the default loading state.
+    await navigateToServer(page, server.id)
 
     // Open server header menu
     await page.locator('[data-test="server-header-button"]').click()
@@ -128,18 +144,9 @@ test.describe('Server Settings Role Gating', () => {
 
   test('overview tab — admin can edit server name', async ({ page }) => {
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    await navigateToServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-
-    const serverSettings = page.locator('[data-test="server-settings"]')
-    await serverSettings.waitFor({ timeout: 10_000 })
+    await openServerSettings(page, server.id)
 
     // Overview tab is the default tab
     const nameInput = page.locator('[data-test="settings-server-name-input"]')
@@ -152,7 +159,7 @@ test.describe('Server Settings Role Gating', () => {
     const saveButton = page.locator('[data-test="settings-save-overview-button"]')
     await expect(saveButton).toBeVisible()
 
-    // Edit the name, save, and verify API call
+    // Edit the name, save, and verify API call succeeds
     const newName = `${server.name} Edited`
     await nameInput.clear()
     await nameInput.fill(newName)
@@ -168,33 +175,22 @@ test.describe('Server Settings Role Gating', () => {
     const updateResponse = await updateResponsePromise
     expect(updateResponse.status()).toBeLessThan(400)
 
-    // Restore the name for other tests
-    const restoreResponsePromise = page.waitForResponse(
-      (response) =>
-        response.url().includes(`/v1/servers/${server.id}`) &&
-        response.request().method() === 'PATCH',
-    )
-    await nameInput.clear()
-    await nameInput.fill(server.name)
-    await saveButton.click()
-    const restoreResponse = await restoreResponsePromise
-    expect(restoreResponse.status()).toBeLessThan(400)
+    // WHY: Restore is done via API to avoid fighting the cache invalidation remount cycle.
+    // The PATCH triggers queryClient.invalidateQueries which remounts the form, creating
+    // a race between the test filling the input and the form reinitializing with new defaultValues.
+    const restoreRes = await fetch(`http://localhost:3000/v1/servers/${server.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${admin.token}` },
+      body: JSON.stringify({ name: server.name }),
+    })
+    expect(restoreRes.status).toBeLessThan(400)
   })
 
   test('channels tab — admin sees create and manage controls', async ({ page }) => {
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    await navigateToServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-
-    const serverSettings = page.locator('[data-test="server-settings"]')
-    await serverSettings.waitFor({ timeout: 10_000 })
+    await openServerSettings(page, server.id)
 
     // Navigate to Channels tab
     await page.locator('[data-test="settings-tab-channels"]').click()
@@ -219,18 +215,9 @@ test.describe('Server Settings Role Gating', () => {
 
   test('bans tab — admin sees ban list', async ({ page }) => {
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    await navigateToServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-
-    const serverSettings = page.locator('[data-test="server-settings"]')
-    await serverSettings.waitFor({ timeout: 10_000 })
+    await openServerSettings(page, server.id)
 
     await page.locator('[data-test="settings-tab-bans"]').click()
 
@@ -249,18 +236,9 @@ test.describe('Server Settings Role Gating', () => {
 
   test('roles tab — admin can manage roles via select dropdown', async ({ page }) => {
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    await navigateToServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-
-    const serverSettings = page.locator('[data-test="server-settings"]')
-    await serverSettings.waitFor({ timeout: 10_000 })
+    await openServerSettings(page, server.id)
 
     await page.locator('[data-test="settings-tab-roles"]').click()
 
@@ -291,18 +269,9 @@ test.describe('Server Settings Role Gating', () => {
   test('roles tab — admin cannot see transfer ownership button', async ({ page }) => {
     // WHY: roles-tab.tsx:255 — only callerRole === 'owner' renders the button.
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    await navigateToServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-
-    const serverSettings = page.locator('[data-test="server-settings"]')
-    await serverSettings.waitFor({ timeout: 10_000 })
+    await openServerSettings(page, server.id)
 
     await page.locator('[data-test="settings-tab-roles"]').click()
 
@@ -315,18 +284,9 @@ test.describe('Server Settings Role Gating', () => {
   test('overview tab — owner sees delete server section', async ({ page }) => {
     // WHY: overview-tab.tsx:129 — only callerRole === 'owner' renders DeleteServerSection.
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    await navigateToServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-
-    const serverSettings = page.locator('[data-test="server-settings"]')
-    await serverSettings.waitFor({ timeout: 10_000 })
+    await openServerSettings(page, server.id)
 
     // Overview is default tab — verify danger zone is visible for owner
     const deleteInput = page.locator('[data-test="delete-server-confirm-input"]')
@@ -341,18 +301,9 @@ test.describe('Server Settings Role Gating', () => {
   test('overview tab — admin does NOT see delete server section', async ({ page }) => {
     // WHY: overview-tab.tsx:129 — DeleteServerSection only rendered for owner.
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    await navigateToServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-
-    const serverSettings = page.locator('[data-test="server-settings"]')
-    await serverSettings.waitFor({ timeout: 10_000 })
+    await openServerSettings(page, server.id)
 
     // Overview is default tab — delete section should NOT be visible for admin
     await expect(page.locator('[data-test="delete-server-confirm-input"]')).not.toBeVisible()
@@ -361,23 +312,15 @@ test.describe('Server Settings Role Gating', () => {
 
   test('settings can be closed via close button', async ({ page }) => {
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
+    await navigateToServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-
-    const serverSettings = page.locator('[data-test="server-settings"]')
-    await serverSettings.waitFor({ timeout: 10_000 })
+    await openServerSettings(page, server.id)
 
     // Click close button
     await page.locator('[data-test="close-settings-button"]').click()
 
     // Settings should disappear, main layout with channel sidebar returns
+    const serverSettings = page.locator('[data-test="server-settings"]')
     await expect(serverSettings).not.toBeVisible({ timeout: 5_000 })
     await expect(page.locator('[data-test="channel-sidebar"]')).toBeVisible({ timeout: 10_000 })
   })

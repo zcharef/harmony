@@ -149,6 +149,24 @@ export async function sendMessage(
   return (await res.json()) as { id: string; content: string }
 }
 
+/**
+ * POST /v1/channels/{id}/messages — non-throwing variant that returns the raw Response.
+ * WHY: Used by tests that assert on specific HTTP status codes (e.g., 429 rate limit).
+ */
+export async function sendMessageRaw(
+  token: string,
+  channelId: string,
+  content: string,
+): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ content }),
+  })
+  const body = await res.json().catch(() => null)
+  return { status: res.status, body }
+}
+
 /** DELETE /v1/servers/{id}/members/{user_id} — kick a member from a server. */
 export async function kickMember(token: string, serverId: string, userId: string): Promise<void> {
   const res = await fetch(`${API_URL}/v1/servers/${serverId}/members/${userId}`, {

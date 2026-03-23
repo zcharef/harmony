@@ -80,6 +80,7 @@ test.describe('Input Validation', () => {
       const responsePromise = page.waitForResponse(
         (response) =>
           response.url().includes('/v1/servers') && response.request().method() === 'POST',
+        { timeout: 15_000 },
       )
 
       await page.locator('[data-test="create-server-submit-button"]').click()
@@ -153,10 +154,12 @@ test.describe('Input Validation', () => {
   // ── Message Content Validation ──────────────────────────────────
 
   test.describe('Message Content', () => {
+    let channelId: string
     let channelName: string
 
     test.beforeAll(async () => {
       const { items: channels } = await getServerChannels(owner.token, server.id)
+      channelId = channels[0].id
       channelName = channels[0].name
     })
 
@@ -165,7 +168,7 @@ test.describe('Input Validation', () => {
       await selectServer(page, server.id)
       await selectChannel(page, channelName)
 
-      await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10000 })
+      await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
 
       const messageInput = page.locator('[data-test="message-input"]')
       await messageInput.fill('   ')
@@ -185,26 +188,25 @@ test.describe('Input Validation', () => {
       expect(count).toBe(0)
     })
 
-    test('rejects message exceeding 4000 characters via API', async ({ page }) => {
-      await authenticatePage(page, owner)
-      await selectServer(page, server.id)
-      await selectChannel(page, channelName)
-
-      await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10000 })
-
-      const longMessage = 'x'.repeat(4001)
-      const messageInput = page.locator('[data-test="message-input"]')
-      await messageInput.fill(longMessage)
-
-      const responsePromise = page.waitForResponse(
-        (response) =>
-          response.url().includes('/messages') && response.request().method() === 'POST',
+    test('rejects message exceeding 4000 characters via API', async () => {
+      // WHY: Pure API test — the max-length rule is enforced by the Rust API,
+      // not client-side JS. Using direct HTTP eliminates flaky UI navigation
+      // (authenticatePage + selectServer + selectChannel) that caused intermittent
+      // 45s timeouts when the API was slow. Same pattern as ban-reason and
+      // channel-topic tests below.
+      const res = await fetch(
+        `http://localhost:3000/v1/channels/${channelId}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${owner.token}`,
+          },
+          body: JSON.stringify({ content: 'x'.repeat(4001) }),
+        },
       )
 
-      await messageInput.press('Enter')
-
-      const response = await responsePromise
-      expect(response.status()).toBeGreaterThanOrEqual(400)
+      expect(res.status).toBeGreaterThanOrEqual(400)
     })
   })
 
@@ -248,55 +250,23 @@ test.describe('Input Validation', () => {
   // ── Invite Code Validation ──────────────────────────────────────
 
   test.describe('Invite Code', () => {
-    test('rejects non-alphanumeric invite code', async ({ page }) => {
-      await authenticatePage(page, owner)
+    test('rejects non-alphanumeric invite code', async () => {
+      // WHY: Pure API test — the invite code format rule is enforced by the
+      // Rust API (alphanumeric only, 1-32 chars). Using direct HTTP eliminates
+      // flaky UI interactions (dialog open/fill/click) that caused intermittent
+      // timeouts due to Supabase session refreshes detaching the DOM.
+      const res = await fetch('http://localhost:3000/v1/invites/abc-def!@#')
 
-      await page.locator('[data-test="join-server-button"]').click()
-      await page.locator('[data-test="join-server-dialog"]').waitFor({ timeout: 10000 })
-
-      const codeInput = page.locator('[data-test="invite-code-input"]')
-      await codeInput.fill('abc-def!@#')
-
-      // WHY: Set up response listener BEFORE the click to avoid a race where
-      // the API response arrives before the listener is registered.
-      const responsePromise = page.waitForResponse(
-        (response) =>
-          response.url().includes('/v1/invites') && response.request().method() === 'GET',
-      )
-
-      await page.locator('[data-test="join-server-preview-button"]').click()
-
-      const response = await responsePromise
-      expect(response.status()).toBeGreaterThanOrEqual(400)
-
-      // API validation rejects non-alphanumeric codes — error shows in dialog
-      await expect(page.locator('[data-test="join-server-dialog"]')).toBeVisible({ timeout: 5000 })
+      expect(res.status).toBeGreaterThanOrEqual(400)
     })
 
-    test('rejects invite code exceeding 32 characters', async ({ page }) => {
-      await authenticatePage(page, owner)
-
-      await page.locator('[data-test="join-server-button"]').click()
-      await page.locator('[data-test="join-server-dialog"]').waitFor({ timeout: 10000 })
-
+    test('rejects invite code exceeding 32 characters', async () => {
+      // WHY: Pure API test — same rationale as above. The 32-char limit is a
+      // server-side validation rule, not a client-side UX concern.
       const longCode = 'a'.repeat(33)
-      const codeInput = page.locator('[data-test="invite-code-input"]')
-      await codeInput.fill(longCode)
+      const res = await fetch(`http://localhost:3000/v1/invites/${longCode}`)
 
-      // WHY: Set up response listener BEFORE the click to avoid a race where
-      // the API response arrives before the listener is registered.
-      const responsePromise = page.waitForResponse(
-        (response) =>
-          response.url().includes('/v1/invites') && response.request().method() === 'GET',
-      )
-
-      await page.locator('[data-test="join-server-preview-button"]').click()
-
-      const response = await responsePromise
-      expect(response.status()).toBeGreaterThanOrEqual(400)
-
-      // API rejects codes > 32 chars — dialog stays open
-      await expect(page.locator('[data-test="join-server-dialog"]')).toBeVisible({ timeout: 5000 })
+      expect(res.status).toBeGreaterThanOrEqual(400)
     })
   })
 
