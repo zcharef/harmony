@@ -59,8 +59,6 @@ test.describe('Member List & Context Menu', () => {
 
   test('member list shows all server members with role badges', async ({ page }) => {
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -100,8 +98,6 @@ test.describe('Member List & Context Menu', () => {
 
   test('right-click member — context menu appears with Send Message', async ({ page }) => {
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -123,8 +119,6 @@ test.describe('Member List & Context Menu', () => {
     // WHY: member (rank 1) cannot moderate anyone. canKick, canBan, canChangeRole
     // all require callerRank > targetRank, plus minimum rank thresholds.
     await authenticatePage(page, member)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -153,8 +147,6 @@ test.describe('Member List & Context Menu', () => {
     // canKick = outranksTarget AND callerRank >= moderator(2) => true.
     // canBan = outranksTarget AND callerRank >= admin(3) => false.
     await authenticatePage(page, mod)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -182,8 +174,6 @@ test.describe('Member List & Context Menu', () => {
     // WHY: moderator (rank 2) does NOT outrank admin (rank 3).
     // outranksTarget = false, so canKick = false.
     await authenticatePage(page, mod)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -215,8 +205,6 @@ test.describe('Member List & Context Menu', () => {
     await assignRole(owner.token, server.id, mod2.id, 'moderator')
 
     await authenticatePage(page, mod)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -243,8 +231,6 @@ test.describe('Member List & Context Menu', () => {
     // canBan = true (rank >= admin AND outranks)
     // canChangeRole = true (rank >= admin AND outranks)
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -272,8 +258,6 @@ test.describe('Member List & Context Menu', () => {
     // WHY: admin (rank 3) does NOT outrank owner (rank 4).
     // outranksTarget = false, so all moderation actions are hidden.
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -302,8 +286,6 @@ test.describe('Member List & Context Menu', () => {
     // When isSelf is true AND no moderation actions: shows "no actions available".
     // member-context-menu.tsx:116 — renders the "no actions" fallback.
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')

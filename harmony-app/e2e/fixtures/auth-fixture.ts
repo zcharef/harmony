@@ -99,12 +99,17 @@ export async function loginViaUI(page: Page, email: string, password: string): P
  * WHY: Tests should navigate via UI, not by constructing URLs.
  */
 export async function selectServer(page: Page, serverId: string): Promise<void> {
+  // WHY: server-list renders only after useServers() query resolves (isPending === false).
+  // While isPending, a Spinner is shown without the data-test="server-list" attribute.
+  // Waiting for it first avoids racing against the TanStack Query cold-cache load.
+  await page.locator('[data-test="server-list"]').waitFor({ timeout: 15_000 })
+
   // WHY: Server buttons have data-server-id attributes — direct ID match is
   // instant and deterministic. Tooltip-hover was unreliable in parallel runs.
   const btn = page.locator(`[data-test="server-button"][data-server-id="${serverId}"]`)
-  await btn.waitFor({ timeout: 10000 })
+  await btn.waitFor({ timeout: 10_000 })
   await btn.click()
-  await page.locator('[data-test="channel-sidebar"]').waitFor({ timeout: 10000 })
+  await page.locator('[data-test="channel-sidebar"]').waitFor({ timeout: 10_000 })
 }
 
 /**
