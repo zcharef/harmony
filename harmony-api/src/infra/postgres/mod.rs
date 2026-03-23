@@ -30,12 +30,29 @@ use sqlx::postgres::PgPoolOptions;
 
 use crate::domain::errors::DomainError;
 
-/// Convert a sqlx error to a `DomainError::Internal`, logging the real error.
+/// Convert a sqlx error to the appropriate `DomainError`, logging the real error.
 ///
 /// WHY: Centralizes DB error logging so every repository adapter
 /// automatically traces the raw sqlx error at the point of failure.
+/// Maps Postgres error code 42501 (`insufficient_privilege`) to
+/// `DomainError::Forbidden` so trigger-raised permission errors
+/// surface as 403 instead of 500.
 #[allow(clippy::needless_pass_by_value)] // WHY: map_err provides owned values
 pub(crate) fn db_err(e: sqlx::Error) -> DomainError {
+    // WHY: Postgres triggers (e.g. protect_message_content) raise
+    // ERRCODE 42501 for permission violations. Map these to Forbidden
+    // so the API returns 403 instead of a misleading 500.
+    if let sqlx::Error::Database(ref db_err) = e
+        && db_err.code().as_deref() == Some("42501")
+    {
+        tracing::warn!(
+            error = %e,
+            pg_code = "42501",
+            "Database permission denied (trigger or RLS)"
+        );
+        return DomainError::Forbidden(db_err.message().to_string());
+    }
+
     tracing::error!(error = %e, "Database query failed");
     DomainError::Internal(e.to_string())
 }

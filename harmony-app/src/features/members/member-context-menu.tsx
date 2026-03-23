@@ -105,10 +105,17 @@ export function MemberContextMenu({
   }
 
   return (
-    <Dropdown isOpen={isOpen} onOpenChange={onOpenChange} placement="bottom-start">
+    <Dropdown
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      placement="bottom-start"
+      // WHY: data-test on Dropdown flows to the Popover wrapper (single visible DOM
+      // element when open). Placing it on DropdownMenu causes HeroUI to duplicate it
+      // onto both the base <div> and the <ul> — breaking Playwright strict-mode.
+      data-test="member-context-menu"
+    >
       <DropdownTrigger>{children}</DropdownTrigger>
       <DropdownMenu
-        data-test="member-context-menu"
         aria-label={t('memberActions', { username: targetUsername })}
         disabledKeys={
           canSendMessage === false && hasModerationAction === false ? ['no-actions'] : []
@@ -119,24 +126,35 @@ export function MemberContextMenu({
             {t('noActionsAvailable')}
           </DropdownItem>
         ) : (
-          <ContextMenuActions
-            perms={perms}
-            canSendMessage={canSendMessage}
-            assignableRoles={assignableRoles}
-            targetUsername={targetUsername}
-            onRoleChange={handleRoleChange}
-            onSendMessage={handleSendMessage}
-            onKick={onKick}
-            onBan={onBan}
-          />
+          // WHY: Called as a function, NOT rendered as <ContextMenuActions />.
+          // React Aria's Collection system (used by DropdownMenu) iterates children
+          // and calls type.getCollectionNode() on each. A custom component wrapper
+          // doesn't have getCollectionNode → "type.getCollectionNode is not a function"
+          // crash. Calling as a function returns a Fragment whose DropdownSection
+          // children get flattened into the Collection directly.
+          renderContextMenuActions({
+            t,
+            perms,
+            canSendMessage,
+            assignableRoles,
+            targetUsername,
+            onRoleChange: handleRoleChange,
+            onSendMessage: handleSendMessage,
+            onKick,
+            onBan,
+          })
         )}
       </DropdownMenu>
     </Dropdown>
   )
 }
 
-/** WHY extracted: Isolates the conditional rendering branches to stay under complexity limit. */
-function ContextMenuActions({
+/** WHY a plain function (not a component): React Aria Collections require children of
+ * DropdownMenu to have a static getCollectionNode method. Rendering as <ContextMenuActions />
+ * creates a component boundary that Collection can't process. Called as renderContextMenuActions(),
+ * the returned Fragment is flattened and Collection sees DropdownSection nodes directly. */
+function renderContextMenuActions({
+  t,
   perms,
   canSendMessage,
   assignableRoles,
@@ -146,6 +164,7 @@ function ContextMenuActions({
   onKick,
   onBan,
 }: {
+  t: (key: string, options?: Record<string, string>) => string
   perms: { canChangeRole: boolean; canKick: boolean; canBan: boolean }
   canSendMessage: boolean
   assignableRoles: Array<{ key: AssignRoleRequest['role']; label: string }>
@@ -155,7 +174,6 @@ function ContextMenuActions({
   onKick: () => void
   onBan: () => void
 }) {
-  const { t } = useTranslation('members')
   const hasModerationAction = perms.canChangeRole || perms.canKick || perms.canBan
 
   return (

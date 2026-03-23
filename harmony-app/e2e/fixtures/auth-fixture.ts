@@ -22,7 +22,7 @@ import type { TestUser } from './user-factory'
  */
 export async function authenticatePage(
   page: Page,
-  user: Pick<TestUser, 'token' | 'email' | 'id'>,
+  user: Pick<TestUser, 'token' | 'email' | 'id' | 'refreshToken'>,
 ): Promise<void> {
   // WHY: Supabase client reads session from localStorage on init.
   // The storage key follows the pattern: sb-<project-ref>-auth-token
@@ -34,7 +34,7 @@ export async function authenticatePage(
     token_type: 'bearer',
     expires_in: 3600,
     expires_at: Math.floor(Date.now() / 1000) + 3600,
-    refresh_token: 'e2e-fake-refresh-token',
+    refresh_token: user.refreshToken,
     user: {
       id: user.id,
       aud: 'authenticated',

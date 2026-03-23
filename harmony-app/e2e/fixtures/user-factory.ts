@@ -17,6 +17,7 @@ export interface TestUser {
   email: string
   password: string
   token: string
+  refreshToken: string
 }
 
 /**
@@ -71,12 +72,13 @@ export async function createTestUser(prefix: string): Promise<TestUser> {
     throw new Error(`Failed to sign in test user: ${signInRes.status} ${body}`)
   }
 
-  const session = (await signInRes.json()) as { access_token: string }
+  const session = (await signInRes.json()) as { access_token: string; refresh_token: string }
 
   return {
     id: user.id,
     email,
     password,
     token: session.access_token,
+    refreshToken: session.refresh_token,
   }
 }
