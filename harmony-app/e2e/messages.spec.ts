@@ -208,10 +208,10 @@ test.describe('Messaging', () => {
     // WHY: Supabase Realtime in local dev is unreliable, so we accept either outcome.
     // Both confirm the delete succeeded; the difference is the UI path.
     await expect(async () => {
-      const text = await contentEl.textContent().catch(() => null)
-      const isGone = (await messageItem.count()) === 0
-      const isTombstone = text === '[Message deleted]'
-      expect(isGone || isTombstone).toBe(true)
+      const count = await messageItem.count()
+      if (count === 0) return // message removed from list — delete confirmed
+      const text = await contentEl.textContent()
+      expect(text).toBe('[Message deleted]')
     }).toPass({ timeout: 15_000 })
   })
 
@@ -255,10 +255,10 @@ test.describe('Messaging', () => {
     // 2. No Realtime → query invalidation refetches list → message disappears
     // WHY: Supabase Realtime in local dev is unreliable, so we accept either outcome.
     await expect(async () => {
-      const text = await contentEl.textContent().catch(() => null)
-      const isGone = (await messageItem.count()) === 0
-      const isTombstone = text === '[Message removed by moderator]'
-      expect(isGone || isTombstone).toBe(true)
+      const count = await messageItem.count()
+      if (count === 0) return // message removed from list — delete confirmed
+      const text = await contentEl.textContent()
+      expect(text).toBe('[Message removed by moderator]')
     }).toPass({ timeout: 15_000 })
   })
 

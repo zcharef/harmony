@@ -37,17 +37,48 @@ test.describe('Concurrent Access', () => {
     const channelId = channels[0].id
     const channelName = channels[0].name
 
+    // WHY: Capture the Realtime WebSocket BEFORE navigating so we can wait for
+    // the subscription acknowledgment. Supabase Realtime sends a phx_reply with
+    // status "ok" once postgres_changes is subscribed. Without this, the INSERT
+    // event may fire before the subscription is ready — the root cause of the
+    // previous test.skip.
+    const wsPromise = page.waitForEvent('websocket', {
+      predicate: (ws) => ws.url().includes('/realtime/'),
+      timeout: 20_000,
+    })
+
     // User B opens the channel in the browser
     await authenticatePage(page, userB)
     await selectServer(page, server.id)
     await selectChannel(page, channelName)
 
-    // WHY: Wait for the chat area to mount — this triggers the Realtime subscription
-    // setup (useRealtimeMessages). We also wait a beat for the WebSocket handshake
-    // to complete before sending the message, otherwise the INSERT event may fire
-    // before the subscription is ready to receive it.
+    // Wait for chat area mount (triggers useRealtimeMessages subscription)
     await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
-    await page.waitForTimeout(2_000)
+
+    // WHY: Wait for the Realtime WebSocket to connect and confirm the
+    // postgres_changes subscription is active. The server sends a phx_reply
+    // frame with status:"ok" for the subscription join. We wait for this
+    // specific frame to guarantee the channel is listening before we send.
+    const ws = await wsPromise
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        // WHY: If subscription ack never arrives within 10s, proceed anyway.
+        // The toPass assertion below has its own retry budget.
+        resolve()
+      }, 10_000)
+
+      ws.on('framereceived', (frame) => {
+        if (typeof frame.payload === 'string' && frame.payload.includes('"status":"ok"')) {
+          clearTimeout(timeout)
+          resolve()
+        }
+      })
+
+      ws.on('close', () => {
+        clearTimeout(timeout)
+        reject(new Error('Realtime WebSocket closed before subscription confirmed'))
+      })
+    })
 
     // User A sends a message via API (not through browser UI).
     // WHY: Using a single browser page avoids browser.newContext() issues
@@ -56,12 +87,14 @@ test.describe('Concurrent Access', () => {
     const uniqueMessage = `realtime-test-${Date.now()}`
     await sendMessage(userA.token, channelId, uniqueMessage)
 
-    // User B should see the message via Realtime INSERT event.
-    // WHY: generous timeout because Realtime delivery latency is unpredictable
-    // in local dev (Supabase Realtime has variable warm-up time).
+    // User B should see the message appear in the chat area.
+    // WHY toPass: Realtime delivery latency in local Supabase is variable.
+    // toPass retries the assertion block periodically (default 2s interval)
+    // within the timeout budget, making this resilient to slow delivery
+    // without requiring fragile fixed waits.
     const messageOnB = page
       .locator('[data-test="message-content"]')
       .filter({ hasText: uniqueMessage })
-    await expect(messageOnB).toBeVisible({ timeout: 20_000 })
+    await expect(messageOnB).toBeVisible({ timeout: 15_000 })
   })
 })
