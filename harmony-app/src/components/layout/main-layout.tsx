@@ -81,15 +81,19 @@ function useServerAutoSelect(
 
   // WHY: If the selected server was removed (e.g., user was kicked/banned),
   // reset selection so the UI doesn't show stale data.
+  // IMPORTANT: Only applies in 'servers' view. In 'dms' view, selectedServerId
+  // points to a DM server which may not yet appear in the useServers() cache
+  // (createDm invalidates the query, but refetch is async). Resetting here
+  // would race against the cache refresh and clear the DM selection.
   useEffect(() => {
-    if (selectedServerId !== null && servers !== undefined) {
+    if (view === 'servers' && selectedServerId !== null && servers !== undefined) {
       const stillExists = servers.some((s) => s.id === selectedServerId)
       if (!stillExists) {
         setSelectedServerId(null)
         setSelectedChannelId(null)
       }
     }
-  }, [selectedServerId, servers, setSelectedServerId, setSelectedChannelId])
+  }, [view, selectedServerId, servers, setSelectedServerId, setSelectedChannelId])
 }
 
 export function MainLayout() {
