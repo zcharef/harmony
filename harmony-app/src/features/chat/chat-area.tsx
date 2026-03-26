@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { useAuthStore } from '@/features/auth'
 import {
+  DmPlaintextBanner,
   E2eeAlphaBanner,
   EncryptedChannelNotice,
   EncryptionRequiredBanner,
@@ -422,14 +423,20 @@ function ChatWelcome({
 // WHY extracted: Keeps ChatArea below Biome's cognitive complexity limit of 15.
 function useInputPlaceholder(
   isInputDisabled: boolean,
+  isWebEncryptionBlocked: boolean,
   isDm: boolean,
   dmRecipient: DmRecipientResponse | null,
   channelName: string | null,
 ) {
   const { t } = useTranslation('chat')
   const { t: tDms } = useTranslation('dms')
+  const { t: tCrypto } = useTranslation('crypto')
 
-  if (isInputDisabled) return t('settings:announcementPlaceholder')
+  if (isInputDisabled) {
+    // WHY: Distinguish encrypted-channel-on-web from read-only announcement channels.
+    if (isWebEncryptionBlocked) return tCrypto('encryptionDesktopOnly')
+    return t('settings:announcementPlaceholder')
+  }
 
   const dmDisplayName =
     dmRecipient !== null ? (dmRecipient.displayName ?? dmRecipient.username) : null
@@ -601,7 +608,8 @@ function useDecryptionCachePreload(
 
 /**
  * WHY extracted: Renders encryption banners for the chat welcome section.
- * Shows EncryptionRequiredBanner on web for encrypted DMs/channels.
+ * Encrypted channels on web get the blocking EncryptionRequiredBanner.
+ * DMs on web get the softer DmPlaintextBanner (web DMs work, just unencrypted).
  */
 function EncryptionBannerSection({
   isDm,
@@ -610,10 +618,18 @@ function EncryptionBannerSection({
   isDm: boolean
   isChannelEncrypted: boolean
 }) {
-  if ((isDm || isChannelEncrypted) && !isTauri()) {
+  if (!isTauri() && isChannelEncrypted) {
     return (
       <div className="mt-4">
         <EncryptionRequiredBanner />
+      </div>
+    )
+  }
+  // WHY: DMs on web work (plaintext), but show a softer informational banner.
+  if (!isTauri() && isDm) {
+    return (
+      <div className="mt-4">
+        <DmPlaintextBanner />
       </div>
     )
   }
@@ -780,8 +796,9 @@ export function ChatArea({
 
   /** WHY: Blocked contacts cannot receive messages from us. Read-only also disables. */
   const isBlocked = isDm && isTauri() && trustLevel === 'blocked'
-  // WHY: Web users must not send plaintext to E2EE channels/DMs — encryption requires Tauri desktop.
-  const isWebEncryptionBlocked = !isTauri() && (isDm || isChannelEncrypted)
+  // WHY: Encrypted channels require Tauri desktop (Megolm can't degrade per-message).
+  // DMs are NOT blocked on web — web users send plaintext DMs with clear indicators.
+  const isWebEncryptionBlocked = !isTauri() && isChannelEncrypted
   const isInputDisabled =
     isBlocked ||
     isWebEncryptionBlocked ||
@@ -791,6 +808,7 @@ export function ChatArea({
   const isDmInitFailed = isDm && isTauri() && initFailed
   const inputPlaceholder = useInputPlaceholder(
     isInputDisabled && !isBlocked,
+    isWebEncryptionBlocked,
     isDm,
     dmRecipient,
     channelName,

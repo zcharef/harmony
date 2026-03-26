@@ -7,11 +7,14 @@
  * - EncryptionRequiredBanner shown on web for encrypted channels
  * - E2EE alpha banner shown in the toolbar for encrypted channels
  * - Message input disabled on web for encrypted channels
+ * - DMs on web: input enabled (plaintext), DmPlaintextBanner shown, per-message lock icons
+ * - Encrypted message fallback text on web in DMs
  *
  * WHY web-only scope: The Playwright tests run against the Vite dev server (not Tauri).
  * On web, isTauri() returns false, so the encryption toggle is disabled (desktop-only)
- * and the message input is blocked for encrypted channels. These tests verify those
- * guards work correctly and that the API-level encryption flag is reflected in the UI.
+ * and the message input is blocked for encrypted channels. DMs are an exception: web
+ * users can send plaintext DMs, with clear indicators distinguishing them from encrypted
+ * messages sent by desktop users.
  *
  * Real data-test attributes from:
  * - channels-tab.tsx:160 (channel-encryption-toggle), :175 (channel-encryption-toggle-disabled)
@@ -20,18 +23,23 @@
  * - encrypted-channel-badge.tsx:21 (encrypted-channel-badge)
  * - encryption-required-banner.tsx:20 (encryption-required-banner)
  * - e2ee-alpha-banner.tsx:17 (e2ee-alpha-banner)
- * - chat-area.tsx:341 (message-input), :820 (chat-area)
+ * - chat-area.tsx:342 (message-input), :820 (chat-area)
  * - encrypted-channel-notice.tsx:41 (encrypted-channel-notice)
+ * - dm-plaintext-banner.tsx:18 (dm-plaintext-banner)
+ * - message-item.tsx:279 (message-encryption-indicator)
+ * - message-item.tsx:182 (encrypted web fallback in message-content)
  */
 import { expect, test } from '@playwright/test'
 import { authenticatePage, selectChannel, selectServer } from './fixtures/auth-fixture'
 import {
   assignRole,
   createChannel,
+  createDm,
   createInvite,
   createServer,
   getServerChannels,
   joinServer,
+  sendMessage,
   syncProfile,
   updateChannel,
   updateChannelRaw,
@@ -196,8 +204,8 @@ test.describe('Encryption UI', () => {
   test('encrypted channel shows encryption-required banner and disables input on web', async ({
     page,
   }) => {
-    // WHY: chat-area.tsx:615 — (isDm || isChannelEncrypted) && !isTauri() renders EncryptionRequiredBanner.
-    // WHY: chat-area.tsx:787 — isWebEncryptionBlocked disables the message input on web.
+    // WHY: chat-area.tsx:621 — !isTauri() && isChannelEncrypted renders EncryptionRequiredBanner.
+    // WHY: chat-area.tsx:801 — isWebEncryptionBlocked (= !isTauri() && isChannelEncrypted) disables input.
     await authenticatePage(page, owner)
     await selectServer(page, server.id)
 
@@ -401,5 +409,167 @@ test.describe('Encryption UI', () => {
     const plain = channels.items.find((c) => c.id === plainChannel.id)
     expect(plain).toBeDefined()
     expect(plain?.encrypted).toBe(false)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DM Encryption on Web — mixed-encryption model
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// WHY separate describe: DMs follow a different encryption model than channels.
+// On web, DMs are ENABLED (plaintext) while encrypted channels are BLOCKED.
+// Desktop users send encrypted DMs (Olm); web users send plaintext DMs.
+// The UI shows per-message lock indicators so users can distinguish.
+//
+// Source: chat-area.tsx:801 — isWebEncryptionBlocked = !isTauri() && isChannelEncrypted
+// (isDm is NOT included, so DMs are not blocked on web)
+
+test.describe('DM Encryption on Web', () => {
+  let dmUserA: TestUser
+  let dmUserB: TestUser
+  let dmData: { serverId: string; channelId: string }
+  let dmMessage: string
+
+  test.beforeAll(async () => {
+    dmUserA = await createTestUser('enc-dm-a')
+    dmUserB = await createTestUser('enc-dm-b')
+    for (const u of [dmUserA, dmUserB]) await syncProfile(u.token)
+
+    // WHY: Both users must share a server so they can DM each other
+    // (the DM API requires both users to have profiles).
+    const sharedServer = await createServer(dmUserA.token, `Enc DM E2E ${Date.now()}`)
+    const invite = await createInvite(dmUserA.token, sharedServer.id)
+    await joinServer(dmUserB.token, sharedServer.id, invite.code)
+
+    // Create DM and send a message via API so the conversation has content.
+    // WHY: sendMessage via API creates a plaintext message (no Tauri = no encryption),
+    // which is the expected state for web DM messages.
+    dmData = await createDm(dmUserA.token, dmUserB.id)
+    dmMessage = `Plaintext DM from web ${Date.now()}`
+    await sendMessage(dmUserA.token, dmData.channelId, dmMessage)
+  })
+
+  test('web user can send plaintext DM — input enabled, DmPlaintextBanner visible', async ({
+    page,
+  }) => {
+    // WHY: chat-area.tsx:801 — isWebEncryptionBlocked = !isTauri() && isChannelEncrypted.
+    // DMs are NOT channel-encrypted, so the input is NOT blocked on web.
+    // chat-area.tsx:629 — !isTauri() && isDm renders DmPlaintextBanner (not EncryptionRequiredBanner).
+    await authenticatePage(page, dmUserA)
+
+    // Navigate to DM view
+    await page.locator('[data-test="dm-home-button"]').click()
+    await page.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+    // Select the DM conversation
+    const dmItem = page.locator(
+      `[data-test="dm-conversation-item"][data-dm-server-id="${dmData.serverId}"]`,
+    )
+    await dmItem.waitFor({ timeout: 10_000 })
+    await dmItem.click()
+
+    const chatArea = page.locator('[data-test="chat-area"]')
+    await chatArea.waitFor({ timeout: 10_000 })
+
+    // Message input should NOT be readonly — web DMs allow plaintext input.
+    // WHY: HeroUI Textarea passes data-test directly to the <textarea> element.
+    const messageInput = page.locator('[data-test="message-input"]')
+    await messageInput.waitFor({ timeout: 10_000 })
+    await expect(messageInput).not.toHaveAttribute('readonly')
+
+    // DmPlaintextBanner should be visible (softer informational banner for web DMs).
+    // WHY: dm-plaintext-banner.tsx:18 — data-test="dm-plaintext-banner".
+    await expect(page.locator('[data-test="dm-plaintext-banner"]')).toBeVisible({
+      timeout: 10_000,
+    })
+
+    // EncryptionRequiredBanner should NOT appear — that banner is for encrypted channels only.
+    await expect(page.locator('[data-test="encryption-required-banner"]')).not.toBeAttached()
+
+    // Verify the previously sent message is visible in the message list.
+    const messageContent = page
+      .locator('[data-test="message-content"]')
+      .filter({ hasText: dmMessage })
+    await expect(messageContent.first()).toBeVisible({ timeout: 10_000 })
+
+    // Type and send a new message from the web client to verify input works end-to-end.
+    const newMessage = `Web DM reply ${Date.now()}`
+    await messageInput.fill(newMessage)
+    await messageInput.press('Enter')
+
+    // Verify the new message appears in the message list.
+    const sentContent = page
+      .locator('[data-test="message-content"]')
+      .filter({ hasText: newMessage })
+    await expect(sentContent.first()).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('per-message lock icons appear in DM conversation', async ({ page }) => {
+    // WHY: message-item.tsx:270-287 — isDm renders a per-message encryption indicator.
+    // Lock (filled) = encrypted (from desktop), LockOpen = plaintext (from web).
+    // Since our test message was sent via API (no Tauri), it should show LockOpen.
+    await authenticatePage(page, dmUserA)
+
+    await page.locator('[data-test="dm-home-button"]').click()
+    await page.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+    const dmItem = page.locator(
+      `[data-test="dm-conversation-item"][data-dm-server-id="${dmData.serverId}"]`,
+    )
+    await dmItem.waitFor({ timeout: 10_000 })
+    await dmItem.click()
+
+    await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+    // Wait for at least one message to render
+    const messageItem = page.locator('[data-test="message-item"]')
+    await messageItem.first().waitFor({ timeout: 10_000 })
+
+    // Verify encryption indicator exists on messages in the DM.
+    // WHY: message-item.tsx:279 — data-test="message-encryption-indicator" renders
+    // inside a Tooltip with lock/lock-open icon for every DM message.
+    const encryptionIndicator = page.locator('[data-test="message-encryption-indicator"]')
+    await expect(encryptionIndicator.first()).toBeVisible({ timeout: 10_000 })
+  })
+
+  test('encrypted message from desktop shows fallback text on web', async ({ page }) => {
+    // WHY: message-item.tsx:178-187 — when message.encrypted === true && !isTauri(),
+    // the component renders an italicized fallback: "Encrypted message — open in desktop app to read"
+    // with a Lock icon, instead of showing raw ciphertext.
+    //
+    // LIMITATION: This test cannot create a real encrypted message because Playwright
+    // runs on web (no Tauri, no vodozemac). To fully test the encrypted fallback render,
+    // a desktop→web integration test is needed. Here we verify the structural expectations:
+    // 1. Plaintext messages render normally (not as fallback).
+    // 2. The fallback text is NOT shown for plaintext messages (no false positives).
+    await authenticatePage(page, dmUserA)
+
+    await page.locator('[data-test="dm-home-button"]').click()
+    await page.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+    const dmItem = page.locator(
+      `[data-test="dm-conversation-item"][data-dm-server-id="${dmData.serverId}"]`,
+    )
+    await dmItem.waitFor({ timeout: 10_000 })
+    await dmItem.click()
+
+    await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+    // Verify our plaintext message renders as normal text (not the encrypted fallback).
+    const messageContent = page
+      .locator('[data-test="message-content"]')
+      .filter({ hasText: dmMessage })
+    await expect(messageContent.first()).toBeVisible({ timeout: 10_000 })
+
+    // The encrypted fallback text should NOT appear for plaintext messages.
+    // WHY: "Encrypted message" fallback (crypto.json:encryptedWebFallback) only renders
+    // when message.encrypted === true && !isTauri(). Our API-sent messages have encrypted=false.
+    const fallbackText = page
+      .locator('[data-test="message-content"]')
+      .filter({ hasText: 'Encrypted message' })
+    // WHY: Use count() === 0 instead of not.toBeAttached() because there could be
+    // multiple message-content elements and we need to verify NONE contain fallback text.
+    const fallbackCount = await fallbackText.count()
+    expect(fallbackCount).toBe(0)
   })
 })

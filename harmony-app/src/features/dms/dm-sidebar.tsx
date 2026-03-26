@@ -76,6 +76,9 @@ function DmConversationItem({
         </div>
         <div className="flex flex-1 flex-col overflow-hidden">
           <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+          {/* TODO(e2ee): DmLastMessageResponse needs `encrypted` field from backend
+             to show "[Encrypted message]" fallback on web. Without it, encrypted
+             messages from desktop will render as raw ciphertext in the sidebar. */}
           {dm.lastMessage !== undefined && dm.lastMessage !== null && (
             <span className="truncate text-xs text-default-500">
               {dm.lastMessage.content.length > 50
