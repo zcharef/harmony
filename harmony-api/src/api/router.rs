@@ -157,8 +157,12 @@ pub fn build_router(state: AppState) -> Router {
         ));
 
     // ── Public v1 routes (no auth required) ───────────
-    let public_routes =
-        Router::new().route("/v1/invites/{code}", get(handlers::invites::preview_invite));
+    let public_routes = Router::new()
+        .route("/v1/invites/{code}", get(handlers::invites::preview_invite))
+        .route(
+            "/v1/auth/check-username",
+            get(handlers::profiles::check_username),
+        );
 
     let mut router = Router::new();
 

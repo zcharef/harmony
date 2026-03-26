@@ -32,5 +32,5 @@ pub use messages::{
     EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, SendMessageRequest,
 };
 pub use pagination::PaginatedResponse;
-pub use profiles::ProfileResponse;
+pub use profiles::{CheckUsernameQuery, CheckUsernameResponse, ProfileResponse};
 pub use servers::{CreateServerRequest, ServerListResponse, ServerResponse, UpdateServerRequest};

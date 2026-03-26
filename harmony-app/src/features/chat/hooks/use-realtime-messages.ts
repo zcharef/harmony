@@ -30,12 +30,24 @@ const realtimeMessageSchema = z.object({
 /**
  * WHY: Transform validated snake_case DB row to camelCase MessageResponse.
  * Separated from the schema so the mapping is explicit and type-safe.
+ *
+ * WHY authorUsername fallback: Supabase Realtime delivers raw `messages` table
+ * rows — they never include JOINed profile data. The API enriches via JOIN,
+ * but the realtime path bypasses the API. We resolve the author from the
+ * existing message cache (REST responses already have authorUsername), or fall
+ * back to the first 8 chars of the UUID as a last resort.
  */
-function toMessageResponse(row: z.infer<typeof realtimeMessageSchema>): MessageResponse {
+function toMessageResponse(
+  row: z.infer<typeof realtimeMessageSchema>,
+  resolveAuthor: (authorId: string) => { username: string; avatarUrl?: string | null },
+): MessageResponse {
+  const author = resolveAuthor(row.author_id)
   return {
     id: row.id,
     channelId: row.channel_id,
     authorId: row.author_id,
+    authorUsername: author.username,
+    authorAvatarUrl: author.avatarUrl,
     content: row.content,
     createdAt: row.created_at,
     editedAt: row.edited_at ?? undefined,
@@ -65,6 +77,27 @@ export function useRealtimeMessages(channelId: string) {
     // WHY: Empty channelId means no channel selected — don't subscribe
     if (channelId.length === 0) return
 
+    /**
+     * WHY: Resolves author username from the existing message cache.
+     * REST API responses already include authorUsername (via JOIN), so any
+     * previously fetched message from this author provides the username.
+     * Falls back to first 8 chars of UUID for authors never seen via REST.
+     */
+    function resolveAuthor(authorId: string): { username: string; avatarUrl?: string | null } {
+      const cached = queryClient.getQueryData<InfiniteData<MessageListResponse>>(
+        queryKeys.messages.byChannel(channelId),
+      )
+      if (cached) {
+        for (const page of cached.pages) {
+          const match = page.items.find((m) => m.authorId === authorId)
+          if (match) {
+            return { username: match.authorUsername, avatarUrl: match.authorAvatarUrl }
+          }
+        }
+      }
+      return { username: authorId.slice(0, 8) }
+    }
+
     const channel = supabase
       .channel(`messages:${channelId}`)
       .on(
@@ -85,7 +118,7 @@ export function useRealtimeMessages(channelId: string) {
             return
           }
 
-          const message = toMessageResponse(parsed.data)
+          const message = toMessageResponse(parsed.data, resolveAuthor)
 
           queryClient.setQueryData<InfiniteData<MessageListResponse>>(
             queryKeys.messages.byChannel(channelId),
@@ -133,7 +166,7 @@ export function useRealtimeMessages(channelId: string) {
           // we update in-place. For soft-deletes, the message stays in cache
           // with `deletedBy` set so the UI can show "[Message deleted]" or
           // "[Message removed by moderator]" instead of silently disappearing.
-          const message = toMessageResponse(parsed.data)
+          const message = toMessageResponse(parsed.data, resolveAuthor)
           queryClient.setQueryData<InfiniteData<MessageListResponse>>(
             queryKeys.messages.byChannel(channelId),
             (old) => {

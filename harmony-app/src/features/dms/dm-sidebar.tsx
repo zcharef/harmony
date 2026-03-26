@@ -2,7 +2,7 @@ import { Avatar, Button, Spinner } from '@heroui/react'
 import { Headphones, MessageSquarePlus, Mic, Settings, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAuthStore } from '@/features/auth'
+import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import type { DmListItem } from '@/lib/api'
 import { useCloseDm } from './hooks/use-close-dm'
@@ -118,14 +118,9 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
   const closeDmMutation = useCloseDm()
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const user = useAuthStore((s) => s.user)
+  const { data: profile } = useCurrentProfile()
   const status = useUserStatus(user?.id ?? '')
-  const username =
-    (typeof user?.user_metadata?.username === 'string' ? user.user_metadata.username : undefined) ??
-    (typeof user?.user_metadata?.display_name === 'string'
-      ? user.user_metadata.display_name
-      : undefined) ??
-    user?.email?.split('@')[0] ??
-    'You'
+  const username = profile?.username ?? 'You'
 
   const statusLabels = {
     online: t('statusOnline'),

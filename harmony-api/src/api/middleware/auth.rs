@@ -48,6 +48,7 @@ pub async fn require_auth(
             email: None,
             role: None,
             email_verified: session_data.email_verified,
+            user_metadata: None,
         };
 
         // WHY: email_verified is baked into the session cookie at login time.

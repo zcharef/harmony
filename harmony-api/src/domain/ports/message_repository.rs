@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{ChannelId, Message, MessageId, UserId};
+use crate::domain::models::{ChannelId, Message, MessageId, MessageWithAuthor, UserId};
 
 /// Intent-based repository for messages.
 #[async_trait]
@@ -15,7 +15,7 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         channel_id: &ChannelId,
         author_id: &UserId,
         content: String,
-    ) -> Result<Message, DomainError>;
+    ) -> Result<MessageWithAuthor, DomainError>;
 
     /// List messages in a channel with cursor-based pagination (ADR-036).
     ///
@@ -25,7 +25,7 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         channel_id: &ChannelId,
         cursor: Option<DateTime<Utc>>,
         limit: i64,
-    ) -> Result<Vec<Message>, DomainError>;
+    ) -> Result<Vec<MessageWithAuthor>, DomainError>;
 
     /// Find a message by ID (returns `None` if not found OR soft-deleted).
     async fn find_by_id(&self, message_id: &MessageId) -> Result<Option<Message>, DomainError>;
@@ -36,7 +36,7 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         &self,
         message_id: &MessageId,
         content: String,
-    ) -> Result<Message, DomainError>;
+    ) -> Result<MessageWithAuthor, DomainError>;
 
     /// Soft-delete a message (ADR-038). Sets `deleted_at=now()` and `deleted_by`.
     async fn soft_delete(

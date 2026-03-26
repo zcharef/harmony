@@ -50,6 +50,9 @@ pub struct AuthenticatedUser {
     pub email: Option<String>,
     pub role: Option<String>,
     pub email_verified: bool,
+    /// WHY: Carries Supabase `user_metadata` from the JWT so handlers can read
+    /// fields like `username` set during signup without an extra API call.
+    pub user_metadata: Option<serde_json::Value>,
 }
 
 /// Verify a Supabase JWT and extract user information.
@@ -123,6 +126,7 @@ pub fn verify_supabase_jwt(
         email: token_data.claims.email,
         role: token_data.claims.role,
         email_verified,
+        user_metadata: token_data.claims.user_metadata,
     })
 }
 

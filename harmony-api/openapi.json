@@ -68,13 +68,46 @@
         }
       }
     },
+    "/v1/auth/check-username": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Check whether a username is available for registration.",
+        "description": "Public endpoint (no auth required) — used during signup to give instant feedback.\nValidates format, checks reserved list, and queries the database.\n\n# Errors\nReturns `ApiError` on database failure.",
+        "operationId": "check_username",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "query",
+            "description": "The username to check for availability.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Availability check result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckUsernameResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/me": {
       "post": {
         "tags": [
           "Auth"
         ],
         "summary": "Sync (get or create) the authenticated user's profile.",
-        "description": "Called after Supabase login. Creates a profile row if this is the first login,\nor returns the existing one.\n\n# Errors\nReturns `ApiError` if the JWT lacks an email claim or the upsert fails.",
+        "description": "Called after Supabase login. Creates a profile row if this is the first login,\nor returns the existing one.\n\nUsername resolution order:\n1. `user_metadata.username` from the JWT (set during signup)\n2. Fallback: derived from the email prefix\n\n# Errors\nReturns `ApiError` if the JWT lacks an email claim, the username is reserved,\nor the upsert fails.",
         "operationId": "sync_profile",
         "responses": {
           "200": {
@@ -89,6 +122,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Username reserved",
             "content": {
               "application/json": {
                 "schema": {
@@ -2548,6 +2591,31 @@
           "voice"
         ]
       },
+      "CheckUsernameQuery": {
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "The username to check for availability."
+          }
+        }
+      },
+      "CheckUsernameResponse": {
+        "type": "object",
+        "description": "Response for the username availability check.",
+        "required": [
+          "available"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether the username is available for registration."
+          }
+        }
+      },
       "ClaimedKeyResponse": {
         "type": "object",
         "description": "A claimed key in a pre-key bundle response.",
@@ -3185,13 +3253,25 @@
           "id",
           "channelId",
           "authorId",
+          "authorUsername",
           "content",
           "encrypted",
           "createdAt"
         ],
         "properties": {
+          "authorAvatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Author's avatar URL (if set)."
+          },
           "authorId": {
             "$ref": "#/components/schemas/UserId"
+          },
+          "authorUsername": {
+            "type": "string",
+            "description": "Author's username from their profile."
           },
           "channelId": {
             "$ref": "#/components/schemas/ChannelId"

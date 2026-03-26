@@ -31,6 +31,14 @@ impl ProfileService {
         self.repo.upsert_from_auth(user_id, email, username).await
     }
 
+    /// Check whether a username is already taken.
+    ///
+    /// # Errors
+    /// Returns `DomainError` on repository failure.
+    pub async fn is_username_taken(&self, username: &str) -> Result<bool, DomainError> {
+        self.repo.is_username_taken(username).await
+    }
+
     /// Get a profile by user ID.
     ///
     /// # Errors

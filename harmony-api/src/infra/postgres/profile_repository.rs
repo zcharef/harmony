@@ -85,8 +85,7 @@ impl ProfileRepository for PgProfileRepository {
             INSERT INTO profiles (id, username, status)
             VALUES ($1, $2, $3)
             ON CONFLICT (id) DO UPDATE
-                SET username = EXCLUDED.username,
-                    updated_at = now()
+                SET id = profiles.id
             RETURNING
                 id,
                 username,
@@ -103,7 +102,12 @@ impl ProfileRepository for PgProfileRepository {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(super::db_err)?;
+        .map_err(|e| match e {
+            sqlx::Error::Database(ref db_err) if db_err.is_unique_violation() => {
+                DomainError::Conflict("Username is already taken".to_string())
+            }
+            other => super::db_err(other),
+        })?;
 
         let profile_row = ProfileRow {
             id: row.id,
@@ -117,6 +121,18 @@ impl ProfileRepository for PgProfileRepository {
         };
 
         Ok(profile_row.into_profile())
+    }
+
+    async fn is_username_taken(&self, username: &str) -> Result<bool, DomainError> {
+        let row = sqlx::query!(
+            r#"SELECT EXISTS(SELECT 1 FROM profiles WHERE username = $1) AS "taken!""#,
+            username,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.taken)
     }
 
     async fn get_by_id(&self, user_id: &UserId) -> Result<Option<Profile>, DomainError> {

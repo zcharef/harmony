@@ -15,8 +15,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { z } from 'zod'
-import { useAuthStore } from '@/features/auth'
+import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import {
   DmPlaintextBanner,
   E2eeAlphaBanner,
@@ -140,25 +139,16 @@ function useThrottledScroll(
 }
 
 /**
- * WHY Zod: user_metadata is external data from Supabase Auth (CLAUDE.md §1.2).
- * Using `as string` would lie to the compiler if the shape ever changes.
- * Fallback to email prefix ensures a display name always exists.
+ * WHY: Combines Supabase Auth user ID (available immediately) with the DB
+ * profile username (SSoT via GET /v1/profiles/me). Falls back to i18n
+ * 'unknownUser' while the profile is loading.
  */
-const userMetaSchema = z.object({
-  username: z.string().optional(),
-  display_name: z.string().optional(),
-})
-
 function useCurrentUser() {
   const { t } = useTranslation('chat')
   const user = useAuthStore((s) => s.user)
+  const { data: profile } = useCurrentProfile()
   const id = user?.id ?? ''
-  const meta = userMetaSchema.safeParse(user?.user_metadata)
-  const username =
-    (meta.success ? meta.data.username : undefined) ??
-    (meta.success ? meta.data.display_name : undefined) ??
-    user?.email?.split('@')[0] ??
-    t('unknownUser')
+  const username = profile?.username ?? t('unknownUser')
   return { id, username }
 }
 
@@ -166,10 +156,11 @@ function useCurrentUser() {
 function useMessageActions(
   channelId: string | null,
   currentUserId: string,
+  currentUsername: string,
   encryption?: SendMessageEncryption,
 ) {
   const safeChannelId = channelId ?? ''
-  const sendMessage = useSendMessage(safeChannelId, currentUserId, encryption)
+  const sendMessage = useSendMessage(safeChannelId, currentUserId, currentUsername, encryption)
   const editMessageMutation = useEditMessage(safeChannelId)
   const deleteMessageMutation = useDeleteMessage(safeChannelId)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
@@ -760,7 +751,7 @@ export function ChatArea({
     handleCancelEdit,
     handleSaveEdit,
     handleDelete,
-  } = useMessageActions(channelId, currentUser.id, activeEncryption)
+  } = useMessageActions(channelId, currentUser.id, currentUser.username, activeEncryption)
   const [messageContent, setMessageContent] = useState('')
   const [isVerifyOpen, setIsVerifyOpen] = useState(false)
 

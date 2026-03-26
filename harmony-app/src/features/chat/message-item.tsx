@@ -221,9 +221,7 @@ export const MessageItem = memo(function MessageItem({
 }: MessageItemProps) {
   const { t } = useTranslation('messages')
   const { t: tCrypto } = useTranslation('crypto')
-  // WHY: authorId is a UUID — use first 8 chars as label fallback.
-  // A proper profile lookup would be a future enhancement.
-  const authorLabel = message.authorId.slice(0, 8)
+  const authorLabel = message.authorUsername
 
   // WHY derive from ID: Optimistic messages use `temp-*` IDs. Deriving pending
   // state from the ID avoids an extra prop and stays in sync automatically —
