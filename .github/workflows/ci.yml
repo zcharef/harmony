@@ -1,6 +1,6 @@
 # Harmony CI/CD — Quality Wall + E2E Tests + Deploy
 #
-# CI: 3 parallel jobs (app wall ~30s, Rust wall ~60s, E2E ~3min)
+# CI: 2 parallel quality walls → E2E → 2 parallel deploys
 # CD: On push to main, deploys API to Fly.io + SPA to Cloudflare Pages
 
 name: CI
@@ -21,7 +21,7 @@ env:
 
 jobs:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # Job 1: App Quality Wall (~30s)
+  # Job 1: App Quality Wall
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   app-quality:
     name: App Quality Wall
@@ -68,7 +68,8 @@ jobs:
         run: pnpm knip
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # Job 2: Rust Quality Wall (~60s)
+  # Job 2: Rust Quality Wall
+  # WHY no Postgres service: all steps use SQLX_OFFLINE=true with .sqlx/ cache.
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   rust-quality:
     name: Rust Quality Wall
@@ -76,21 +77,8 @@ jobs:
     defaults:
       run:
         working-directory: harmony-api
-
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: harmony_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    env:
+      SQLX_OFFLINE: "true"
 
     steps:
       - uses: actions/checkout@v4
@@ -102,6 +90,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: harmony-api
+          shared-key: harmony-rust
 
       - name: Check formatting
         run: cargo fmt --check
@@ -109,18 +98,18 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
       - name: Security audit
         # WHY ignore: RUSTSEC-2023-0071 is in `rsa` via `sqlx-mysql` (transitive). We only use Postgres. No fix available.
-        run: |
-          command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
-          cargo audit --ignore RUSTSEC-2023-0071
+        run: cargo audit --ignore RUSTSEC-2023-0071
 
       - name: Run tests
         env:
-          # WHY SQLX_OFFLINE: CI Postgres has no Supabase schema (auth.uid() etc.).
-          # The .sqlx/ cache lets sqlx macros compile; unit tests run without a live DB.
-          SQLX_OFFLINE: "true"
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/harmony_test
+          DATABASE_URL: postgres://unused:unused@localhost/unused
           SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           SUPABASE_URL: http://localhost:9999
           ENVIRONMENT: test
@@ -129,21 +118,20 @@ jobs:
 
       - name: OpenAPI freshness check
         env:
-          SQLX_OFFLINE: "true"
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/harmony_test
+          DATABASE_URL: postgres://unused:unused@localhost/unused
           SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           SUPABASE_URL: http://localhost:9999
           ENVIRONMENT: test
           SERVER_PORT: "3000"
         run: |
-          cargo run --bin export_openapi > /tmp/openapi-fresh.json
+          cargo run --bin export_openapi 2>/dev/null > /tmp/openapi-fresh.json
           diff -u openapi.json /tmp/openapi-fresh.json || {
             echo "openapi.json is stale. Run just export-openapi and commit."
             exit 1
           }
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # Job 3: E2E Tests (~3min)
+  # Job 3: E2E Tests
   # WHY Supabase Cloud: dedicated CI project avoids Docker-in-Docker overhead.
   # supabase db push applies pending migrations. Test data uses unique IDs
   # so accumulation doesn't cause conflicts.
@@ -171,21 +159,33 @@ jobs:
         working-directory: harmony-app
         run: pnpm install --frozen-lockfile
 
+      # ── Playwright with browser cache ───────────────────
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('harmony-app/pnpm-lock.yaml') }}
+
       - name: Install Playwright (chromium only)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: harmony-app
         run: npx playwright install --with-deps chromium
 
-      # ── Rust toolchain ───────────────────────────────────
+      - name: Install Playwright system deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: harmony-app
+        run: npx playwright install-deps chromium
+
+      # ── Rust toolchain (shared cache from rust-quality) ─
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: harmony-api
+          shared-key: harmony-rust
 
       # ── Supabase Cloud: apply pending migrations ─────────
-      # WHY: Dedicated CI Supabase Cloud project. supabase db push
-      # applies any new migrations without destroying existing data.
-      # Test data uses unique IDs so accumulation is safe.
       - uses: supabase/setup-cli@v1
         with:
           version: latest
@@ -202,16 +202,10 @@ jobs:
         run: supabase db push
 
       # ── Build & start Rust API ───────────────────────────
-      # WHY: API runs locally in the CI runner, connects to Cloud Supabase.
       - name: Build Rust API
         working-directory: harmony-api
         env:
           SQLX_OFFLINE: "true"
-          DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
-          SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
-          SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
-          ENVIRONMENT: test
-          SERVER_PORT: "3000"
         run: cargo build --release
 
       - name: Start Rust API (background)
@@ -271,8 +265,6 @@ jobs:
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Job 4: Deploy API to Fly.io (only on push to main, after E2E passes)
-  # WHY: Rolling deploy — zero downtime. Fly.io starts new instance,
-  # health-checks it, then stops the old one.
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   deploy-api:
     name: Deploy API (Fly.io)
@@ -293,8 +285,6 @@ jobs:
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Job 5: Deploy SPA to Cloudflare Pages (only on push to main)
-  # WHY: Static SPA build deployed to Cloudflare's global edge network.
-  # app.joinharmony.app serves the React app.
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   deploy-spa:
     name: Deploy SPA (Cloudflare Pages)
