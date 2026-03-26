@@ -141,7 +141,14 @@ export function usePresence(
       // populate the member list store for the currently selected server.
       ch.on('presence', { event: 'sync' }, () => {
         if (sid !== selectedServerRef.current) return
-        syncPresenceState(parsePresenceState(ch, sid))
+        const users = parsePresenceState(ch, sid)
+        // WHY: Own status is authoritative from local activity tracking.
+        // ch.track() propagation is async — the channel may still report
+        // 'idle' after the user has returned. Without this override,
+        // syncPresenceState replaces the entire map with stale status.
+        const localStatus: UserStatus = isIdleRef.current ? 'idle' : 'online'
+        users.set(uid, localStatus)
+        syncPresenceState(users)
       })
 
       ch.subscribe(async (status) => {
@@ -184,6 +191,10 @@ export function usePresence(
     if (ch === undefined) return
 
     const users = parsePresenceState(ch, selectedServerId)
+    if (userId !== null) {
+      const localStatus: UserStatus = isIdleRef.current ? 'idle' : 'online'
+      users.set(userId, localStatus)
+    }
     if (users.size > 0) {
       usePresenceStore.getState().syncPresenceState(users)
     }
