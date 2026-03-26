@@ -40,8 +40,8 @@ pub fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(if state.is_production {
             AllowOrigin::list([
-                // SAFETY: hardcoded valid header value
-                HeaderValue::from_static("https://harmony.app"),
+                HeaderValue::from_static("https://app.joinharmony.app"),
+                HeaderValue::from_static("https://joinharmony.app"),
             ])
         } else {
             AllowOrigin::mirror_request()
