@@ -1,8 +1,7 @@
-# Harmony CI — Quality Wall + E2E Tests
+# Harmony CI/CD — Quality Wall + E2E Tests + Deploy
 #
-# Architecture: 3 parallel jobs (app wall ~30s, Rust wall ~60s, E2E ~3min)
-# E2E uses local Supabase (supabase start) — zero Cloud secrets needed.
-# supabase db reset applies all migrations fresh, catching migration bugs.
+# CI: 3 parallel jobs (app wall ~30s, Rust wall ~60s, E2E ~3min)
+# CD: On push to main, deploys API to Fly.io + SPA to Cloudflare Pages
 
 name: CI
 
@@ -255,3 +254,69 @@ jobs:
           name: playwright-test-results
           path: harmony-app/test-results/
           retention-days: 14
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 4: Deploy API to Fly.io (only on push to main, after E2E passes)
+  # WHY: Rolling deploy — zero downtime. Fly.io starts new instance,
+  # health-checks it, then stops the old one.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  deploy-api:
+    name: Deploy API (Fly.io)
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly.io
+        working-directory: harmony-api
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 5: Deploy SPA to Cloudflare Pages (only on push to main)
+  # WHY: Static SPA build deployed to Cloudflare's global edge network.
+  # app.joinharmony.app serves the React app.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  deploy-spa:
+    name: Deploy SPA (Cloudflare Pages)
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: harmony-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: harmony-app
+        run: pnpm install --frozen-lockfile
+
+      - name: Build production SPA
+        working-directory: harmony-app
+        env:
+          VITE_API_URL: https://api.joinharmony.app
+          VITE_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.PROD_TURNSTILE_SITE_KEY }}
+        run: pnpm build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy harmony-app/dist --project-name=harmony-app --branch=main
