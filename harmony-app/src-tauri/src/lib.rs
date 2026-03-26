@@ -11,7 +11,22 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let client = sentry::init((
+        "https://a451fbc1d5091713d710f6db748a29af@o4509859895181312.ingest.de.sentry.io/4511112066695248",
+        sentry::ClientOptions {
+            release: sentry::release_name!(),
+            auto_session_tracking: true,
+            ..Default::default()
+        },
+    ));
+
+    // WHY: Minidump captures native crashes (segfaults, stack overflows) in a separate
+    // crash reporter process so they reach Sentry even if the main process is dead.
+    #[cfg(not(target_os = "ios"))]
+    let _guard = tauri_plugin_sentry::minidump::init(&client);
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_sentry::init(&client))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_keyring::init())
         .manage(CryptoState::new(OlmAccountManager::new()))

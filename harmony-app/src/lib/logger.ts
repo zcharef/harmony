@@ -9,16 +9,20 @@
  * Biome `noConsole: error` enforces this globally.
  */
 
+import { Sentry } from '@/lib/sentry'
+
 export const logger = {
   error(message: string, context?: Record<string, unknown>) {
-    // WHY: Errors are always logged — in dev they appear in devtools,
-    // in production they appear in Tauri's log output for diagnostics.
-    // TODO: Route to Sentry.captureException when @sentry/react is added.
+    // WHY: In production, errors become Sentry breadcrumbs for crash context.
+    // NOT captureException — that's reserved for Error Boundary crashes only (ADR-028).
+    Sentry.addBreadcrumb({ category: 'logger', level: 'error', message, data: context })
     console.error(message, context)
   },
   warn(message: string, context?: Record<string, unknown>) {
     if (import.meta.env.DEV) {
       console.warn(message, context)
+    } else {
+      Sentry.addBreadcrumb({ category: 'logger', level: 'warning', message, data: context })
     }
   },
   info(message: string, context?: Record<string, unknown>) {

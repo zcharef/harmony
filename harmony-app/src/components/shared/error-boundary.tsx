@@ -1,6 +1,7 @@
 import { Button } from '@heroui/react'
 import { type FallbackProps, ErrorBoundary as ReactErrorBoundary } from 'react-error-boundary'
 import { useTranslation } from 'react-i18next'
+import { Sentry } from '@/lib/sentry'
 
 function DefaultErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
   const { t } = useTranslation('common')
@@ -22,8 +23,16 @@ function DefaultErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
   )
 }
 
+// WHY: React render crashes are the ONE case where captureException is mandatory (ADR-028).
+// 4xx/5xx are handled by the API interceptor as breadcrumbs, never as exceptions.
+function handleError(error: unknown, info: React.ErrorInfo) {
+  Sentry.captureException(error, { extra: { componentStack: info.componentStack } })
+}
+
 export function FeatureErrorBoundary({ children }: { children: React.ReactNode }) {
   return (
-    <ReactErrorBoundary FallbackComponent={DefaultErrorFallback}>{children}</ReactErrorBoundary>
+    <ReactErrorBoundary FallbackComponent={DefaultErrorFallback} onError={handleError}>
+      {children}
+    </ReactErrorBoundary>
   )
 }
