@@ -37,6 +37,7 @@ use crate::domain::models::{
     paths(
         // System
         handlers::health_check,
+        handlers::liveness_check,
         // Auth
         handlers::profiles::sync_profile,
         // Profiles

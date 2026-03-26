@@ -35,8 +35,7 @@ pub async fn register_device(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<RegisterDeviceRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let device_id =
-        DeviceId::try_new(req.device_id).map_err(|e| ApiError::bad_request(e))?;
+    let device_id = DeviceId::try_new(req.device_id).map_err(ApiError::bad_request)?;
 
     let device = state
         .key_service()
@@ -74,8 +73,7 @@ pub async fn upload_one_time_keys(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<UploadOneTimeKeysRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let device_id =
-        DeviceId::try_new(req.device_id).map_err(|e| ApiError::bad_request(e))?;
+    let device_id = DeviceId::try_new(req.device_id).map_err(ApiError::bad_request)?;
     let keys: Vec<(String, String, bool)> = req
         .keys
         .into_iter()
@@ -175,8 +173,7 @@ pub async fn remove_device(
     State(state): State<AppState>,
     ApiPath(device_id_str): ApiPath<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let device_id =
-        DeviceId::try_new(device_id_str).map_err(|e| ApiError::bad_request(e))?;
+    let device_id = DeviceId::try_new(device_id_str).map_err(ApiError::bad_request)?;
 
     state
         .key_service()
@@ -212,8 +209,7 @@ pub async fn get_key_count(
     State(state): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<KeyCountQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let device_id =
-        DeviceId::try_new(params.device_id).map_err(|e| ApiError::bad_request(e))?;
+    let device_id = DeviceId::try_new(params.device_id).map_err(ApiError::bad_request)?;
 
     let count = state
         .key_service()

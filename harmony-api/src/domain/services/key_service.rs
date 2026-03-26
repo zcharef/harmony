@@ -224,6 +224,7 @@ pub(crate) fn validate_device_name(name: Option<&str>) -> Result<(), DomainError
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 

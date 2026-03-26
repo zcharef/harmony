@@ -89,11 +89,11 @@ pub async fn list_dms(
     let cursor = query
         .before
         .map(|s| {
-            s.parse::<chrono::DateTime<chrono::Utc>>().map_err(|_| {
-                ApiError::bad_request("Invalid 'before' cursor: expected ISO 8601 timestamp")
-            })
+            s.parse::<chrono::DateTime<chrono::Utc>>()
+                .map_err(|_| "Invalid 'before' cursor: expected ISO 8601 timestamp")
         })
-        .transpose()?;
+        .transpose()
+        .map_err(ApiError::bad_request)?;
 
     let dms = state.dm_service().list_dms(&user_id, cursor, limit).await?;
 

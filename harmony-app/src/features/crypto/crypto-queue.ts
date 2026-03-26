@@ -20,7 +20,10 @@ export function enqueueForSession<T>(sessionId: string, task: QueuedTask<T>): Pr
   // WHY: Two-arg .then() only catches `current`'s rejection, not `task()`'s.
   // If task() itself fails, the error propagates to the caller — no implicit retry
   // that could corrupt the Olm ratchet.
-  const next = current.then(() => task(), () => task())
+  const next = current.then(
+    () => task(),
+    () => task(),
+  )
 
   sessionQueues.set(sessionId, next)
 

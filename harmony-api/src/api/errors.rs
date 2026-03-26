@@ -171,8 +171,7 @@ impl From<DomainError> for ApiError {
                 );
                 // WHY: Hardcoded for now. When billing is added (Phase 4), this
                 // will come from config. YAGNI — no config mechanism until needed.
-                problem.upgrade_url =
-                    Some("https://harmony.app/pricing".to_string());
+                problem.upgrade_url = Some("https://harmony.app/pricing".to_string());
                 ApiError { status, problem }
             }
             // WHY: Already logged at the infrastructure layer (db_err, etc.)

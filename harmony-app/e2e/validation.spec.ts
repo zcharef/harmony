@@ -49,7 +49,9 @@ test.describe('Input Validation', () => {
       // WHY: Client-side Zod schema requires min(1). The zodResolver catches the
       // error before handleSubmit fires, so dialog stays open with the submit
       // button still present — no API call is made.
-      await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({
+        timeout: 5000,
+      })
       await expect(page.locator('[data-test="create-server-submit-button"]')).toBeVisible()
     })
 
@@ -69,7 +71,9 @@ test.describe('Input Validation', () => {
       // WHY: Client-side Zod schema has max(100). The zodResolver catches the
       // error before handleSubmit fires, so no POST request is ever made.
       // Dialog stays open with the submit button still present — no API call needed.
-      await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({
+        timeout: 5000,
+      })
       await expect(page.locator('[data-test="create-server-submit-button"]')).toBeVisible()
     })
 
@@ -95,7 +99,9 @@ test.describe('Input Validation', () => {
       const response = await responsePromise
       expect(response.status()).toBeGreaterThanOrEqual(400)
 
-      await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({
+        timeout: 5000,
+      })
     })
   })
 
@@ -121,7 +127,9 @@ test.describe('Input Validation', () => {
       // WHY: Client-side Zod regex ^[a-z0-9-]+$ rejects uppercase. The zodResolver
       // catches the error before handleSubmit fires, so dialog stays open with the
       // submit button still present — no API call is made.
-      await expect(page.locator('[data-test="create-channel-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-channel-dialog"]')).toBeVisible({
+        timeout: 5000,
+      })
       await expect(page.locator('[data-test="create-channel-submit-button"]')).toBeVisible()
     })
 
@@ -142,7 +150,9 @@ test.describe('Input Validation', () => {
 
       // WHY: Client-side Zod regex ^[a-z0-9-]+$ rejects underscore and exclamation.
       // Dialog stays open with submit button still present — validation prevented submission.
-      await expect(page.locator('[data-test="create-channel-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-channel-dialog"]')).toBeVisible({
+        timeout: 5000,
+      })
       await expect(page.locator('[data-test="create-channel-submit-button"]')).toBeVisible()
     })
 
@@ -164,7 +174,9 @@ test.describe('Input Validation', () => {
 
       // WHY: Client-side Zod schema has max(100). Dialog stays open with submit
       // button still present — validation prevented submission, no API call made.
-      await expect(page.locator('[data-test="create-channel-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-channel-dialog"]')).toBeVisible({
+        timeout: 5000,
+      })
       await expect(page.locator('[data-test="create-channel-submit-button"]')).toBeVisible()
     })
   })
@@ -212,17 +224,14 @@ test.describe('Input Validation', () => {
       // (authenticatePage + selectServer + selectChannel) that caused intermittent
       // 45s timeouts when the API was slow. Same pattern as ban-reason and
       // channel-topic tests below.
-      const res = await fetch(
-        `http://localhost:3000/v1/channels/${channelId}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${owner.token}`,
-          },
-          body: JSON.stringify({ content: 'x'.repeat(4001) }),
+      const res = await fetch(`http://localhost:3000/v1/channels/${channelId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${owner.token}`,
         },
-      )
+        body: JSON.stringify({ content: 'x'.repeat(4001) }),
+      })
 
       expect(res.status).toBeGreaterThanOrEqual(400)
     })

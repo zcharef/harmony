@@ -126,9 +126,7 @@ test.describe('Encryption UI', () => {
     await plainRow.waitFor({ timeout: 10_000 })
 
     // Neither active nor disabled encryption toggle should be visible for admin
-    await expect(
-      plainRow.locator('[data-test="channel-encryption-toggle"]'),
-    ).not.toBeAttached()
+    await expect(plainRow.locator('[data-test="channel-encryption-toggle"]')).not.toBeAttached()
     await expect(
       plainRow.locator('[data-test="channel-encryption-toggle-disabled"]'),
     ).not.toBeAttached()

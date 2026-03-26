@@ -120,7 +120,12 @@ pub struct MegolmSessionResponse {
 
 impl MegolmSessionResponse {
     #[must_use]
-    pub fn new(id: uuid::Uuid, channel_id: ChannelId, session_id: String, created_at: DateTime<Utc>) -> Self {
+    pub fn new(
+        id: uuid::Uuid,
+        channel_id: ChannelId,
+        session_id: String,
+        created_at: DateTime<Utc>,
+    ) -> Self {
         Self {
             id: id.to_string(),
             channel_id,

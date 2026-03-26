@@ -125,7 +125,7 @@ describe('Type Safety', () => {
       const ROUTE_SEGMENTS = ['servers', 'channels', 'settings', 'auth']
       // Match template literals like `/servers/${` or `/channels/${`
       const routePatterns = ROUTE_SEGMENTS.map(
-        (segment) => new RegExp('`[^`]*/' + segment + '/\\$\\{'),
+        (segment) => new RegExp(`\`[^\`]*/${segment}/\\$\\{`),
       )
 
       for (const filePath of files) {

@@ -372,50 +372,98 @@ mod tests {
 
     #[test]
     fn limit_for_owned_servers() {
-        assert_eq!(PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::OwnedServers), 3);
-        assert_eq!(PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::OwnedServers), 10);
-        assert_eq!(PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::OwnedServers), 25);
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::OwnedServers),
+            3
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::OwnedServers),
+            10
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::OwnedServers),
+            25
+        );
     }
 
     #[test]
     fn limit_for_joined_servers() {
-        assert_eq!(PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::JoinedServers), 10);
-        assert_eq!(PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::JoinedServers), 50);
-        assert_eq!(PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::JoinedServers), 100);
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::JoinedServers),
+            10
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::JoinedServers),
+            50
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::JoinedServers),
+            100
+        );
     }
 
     #[test]
     fn limit_for_members() {
-        assert_eq!(PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Members), 150);
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Members),
+            150
+        );
     }
 
     #[test]
     fn limit_for_channels() {
-        assert_eq!(PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Channels), 20);
-        assert_eq!(PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::Channels), 100);
-        assert_eq!(PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::Channels), 500);
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Channels),
+            20
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::Channels),
+            100
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::Channels),
+            500
+        );
     }
 
     #[test]
     fn limit_for_categories() {
-        assert_eq!(PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Categories), 5);
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Categories),
+            5
+        );
     }
 
     #[test]
     fn limit_for_roles() {
-        assert_eq!(PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::Roles), 50);
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::Roles),
+            50
+        );
     }
 
     #[test]
     fn limit_for_active_invites() {
-        assert_eq!(PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::ActiveInvites), 5);
-        assert_eq!(PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::ActiveInvites), 100);
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::ActiveInvites),
+            5
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::ActiveInvites),
+            100
+        );
     }
 
     #[test]
     fn limit_for_open_dms() {
-        assert_eq!(PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::OpenDms), 20);
-        assert_eq!(PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::OpenDms), 500);
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::OpenDms),
+            20
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::OpenDms),
+            500
+        );
     }
 
     // ── Plan FromStr round-trip ─────────────────────────────────────────
@@ -502,7 +550,10 @@ mod tests {
         assert_eq!(ResourceKind::Categories.display_name(), "categories");
         assert_eq!(ResourceKind::Roles.display_name(), "roles");
         assert_eq!(ResourceKind::ActiveInvites.display_name(), "active invites");
-        assert_eq!(ResourceKind::OpenDms.display_name(), "open DM conversations");
+        assert_eq!(
+            ResourceKind::OpenDms.display_name(),
+            "open DM conversations"
+        );
     }
 
     // ── Display impls ───────────────────────────────────────────────────
@@ -534,8 +585,14 @@ mod tests {
 
     #[test]
     fn pro_and_community_have_unlimited_edit_window() {
-        assert_eq!(PlanLimits::for_plan(Plan::Pro).message_edit_window_secs, u64::MAX);
-        assert_eq!(PlanLimits::for_plan(Plan::Community).message_edit_window_secs, u64::MAX);
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Pro).message_edit_window_secs,
+            u64::MAX
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Community).message_edit_window_secs,
+            u64::MAX
+        );
     }
 
     // ── for_self_hosted matches SELF_HOSTED_LIMITS constant ─────────────

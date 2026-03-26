@@ -45,10 +45,7 @@ export function createOutboundSession(channelId: string): Promise<MegolmOutbound
 }
 
 /** Create an inbound Megolm session from a shared session key. */
-export function createInboundSession(
-  channelId: string,
-  sessionKey: string,
-): Promise<string> {
+export function createInboundSession(channelId: string, sessionKey: string): Promise<string> {
   return invoke<string>('megolm_create_inbound_session', {
     channelId,
     sessionKey,

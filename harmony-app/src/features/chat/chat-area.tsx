@@ -516,14 +516,12 @@ function useChannelEncryptionParam(
         return { content: result.content, senderDeviceId: result.senderDeviceId }
       },
       cachePlaintext: (messageId: string, chId: string, plaintext: string) => {
-        cacheMessage(messageId, chId, plaintext, new Date().toISOString()).catch(
-          (err: unknown) => {
-            logger.warn('cache_plaintext_failed', {
-              messageId,
-              error: err instanceof Error ? err.message : String(err),
-            })
-          },
-        )
+        cacheMessage(messageId, chId, plaintext, new Date().toISOString()).catch((err: unknown) => {
+          logger.warn('cache_plaintext_failed', {
+            messageId,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        })
       },
     }
   }, [isChannelEncrypted, isDesktop, isInitialized, channelId, deviceId, encryptChannelMessage])

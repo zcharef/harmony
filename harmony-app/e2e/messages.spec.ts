@@ -377,7 +377,7 @@ test.describe('Messaging', () => {
     // the virtualizer removes off-screen items as it adds new ones. Instead,
     // we verify that the pagination response returned additional message items.
     const paginationBody = (await paginationResponse.json()) as Record<string, unknown>
-    const paginatedItems = paginationBody['items']
+    const paginatedItems = paginationBody.items
     expect(Array.isArray(paginatedItems)).toBe(true)
     expect((paginatedItems as unknown[]).length).toBeGreaterThan(0)
   })

@@ -42,7 +42,16 @@ pub async fn require_auth(
             user_id: UserId::new(user_id),
             email: None,
             role: None,
+            email_verified: session_data.email_verified,
         };
+
+        // WHY: Unverified users must not access protected resources, but
+        // `/v1/auth/me` (sync_profile) is exempt so they can sync after registration.
+        if !user.email_verified && parts.uri.path() != "/v1/auth/me" {
+            return Err(ApiError::forbidden(
+                "Email verification required. Please verify your email address.",
+            ));
+        }
 
         sentry::configure_scope(|scope| {
             scope.set_user(Some(sentry::protocol::User {
@@ -74,6 +83,13 @@ pub async fn require_auth(
             tracing::warn!(error = %e, "JWT verification failed");
             ApiError::unauthorized("Invalid or expired token")
         })?;
+
+    // WHY: Same email verification gate as the session cookie path above.
+    if !user.email_verified && parts.uri.path() != "/v1/auth/me" {
+        return Err(ApiError::forbidden(
+            "Email verification required. Please verify your email address.",
+        ));
+    }
 
     sentry::configure_scope(|scope| {
         scope.set_user(Some(sentry::protocol::User {

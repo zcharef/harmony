@@ -18,7 +18,7 @@
  * - roles-tab.tsx:89 (roles-member-row), :111 (role-select), :276 (settings-role-list)
  * - roles-tab.tsx:260 (transfer-ownership-button)
  */
-import { type Page, expect, test } from '@playwright/test'
+import { expect, type Page, test } from '@playwright/test'
 import { authenticatePage, selectServer } from './fixtures/auth-fixture'
 import {
   assignRole,
@@ -55,7 +55,7 @@ async function navigateToServer(page: Page, serverId: string): Promise<void> {
  * Opens the server settings panel for an admin+ user.
  * WHY: Extracted to reduce duplication — every settings test repeats this 5-step flow.
  */
-async function openServerSettings(page: Page, serverId: string): Promise<void> {
+async function openServerSettings(page: Page, _serverId: string): Promise<void> {
   await page.locator('[data-test="server-header-button"]').click()
   // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
   const settingsItem = page.locator('[data-test="server-menu-settings-item"]')

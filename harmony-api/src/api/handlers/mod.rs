@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::Serialize;
+use serde_json::json;
 use utoipa::ToSchema;
 
 use crate::api::state::AppState;
@@ -24,6 +25,21 @@ use crate::infra::postgres;
 /// Returns a 404 RFC 9457 `ProblemDetails` response instead of Axum's default empty body.
 pub async fn not_found_fallback() -> crate::api::errors::ApiError {
     crate::api::errors::ApiError::not_found("The requested resource was not found")
+}
+
+/// Liveness probe — confirms the process is running and can serve HTTP.
+///
+/// No dependency checks (DB, cache, etc.). Use `/health` for deep readiness.
+#[utoipa::path(
+    get,
+    path = "/health/live",
+    tag = "System",
+    responses(
+        (status = 200, description = "Process is alive")
+    )
+)]
+pub async fn liveness_check() -> impl IntoResponse {
+    Json(json!({"status": "ok"}))
 }
 
 /// Deep health check response with component status.

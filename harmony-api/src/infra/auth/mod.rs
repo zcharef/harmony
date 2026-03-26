@@ -31,6 +31,8 @@ pub struct SupabaseClaims {
     pub email: Option<String>,
     /// Token role (e.g., "authenticated", "anon")
     pub role: Option<String>,
+    /// Timestamp when email was confirmed (present = verified)
+    pub email_confirmed_at: Option<String>,
 }
 
 /// Verified user extracted from a Supabase JWT.
@@ -39,6 +41,7 @@ pub struct AuthenticatedUser {
     pub user_id: UserId,
     pub email: Option<String>,
     pub role: Option<String>,
+    pub email_verified: bool,
 }
 
 /// Verify a Supabase JWT and extract user information.
@@ -97,6 +100,7 @@ pub fn verify_supabase_jwt(
         user_id: UserId::new(token_data.claims.sub),
         email: token_data.claims.email,
         role: token_data.claims.role,
+        email_verified: token_data.claims.email_confirmed_at.is_some(),
     })
 }
 

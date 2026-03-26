@@ -283,7 +283,10 @@ pub async fn create_megolm_session(
         Some(r) => Ok((
             StatusCode::CREATED,
             Json(MegolmSessionResponse::new(
-                r.id, ChannelId::new(r.channel_id), r.session_id, r.created_at,
+                r.id,
+                ChannelId::new(r.channel_id),
+                r.session_id,
+                r.created_at,
             )),
         )),
         // ON CONFLICT DO NOTHING — session already registered, return 201 idempotently
@@ -307,7 +310,10 @@ pub async fn create_megolm_session(
             Ok((
                 StatusCode::CREATED,
                 Json(MegolmSessionResponse::new(
-                    existing.id, ChannelId::new(existing.channel_id), existing.session_id, existing.created_at,
+                    existing.id,
+                    ChannelId::new(existing.channel_id),
+                    existing.session_id,
+                    existing.created_at,
                 )),
             ))
         }

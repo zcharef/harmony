@@ -130,15 +130,13 @@ describe('Dependency Version Coupling', () => {
       const composeContent = readFileSync(composePath, 'utf-8')
 
       // Extract version from image tag like: mcr.microsoft.com/playwright:v1.58.2-noble
-      const imageMatch = composeContent.match(
-        /mcr\.microsoft\.com\/playwright:v([\d.]+)/,
-      )
+      const imageMatch = composeContent.match(/mcr\.microsoft\.com\/playwright:v([\d.]+)/)
       expect(
         imageMatch,
         'docker-compose.playwright.yml must contain a Playwright image with a version tag (e.g., mcr.microsoft.com/playwright:v1.58.2-noble)',
       ).not.toBeNull()
 
-      const dockerVersion = imageMatch![1]
+      const dockerVersion = imageMatch?.[1]
 
       expect(
         pkgBase,
@@ -162,7 +160,8 @@ describe('Dependency Version Coupling', () => {
       const forbiddenImportLines: string[] = []
       for (let i = 0; i < lines.length; i++) {
         const trimmed = lines[i].trim()
-        if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) continue
+        if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*'))
+          continue
         const hasStaticImport = /from\s+['"]@hey-api\/client-fetch['"]/.test(lines[i])
         const hasDynamicImport = /import\s*\(\s*['"]@hey-api\/client-fetch['"]/.test(lines[i])
         if (hasStaticImport || hasDynamicImport) {

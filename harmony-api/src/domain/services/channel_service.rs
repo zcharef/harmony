@@ -49,12 +49,13 @@ pub(crate) fn check_encryption_toggle(
     current_encrypted: bool,
     requested: Option<bool>,
 ) -> Result<(), DomainError> {
-    if let Some(new_encrypted) = requested {
-        if current_encrypted && !new_encrypted {
-            return Err(DomainError::ValidationError(
-                "Encryption cannot be disabled once enabled".to_string(),
-            ));
-        }
+    if let Some(new_encrypted) = requested
+        && current_encrypted
+        && !new_encrypted
+    {
+        return Err(DomainError::ValidationError(
+            "Encryption cannot be disabled once enabled".to_string(),
+        ));
     }
     Ok(())
 }
@@ -231,7 +232,7 @@ impl ChannelService {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 

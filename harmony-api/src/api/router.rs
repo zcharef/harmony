@@ -31,7 +31,7 @@ use super::state::AppState;
 /// Layers are applied in reverse order of declaration:
 /// ```text
 /// Request  → SentryHub → RequestId → Tracing → Timeout → BodyLimit → CORS → RateLimit → Handler
-/// Response ← SecurityHeaders ← Compression ← RateLimit ← CORS ← Handler
+/// Response ← SecurityHeaders(X-Content-Type-Options, X-Frame-Options, HSTS, CSP, Referrer-Policy, Permissions-Policy) ← Compression ← RateLimit ← CORS ← Handler
 /// ```
 #[allow(deprecated)] // TimeoutLayer::new is deprecated; upgrade when tower-http 0.7 releases
 pub fn build_router(state: AppState) -> Router {
@@ -159,11 +159,18 @@ pub fn build_router(state: AppState) -> Router {
     let public_routes =
         Router::new().route("/v1/invites/{code}", get(handlers::invites::preview_invite));
 
-    Router::new()
-        // Swagger UI
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+    let mut router = Router::new();
+
+    // Swagger UI — disabled in production to avoid exposing API surface
+    if !state.is_production {
+        router = router
+            .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()));
+    }
+
+    router
         // System endpoints
         .route("/health", get(handlers::health_check))
+        .route("/health/live", get(handlers::liveness_check))
         // Public API routes (no auth)
         .merge(public_routes)
         // Versioned API routes (auth-protected)
@@ -182,6 +189,18 @@ pub fn build_router(state: AppState) -> Router {
         .layer(SetResponseHeaderLayer::overriding(
             header::STRICT_TRANSPORT_SECURITY,
             HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("referrer-policy"),
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("permissions-policy"),
+            HeaderValue::from_static("interest-cohort=()"),
         ))
         .layer(CompressionLayer::new())
         .layer(RateLimitLayer::new(60, 300))

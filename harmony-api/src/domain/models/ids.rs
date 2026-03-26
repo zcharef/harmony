@@ -242,7 +242,9 @@ impl DeviceId {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         {
-            return Err("device_id may only contain alphanumeric characters, hyphens, and underscores");
+            return Err(
+                "device_id may only contain alphanumeric characters, hyphens, and underscores",
+            );
         }
         Ok(Self(id))
     }

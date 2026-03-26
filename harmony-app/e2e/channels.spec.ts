@@ -182,9 +182,7 @@ test.describe('Channel CRUD', () => {
     const countBefore = await channelButtons.count()
 
     // Hover to reveal settings
-    const channelRow = page
-      .locator('[data-test="channel-item"]')
-      .filter({ hasText: 'throwaway' })
+    const channelRow = page.locator('[data-test="channel-item"]').filter({ hasText: 'throwaway' })
     await channelRow.hover()
 
     const settingsBtn = channelRow.locator('[data-test="channel-settings-button"]')

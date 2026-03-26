@@ -70,9 +70,7 @@ test.describe('Dependency Bump Smoke Tests', () => {
 
     // AFTER: server appears in the sidebar (proves data fetching + rendering
     // through new React/TanStack Query/HeroUI versions)
-    const serverButton = page.locator(
-      `[data-test="server-button"][data-server-id="${server.id}"]`,
-    )
+    const serverButton = page.locator(`[data-test="server-button"][data-server-id="${server.id}"]`)
     await expect(serverButton).toBeAttached({ timeout: 10_000 })
 
     // Navigate to the server and verify channel sidebar renders
@@ -126,7 +124,9 @@ test.describe('Dependency Bump Smoke Tests', () => {
     // WHY: Channel buttons use HeroUI styling. Verify the auto-created
     // #general channel renders with text content, not just as an empty element.
     const channelList = page.locator('[data-test="channel-list"]')
-    const generalChannel = channelList.locator('[data-test="channel-button"]').filter({ hasText: 'general' })
+    const generalChannel = channelList
+      .locator('[data-test="channel-button"]')
+      .filter({ hasText: 'general' })
     await expect(generalChannel).toContainText('general', { timeout: 10_000 })
 
     // WHY: Server name header uses HeroUI text styling. Strict content check

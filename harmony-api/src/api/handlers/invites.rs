@@ -39,6 +39,21 @@ pub async fn create_invite(
     ApiPath(server_id): ApiPath<ServerId>,
     ApiJson(req): ApiJson<CreateInviteRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    if let Some(m) = req.max_uses
+        && !(1..=10000).contains(&m)
+    {
+        return Err(ApiError::bad_request(
+            "max_uses must be between 1 and 10000",
+        ));
+    }
+    if let Some(h) = req.expires_in_hours
+        && !(1..=8760).contains(&h)
+    {
+        return Err(ApiError::bad_request(
+            "expires_in_hours must be between 1 and 8760",
+        ));
+    }
+
     // WHY: Convert hours to an absolute expiry timestamp so the domain layer
     // deals only with DateTime, not relative durations.
     let expires_at = req

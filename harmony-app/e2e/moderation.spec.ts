@@ -58,7 +58,12 @@ async function openMemberContextMenu(
   // Waiting for the first visible menu item (identified by data-test) to pass
   // Playwright's visibility check guarantees the animation is done.
   // WHY: Include no-actions-item for self-menu (shows "No actions available" instead of action items).
-  await menu.locator('[data-test="send-message-item"], [data-test="kick-member-item"], [data-test="ban-member-item"], [data-test="no-actions-item"]').first().waitFor({ timeout: 5_000 })
+  await menu
+    .locator(
+      '[data-test="send-message-item"], [data-test="kick-member-item"], [data-test="ban-member-item"], [data-test="no-actions-item"]',
+    )
+    .first()
+    .waitFor({ timeout: 5_000 })
 }
 
 test.describe('Kick & Ban Moderation', () => {

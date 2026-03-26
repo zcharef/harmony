@@ -69,9 +69,7 @@ test.describe('Direct Messages', () => {
       await memberList.waitFor({ timeout: 10_000 })
 
       // Right-click userB to open context menu
-      const targetItem = memberList.locator(
-        `[data-test="member-item"][data-user-id="${userB.id}"]`,
-      )
+      const targetItem = memberList.locator(`[data-test="member-item"][data-user-id="${userB.id}"]`)
       await targetItem.waitFor({ timeout: 10_000 })
       await targetItem.click({ button: 'right' })
 
@@ -88,8 +86,7 @@ test.describe('Direct Messages', () => {
 
       // WHY: Set up response listener BEFORE clicking to avoid race conditions.
       const dmResponsePromise = page.waitForResponse(
-        (response) =>
-          response.url().includes('/v1/dms') && response.request().method() === 'POST',
+        (response) => response.url().includes('/v1/dms') && response.request().method() === 'POST',
       )
 
       const sendMessageItem = page.locator('[data-test="send-message-item"]')
@@ -133,10 +130,7 @@ test.describe('Direct Messages', () => {
       searchUserB = await createTestUser('dm-search-b')
       for (const u of [searchUserA, searchUserB]) await syncProfile(u.token)
 
-      const searchServer = await createServer(
-        searchUserA.token,
-        `DM Search E2E ${Date.now()}`,
-      )
+      const searchServer = await createServer(searchUserA.token, `DM Search E2E ${Date.now()}`)
       const invite = await createInvite(searchUserA.token, searchServer.id)
       await joinServer(searchUserB.token, searchServer.id, invite.code)
     })
@@ -164,8 +158,7 @@ test.describe('Direct Messages', () => {
 
       // Click the target user to create DM
       const dmResponsePromise = page.waitForResponse(
-        (response) =>
-          response.url().includes('/v1/dms') && response.request().method() === 'POST',
+        (response) => response.url().includes('/v1/dms') && response.request().method() === 'POST',
       )
 
       await page
@@ -265,10 +258,7 @@ test.describe('Direct Messages', () => {
       closeUserB = await createTestUser('dm-close-b')
       for (const u of [closeUserA, closeUserB]) await syncProfile(u.token)
 
-      const closeServer = await createServer(
-        closeUserA.token,
-        `DM Close E2E ${Date.now()}`,
-      )
+      const closeServer = await createServer(closeUserA.token, `DM Close E2E ${Date.now()}`)
       const invite = await createInvite(closeUserA.token, closeServer.id)
       await joinServer(closeUserB.token, closeServer.id, invite.code)
 
@@ -327,10 +317,7 @@ test.describe('Direct Messages', () => {
       const reopenUserB = await createTestUser('dm-reopen-b')
       for (const u of [reopenUserA, reopenUserB]) await syncProfile(u.token)
 
-      const reopenServer = await createServer(
-        reopenUserA.token,
-        `DM Reopen E2E ${Date.now()}`,
-      )
+      const reopenServer = await createServer(reopenUserA.token, `DM Reopen E2E ${Date.now()}`)
       const invite = await createInvite(reopenUserA.token, reopenServer.id)
       await joinServer(reopenUserB.token, reopenServer.id, invite.code)
 

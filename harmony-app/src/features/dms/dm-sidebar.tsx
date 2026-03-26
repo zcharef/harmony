@@ -48,7 +48,11 @@ function DmConversationItem({
   const status = useUserStatus(dm.recipient.id)
 
   return (
-    <div className="group flex items-center" data-test="dm-conversation-row" data-dm-server-id={dm.serverId}>
+    <div
+      className="group flex items-center"
+      data-test="dm-conversation-row"
+      data-dm-server-id={dm.serverId}
+    >
       <button
         data-test="dm-conversation-item"
         data-dm-server-id={dm.serverId}
