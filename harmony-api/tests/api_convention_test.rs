@@ -158,7 +158,10 @@ fn handlers_dont_construct_dtos_inline() {
                 && !trimmed.contains("impl Response")
             {
                 // Allow system endpoint DTOs — not domain models
-                if trimmed.contains("HealthResponse") || trimmed.contains("ComponentHealth") || trimmed.contains("LivenessResponse") {
+                if trimmed.contains("HealthResponse")
+                    || trimmed.contains("ComponentHealth")
+                    || trimmed.contains("LivenessResponse")
+                {
                     continue;
                 }
 
