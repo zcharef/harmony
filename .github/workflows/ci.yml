@@ -46,6 +46,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate API client from OpenAPI spec
+        run: pnpm gen:api
+
       - name: Biome lint
         run: pnpm lint
 
@@ -107,9 +110,10 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Security audit
+        # WHY ignore: RUSTSEC-2023-0071 is in `rsa` via `sqlx-mysql` (transitive). We only use Postgres. No fix available.
         run: |
           cargo install cargo-audit --locked 2>/dev/null || true
-          cargo audit
+          cargo audit --ignore RUSTSEC-2023-0071
 
       - name: Run tests
         env:
