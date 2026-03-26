@@ -112,11 +112,14 @@ jobs:
       - name: Security audit
         # WHY ignore: RUSTSEC-2023-0071 is in `rsa` via `sqlx-mysql` (transitive). We only use Postgres. No fix available.
         run: |
-          cargo install cargo-audit --locked 2>/dev/null || true
+          command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
           cargo audit --ignore RUSTSEC-2023-0071
 
       - name: Run tests
         env:
+          # WHY SQLX_OFFLINE: CI Postgres has no Supabase schema (auth.uid() etc.).
+          # The .sqlx/ cache lets sqlx macros compile; unit tests run without a live DB.
+          SQLX_OFFLINE: "true"
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/harmony_test
           SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           SUPABASE_URL: http://localhost:9999
@@ -126,6 +129,7 @@ jobs:
 
       - name: OpenAPI freshness check
         env:
+          SQLX_OFFLINE: "true"
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/harmony_test
           SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           SUPABASE_URL: http://localhost:9999

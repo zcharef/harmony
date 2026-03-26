@@ -35,6 +35,7 @@ use super::state::AppState;
 /// ```
 #[allow(deprecated)] // TimeoutLayer::new is deprecated; upgrade when tower-http 0.7 releases
 pub fn build_router(state: AppState) -> Router {
+    let is_production = state.is_production;
     let request_id_header = header::HeaderName::from_static("x-request-id");
 
     let cors = CorsLayer::new()
@@ -167,7 +168,7 @@ pub fn build_router(state: AppState) -> Router {
             .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()));
     }
 
-    router
+    let mut router = router
         // System endpoints
         .route("/health", get(handlers::health_check))
         .route("/health/live", get(handlers::liveness_check))
@@ -189,11 +190,18 @@ pub fn build_router(state: AppState) -> Router {
         .layer(SetResponseHeaderLayer::overriding(
             header::STRICT_TRANSPORT_SECURITY,
             HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
+        ));
+
+    // WHY: CSP `default-src 'none'` blocks all resource loading (JS, CSS, fetch).
+    // Swagger UI needs these in development mode. Only enforce in production.
+    if is_production {
+        router = router.layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("content-security-policy"),
             HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
-        ))
+        ));
+    }
+
+    router
         .layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("referrer-policy"),
             HeaderValue::from_static("no-referrer"),

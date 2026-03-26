@@ -31,8 +31,16 @@ pub struct SupabaseClaims {
     pub email: Option<String>,
     /// Token role (e.g., "authenticated", "anon")
     pub role: Option<String>,
-    /// Timestamp when email was confirmed (present = verified)
+    /// Timestamp when email was confirmed.
+    /// NOT present in standard Supabase access tokens, but may appear if a
+    /// custom access token hook injects it. Kept as a fallback.
     pub email_confirmed_at: Option<String>,
+    /// User metadata from Supabase JWT.
+    /// WHY: Standard Supabase access tokens do NOT include `email_confirmed_at`
+    /// at the top level. After email confirmation, Supabase sets
+    /// `user_metadata.email_verified = true` inside the JWT. This is the
+    /// reliable source for email verification status on the JWT path.
+    pub user_metadata: Option<serde_json::Value>,
 }
 
 /// Verified user extracted from a Supabase JWT.
@@ -96,11 +104,25 @@ pub fn verify_supabase_jwt(
             _ => AuthError::InvalidToken(e.to_string()),
         })?;
 
+    // WHY: Supabase access tokens do NOT include `email_confirmed_at` as a
+    // top-level claim. The reliable signal is `user_metadata.email_verified`,
+    // which Supabase sets to `true` after the user confirms their email.
+    // We also check `email_confirmed_at` as a fallback in case a custom
+    // access token hook injects it.
+    let email_verified = token_data.claims.email_confirmed_at.is_some()
+        || token_data
+            .claims
+            .user_metadata
+            .as_ref()
+            .and_then(|m| m.get("email_verified"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
     Ok(AuthenticatedUser {
         user_id: UserId::new(token_data.claims.sub),
         email: token_data.claims.email,
         role: token_data.claims.role,
-        email_verified: token_data.claims.email_confirmed_at.is_some(),
+        email_verified,
     })
 }
 

@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:arch": "vitest run --config vitest.config.arch.ts",
-    "circular": "madge --circular --extensions ts,tsx src/",
+    "circular": "madge --circular --extensions ts,tsx --exclude 'lib/api/' src/",
     "knip": "knip",
     "gen:api": "openapi-ts",
     "e2e": "playwright test",

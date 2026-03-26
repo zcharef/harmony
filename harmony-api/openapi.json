@@ -46,6 +46,28 @@
         }
       }
     },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Liveness probe — confirms the process is running and can serve HTTP.",
+        "description": "No dependency checks (DB, cache, etc.). Use `/health` for deep readiness.",
+        "operationId": "liveness_check",
+        "responses": {
+          "200": {
+            "description": "Process is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivenessResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/me": {
       "post": {
         "tags": [
@@ -3011,6 +3033,19 @@
           }
         }
       },
+      "LivenessResponse": {
+        "type": "object",
+        "description": "Liveness probe response.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Always `\"ok\"` when the process is alive."
+          }
+        }
+      },
       "MegolmSessionResponse": {
         "type": "object",
         "description": "Response after registering a Megolm session.",
@@ -3305,6 +3340,13 @@
           },
           "type": {
             "type": "string"
+          },
+          "upgrade_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "WHY: Drives upsell when a plan limit is exceeded. The frontend renders\nan \"Upgrade\" CTA using this URL. Only present on `LimitExceeded` errors."
           }
         }
       },

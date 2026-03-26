@@ -16,7 +16,7 @@ use super::dto::{
     TransferOwnershipRequest, UpdateChannelRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
-use super::handlers::{self, ComponentHealth, HealthResponse};
+use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
 use crate::domain::models::{
     CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MessageId, OneTimeKeyId,
     ServerId, UserId, UserStatus,
@@ -86,6 +86,7 @@ use crate::domain::models::{
     components(
         schemas(
             // System
+            LivenessResponse,
             HealthResponse,
             ComponentHealth,
             ProblemDetails,

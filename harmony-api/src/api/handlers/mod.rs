@@ -14,7 +14,6 @@ use std::time::Instant;
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::Serialize;
-use serde_json::json;
 use utoipa::ToSchema;
 
 use crate::api::state::AppState;
@@ -27,6 +26,21 @@ pub async fn not_found_fallback() -> crate::api::errors::ApiError {
     crate::api::errors::ApiError::not_found("The requested resource was not found")
 }
 
+/// Liveness probe response.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LivenessResponse {
+    /// Always `"ok"` when the process is alive.
+    pub status: &'static str,
+}
+
+impl LivenessResponse {
+    #[must_use]
+    pub fn ok() -> Self {
+        Self { status: "ok" }
+    }
+}
+
 /// Liveness probe — confirms the process is running and can serve HTTP.
 ///
 /// No dependency checks (DB, cache, etc.). Use `/health` for deep readiness.
@@ -35,11 +49,12 @@ pub async fn not_found_fallback() -> crate::api::errors::ApiError {
     path = "/health/live",
     tag = "System",
     responses(
-        (status = 200, description = "Process is alive")
+        (status = 200, description = "Process is alive", body = LivenessResponse)
     )
 )]
+#[tracing::instrument]
 pub async fn liveness_check() -> impl IntoResponse {
-    Json(json!({"status": "ok"}))
+    Json(LivenessResponse::ok())
 }
 
 /// Deep health check response with component status.

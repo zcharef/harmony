@@ -11,6 +11,11 @@ use crate::api::state::AppState;
 use crate::domain::models::UserId;
 use crate::infra::auth::{self, AuthenticatedUser};
 
+/// Paths exempt from email verification.
+/// WHY: Unverified users must call `sync_profile` (`/v1/auth/me`) after
+/// registration to complete onboarding, so that endpoint stays accessible.
+const EMAIL_EXEMPT_PATHS: &[&str] = &["/v1/auth/me"];
+
 /// Middleware: reject unauthenticated requests.
 ///
 /// Checks (in order):
@@ -45,9 +50,10 @@ pub async fn require_auth(
             email_verified: session_data.email_verified,
         };
 
-        // WHY: Unverified users must not access protected resources, but
-        // `/v1/auth/me` (sync_profile) is exempt so they can sync after registration.
-        if !user.email_verified && parts.uri.path() != "/v1/auth/me" {
+        // WHY: email_verified is baked into the session cookie at login time.
+        // If a user verifies their email later, the cookie remains stale until
+        // they re-login. The client must trigger a fresh login after verification.
+        if !user.email_verified && !EMAIL_EXEMPT_PATHS.contains(&parts.uri.path()) {
             return Err(ApiError::forbidden(
                 "Email verification required. Please verify your email address.",
             ));
@@ -85,7 +91,7 @@ pub async fn require_auth(
         })?;
 
     // WHY: Same email verification gate as the session cookie path above.
-    if !user.email_verified && parts.uri.path() != "/v1/auth/me" {
+    if !user.email_verified && !EMAIL_EXEMPT_PATHS.contains(&parts.uri.path()) {
         return Err(ApiError::forbidden(
             "Email verification required. Please verify your email address.",
         ));
