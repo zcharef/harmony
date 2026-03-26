@@ -59,9 +59,7 @@ test.describe('Channel CRUD', () => {
 
     // Verify initial channel count (admin sees all 4: general, extra, secret, announcements)
     const channelButtons = page.locator('[data-test="channel-button"]')
-    await channelButtons.first().waitFor({ timeout: 10_000 })
-    const countBefore = await channelButtons.count()
-    expect(countBefore).toBe(4)
+    await expect(channelButtons).toHaveCount(4, { timeout: 10_000 })
 
     // Open server menu and click "Create Channel"
     await page.locator('[data-test="server-header-button"]').click()
@@ -100,8 +98,7 @@ test.describe('Channel CRUD', () => {
     await expect(newChannelButton).toBeVisible({ timeout: 10_000 })
 
     // Count increased by 1
-    const countAfter = await channelButtons.count()
-    expect(countAfter).toBe(countBefore + 1)
+    await expect(channelButtons).toHaveCount(5, { timeout: 10_000 })
   })
 
   // ── Admin edits a channel name and topic ──────────────────────────
@@ -114,8 +111,8 @@ test.describe('Channel CRUD', () => {
     const extraBtn = page.locator('[data-test="channel-button"]').filter({ hasText: 'extra' })
     await extraBtn.waitFor({ timeout: 10_000 })
 
-    // Hover the parent .group div to show the settings button
-    const channelRow = extraBtn.locator('..')
+    // Hover the channel item wrapper to show the settings button
+    const channelRow = page.locator('[data-test="channel-item"]').filter({ hasText: 'extra' })
     await channelRow.hover()
 
     const settingsBtn = channelRow.locator('[data-test="channel-settings-button"]')
@@ -181,10 +178,13 @@ test.describe('Channel CRUD', () => {
       .filter({ hasText: 'throwaway' })
     await expect(throwawayBtn).toBeVisible({ timeout: 10_000 })
 
-    const countBefore = await page.locator('[data-test="channel-button"]').count()
+    const channelButtons = page.locator('[data-test="channel-button"]')
+    const countBefore = await channelButtons.count()
 
     // Hover to reveal settings
-    const channelRow = throwawayBtn.locator('..')
+    const channelRow = page
+      .locator('[data-test="channel-item"]')
+      .filter({ hasText: 'throwaway' })
     await channelRow.hover()
 
     const settingsBtn = channelRow.locator('[data-test="channel-settings-button"]')
@@ -212,8 +212,7 @@ test.describe('Channel CRUD', () => {
     // Channel disappears from sidebar
     await expect(throwawayBtn).not.toBeVisible({ timeout: 10_000 })
 
-    const countAfter = await page.locator('[data-test="channel-button"]').count()
-    expect(countAfter).toBe(countBefore - 1)
+    await expect(channelButtons).toHaveCount(countBefore - 1, { timeout: 10_000 })
   })
 
   // ── Cannot delete the last channel ────────────────────────────────
@@ -229,11 +228,10 @@ test.describe('Channel CRUD', () => {
 
     // Verify only one channel visible
     const channelButtons = page.locator('[data-test="channel-button"]')
-    await channelButtons.first().waitFor({ timeout: 10_000 })
-    expect(await channelButtons.count()).toBe(1)
+    await expect(channelButtons).toHaveCount(1, { timeout: 10_000 })
 
     // Hover to reveal settings
-    const channelRow = channelButtons.first().locator('..')
+    const channelRow = page.locator('[data-test="channel-item"]').first()
     await channelRow.hover()
 
     const settingsBtn = channelRow.locator('[data-test="channel-settings-button"]')
@@ -260,7 +258,7 @@ test.describe('Channel CRUD', () => {
 
     // Channel is still visible (not removed)
     await expect(channelButtons.first()).toBeVisible()
-    expect(await channelButtons.count()).toBe(1)
+    await expect(channelButtons).toHaveCount(1)
   })
 
   // ── Member cannot see channel management controls ─────────────────
@@ -274,11 +272,11 @@ test.describe('Channel CRUD', () => {
     await channelButtons.first().waitFor({ timeout: 10_000 })
 
     // Verify no settings cog is visible on any channel (even on hover)
-    const firstChannelRow = channelButtons.first().locator('..')
+    const firstChannelRow = page.locator('[data-test="channel-item"]').first()
     await firstChannelRow.hover()
 
     const settingsBtns = page.locator('[data-test="channel-settings-button"]')
-    expect(await settingsBtns.count()).toBe(0)
+    await expect(settingsBtns).toHaveCount(0)
 
     // Open server menu — create-channel and settings items should be hidden
     await page.locator('[data-test="server-header-button"]').click()
@@ -304,7 +302,7 @@ test.describe('Channel CRUD', () => {
 
     // Member should NOT see the #secret private channel
     const secretBtn = page.locator('[data-test="channel-button"]').filter({ hasText: 'secret' })
-    expect(await secretBtn.count()).toBe(0)
+    await expect(secretBtn).toHaveCount(0)
 
     // Member SHOULD see non-private channels (general, announcements)
     const generalBtn = page.locator('[data-test="channel-button"]').filter({ hasText: 'general' })

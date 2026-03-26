@@ -6,7 +6,8 @@
  * to internal DB structure.
  */
 
-const API_URL = 'http://localhost:3000'
+// WHY: Configurable for CI (deployed API) while defaulting to local dev.
+const API_URL = process.env.VITE_API_URL ?? 'http://localhost:3000'
 
 function authHeaders(token: string): Record<string, string> {
   return {

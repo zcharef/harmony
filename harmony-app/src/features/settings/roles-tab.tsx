@@ -175,7 +175,9 @@ function TransferOwnershipModal({
             data-test="transfer-owner-select"
           >
             {candidates.map((m) => (
-              <SelectItem key={m.userId}>{m.nickname ?? m.username}</SelectItem>
+              <SelectItem key={m.userId} data-test={`transfer-option-${m.userId}`}>
+                {m.nickname ?? m.username}
+              </SelectItem>
             ))}
           </Select>
         </ModalBody>

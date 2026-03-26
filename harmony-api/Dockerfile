@@ -2,27 +2,26 @@
 
 # -----------------------------------------------------------------------------
 # Stage 1: Builder
+# WHY multi-stage: final image is ~20MB (distroless) instead of ~1.5GB (rust).
+# WHY SQLX_OFFLINE: compile-time query checking without a live database.
+# The .sqlx/ directory (committed to repo) contains cached query metadata.
+# Regenerate with: cargo sqlx prepare
 # -----------------------------------------------------------------------------
 FROM rust:1.94-bookworm AS builder
 
 WORKDIR /app
 
-# Install mold linker for faster builds
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    mold \
-    clang \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy cargo config for mold linker
-COPY .cargo .cargo
-
 # Copy manifests first for dependency caching
 COPY Cargo.toml Cargo.lock ./
+
+# Copy SQLx offline cache (compile-time query checking without live DB)
+COPY .sqlx .sqlx
 
 # Create dummy main.rs to build dependencies (layer caching)
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
-# Build dependencies only (cached unless Cargo.toml changes)
+# Build dependencies only (cached unless Cargo.toml/Cargo.lock changes)
+ENV SQLX_OFFLINE=true
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo build --release --bin harmony-api && rm -rf src
@@ -40,23 +39,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp /app/target/release/harmony-api /app/harmony-api
 
 # -----------------------------------------------------------------------------
-# Stage 2: Runtime (Distroless)
+# Stage 2: Runtime (Distroless — ~20MB, no shell, no package manager)
 # -----------------------------------------------------------------------------
 FROM gcr.io/distroless/cc-debian12:nonroot
 
 WORKDIR /app
 
-# Copy binary from builder
 COPY --from=builder /app/harmony-api /app/harmony-api
 
-# Run as non-root user (UID 65532 is 'nonroot' in distroless)
 USER nonroot:nonroot
 
-# Expose application port
 EXPOSE 3000
-
-# Health check endpoint
-# Note: Distroless has no shell, health checks must be done via orchestrator
-# Kubernetes liveness/readiness probes will use /health endpoint
 
 ENTRYPOINT ["/app/harmony-api"]

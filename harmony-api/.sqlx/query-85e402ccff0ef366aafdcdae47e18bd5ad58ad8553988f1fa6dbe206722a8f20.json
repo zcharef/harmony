@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                user_id,\n                device_id,\n                identity_key,\n                signing_key,\n                device_name,\n                created_at,\n                last_key_upload_at\n            FROM device_keys\n            WHERE user_id = $1\n            ORDER BY created_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "device_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "identity_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "signing_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "device_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_key_upload_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "85e402ccff0ef366aafdcdae47e18bd5ad58ad8553988f1fa6dbe206722a8f20"
+}

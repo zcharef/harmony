@@ -98,16 +98,12 @@ test.describe('Messaging', () => {
     // Verify author is shown (authorLabel = first 8 chars of authorId)
     const authorEl = messageItem.locator('[data-test="message-author"]')
     await expect(authorEl).toBeVisible()
-    const authorText = await authorEl.textContent()
-    expect(authorText).toBeTruthy()
-    expect(authorText!.length).toBeGreaterThan(0)
+    await expect(authorEl).toContainText(/.+/)
 
-    // Verify timestamp is shown
+    // Verify timestamp is shown (format: "HH:MM" or locale date string)
     const timestampEl = messageItem.locator('[data-test="message-timestamp"]')
     await expect(timestampEl).toBeVisible()
-    const timestampText = await timestampEl.textContent()
-    expect(timestampText).toBeTruthy()
-    expect(timestampText!.length).toBeGreaterThan(0)
+    await expect(timestampEl).toContainText(/.+/)
   })
 
   // ── Edit own message ──────────────────────────────────────────────
@@ -203,15 +199,18 @@ test.describe('Messaging', () => {
     expect(deleteResponse.status()).toBe(204)
 
     // AFTER delete: Two possible outcomes depending on whether Realtime fires:
-    // 1. Realtime UPDATE → tombstone text "[Message deleted]" replaces content
-    // 2. No Realtime → query invalidation refetches list → message disappears
+    // 1. Realtime UPDATE -> tombstone text "[Message deleted]" replaces content
+    // 2. No Realtime -> query invalidation refetches list -> message disappears
+    //    (API excludes soft-deleted messages with `deleted_at IS NULL` filter)
     // WHY: Supabase Realtime in local dev is unreliable, so we accept either outcome.
     // Both confirm the delete succeeded; the difference is the UI path.
+    const tombstone = contentEl.filter({ hasText: '[Message deleted]' })
     await expect(async () => {
-      const count = await messageItem.count()
-      if (count === 0) return // message removed from list — delete confirmed
-      const text = await contentEl.textContent()
-      expect(text).toBe('[Message deleted]')
+      const itemCount = await messageItem.count()
+      const tombstoneVisible = itemCount > 0 ? await tombstone.isVisible() : false
+      // Either the message was removed from the DOM (refetch path) or
+      // the tombstone text replaced the original content (Realtime path).
+      expect(itemCount === 0 || tombstoneVisible).toBe(true)
     }).toPass({ timeout: 15_000 })
   })
 
@@ -251,14 +250,15 @@ test.describe('Messaging', () => {
     expect(deleteResponse.status()).toBe(204)
 
     // AFTER delete: Two possible outcomes depending on whether Realtime fires:
-    // 1. Realtime UPDATE → tombstone "[Message removed by moderator]"
-    // 2. No Realtime → query invalidation refetches list → message disappears
+    // 1. Realtime UPDATE -> tombstone "[Message removed by moderator]"
+    // 2. No Realtime -> query invalidation refetches list -> message disappears
+    //    (API excludes soft-deleted messages with `deleted_at IS NULL` filter)
     // WHY: Supabase Realtime in local dev is unreliable, so we accept either outcome.
+    const tombstone = contentEl.filter({ hasText: '[Message removed by moderator]' })
     await expect(async () => {
-      const count = await messageItem.count()
-      if (count === 0) return // message removed from list — delete confirmed
-      const text = await contentEl.textContent()
-      expect(text).toBe('[Message removed by moderator]')
+      const itemCount = await messageItem.count()
+      const tombstoneVisible = itemCount > 0 ? await tombstone.isVisible() : false
+      expect(itemCount === 0 || tombstoneVisible).toBe(true)
     }).toPass({ timeout: 15_000 })
   })
 
@@ -318,9 +318,12 @@ test.describe('Messaging', () => {
 
     const users = [owner, moderator, member]
 
-    // WHY: Send 60 messages total (20 per user) in batches of 5 per user.
+    // WHY: Send 60 messages total (20 per user) in 4 batches of 5 per user.
     // Each batch of 5 per user is within the rate limit window.
-    for (let batch = 0; batch < 4; batch++) {
+    // Batches are separated by a 5.5s pause to let the rate limit window slide.
+    // The last batch skips the trailing pause (no subsequent batch needs it).
+    const totalBatches = 4
+    for (let batch = 0; batch < totalBatches; batch++) {
       const batchPromises: Promise<unknown>[] = []
       for (const user of users) {
         for (let j = 0; j < 5; j++) {
@@ -332,9 +335,9 @@ test.describe('Messaging', () => {
       }
       await Promise.all(batchPromises)
       // WHY: Brief pause between batches to let the rate limit window slide.
-      if (batch < 3) {
-        await new Promise((resolve) => setTimeout(resolve, 5_500))
-      }
+      // Last batch does not need a trailing pause.
+      const isLastBatch = batch === totalBatches - 1
+      await new Promise((resolve) => setTimeout(resolve, isLastBatch ? 0 : 5_500))
     }
 
     await authenticatePage(page, owner)

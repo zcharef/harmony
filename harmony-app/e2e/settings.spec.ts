@@ -28,6 +28,7 @@ import {
   createServer,
   joinServer,
   syncProfile,
+  updateServer,
 } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
 
@@ -163,6 +164,7 @@ test.describe('Server Settings Role Gating', () => {
     const newName = `${server.name} Edited`
     await nameInput.clear()
     await nameInput.fill(newName)
+    await expect(nameInput).toHaveValue(newName)
 
     const updateResponsePromise = page.waitForResponse(
       (response) =>
@@ -178,12 +180,7 @@ test.describe('Server Settings Role Gating', () => {
     // WHY: Restore is done via API to avoid fighting the cache invalidation remount cycle.
     // The PATCH triggers queryClient.invalidateQueries which remounts the form, creating
     // a race between the test filling the input and the form reinitializing with new defaultValues.
-    const restoreRes = await fetch(`http://localhost:3000/v1/servers/${server.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${admin.token}` },
-      body: JSON.stringify({ name: server.name }),
-    })
-    expect(restoreRes.status).toBeLessThan(400)
+    await updateServer(admin.token, server.id, { name: server.name })
   })
 
   test('channels tab — admin sees create and manage controls', async ({ page }) => {

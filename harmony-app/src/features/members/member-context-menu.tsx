@@ -122,7 +122,7 @@ export function MemberContextMenu({
         }
       >
         {canSendMessage === false && hasModerationAction === false ? (
-          <DropdownItem key="no-actions" className="text-default-400">
+          <DropdownItem key="no-actions" className="text-default-400" data-test="no-actions-item">
             {t('noActionsAvailable')}
           </DropdownItem>
         ) : (
@@ -203,39 +203,32 @@ function renderContextMenuActions({
           ))}
         </DropdownSection>
       )}
-      {perms.canKick && perms.canBan === false && (
+      {perms.canKick && (
         <DropdownSection>
-          <DropdownItem
-            key="kick"
-            className="text-danger"
-            color="danger"
-            onPress={onKick}
-            data-test="kick-member-item"
-          >
-            {t('kickUser', { username: targetUsername })}
-          </DropdownItem>
-        </DropdownSection>
-      )}
-      {perms.canKick && perms.canBan && (
-        <DropdownSection>
-          <DropdownItem
-            key="kick"
-            className="text-danger"
-            color="danger"
-            onPress={onKick}
-            data-test="kick-member-item"
-          >
-            {t('kickUser', { username: targetUsername })}
-          </DropdownItem>
-          <DropdownItem
-            key="ban"
-            className="text-danger"
-            color="danger"
-            onPress={onBan}
-            data-test="ban-member-item"
-          >
-            {t('banUser', { username: targetUsername })}
-          </DropdownItem>
+          {[
+            <DropdownItem
+              key="kick"
+              className="text-danger"
+              color="danger"
+              onPress={onKick}
+              data-test="kick-member-item"
+            >
+              {t('kickUser', { username: targetUsername })}
+            </DropdownItem>,
+            ...(perms.canBan
+              ? [
+                  <DropdownItem
+                    key="ban"
+                    className="text-danger"
+                    color="danger"
+                    onPress={onBan}
+                    data-test="ban-member-item"
+                  >
+                    {t('banUser', { username: targetUsername })}
+                  </DropdownItem>,
+                ]
+              : []),
+          ]}
         </DropdownSection>
       )}
     </>

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM device_keys\n            WHERE user_id = $1 AND device_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "597ec99224f785672a782755d20967fd82132b1e37fe4c9e735b6bfe20ae4d85"
+}

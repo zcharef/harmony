@@ -24,10 +24,12 @@ export async function authenticatePage(
   page: Page,
   user: Pick<TestUser, 'token' | 'email' | 'id' | 'refreshToken'>,
 ): Promise<void> {
-  // WHY: Supabase client reads session from localStorage on init.
-  // The storage key follows the pattern: sb-<project-ref>-auth-token
-  // For local dev, the project ref is derived from the URL host.
-  const storageKey = `sb-127-auth-token`
+  // WHY: Supabase client key follows pattern sb-<hostname-first-segment>-auth-token.
+  // For local dev (127.0.0.1), this is "sb-127-auth-token".
+  // For Cloud (abcdef.supabase.co), this is "sb-abcdef-auth-token".
+  const supabaseUrl = process.env.CI_SUPABASE_URL ?? 'http://127.0.0.1:64321'
+  const hostSegment = new URL(supabaseUrl).hostname.split('.')[0]
+  const storageKey = `sb-${hostSegment}-auth-token`
 
   const sessionPayload = JSON.stringify({
     access_token: user.token,

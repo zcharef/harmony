@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { authenticatePage } from './fixtures/auth-fixture'
 import { createServer, syncProfile } from './fixtures/test-data-factory'
-import { createTestUser } from './fixtures/user-factory'
+import { createTestUser, type TestUser } from './fixtures/user-factory'
 
 /**
  * Error handling E2E tests.
@@ -13,13 +13,17 @@ import { createTestUser } from './fixtures/user-factory'
  */
 
 test.describe('Error Handling', () => {
+  let user: TestUser
+
+  test.beforeAll(async () => {
+    user = await createTestUser('err-session-exp')
+    await syncProfile(user.token)
+    await createServer(user.token)
+  })
+
   // ── Expired Session Handling ───────────────────────────────────
 
   test('expired session redirects to login page', async ({ page }) => {
-    const user = await createTestUser('err-session-exp')
-    await syncProfile(user.token)
-    await createServer(user.token)
-
     // Authenticate and verify main layout loads
     await authenticatePage(page, user)
 
@@ -42,6 +46,9 @@ test.describe('Error Handling', () => {
 
     const loginPage = freshPage.locator('[data-test="login-page"]')
     await expect(loginPage).toBeVisible({ timeout: 15000 })
+    // WHY: Bare toBeVisible only confirms the locator matched — verify it's actually
+    // the login page by checking for the email input form element.
+    await expect(freshPage.locator('[data-test="login-email-input"]')).toBeVisible()
 
     await freshPage.close()
   })

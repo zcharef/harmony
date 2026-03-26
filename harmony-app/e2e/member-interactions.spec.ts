@@ -39,6 +39,7 @@ test.describe('Member List & Context Menu', () => {
   let owner: TestUser
   let admin: TestUser
   let mod: TestUser
+  let mod2: TestUser
   let member: TestUser
   let server: { id: string; name: string }
 
@@ -46,15 +47,17 @@ test.describe('Member List & Context Menu', () => {
     owner = await createTestUser('mctx-owner')
     admin = await createTestUser('mctx-admin')
     mod = await createTestUser('mctx-mod')
+    mod2 = await createTestUser('mctx-mod2')
     member = await createTestUser('mctx-member')
-    for (const u of [owner, admin, mod, member]) await syncProfile(u.token)
+    for (const u of [owner, admin, mod, mod2, member]) await syncProfile(u.token)
 
     server = await createServer(owner.token, `Members E2E ${Date.now()}`)
     const invite = await createInvite(owner.token, server.id)
-    for (const u of [admin, mod, member]) await joinServer(u.token, server.id, invite.code)
+    for (const u of [admin, mod, mod2, member]) await joinServer(u.token, server.id, invite.code)
 
     await assignRole(owner.token, server.id, admin.id, 'admin')
     await assignRole(owner.token, server.id, mod.id, 'moderator')
+    await assignRole(owner.token, server.id, mod2.id, 'moderator')
   })
 
   test('member list shows all server members with role badges', async ({ page }) => {
@@ -64,13 +67,13 @@ test.describe('Member List & Context Menu', () => {
     const memberList = page.locator('[data-test="member-list"]')
     await memberList.waitFor({ timeout: 10_000 })
 
-    // Verify member count reflects all 4 members
+    // Verify member count reflects all 5 members (owner, admin, mod, mod2, member)
     const memberCount = page.locator('[data-test="member-count"]')
-    await expect(memberCount).toHaveText(/4/, { timeout: 10_000 })
+    await expect(memberCount).toHaveText(/5/, { timeout: 10_000 })
 
     // Verify each member is present
     const memberItems = memberList.locator('[data-test="member-item"]')
-    await expect(memberItems).toHaveCount(4, { timeout: 10_000 })
+    await expect(memberItems).toHaveCount(5, { timeout: 10_000 })
 
     // Verify owner has owner badge
     const ownerItem = memberList.locator(`[data-test="member-item"][data-user-id="${owner.id}"]`)
@@ -134,12 +137,12 @@ test.describe('Member List & Context Menu', () => {
     const sendMsg = page.locator('[data-test="send-message-item"]')
     await sendMsg.waitFor({ timeout: 5_000 })
 
-    // No moderation actions
-    await expect(page.locator('[data-test="kick-member-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="role-admin-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="role-moderator-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="role-member-item"]')).not.toBeVisible()
+    // No moderation actions — not.toBeAttached() for consistency with encryption.spec.ts
+    await expect(page.locator('[data-test="kick-member-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="role-admin-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="role-moderator-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="role-member-item"]')).not.toBeAttached()
   })
 
   test('moderator right-clicks member — Kick visible, Ban NOT visible', async ({ page }) => {
@@ -162,12 +165,12 @@ test.describe('Member List & Context Menu', () => {
     const kickItem = page.locator('[data-test="kick-member-item"]')
     await expect(kickItem).toBeVisible({ timeout: 5_000 })
 
-    // Ban should NOT be visible (requires admin+)
-    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeVisible()
+    // Ban should NOT be attached (requires admin+)
+    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeAttached()
 
-    // Role change should NOT be visible (requires admin+)
-    await expect(page.locator('[data-test="role-admin-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="role-moderator-item"]')).not.toBeVisible()
+    // Role change should NOT be attached (requires admin+)
+    await expect(page.locator('[data-test="role-admin-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="role-moderator-item"]')).not.toBeAttached()
   })
 
   test('moderator right-clicks admin — no Kick visible (higher rank)', async ({ page }) => {
@@ -190,20 +193,14 @@ test.describe('Member List & Context Menu', () => {
     await sendMsg.waitFor({ timeout: 5_000 })
 
     // No moderation actions against higher-ranked user
-    await expect(page.locator('[data-test="kick-member-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeVisible()
+    await expect(page.locator('[data-test="kick-member-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeAttached()
   })
 
   test('moderator right-clicks another moderator — no Kick visible (same rank)', async ({
     page,
   }) => {
-    // WHY: Need a second moderator to test same-rank interactions.
-    const mod2 = await createTestUser('mctx-mod2')
-    await syncProfile(mod2.token)
-    const invite = await createInvite(owner.token, server.id)
-    await joinServer(mod2.token, server.id, invite.code)
-    await assignRole(owner.token, server.id, mod2.id, 'moderator')
-
+    // WHY: mod2 is a second moderator (same rank as mod), set up in beforeAll.
     await authenticatePage(page, mod)
     await selectServer(page, server.id)
 
@@ -221,8 +218,8 @@ test.describe('Member List & Context Menu', () => {
     await sendMsg.waitFor({ timeout: 5_000 })
 
     // outranksTarget = false (same rank), so canKick = false
-    await expect(page.locator('[data-test="kick-member-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeVisible()
+    await expect(page.locator('[data-test="kick-member-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeAttached()
   })
 
   test('admin right-clicks member — Kick + Ban + Role visible', async ({ page }) => {
@@ -274,11 +271,11 @@ test.describe('Member List & Context Menu', () => {
     await sendMsg.waitFor({ timeout: 5_000 })
 
     // No moderation actions against owner
-    await expect(page.locator('[data-test="kick-member-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="role-admin-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="role-moderator-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="role-member-item"]')).not.toBeVisible()
+    await expect(page.locator('[data-test="kick-member-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="role-admin-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="role-moderator-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="role-member-item"]')).not.toBeAttached()
   })
 
   test('right-click self — no moderation actions available', async ({ page }) => {
@@ -298,15 +295,13 @@ test.describe('Member List & Context Menu', () => {
     await selfItem.click({ button: 'right' })
     await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
 
-    // "Send Message" should NOT be visible (isSelf === true)
-    await expect(page.locator('[data-test="send-message-item"]')).not.toBeVisible({
-      timeout: 3_000,
-    })
+    // "Send Message" should NOT be attached (isSelf === true)
+    await expect(page.locator('[data-test="send-message-item"]')).not.toBeAttached()
 
     // No moderation actions on self
-    await expect(page.locator('[data-test="kick-member-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="role-admin-item"]')).not.toBeVisible()
-    await expect(page.locator('[data-test="role-moderator-item"]')).not.toBeVisible()
+    await expect(page.locator('[data-test="kick-member-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="ban-member-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="role-admin-item"]')).not.toBeAttached()
+    await expect(page.locator('[data-test="role-moderator-item"]')).not.toBeAttached()
   })
 })

@@ -10,7 +10,7 @@
  *
  * Real data-test attributes from:
  * - member-list.tsx:242 (member-item)
- * - member-context-menu.tsx:194,207 (kick-member-item), :216 (ban-member-item)
+ * - member-context-menu.tsx:214 (kick-member-item), :225 (ban-member-item)
  * - kick-dialog.tsx:26 (kick-dialog), :47 (kick-submit-button)
  * - ban-dialog.tsx:47 (ban-dialog), :62 (ban-reason-input), :78 (ban-submit-button)
  * - bans-tab.tsx:21 (settings-insufficient-permissions), :50 (settings-ban-list)
@@ -55,9 +55,10 @@ async function openMemberContextMenu(
   // WHY: HeroUI Dropdown uses CSS transition (~150ms) for entry animation.
   // The menu wrapper appears immediately but inner items are still transitioning
   // (position/opacity), causing Playwright's "element is not stable" error on click.
-  // Waiting for the first visible menu item to pass Playwright's visibility check
-  // (which includes a stability assertion) guarantees the animation is done.
-  await menu.locator('[role="menuitem"]').first().waitFor({ timeout: 5_000 })
+  // Waiting for the first visible menu item (identified by data-test) to pass
+  // Playwright's visibility check guarantees the animation is done.
+  // WHY: Include no-actions-item for self-menu (shows "No actions available" instead of action items).
+  await menu.locator('[data-test="send-message-item"], [data-test="kick-member-item"], [data-test="ban-member-item"], [data-test="no-actions-item"]').first().waitFor({ timeout: 5_000 })
 }
 
 test.describe('Kick & Ban Moderation', () => {
@@ -114,7 +115,7 @@ test.describe('Kick & Ban Moderation', () => {
     await page.locator('[data-test="kick-submit-button"]').click()
 
     const kickResponse = await kickResponsePromise
-    expect(kickResponse.status()).toBeLessThan(400)
+    expect(kickResponse.status()).toBe(204)
 
     // Dialog closes and member disappears from list
     await expect(kickDialog).not.toBeVisible({ timeout: 5_000 })
@@ -225,7 +226,9 @@ test.describe('Kick & Ban Moderation', () => {
     const banDialog = page.locator('[data-test="ban-dialog"]')
     await expect(banDialog).toBeVisible({ timeout: 5_000 })
 
-    await page.locator('[data-test="ban-reason-input"]').fill('E2E test ban reason')
+    const banReasonInput = page.locator('[data-test="ban-reason-input"]')
+    await banReasonInput.fill('E2E test ban reason')
+    await expect(banReasonInput).toHaveValue('E2E test ban reason')
 
     const banResponsePromise = page.waitForResponse(
       (response) =>
@@ -236,7 +239,7 @@ test.describe('Kick & Ban Moderation', () => {
     await page.locator('[data-test="ban-submit-button"]').click()
 
     const banResponse = await banResponsePromise
-    expect(banResponse.status()).toBeLessThan(400)
+    expect(banResponse.status()).toBe(201)
 
     // Dialog closes and member disappears
     await expect(banDialog).not.toBeVisible({ timeout: 5_000 })
@@ -286,7 +289,7 @@ test.describe('Kick & Ban Moderation', () => {
     await banRow.locator('[data-test="unban-button"]').click()
 
     const unbanResponse = await unbanResponsePromise
-    expect(unbanResponse.status()).toBeLessThan(400)
+    expect(unbanResponse.status()).toBe(204)
 
     // Ban row disappears
     await expect(banRow).not.toBeVisible({ timeout: 10_000 })
@@ -317,9 +320,8 @@ test.describe('Kick & Ban Moderation', () => {
     await expect(page.locator('[data-test="kick-member-item"]')).not.toBeVisible()
   })
 
-  test('ban list visible to admin — member sees insufficient permissions', async ({ page }) => {
-    // WHY: bans-tab.tsx:19 — isAdmin check gates the ban list. Non-admin sees
-    // settings-insufficient-permissions (line 21).
+  test('ban list visible to admin', async ({ page }) => {
+    // WHY: bans-tab.tsx:19 — isAdmin check gates the ban list.
 
     // WHY: Create a ban via API so the ban list has content regardless of whether
     // earlier tests succeeded. An empty ban-list div has 0 height and is invisible.
@@ -346,6 +348,20 @@ test.describe('Kick & Ban Moderation', () => {
     const banList = page.locator('[data-test="settings-ban-list"]')
     await banList.waitFor({ timeout: 10_000 })
     await expect(banList).toBeVisible()
+  })
+
+  test('member cannot access server settings — settings item hidden', async ({ page }) => {
+    // WHY: channel-sidebar.tsx:228 — canAccessSettings requires admin+ (rank >= 3).
+    // Member (rank 1) and moderator (rank 2) both fail this check,
+    // so the settings menu item is rendered with className="hidden".
+    await authenticatePage(page, member)
+    await selectServer(page, server.id)
+
+    await page.locator('[data-test="server-header-button"]').click()
+
+    // WHY: The dropdown renders the settings item with display:none for non-admin.
+    // Playwright's not.toBeVisible() passes for both hidden and absent elements.
+    await expect(page.locator('[data-test="server-menu-settings-item"]')).not.toBeVisible()
   })
 
   test('kicked user can rejoin via invite', async ({ page }) => {
@@ -396,8 +412,8 @@ test.describe('Kick & Ban Moderation', () => {
       body: JSON.stringify({ inviteCode: newInvite.code }),
     })
 
-    // The API should reject the join with a 403
-    expect(rejoinRes.status).toBeGreaterThanOrEqual(400)
+    // WHY: invite_service.rs:180 — is_banned check returns DomainError::Forbidden → 403.
+    expect(rejoinRes.status).toBe(403)
 
     // Verify the user does NOT appear in the member list
     await authenticatePage(page, owner)

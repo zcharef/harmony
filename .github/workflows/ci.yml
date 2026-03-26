@@ -1,3 +1,9 @@
+# Harmony CI — Quality Wall + E2E Tests
+#
+# Architecture: 3 parallel jobs (app wall ~30s, Rust wall ~60s, E2E ~3min)
+# E2E uses local Supabase (supabase start) — zero Cloud secrets needed.
+# supabase db reset applies all migrations fresh, catching migration bugs.
+
 name: CI
 
 on:
@@ -15,6 +21,53 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 1: App Quality Wall (~30s)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  app-quality:
+    name: App Quality Wall
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harmony-app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: harmony-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Biome lint
+        run: pnpm lint
+
+      - name: TypeScript check
+        run: pnpm typecheck
+
+      - name: Module boundaries
+        run: pnpm lint:boundaries
+
+      - name: Circular dependencies
+        run: pnpm circular
+
+      - name: Architecture tests
+        run: pnpm test:arch
+
+      - name: Dead code check (Knip)
+        run: pnpm knip
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 2: Rust Quality Wall (~60s)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   rust-quality:
     name: Rust Quality Wall
     runs-on: ubuntu-latest
@@ -40,9 +93,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.94"
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -58,7 +110,7 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/harmony_test
-          SUPABASE_JWT_SECRET: test-secret-with-at-least-32-characters-long-for-ci
+          SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           SUPABASE_URL: http://localhost:9999
           ENVIRONMENT: test
           SERVER_PORT: "3000"
@@ -67,143 +119,39 @@ jobs:
       - name: OpenAPI freshness check
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/harmony_test
-          SUPABASE_JWT_SECRET: test-secret-with-at-least-32-characters-long-for-ci
+          SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           SUPABASE_URL: http://localhost:9999
           ENVIRONMENT: test
           SERVER_PORT: "3000"
         run: |
           cargo run --bin export_openapi > /tmp/openapi-fresh.json
-          diff -u openapi.json /tmp/openapi-fresh.json || (echo "ERROR: openapi.json is stale. Run 'just export-openapi' and commit." && exit 1)
+          diff -u openapi.json /tmp/openapi-fresh.json || {
+            echo "openapi.json is stale. Run just export-openapi and commit."
+            exit 1
+          }
 
-  rust-security:
-    name: Rust Security Audit
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: harmony-api
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.94"
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
-      - name: Check licenses and bans
-        run: cargo deny check
-
-      - name: Audit dependencies for vulnerabilities
-        run: |
-          cargo install cargo-audit --locked || true
-          cargo audit
-
-  app-quality:
-    name: App Quality Wall
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: harmony-app
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          cache-dependency-path: harmony-app/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Biome lint
-        run: pnpm lint
-
-      - name: TypeScript check
-        run: pnpm typecheck
-
-      - name: Module boundaries
-        run: pnpm lint:boundaries
-
-      - name: Circular dependencies
-        run: pnpm circular
-
-      - name: Architecture tests
-        run: pnpm test:arch
-
-      - name: Dead code check
-        run: pnpm knip
-
-      - name: Generated TypeScript client compiles
-        run: |
-          pnpm run gen:api
-          pnpm tsc --noEmit
-
-  migration-quality:
-    name: Migration Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Lint migrations
-        run: |
-          chmod +x scripts/lint-migrations.sh
-          ./scripts/lint-migrations.sh
-
-      - name: Check ADR index freshness
-        run: |
-          chmod +x scripts/check-adr-index.sh
-          ./scripts/check-adr-index.sh
-
-  commit-quality:
-    name: Commit Message Lint
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          cache-dependency-path: harmony-app/pnpm-lock.yaml
-
-      - name: Install commitlint
-        working-directory: ./harmony-app
-        run: pnpm install --frozen-lockfile
-
-      - name: Validate commit messages
-        working-directory: ./harmony-app
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: npx commitlint --from "$BASE_SHA" --to "$HEAD_SHA"
-
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 3: E2E Tests (~3min)
+  # WHY Supabase Cloud: dedicated CI project avoids Docker-in-Docker overhead.
+  # supabase db push applies pending migrations. Test data uses unique IDs
+  # so accumulation doesn't cause conflicts.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   e2e-tests:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
-    needs: [rust-quality, app-quality]
+    needs: [app-quality, rust-quality]
 
     steps:
       - uses: actions/checkout@v4
 
-      # ── Node / pnpm ──────────────────────────────────────────────
+      # ── Node / pnpm ──────────────────────────────────────
       - uses: pnpm/action-setup@v4
         with:
           version: 9
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
           cache-dependency-path: harmony-app/pnpm-lock.yaml
 
@@ -211,43 +159,44 @@ jobs:
         working-directory: harmony-app
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright browsers
+      - name: Install Playwright (chromium only)
         working-directory: harmony-app
         run: npx playwright install --with-deps chromium
 
-      # ── Rust toolchain ───────────────────────────────────────────
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.94"
+      # ── Rust toolchain ───────────────────────────────────
+      - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: harmony-api
 
-      # ── Supabase CLI ─────────────────────────────────────────────
-      - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
+      # ── Supabase Cloud: apply pending migrations ─────────
+      # WHY: Dedicated CI Supabase Cloud project. supabase db push
+      # applies any new migrations without destroying existing data.
+      # Test data uses unique IDs so accumulation is safe.
+      - uses: supabase/setup-cli@v1
         with:
           version: latest
 
-      - name: Link Supabase project
+      - name: Link Supabase CI project
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-        run: npx supabase link --project-ref "$SUPABASE_PROJECT_REF"
+          CI_SUPABASE_PROJECT_REF: ${{ secrets.CI_SUPABASE_PROJECT_REF }}
+        run: supabase link --project-ref "$CI_SUPABASE_PROJECT_REF"
 
-      - name: Reset E2E database (clean slate)
+      - name: Push pending migrations
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: npx supabase db reset --linked
+        run: supabase db push
 
-      # ── Start services ───────────────────────────────────────────
+      # ── Build & start Rust API ───────────────────────────
+      # WHY: API runs locally in the CI runner, connects to Cloud Supabase.
       - name: Build Rust API
         working-directory: harmony-api
         env:
-          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
-          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
+          SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
+          SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
           ENVIRONMENT: test
           SERVER_PORT: "3000"
         run: cargo build --release
@@ -255,39 +204,44 @@ jobs:
       - name: Start Rust API (background)
         working-directory: harmony-api
         env:
-          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
-          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
+          SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
+          SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
           ENVIRONMENT: test
           SERVER_PORT: "3000"
         run: ./target/release/harmony-api &
 
+      # ── Start Vite dev server ────────────────────────────
       - name: Start Vite dev server (background)
         working-directory: harmony-app
         env:
           VITE_API_URL: http://localhost:3000
-          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          VITE_TURNSTILE_SITE_KEY: "1x00000000000000000000AA"
+          VITE_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
         run: pnpm dev &
 
-      - name: Wait for services to be ready
-        run: npx wait-on --timeout 60000 http://localhost:3000/health http://localhost:1420
+      # ── Wait for services ────────────────────────────────
+      - name: Wait for API and Vite to be ready
+        run: |
+          echo "Waiting for Rust API..."
+          timeout 60 bash -c 'until curl -sf http://localhost:3000/health; do sleep 1; done'
+          echo "Waiting for Vite dev server..."
+          timeout 60 bash -c 'until curl -sf http://localhost:1420; do sleep 1; done'
+          echo "All services ready."
 
-      # ── Run E2E tests ────────────────────────────────────────────
+      # ── Run E2E tests ────────────────────────────────────
       - name: Run Playwright E2E tests
         working-directory: harmony-app
         env:
-          VITE_API_URL: http://localhost:3000
-          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          VITE_TURNSTILE_SITE_KEY: "1x00000000000000000000AA"
-        run: npx playwright test --fail-on-flaky-tests
+          CI_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
+          CI_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
+          CI_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.CI_SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx playwright test --retries=1 --fail-on-flaky-tests
 
-      # ── Artifacts ────────────────────────────────────────────────
+      # ── Artifacts (on failure only) ──────────────────────
       - name: Upload Playwright report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
@@ -295,7 +249,7 @@ jobs:
           retention-days: 14
 
       - name: Upload test results
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-test-results

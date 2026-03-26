@@ -48,9 +48,10 @@ pub(crate) fn db_err(e: sqlx::Error) -> DomainError {
         tracing::warn!(
             error = %e,
             pg_code = "42501",
+            pg_message = %db_err.message(),
             "Database permission denied (trigger or RLS)"
         );
-        return DomainError::Forbidden(db_err.message().to_string());
+        return DomainError::Forbidden("Operation not permitted".to_string());
     }
 
     tracing::error!(error = %e, "Database query failed");

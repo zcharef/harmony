@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT s.id AS server_id, c.id AS channel_id\n            FROM servers s\n            INNER JOIN channels c ON c.server_id = s.id\n            WHERE s.is_dm = true\n              AND EXISTS (\n                  SELECT 1 FROM server_members WHERE server_id = s.id AND user_id = $1\n                  FOR SHARE\n              )\n              AND EXISTS (\n                  SELECT 1 FROM server_members WHERE server_id = s.id AND user_id = $2\n                  FOR SHARE\n              )\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "277a93986d3a49c3ab913ad2ac9bbc050c7c8c78bd6eda5b55356ee3d49bb793"
+}

@@ -92,8 +92,8 @@ test.describe('Ownership Transfer', () => {
     const ownerSelect = page.locator('[data-test="transfer-owner-select"]')
     await ownerSelect.click()
 
-    // WHY: HeroUI Select renders options in a listbox. Click the option by user ID.
-    const option = page.locator(`[data-key="${transferAdmin.id}"]`)
+    // WHY: HeroUI Select renders options in a listbox. Click the option by data-test.
+    const option = page.locator(`[data-test="transfer-option-${transferAdmin.id}"]`)
     await option.waitFor({ timeout: 5_000 })
     await option.click()
 
@@ -107,7 +107,7 @@ test.describe('Ownership Transfer', () => {
     await page.locator('[data-test="confirm-transfer-button"]').click()
 
     const transferResponse = await transferResponsePromise
-    expect(transferResponse.status()).toBeLessThan(400)
+    expect(transferResponse.status()).toBe(200)
 
     // Modal closes
     await expect(transferModal).not.toBeVisible({ timeout: 5_000 })
@@ -185,8 +185,8 @@ test.describe('Ownership Transfer', () => {
       body: JSON.stringify({ newOwnerId: nonMember.id }),
     })
 
-    // API should reject this with a 4xx error
-    expect(res.status).toBeGreaterThanOrEqual(400)
+    // WHY: moderation_service.rs:335 — non-member triggers DomainError::NotFound → 404.
+    expect(res.status).toBe(404)
 
     // Verify the owner is still the owner via the member list
     await authenticatePage(page, owner)

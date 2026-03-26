@@ -56,8 +56,6 @@ test.describe('Role Assignment', () => {
     await joinServer(target.token, server.id, invite.code)
 
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -95,8 +93,6 @@ test.describe('Role Assignment', () => {
   test('admin assigns moderator role via context menu', async ({ page }) => {
     // WHY: Admin (rank 3) can assign moderator (rank 2) which is below their level.
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -135,8 +131,6 @@ test.describe('Role Assignment', () => {
     // WHY: member-context-menu.tsx:50 — callerRank > ROLE_HIERARCHY.admin filters out owner.
     // useAssignableRoles only includes roles below the caller's rank.
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -160,8 +154,6 @@ test.describe('Role Assignment', () => {
     // WHY: member-context-menu.tsx:38 — canChangeRole requires callerRank >= ROLE_HIERARCHY.admin.
     // Moderator (rank 2) < admin (rank 3), so canChangeRole is false.
     await authenticatePage(page, mod)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -186,8 +178,6 @@ test.describe('Role Assignment', () => {
   test('member cannot assign roles — change role section hidden', async ({ page }) => {
     // WHY: member-context-menu.tsx:38 — member (rank 1) < admin (rank 3).
     await authenticatePage(page, member)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -214,8 +204,6 @@ test.describe('Role Assignment', () => {
     // callerRank > ROLE_HIERARCHY[role]. Admin (3) is NOT > admin (3), so admin role is excluded.
     // Also, the target's current role is filtered out (line 59).
     await authenticatePage(page, admin)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -248,8 +236,6 @@ test.describe('Role Assignment', () => {
     await assignRole(owner.token, server.id, target.id, 'moderator')
 
     await authenticatePage(page, owner)
-    await page.goto('/')
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
 
     const memberList = page.locator('[data-test="member-list"]')
@@ -264,7 +250,7 @@ test.describe('Role Assignment', () => {
 
     // Now promote to admin via API and reload
     await assignRole(owner.token, server.id, target.id, 'admin')
-    await page.goto('/')
+    await page.reload()
     await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
     await selectServer(page, server.id)
     await memberList.waitFor({ timeout: 10_000 })

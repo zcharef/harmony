@@ -43,7 +43,8 @@ test.describe('Invites', () => {
 
     // Verify the generated invite code is displayed in the UI
     const codeDisplay = page.locator('[data-test="invite-code-display"]')
-    await expect(codeDisplay).toBeVisible({ timeout: 10_000 })
+    // WHY: invite-code-display is an <input> element — use toHaveValue, not toContainText.
+    await expect(codeDisplay).toHaveValue(inviteCode, { timeout: 10_000 })
 
     // Close the dialog
     await page.locator('[data-test="invite-done-button"]').click()
@@ -109,7 +110,6 @@ test.describe('Invites', () => {
     await expect(serverName).toHaveText(new RegExp(server.name))
 
     const memberCount = page.locator('[data-test="join-server-member-count"]')
-    await expect(memberCount).toBeVisible()
     await expect(memberCount).toHaveText(/\d+/)
 
     // Go back without joining (owner is already a member)

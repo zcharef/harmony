@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   createDm,
+  createDmRaw,
   createServer,
   getServerChannels,
   sendMessageRaw,
@@ -85,19 +86,9 @@ test.describe('Rate Limiting', () => {
     })
 
     test('11th DM creation within an hour is rate-limited', async () => {
-      // Attempt 11th DM via API — should be rate limited
-      const API_URL = process.env.VITE_API_URL ?? 'http://localhost:3000'
-
-      const res = await fetch(`${API_URL}/v1/dms`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${dmCreator.token}`,
-        },
-        body: JSON.stringify({ recipientId: targets[10].id }),
-      })
-
-      expect(res.status).toBe(429)
+      // Attempt 11th DM via factory — should be rate limited
+      const { status } = await createDmRaw(dmCreator.token, targets[10].id)
+      expect(status).toBe(429)
     })
   })
 })

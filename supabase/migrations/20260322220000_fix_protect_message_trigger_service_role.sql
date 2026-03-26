@@ -35,6 +35,12 @@ BEGIN
     -- auth.uid() returns NULL. Authorization is handled by the
     -- API service layer; the trigger is defense-in-depth for
     -- Realtime/PowerSync clients only.
+    --
+    -- INVARIANT: This bypass is safe because no anon-role write
+    -- policies (INSERT/UPDATE/DELETE) exist on the messages table.
+    -- If anon write policies are ever added, this NULL check must
+    -- be replaced with an explicit role check (e.g. current_setting
+    -- ('request.jwt.claims')::json->>'role' = 'service_role').
     IF auth.uid() IS NULL THEN
         RETURN NEW;
     END IF;

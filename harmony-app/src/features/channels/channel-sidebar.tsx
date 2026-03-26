@@ -52,7 +52,7 @@ function ChannelButton({
   const { t } = useTranslation('channels')
 
   return (
-    <div className="group flex items-center">
+    <div data-test="channel-item" className="group flex items-center">
       <Button
         data-test="channel-button"
         data-channel-id={channel.id}

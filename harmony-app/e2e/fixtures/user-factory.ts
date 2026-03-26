@@ -5,11 +5,14 @@
  * The Admin API bypasses email confirmation, so users can log in immediately.
  */
 
-// WHY: Standard local-dev service_role key for supabase local. Not a secret.
-const SUPABASE_URL = 'http://127.0.0.1:64321'
+// WHY: Configurable for CI (Supabase Cloud) while defaulting to local dev.
+// Local-dev keys are standard supabase local defaults. Not secrets.
+const SUPABASE_URL = process.env.CI_SUPABASE_URL ?? 'http://127.0.0.1:64321'
 const SERVICE_ROLE_KEY =
+  process.env.CI_SUPABASE_SERVICE_ROLE_KEY ??
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU'
 const ANON_KEY =
+  process.env.CI_SUPABASE_ANON_KEY ??
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0'
 
 export interface TestUser {

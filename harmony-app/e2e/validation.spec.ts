@@ -4,6 +4,7 @@ import {
   createInvite,
   createServer,
   getServerChannels,
+  joinServer,
   syncProfile,
 } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
@@ -42,10 +43,14 @@ test.describe('Input Validation', () => {
       // Leave name empty, submit
       const nameInput = page.locator('[data-test="server-name-input"]')
       await nameInput.fill('')
+      await expect(nameInput).toHaveValue('')
       await page.locator('[data-test="create-server-submit-button"]').click()
 
-      // Dialog should stay open (form validation prevents submission)
+      // WHY: Client-side Zod schema requires min(1). The zodResolver catches the
+      // error before handleSubmit fires, so dialog stays open with the submit
+      // button still present — no API call is made.
       await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-server-submit-button"]')).toBeVisible()
     })
 
     test('rejects server name exceeding 100 characters', async ({ page }) => {
@@ -57,13 +62,15 @@ test.describe('Input Validation', () => {
       const longName = 'a'.repeat(101)
       const nameInput = page.locator('[data-test="server-name-input"]')
       await nameInput.fill(longName)
+      await expect(nameInput).toHaveValue(longName)
 
       await page.locator('[data-test="create-server-submit-button"]').click()
 
       // WHY: Client-side Zod schema has max(100). The zodResolver catches the
       // error before handleSubmit fires, so no POST request is ever made.
-      // Dialog stays open with a validation error — no API call needed.
+      // Dialog stays open with the submit button still present — no API call needed.
       await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-server-submit-button"]')).toBeVisible()
     })
 
     test('rejects server name with control characters via API', async ({ page }) => {
@@ -108,10 +115,14 @@ test.describe('Input Validation', () => {
 
       const nameInput = page.locator('[data-test="channel-name-input"]')
       await nameInput.fill('MyChannel')
+      await expect(nameInput).toHaveValue('MyChannel')
       await page.locator('[data-test="create-channel-submit-button"]').click()
 
-      // Client-side Zod regex rejects uppercase — dialog stays open with error
+      // WHY: Client-side Zod regex ^[a-z0-9-]+$ rejects uppercase. The zodResolver
+      // catches the error before handleSubmit fires, so dialog stays open with the
+      // submit button still present — no API call is made.
       await expect(page.locator('[data-test="create-channel-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-channel-submit-button"]')).toBeVisible()
     })
 
     test('rejects channel name with special characters', async ({ page }) => {
@@ -126,10 +137,13 @@ test.describe('Input Validation', () => {
 
       const nameInput = page.locator('[data-test="channel-name-input"]')
       await nameInput.fill('hello_world!')
+      await expect(nameInput).toHaveValue('hello_world!')
       await page.locator('[data-test="create-channel-submit-button"]').click()
 
-      // Regex ^[a-z0-9-]+$ rejects underscore and exclamation
+      // WHY: Client-side Zod regex ^[a-z0-9-]+$ rejects underscore and exclamation.
+      // Dialog stays open with submit button still present — validation prevented submission.
       await expect(page.locator('[data-test="create-channel-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-channel-submit-button"]')).toBeVisible()
     })
 
     test('rejects channel name exceeding 100 characters', async ({ page }) => {
@@ -142,12 +156,16 @@ test.describe('Input Validation', () => {
       await menuItem3.click()
       await page.locator('[data-test="create-channel-dialog"]').waitFor({ timeout: 10000 })
 
+      const longChannelName = 'a'.repeat(101)
       const nameInput = page.locator('[data-test="channel-name-input"]')
-      await nameInput.fill('a'.repeat(101))
+      await nameInput.fill(longChannelName)
+      await expect(nameInput).toHaveValue(longChannelName)
       await page.locator('[data-test="create-channel-submit-button"]').click()
 
-      // Zod max(100) rejects — dialog stays open
+      // WHY: Client-side Zod schema has max(100). Dialog stays open with submit
+      // button still present — validation prevented submission, no API call made.
       await expect(page.locator('[data-test="create-channel-dialog"]')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('[data-test="create-channel-submit-button"]')).toBeVisible()
     })
   })
 
@@ -213,22 +231,13 @@ test.describe('Input Validation', () => {
   // ── Ban Reason Validation ───────────────────────────────────────
 
   test.describe('Ban Reason', () => {
-    test('rejects ban reason exceeding 512 characters via API', async ({ page: _page }) => {
+    test('rejects ban reason exceeding 512 characters via API', async () => {
       const target = await createTestUser('val-ban-target')
       await syncProfile(target.token)
 
       // Create invite, join the server as target
       const invite = await createInvite(owner.token, server.id)
-      const previewRes = await fetch(`http://localhost:3000/v1/invites/${invite.code}`)
-      const preview = (await previewRes.json()) as { serverId: string }
-      await fetch(`http://localhost:3000/v1/servers/${preview.serverId}/members`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${target.token}`,
-        },
-        body: JSON.stringify({ inviteCode: invite.code }),
-      })
+      await joinServer(target.token, server.id, invite.code)
 
       // Try to ban with a reason > 512 chars via API
       const banRes = await fetch(`http://localhost:3000/v1/servers/${server.id}/bans`, {
