@@ -206,6 +206,7 @@ jobs:
       - name: Build Rust API
         working-directory: harmony-api
         env:
+          SQLX_OFFLINE: "true"
           DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
           SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
           SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
