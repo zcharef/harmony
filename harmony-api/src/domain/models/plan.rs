@@ -2,9 +2,9 @@
 //!
 //! WHY: Hardcoded limits act as financial guard-rails for `SaaS` tiers.
 //! Self-hosted deployments bypass these entirely via the `AlwaysAllowedChecker` adapter,
-//! or use `SELF_HOSTED_LIMITS` (all `u64::MAX`) for code paths that read limit values.
+//! or use `SELF_HOSTED_LIMITS` for code paths that read limit values.
 //!
-//! Spec reference: dev/active/plan-limits/plan-limits-plan.md
+//! Spec reference: V3 Pricing Simulation
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -14,8 +14,8 @@ use utoipa::ToSchema;
 #[serde(rename_all = "lowercase")]
 pub enum Plan {
     Free,
-    Pro,
-    Community,
+    Supporter,
+    Creator,
 }
 
 impl Plan {
@@ -24,8 +24,8 @@ impl Plan {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Free => "free",
-            Self::Pro => "pro",
-            Self::Community => "community",
+            Self::Supporter => "supporter",
+            Self::Creator => "creator",
         }
     }
 }
@@ -42,8 +42,8 @@ impl std::str::FromStr for Plan {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "free" => Ok(Self::Free),
-            "pro" => Ok(Self::Pro),
-            "community" => Ok(Self::Community),
+            "supporter" => Ok(Self::Supporter),
+            "creator" => Ok(Self::Creator),
             _ => Err(format!("Invalid plan: '{s}'")),
         }
     }
@@ -97,7 +97,8 @@ impl std::fmt::Display for ResourceKind {
 
 /// Concrete limit values for a plan tier.
 ///
-/// All numeric limits are `u64`. Self-hosted deployments use `u64::MAX` for all values.
+/// All numeric limits are `u64`. Self-hosted deployments use specific high defaults
+/// with `u64::MAX` only for configurable fields (edit window, rate limits).
 /// Fields are organized by spec section (§N).
 ///
 /// For non-countable limits (message chars, edit window, bio chars, rate limits),
@@ -107,11 +108,15 @@ pub struct PlanLimits {
     // §1 Servers (per user — global, not per-server)
     pub max_owned_servers: u64,
     pub max_joined_servers: u64,
+    // §1 Servers — text limits
+    pub max_server_description_chars: u64,
     // §2 Members (per server)
     pub max_members: u64,
     // §3 Channels (per server)
     pub max_channels: u64,
     pub max_categories: u64,
+    // §3 Channels — text limits
+    pub max_channel_topic_chars: u64,
     // §4 Roles (per server)
     pub max_roles: u64,
     // §5 Messages (per server)
@@ -124,72 +129,86 @@ pub struct PlanLimits {
     pub max_open_dms: u64,
     // §11 Profile (per user)
     pub max_bio_chars: u64,
+    // §11 Profile — text limits
+    pub max_custom_status_chars: u64,
     // §12 Rate limits (per user)
     pub max_messages_per_5s: u64,
 }
 
 // -- Hardcoded limit constants -----------------------------------------------
-// Source of truth: dev/active/plan-limits/plan-limits-plan.md
+// Source of truth: V3 Pricing Simulation
 
 const FREE_LIMITS: PlanLimits = PlanLimits {
     max_owned_servers: 3,
-    max_joined_servers: 10,
-    max_members: 150,
-    max_channels: 20,
-    max_categories: 5,
-    max_roles: 10,
+    max_joined_servers: 20,
+    max_server_description_chars: 500,
+    max_members: 200,
+    max_channels: 50,
+    max_categories: 10,
+    max_channel_topic_chars: 256,
+    max_roles: 20,
     max_message_chars: 2_000,
     message_edit_window_secs: 15 * 60, // 15 minutes
     max_active_invites: 5,
     max_open_dms: 20,
     max_bio_chars: 200,
+    max_custom_status_chars: 50,
     max_messages_per_5s: 5,
 };
 
-const PRO_LIMITS: PlanLimits = PlanLimits {
+const SUPPORTER_LIMITS: PlanLimits = PlanLimits {
     max_owned_servers: 10,
-    max_joined_servers: 50,
-    max_members: 2_000,
-    max_channels: 100,
-    max_categories: 20,
-    max_roles: 50,
-    max_message_chars: 4_000,
-    message_edit_window_secs: u64::MAX, // unlimited
-    max_active_invites: 25,
-    max_open_dms: 100,
-    max_bio_chars: 500,
-    max_messages_per_5s: 10,
-};
-
-const COMMUNITY_LIMITS: PlanLimits = PlanLimits {
-    max_owned_servers: 25,
     max_joined_servers: 100,
+    max_server_description_chars: 1_000,
     max_members: 10_000,
     max_channels: 500,
     max_categories: 50,
+    max_channel_topic_chars: 512,
     max_roles: 250,
     max_message_chars: 4_000,
-    message_edit_window_secs: u64::MAX, // unlimited
-    max_active_invites: 100,
-    max_open_dms: 500,
+    message_edit_window_secs: 86_400, // 24 hours
+    max_active_invites: 25,
+    max_open_dms: 100,
     max_bio_chars: 500,
-    max_messages_per_5s: 15,
+    max_custom_status_chars: 128,
+    max_messages_per_5s: 10,
 };
 
-/// Self-hosted limits: everything unlimited.
+const CREATOR_LIMITS: PlanLimits = PlanLimits {
+    max_owned_servers: 25,
+    max_joined_servers: 500,
+    max_server_description_chars: 2_000,
+    max_members: 50_000,
+    max_channels: 1_000,
+    max_categories: 100,
+    max_channel_topic_chars: 1_024,
+    max_roles: 500,
+    max_message_chars: 4_000,
+    message_edit_window_secs: 604_800, // 7 days
+    max_active_invites: 100,
+    max_open_dms: 500,
+    max_bio_chars: 1_000,
+    max_custom_status_chars: 128,
+    max_messages_per_5s: 20,
+};
+
+/// Self-hosted limits: specific high defaults, with `u64::MAX` only for configurable fields.
 pub const SELF_HOSTED_LIMITS: PlanLimits = PlanLimits {
-    max_owned_servers: u64::MAX,
-    max_joined_servers: u64::MAX,
-    max_members: u64::MAX,
-    max_channels: u64::MAX,
-    max_categories: u64::MAX,
-    max_roles: u64::MAX,
-    max_message_chars: u64::MAX,
-    message_edit_window_secs: u64::MAX,
-    max_active_invites: u64::MAX,
-    max_open_dms: u64::MAX,
-    max_bio_chars: u64::MAX,
-    max_messages_per_5s: u64::MAX,
+    max_owned_servers: 100,
+    max_joined_servers: 1_000,
+    max_server_description_chars: 5_000,
+    max_members: 500_000,
+    max_channels: 10_000,
+    max_categories: 500,
+    max_channel_topic_chars: 4_096,
+    max_roles: 2_000,
+    max_message_chars: 8_000,
+    message_edit_window_secs: u64::MAX, // configurable
+    max_active_invites: 1_000,
+    max_open_dms: 2_000,
+    max_bio_chars: 4_000,
+    max_custom_status_chars: 256,
+    max_messages_per_5s: u64::MAX, // configurable
 };
 
 impl PlanLimits {
@@ -198,12 +217,12 @@ impl PlanLimits {
     pub fn for_plan(plan: Plan) -> Self {
         match plan {
             Plan::Free => FREE_LIMITS,
-            Plan::Pro => PRO_LIMITS,
-            Plan::Community => COMMUNITY_LIMITS,
+            Plan::Supporter => SUPPORTER_LIMITS,
+            Plan::Creator => CREATOR_LIMITS,
         }
     }
 
-    /// Get the self-hosted limits (all `u64::MAX`).
+    /// Get the self-hosted limits.
     #[must_use]
     pub fn for_self_hosted() -> Self {
         SELF_HOSTED_LIMITS
@@ -242,14 +261,16 @@ mod tests {
 
         // §1 Servers
         assert_eq!(limits.max_owned_servers, 3);
-        assert_eq!(limits.max_joined_servers, 10);
+        assert_eq!(limits.max_joined_servers, 20);
+        assert_eq!(limits.max_server_description_chars, 500);
         // §2 Members
-        assert_eq!(limits.max_members, 150);
+        assert_eq!(limits.max_members, 200);
         // §3 Channels
-        assert_eq!(limits.max_channels, 20);
-        assert_eq!(limits.max_categories, 5);
+        assert_eq!(limits.max_channels, 50);
+        assert_eq!(limits.max_categories, 10);
+        assert_eq!(limits.max_channel_topic_chars, 256);
         // §4 Roles
-        assert_eq!(limits.max_roles, 10);
+        assert_eq!(limits.max_roles, 20);
         // §5 Messages
         assert_eq!(limits.max_message_chars, 2_000);
         assert_eq!(limits.message_edit_window_secs, 900); // 15 minutes
@@ -259,113 +280,132 @@ mod tests {
         assert_eq!(limits.max_open_dms, 20);
         // §11 Profile
         assert_eq!(limits.max_bio_chars, 200);
+        assert_eq!(limits.max_custom_status_chars, 50);
         // §12 Rate limits
         assert_eq!(limits.max_messages_per_5s, 5);
     }
 
-    // ── Pro plan limits match spec ──────────────────────────────────────
+    // ── Supporter plan limits match spec ────────────────────────────────
 
     #[test]
-    fn pro_plan_limits_match_spec() {
-        let limits = PlanLimits::for_plan(Plan::Pro);
+    fn supporter_plan_limits_match_spec() {
+        let limits = PlanLimits::for_plan(Plan::Supporter);
 
         assert_eq!(limits.max_owned_servers, 10);
-        assert_eq!(limits.max_joined_servers, 50);
-        assert_eq!(limits.max_members, 2_000);
-        assert_eq!(limits.max_channels, 100);
-        assert_eq!(limits.max_categories, 20);
-        assert_eq!(limits.max_roles, 50);
-        assert_eq!(limits.max_message_chars, 4_000);
-        assert_eq!(limits.message_edit_window_secs, u64::MAX);
-        assert_eq!(limits.max_active_invites, 25);
-        assert_eq!(limits.max_open_dms, 100);
-        assert_eq!(limits.max_bio_chars, 500);
-        assert_eq!(limits.max_messages_per_5s, 10);
-    }
-
-    // ── Community plan limits match spec ─────────────────────────────────
-
-    #[test]
-    fn community_plan_limits_match_spec() {
-        let limits = PlanLimits::for_plan(Plan::Community);
-
-        assert_eq!(limits.max_owned_servers, 25);
         assert_eq!(limits.max_joined_servers, 100);
+        assert_eq!(limits.max_server_description_chars, 1_000);
         assert_eq!(limits.max_members, 10_000);
         assert_eq!(limits.max_channels, 500);
         assert_eq!(limits.max_categories, 50);
+        assert_eq!(limits.max_channel_topic_chars, 512);
         assert_eq!(limits.max_roles, 250);
         assert_eq!(limits.max_message_chars, 4_000);
-        assert_eq!(limits.message_edit_window_secs, u64::MAX);
+        assert_eq!(limits.message_edit_window_secs, 86_400); // 24 hours
+        assert_eq!(limits.max_active_invites, 25);
+        assert_eq!(limits.max_open_dms, 100);
+        assert_eq!(limits.max_bio_chars, 500);
+        assert_eq!(limits.max_custom_status_chars, 128);
+        assert_eq!(limits.max_messages_per_5s, 10);
+    }
+
+    // ── Creator plan limits match spec ──────────────────────────────────
+
+    #[test]
+    fn creator_plan_limits_match_spec() {
+        let limits = PlanLimits::for_plan(Plan::Creator);
+
+        assert_eq!(limits.max_owned_servers, 25);
+        assert_eq!(limits.max_joined_servers, 500);
+        assert_eq!(limits.max_server_description_chars, 2_000);
+        assert_eq!(limits.max_members, 50_000);
+        assert_eq!(limits.max_channels, 1_000);
+        assert_eq!(limits.max_categories, 100);
+        assert_eq!(limits.max_channel_topic_chars, 1_024);
+        assert_eq!(limits.max_roles, 500);
+        assert_eq!(limits.max_message_chars, 4_000);
+        assert_eq!(limits.message_edit_window_secs, 604_800); // 7 days
         assert_eq!(limits.max_active_invites, 100);
         assert_eq!(limits.max_open_dms, 500);
-        assert_eq!(limits.max_bio_chars, 500);
-        assert_eq!(limits.max_messages_per_5s, 15);
+        assert_eq!(limits.max_bio_chars, 1_000);
+        assert_eq!(limits.max_custom_status_chars, 128);
+        assert_eq!(limits.max_messages_per_5s, 20);
     }
 
-    // ── Self-hosted limits are all u64::MAX ─────────────────────────────
+    // ── Self-hosted limits: specific high defaults ──────────────────────
 
     #[test]
-    fn self_hosted_limits_are_all_max() {
+    fn self_hosted_limits_match_spec() {
         let limits = PlanLimits::for_self_hosted();
 
-        assert_eq!(limits.max_owned_servers, u64::MAX);
-        assert_eq!(limits.max_joined_servers, u64::MAX);
-        assert_eq!(limits.max_members, u64::MAX);
-        assert_eq!(limits.max_channels, u64::MAX);
-        assert_eq!(limits.max_categories, u64::MAX);
-        assert_eq!(limits.max_roles, u64::MAX);
-        assert_eq!(limits.max_message_chars, u64::MAX);
-        assert_eq!(limits.message_edit_window_secs, u64::MAX);
-        assert_eq!(limits.max_active_invites, u64::MAX);
-        assert_eq!(limits.max_open_dms, u64::MAX);
-        assert_eq!(limits.max_bio_chars, u64::MAX);
-        assert_eq!(limits.max_messages_per_5s, u64::MAX);
+        assert_eq!(limits.max_owned_servers, 100);
+        assert_eq!(limits.max_joined_servers, 1_000);
+        assert_eq!(limits.max_server_description_chars, 5_000);
+        assert_eq!(limits.max_members, 500_000);
+        assert_eq!(limits.max_channels, 10_000);
+        assert_eq!(limits.max_categories, 500);
+        assert_eq!(limits.max_channel_topic_chars, 4_096);
+        assert_eq!(limits.max_roles, 2_000);
+        assert_eq!(limits.max_message_chars, 8_000);
+        assert_eq!(limits.message_edit_window_secs, u64::MAX); // configurable
+        assert_eq!(limits.max_active_invites, 1_000);
+        assert_eq!(limits.max_open_dms, 2_000);
+        assert_eq!(limits.max_bio_chars, 4_000);
+        assert_eq!(limits.max_custom_status_chars, 256);
+        assert_eq!(limits.max_messages_per_5s, u64::MAX); // configurable
     }
 
-    // ── Tier ordering: Free < Pro < Community for all limits ────────────
+    // ── Tier ordering: Free < Supporter < Creator for all limits ────────
 
     #[test]
-    fn tier_ordering_free_le_pro_le_community() {
+    fn tier_ordering_free_le_supporter_le_creator() {
         let free = PlanLimits::for_plan(Plan::Free);
-        let pro = PlanLimits::for_plan(Plan::Pro);
-        let community = PlanLimits::for_plan(Plan::Community);
+        let supporter = PlanLimits::for_plan(Plan::Supporter);
+        let creator = PlanLimits::for_plan(Plan::Creator);
 
-        assert!(free.max_owned_servers <= pro.max_owned_servers);
-        assert!(pro.max_owned_servers <= community.max_owned_servers);
+        assert!(free.max_owned_servers <= supporter.max_owned_servers);
+        assert!(supporter.max_owned_servers <= creator.max_owned_servers);
 
-        assert!(free.max_joined_servers <= pro.max_joined_servers);
-        assert!(pro.max_joined_servers <= community.max_joined_servers);
+        assert!(free.max_joined_servers <= supporter.max_joined_servers);
+        assert!(supporter.max_joined_servers <= creator.max_joined_servers);
 
-        assert!(free.max_members <= pro.max_members);
-        assert!(pro.max_members <= community.max_members);
+        assert!(free.max_server_description_chars <= supporter.max_server_description_chars);
+        assert!(supporter.max_server_description_chars <= creator.max_server_description_chars);
 
-        assert!(free.max_channels <= pro.max_channels);
-        assert!(pro.max_channels <= community.max_channels);
+        assert!(free.max_members <= supporter.max_members);
+        assert!(supporter.max_members <= creator.max_members);
 
-        assert!(free.max_categories <= pro.max_categories);
-        assert!(pro.max_categories <= community.max_categories);
+        assert!(free.max_channels <= supporter.max_channels);
+        assert!(supporter.max_channels <= creator.max_channels);
 
-        assert!(free.max_roles <= pro.max_roles);
-        assert!(pro.max_roles <= community.max_roles);
+        assert!(free.max_categories <= supporter.max_categories);
+        assert!(supporter.max_categories <= creator.max_categories);
 
-        assert!(free.max_message_chars <= pro.max_message_chars);
-        assert!(pro.max_message_chars <= community.max_message_chars);
+        assert!(free.max_channel_topic_chars <= supporter.max_channel_topic_chars);
+        assert!(supporter.max_channel_topic_chars <= creator.max_channel_topic_chars);
 
-        assert!(free.message_edit_window_secs <= pro.message_edit_window_secs);
-        assert!(pro.message_edit_window_secs <= community.message_edit_window_secs);
+        assert!(free.max_roles <= supporter.max_roles);
+        assert!(supporter.max_roles <= creator.max_roles);
 
-        assert!(free.max_active_invites <= pro.max_active_invites);
-        assert!(pro.max_active_invites <= community.max_active_invites);
+        assert!(free.max_message_chars <= supporter.max_message_chars);
+        assert!(supporter.max_message_chars <= creator.max_message_chars);
 
-        assert!(free.max_open_dms <= pro.max_open_dms);
-        assert!(pro.max_open_dms <= community.max_open_dms);
+        assert!(free.message_edit_window_secs <= supporter.message_edit_window_secs);
+        assert!(supporter.message_edit_window_secs <= creator.message_edit_window_secs);
 
-        assert!(free.max_bio_chars <= pro.max_bio_chars);
-        assert!(pro.max_bio_chars <= community.max_bio_chars);
+        assert!(free.max_active_invites <= supporter.max_active_invites);
+        assert!(supporter.max_active_invites <= creator.max_active_invites);
 
-        assert!(free.max_messages_per_5s <= pro.max_messages_per_5s);
-        assert!(pro.max_messages_per_5s <= community.max_messages_per_5s);
+        assert!(free.max_open_dms <= supporter.max_open_dms);
+        assert!(supporter.max_open_dms <= creator.max_open_dms);
+
+        assert!(free.max_bio_chars <= supporter.max_bio_chars);
+        assert!(supporter.max_bio_chars <= creator.max_bio_chars);
+
+        assert!(free.max_custom_status_chars <= supporter.max_custom_status_chars);
+        assert!(supporter.max_custom_status_chars <= creator.max_custom_status_chars);
+
+        assert!(free.max_messages_per_5s <= supporter.max_messages_per_5s);
+        assert!(supporter.max_messages_per_5s <= creator.max_messages_per_5s);
     }
 
     // ── limit_for returns correct value for each ResourceKind ───────────
@@ -377,11 +417,11 @@ mod tests {
             3
         );
         assert_eq!(
-            PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::OwnedServers),
+            PlanLimits::for_plan(Plan::Supporter).limit_for(ResourceKind::OwnedServers),
             10
         );
         assert_eq!(
-            PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::OwnedServers),
+            PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::OwnedServers),
             25
         );
     }
@@ -390,15 +430,15 @@ mod tests {
     fn limit_for_joined_servers() {
         assert_eq!(
             PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::JoinedServers),
-            10
+            20
         );
         assert_eq!(
-            PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::JoinedServers),
-            50
-        );
-        assert_eq!(
-            PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::JoinedServers),
+            PlanLimits::for_plan(Plan::Supporter).limit_for(ResourceKind::JoinedServers),
             100
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::JoinedServers),
+            500
         );
     }
 
@@ -406,7 +446,7 @@ mod tests {
     fn limit_for_members() {
         assert_eq!(
             PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Members),
-            150
+            200
         );
     }
 
@@ -414,15 +454,15 @@ mod tests {
     fn limit_for_channels() {
         assert_eq!(
             PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Channels),
-            20
+            50
         );
         assert_eq!(
-            PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::Channels),
-            100
-        );
-        assert_eq!(
-            PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::Channels),
+            PlanLimits::for_plan(Plan::Supporter).limit_for(ResourceKind::Channels),
             500
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::Channels),
+            1_000
         );
     }
 
@@ -430,15 +470,15 @@ mod tests {
     fn limit_for_categories() {
         assert_eq!(
             PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Categories),
-            5
+            10
         );
     }
 
     #[test]
     fn limit_for_roles() {
         assert_eq!(
-            PlanLimits::for_plan(Plan::Pro).limit_for(ResourceKind::Roles),
-            50
+            PlanLimits::for_plan(Plan::Supporter).limit_for(ResourceKind::Roles),
+            250
         );
     }
 
@@ -449,7 +489,7 @@ mod tests {
             5
         );
         assert_eq!(
-            PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::ActiveInvites),
+            PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::ActiveInvites),
             100
         );
     }
@@ -461,7 +501,7 @@ mod tests {
             20
         );
         assert_eq!(
-            PlanLimits::for_plan(Plan::Community).limit_for(ResourceKind::OpenDms),
+            PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::OpenDms),
             500
         );
     }
@@ -476,17 +516,17 @@ mod tests {
     }
 
     #[test]
-    fn plan_from_str_pro_round_trip() {
-        let plan: Plan = "pro".parse().unwrap();
-        assert_eq!(plan, Plan::Pro);
-        assert_eq!(plan.as_str(), "pro");
+    fn plan_from_str_supporter_round_trip() {
+        let plan: Plan = "supporter".parse().unwrap();
+        assert_eq!(plan, Plan::Supporter);
+        assert_eq!(plan.as_str(), "supporter");
     }
 
     #[test]
-    fn plan_from_str_community_round_trip() {
-        let plan: Plan = "community".parse().unwrap();
-        assert_eq!(plan, Plan::Community);
-        assert_eq!(plan.as_str(), "community");
+    fn plan_from_str_creator_round_trip() {
+        let plan: Plan = "creator".parse().unwrap();
+        assert_eq!(plan, Plan::Creator);
+        assert_eq!(plan.as_str(), "creator");
     }
 
     // ── Plan serde round-trip ───────────────────────────────────────────
@@ -500,19 +540,19 @@ mod tests {
     }
 
     #[test]
-    fn plan_serde_round_trip_pro() {
-        let json = serde_json::to_string(&Plan::Pro).unwrap();
-        assert_eq!(json, r#""pro""#);
+    fn plan_serde_round_trip_supporter() {
+        let json = serde_json::to_string(&Plan::Supporter).unwrap();
+        assert_eq!(json, r#""supporter""#);
         let deserialized: Plan = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, Plan::Pro);
+        assert_eq!(deserialized, Plan::Supporter);
     }
 
     #[test]
-    fn plan_serde_round_trip_community() {
-        let json = serde_json::to_string(&Plan::Community).unwrap();
-        assert_eq!(json, r#""community""#);
+    fn plan_serde_round_trip_creator() {
+        let json = serde_json::to_string(&Plan::Creator).unwrap();
+        assert_eq!(json, r#""creator""#);
         let deserialized: Plan = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, Plan::Community);
+        assert_eq!(deserialized, Plan::Creator);
     }
 
     // ── Invalid plan string rejected ────────────────────────────────────
@@ -529,8 +569,8 @@ mod tests {
     #[test]
     fn plan_from_str_rejects_uppercase() {
         assert!("Free".parse::<Plan>().is_err());
-        assert!("Pro".parse::<Plan>().is_err());
-        assert!("Community".parse::<Plan>().is_err());
+        assert!("Supporter".parse::<Plan>().is_err());
+        assert!("Creator".parse::<Plan>().is_err());
     }
 
     #[test]
@@ -561,8 +601,8 @@ mod tests {
     #[test]
     fn plan_display() {
         assert_eq!(format!("{}", Plan::Free), "free");
-        assert_eq!(format!("{}", Plan::Pro), "pro");
-        assert_eq!(format!("{}", Plan::Community), "community");
+        assert_eq!(format!("{}", Plan::Supporter), "supporter");
+        assert_eq!(format!("{}", Plan::Creator), "creator");
     }
 
     #[test]
@@ -581,17 +621,17 @@ mod tests {
         assert_eq!(limits.message_edit_window_secs, 900);
     }
 
-    // ── Pro and Community have unlimited edit window ─────────────────────
+    // ── Supporter has 24h and Creator has 7d edit window ────────────────
 
     #[test]
-    fn pro_and_community_have_unlimited_edit_window() {
+    fn supporter_and_creator_edit_windows() {
         assert_eq!(
-            PlanLimits::for_plan(Plan::Pro).message_edit_window_secs,
-            u64::MAX
+            PlanLimits::for_plan(Plan::Supporter).message_edit_window_secs,
+            86_400 // 24 hours
         );
         assert_eq!(
-            PlanLimits::for_plan(Plan::Community).message_edit_window_secs,
-            u64::MAX
+            PlanLimits::for_plan(Plan::Creator).message_edit_window_secs,
+            604_800 // 7 days
         );
     }
 
