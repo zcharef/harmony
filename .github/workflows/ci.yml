@@ -216,7 +216,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
           ENVIRONMENT: test
           SERVER_PORT: "3000"
-        run: ./target/release/harmony-api &
+        run: ./target/release/harmony-api > /tmp/api-stdout.log 2>&1 &
 
       # ── Start Vite dev server ────────────────────────────
       - name: Start Vite dev server (background)
@@ -232,7 +232,11 @@ jobs:
       - name: Wait for API and Vite to be ready
         run: |
           echo "Waiting for Rust API..."
-          timeout 60 bash -c 'until curl -sf http://localhost:3000/health; do sleep 1; done'
+          timeout 60 bash -c 'until curl -sf http://localhost:3000/health; do sleep 1; done' || {
+            echo "::error::API failed to start. Logs:"
+            cat /tmp/api-stdout.log
+            exit 1
+          }
           echo "Waiting for Vite dev server..."
           timeout 60 bash -c 'until curl -sf http://localhost:1420; do sleep 1; done'
           echo "All services ready."
