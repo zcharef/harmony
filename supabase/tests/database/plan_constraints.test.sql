@@ -8,6 +8,21 @@
 -- =============================================================
 BEGIN;
 
+-- DIAGNOSTIC: Find where pgtap is installed
+SELECT e.extname, n.nspname AS schema, e.extversion
+FROM pg_extension e
+JOIN pg_namespace n ON e.extnamespace = n.oid
+WHERE e.extname = 'pgtap';
+
+-- DIAGNOSTIC: Find all functions named 'plan'
+SELECT n.nspname AS schema, p.proname, pg_catalog.pg_get_function_arguments(p.oid) AS args
+FROM pg_proc p
+JOIN pg_namespace n ON p.pronamespace = n.oid
+WHERE p.proname = 'plan';
+
+-- DIAGNOSTIC: Current search_path
+SHOW search_path;
+
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 DO $$
@@ -17,6 +32,9 @@ BEGIN
     (SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON e.extnamespace = n.oid WHERE e.extname = 'pgtap')
   );
 END $$;
+
+-- DIAGNOSTIC: search_path after DO block
+SHOW search_path;
 
 SELECT plan(17);
 
