@@ -8,10 +8,6 @@
 -- =============================================================
 BEGIN;
 
--- WHY: On Supabase Cloud, pgtap is in the `extensions` schema.
-CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT set_config('search_path', 'public, extensions', false);
-
 SELECT plan(17);
 
 

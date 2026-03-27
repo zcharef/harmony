@@ -12,11 +12,6 @@
 -- =============================================================
 BEGIN;
 
--- WHY: On Supabase Cloud, pgtap is in the `extensions` schema.
--- SET must be OUTSIDE any DO $$ block — PL/pgSQL reverts SET on exit.
-CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT set_config('search_path', 'public, extensions', false);
-
 SELECT plan(34);
 
 

@@ -11,9 +11,6 @@
 -- =============================================================
 BEGIN;
 
-CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT set_config('search_path', 'public, extensions', false);
-
 SELECT plan(59);
 
 
