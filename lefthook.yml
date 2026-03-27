@@ -64,10 +64,21 @@ pre-push:
       run: pnpm vitest run --config vitest.config.arch.ts
       fail_text: "Architecture tests failed. Check feature structure."
 
+    vitest:
+      root: harmony-app/
+      run: pnpm vitest run
+      fail_text: "Vitest unit tests failed. Run 'pnpm vitest run' for details."
+
     knip:
       root: harmony-app/
       run: pnpm knip --no-progress
       fail_text: "Dead code detected. Run 'pnpm knip' to see unused files/exports/deps."
+
+    # --- Tauri Crypto (harmony-app/src-tauri) ---
+    tauri-test:
+      root: harmony-app/src-tauri/
+      run: $HOME/.cargo/bin/cargo test --all-targets
+      fail_text: "Tauri crypto tests failed. Run 'cargo test' in src-tauri/."
 
     # --- Rust API (harmony-api) ---
     openapi-freshness:
