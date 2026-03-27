@@ -1,8 +1,10 @@
 import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
-import { LogIn, MessageCircle, Plus } from 'lucide-react'
+import { Compass, LogOut, MessageSquare, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ServerResponse } from '@/lib/api'
+import { logger } from '@/lib/logger'
+import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { CreateServerDialog } from './create-server-dialog'
 import { useServers } from './hooks/use-servers'
@@ -20,6 +22,7 @@ function ServerIcon({
   // WHY: Generate initials from server name for avatar fallback
   const initials = server.name
     .split(' ')
+    .filter((w) => w.length > 0)
     .map((w) => w[0])
     .join('')
     .slice(0, 2)
@@ -81,6 +84,7 @@ export function ServerList({
   onSelectDmView,
 }: ServerListProps) {
   const { t } = useTranslation('servers')
+  const { t: tAuth } = useTranslation('auth')
   const { t: tDms } = useTranslation('dms')
   const { data: servers, isPending, isError } = useServers()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
@@ -128,7 +132,7 @@ export function ServerList({
           />
 
           <Avatar
-            icon={<MessageCircle className="h-5 w-5" />}
+            icon={<MessageSquare className="h-5 w-5" />}
             classNames={{
               base: cn(
                 'h-12 w-12 cursor-pointer transition-all duration-200',
@@ -162,7 +166,13 @@ export function ServerList({
 
       {/* Add server button */}
       <Tooltip content={t('addServer')} placement="right" offset={8}>
-        <div className="flex items-center justify-center">
+        <button
+          type="button"
+          data-test="add-server-button"
+          onClick={() => setIsCreateOpen(true)}
+          aria-label={t('addServer')}
+          className="flex items-center justify-center"
+        >
           <Avatar
             icon={<Plus className="h-5 w-5" />}
             classNames={{
@@ -172,17 +182,21 @@ export function ServerList({
               ),
               icon: 'text-current',
             }}
-            data-test="add-server-button"
-            onClick={() => setIsCreateOpen(true)}
           />
-        </div>
+        </button>
       </Tooltip>
 
       {/* Join server button */}
       <Tooltip content={t('joinServer')} placement="right" offset={8}>
-        <div className="mt-2 flex items-center justify-center">
+        <button
+          type="button"
+          data-test="join-server-button"
+          onClick={() => setIsJoinOpen(true)}
+          aria-label={t('joinServer')}
+          className="mt-2 flex items-center justify-center"
+        >
           <Avatar
-            icon={<LogIn className="h-5 w-5" />}
+            icon={<Compass className="h-5 w-5" />}
             classNames={{
               base: cn(
                 'h-12 w-12 cursor-pointer rounded-[24px] bg-default-100 text-default-foreground',
@@ -190,10 +204,38 @@ export function ServerList({
               ),
               icon: 'text-current',
             }}
-            data-test="join-server-button"
-            onClick={() => setIsJoinOpen(true)}
           />
-        </div>
+        </button>
+      </Tooltip>
+
+      <Divider className="mx-auto my-2 w-8 bg-divider" />
+
+      {/* Logout button */}
+      <Tooltip content={tAuth('logout')} placement="right" offset={8}>
+        <button
+          type="button"
+          data-test="logout-button"
+          onClick={() => {
+            supabase.auth.signOut().catch((err: unknown) => {
+              logger.error('sign_out_failed', {
+                error: err instanceof Error ? err.message : String(err),
+              })
+            })
+          }}
+          aria-label={tAuth('logout')}
+          className="flex items-center justify-center"
+        >
+          <Avatar
+            icon={<LogOut className="h-5 w-5" />}
+            classNames={{
+              base: cn(
+                'h-12 w-12 cursor-pointer rounded-[24px] bg-default-100 text-default-foreground',
+                'transition-all duration-200 hover:rounded-2xl hover:bg-danger hover:text-danger-foreground',
+              ),
+              icon: 'text-current',
+            }}
+          />
+        </button>
       </Tooltip>
 
       <CreateServerDialog

@@ -174,15 +174,16 @@ export function LoginPage() {
       className="flex min-h-screen items-center justify-center bg-background p-4"
     >
       <Card className="w-full max-w-md">
-        <CardHeader className="flex flex-col items-center gap-1 pb-0 pt-6">
-          <div className="flex items-center gap-2">
-            <h1 data-test="login-heading" className="text-2xl font-bold text-foreground">
-              {t('appName')}
-            </h1>
-            <Chip color="warning" size="sm" variant="flat">
-              {t('alphaLabel', { ns: 'common' })}
-            </Chip>
-          </div>
+        <CardHeader className="flex flex-col items-center gap-2 pb-0 pt-6">
+          <img
+            src="/brand/logo_vertical_dark.png"
+            alt="Harmony"
+            data-test="login-heading"
+            className="h-24 w-auto"
+          />
+          <Chip color="secondary" size="sm" variant="dot">
+            {t('alphaLabel', { ns: 'common' })}
+          </Chip>
           <p data-test="login-subtitle" className="text-sm text-default-500">
             {mode === 'login' ? t('welcomeBack') : t('createYourAccount')}
           </p>

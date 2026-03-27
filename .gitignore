@@ -37,6 +37,7 @@ harmony-app/src-tauri/gen/schemas
 # Local dev
 *.local
 .mcp.json
+.claude/
 
 # E2E test screenshots
 *.png
@@ -71,3 +72,4 @@ harmony-app/src/lib/api/
 # Supabase local
 supabase/.branches/_current_branch
 supabase/.temp/
+.env.secrets

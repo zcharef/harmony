@@ -1,9 +1,12 @@
-# Harmony CI/CD — Quality Wall + E2E Tests + Deploy
+# Harmony CI — Quality Wall (Tier 1: No Secrets Required)
 #
-# CI: 2 parallel quality walls → E2E → 2 parallel deploys
-# CD: On push to main, deploys API to Fly.io + SPA to Cloudflare Pages
+# Runs on ALL pull requests including forks.
+# These checks do NOT require secrets — safe for untrusted code.
+# E2E tests and deploys are in e2e-deploy.yml (Tier 2).
 
 name: CI
+
+permissions: {}
 
 on:
   pull_request:
@@ -113,7 +116,7 @@ jobs:
         run: cargo audit --ignore RUSTSEC-2023-0071
 
       - name: License & crate compliance
-        run: cargo deny check 2>/dev/null || echo "::warning::cargo deny check failed — review denied crates"
+        run: cargo deny check
 
       - name: Install Tauri system dependencies
         run: |
@@ -141,216 +144,8 @@ jobs:
           ENVIRONMENT: test
           SERVER_PORT: "3000"
         run: |
-          cargo run --bin export_openapi 2>/dev/null > /tmp/openapi-fresh.json
+          RUST_LOG=error cargo run --bin export_openapi > /tmp/openapi-fresh.json
           diff -u openapi.json /tmp/openapi-fresh.json || {
             echo "openapi.json is stale. Run just export-openapi and commit."
             exit 1
           }
-
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # Job 3: E2E Tests
-  # WHY Supabase Cloud: dedicated CI project avoids Docker-in-Docker overhead.
-  # supabase db push applies pending migrations. Test data uses unique IDs
-  # so accumulation doesn't cause conflicts.
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  e2e-tests:
-    name: E2E Tests (Playwright)
-    runs-on: ubuntu-latest
-    needs: [app-quality, rust-quality]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      # ── Node / pnpm ──────────────────────────────────────
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: harmony-app/pnpm-lock.yaml
-
-      - name: Install frontend dependencies
-        working-directory: harmony-app
-        run: pnpm install --frozen-lockfile
-
-      # ── Playwright with browser cache ───────────────────
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('harmony-app/pnpm-lock.yaml') }}
-
-      - name: Install Playwright (chromium only)
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        working-directory: harmony-app
-        run: npx playwright install --with-deps chromium
-
-      - name: Install Playwright system deps (cache hit)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        working-directory: harmony-app
-        run: npx playwright install-deps chromium
-
-      # ── Rust toolchain (shared cache from rust-quality) ─
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: harmony-api
-          shared-key: harmony-rust
-
-      # ── Supabase Cloud: apply pending migrations ─────────
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-
-      - name: Link Supabase CI project
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          CI_SUPABASE_PROJECT_REF: ${{ secrets.CI_SUPABASE_PROJECT_REF }}
-        run: supabase link --project-ref "$CI_SUPABASE_PROJECT_REF"
-
-      - name: Push pending migrations
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push
-
-      # ── pgTAP database tests ────────────────────────────
-      # WHY: RLS policies and CHECK constraints are security-critical.
-      # WHY --db-url: `--linked` creates a restricted login role that lacks
-      # CREATE on public schema and access to auth tables. Using --db-url
-      # with the full database URL bypasses this and runs as postgres.
-      - name: Run pgTAP database tests
-        run: supabase test db --db-url "${{ secrets.CI_SUPABASE_DB_URL }}"
-
-      # ── Build & start Rust API ───────────────────────────
-      - name: Build Rust API
-        working-directory: harmony-api
-        env:
-          SQLX_OFFLINE: "true"
-        run: cargo build --release
-
-      - name: Start Rust API (background)
-        working-directory: harmony-api
-        env:
-          DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
-          SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
-          SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
-          ENVIRONMENT: test
-          SERVER_PORT: "3000"
-        run: ./target/release/harmony-api > /tmp/api-stdout.log 2>&1 &
-
-      # ── Start Vite dev server ────────────────────────────
-      - name: Start Vite dev server (background)
-        working-directory: harmony-app
-        env:
-          VITE_API_URL: http://localhost:3000
-          VITE_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
-          VITE_TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
-        run: pnpm dev &
-
-      # ── Wait for services ────────────────────────────────
-      - name: Wait for API and Vite to be ready
-        run: |
-          echo "Waiting for Rust API..."
-          timeout 60 bash -c 'until curl -sf http://localhost:3000/health; do sleep 1; done' || {
-            echo "::error::API failed to start. Logs:"
-            cat /tmp/api-stdout.log
-            exit 1
-          }
-          echo "Waiting for Vite dev server..."
-          timeout 60 bash -c 'until curl -sf http://localhost:1420; do sleep 1; done'
-          echo "All services ready."
-
-      # ── Run E2E tests ────────────────────────────────────
-      - name: Run Playwright E2E tests
-        working-directory: harmony-app
-        env:
-          CI_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
-          CI_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
-          CI_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.CI_SUPABASE_SERVICE_ROLE_KEY }}
-        run: npx playwright test --retries=1 --fail-on-flaky-tests
-
-      # ── Artifacts (on failure only) ──────────────────────
-      - name: Upload Playwright report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: harmony-app/playwright-report/
-          retention-days: 14
-
-      - name: Upload test results
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-test-results
-          path: harmony-app/test-results/
-          retention-days: 14
-
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # Job 4: Deploy API to Fly.io (only on push to main, after E2E passes)
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  deploy-api:
-    name: Deploy API (Fly.io)
-    runs-on: ubuntu-latest
-    needs: [e2e-tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Deploy to Fly.io
-        working-directory: harmony-api
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only
-
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # Job 5: Deploy SPA to Cloudflare Pages (only on push to main)
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  deploy-spa:
-    name: Deploy SPA (Cloudflare Pages)
-    runs-on: ubuntu-latest
-    needs: [e2e-tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: harmony-app/pnpm-lock.yaml
-
-      - name: Install dependencies
-        working-directory: harmony-app
-        run: pnpm install --frozen-lockfile
-
-      - name: Build production SPA
-        working-directory: harmony-app
-        env:
-          VITE_API_URL: https://api.joinharmony.app
-          VITE_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
-          VITE_TURNSTILE_SITE_KEY: ${{ secrets.PROD_TURNSTILE_SITE_KEY }}
-          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
-        run: pnpm build
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy harmony-app/dist --project-name=harmony-app --branch=main

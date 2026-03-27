@@ -8,6 +8,10 @@
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
 }
 
+@utility bg-gradient-harmony {
+  background-image: linear-gradient(135deg, #15D4C8 0%, #5A4EEA 100%);
+}
+
 @layer base {
   * {
     @apply border-divider;

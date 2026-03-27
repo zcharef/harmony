@@ -18,11 +18,12 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sentry.io; frame-src https://challenges.cloudflare.com"
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -31,5 +32,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI3NTYyM0ExMjIxRUIzREYKUldUZnN4NGlvU05XdDNnMUFZWjUzLyszNG55NTBPVmdRTm95SlhhNnJOeEw0Z3pVcks1MW9qMUIK",
+      "endpoints": [
+        "https://github.com/harmony-app/harmony/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

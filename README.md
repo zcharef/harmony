@@ -1,10 +1,15 @@
 <p align="center">
-  <h1 align="center">Harmony</h1>
-  <p align="center">
-    <strong>Your chat app shouldn't sell your data.</strong>
-    <br />
-    Open-source, privacy-first group communication — Discord's UX with Signal's principles.
-  </p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="mediakit/logo_horizontal_dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="mediakit/logo_horizontal.png">
+    <img alt="Harmony" src="mediakit/logo_horizontal.png" height="64">
+  </picture>
+  <br /><br />
+  <strong>Your chat app shouldn't sell your data.</strong>
+  <br />
+  Open-source, privacy-first group communication — Discord's UX with Signal's principles.
+</p>
+<p align="center">
   <p align="center">
     <a href="https://github.com/harmony-app/harmony/actions"><img src="https://img.shields.io/github/actions/workflow/status/harmony-app/harmony/ci.yml?style=flat-square&label=CI" alt="CI"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License"></a>

@@ -7,6 +7,8 @@
     "core:default",
     "opener:default",
     "keyring:default",
-    "sentry:default"
+    "sentry:default",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

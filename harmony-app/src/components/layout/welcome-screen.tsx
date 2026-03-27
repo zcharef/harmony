@@ -1,5 +1,5 @@
 import { Card, CardBody, Chip } from '@heroui/react'
-import { LogIn, Plus, Shield } from 'lucide-react'
+import { LogIn, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -20,15 +20,17 @@ export function WelcomeScreen({ onServerCreated, onServerJoined }: WelcomeScreen
       data-test="welcome-screen"
       className="flex h-full w-full flex-col items-center justify-center bg-background"
     >
-      {/* Brand icon */}
-      <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10 animate-[fade-in_0.6s_ease-out_both]">
-        <Shield className="h-10 w-10 text-primary" />
-      </div>
+      {/* Brand logo */}
+      <img
+        src="/brand/logo_vertical_dark.png"
+        alt="Harmony"
+        className="h-32 w-auto animate-[fade-in_0.6s_ease-out_both]"
+      />
 
       {/* Heading */}
       <div className="mt-6 flex items-center gap-3 animate-[fade-in-up_0.5s_ease-out_0.15s_both]">
         <h1 className="text-4xl font-bold tracking-tight text-foreground">{t('welcomeTitle')}</h1>
-        <Chip color="warning" size="sm" variant="flat">
+        <Chip color="secondary" size="sm" variant="dot">
           {t('alphaLabel', { ns: 'common' })}
         </Chip>
       </div>

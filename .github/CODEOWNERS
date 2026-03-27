@@ -1,0 +1,15 @@
+# Harmony — Code Ownership
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Default: maintainer reviews everything
+* @zcharef
+
+# Critical paths: require explicit maintainer review
+supabase/migrations/ @zcharef
+.github/workflows/ @zcharef
+.github/CODEOWNERS @zcharef
+harmony-api/src/infrastructure/ @zcharef
+harmony-api/Cargo.toml @zcharef
+harmony-api/deny.toml @zcharef
+harmony-app/package.json @zcharef
+harmony-app/pnpm-lock.yaml @zcharef

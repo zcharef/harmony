@@ -11,10 +11,17 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WHY: DSN from env avoids hardcoding credentials in source.
+    // In production builds, SENTRY_DSN must be set as an env var during CI compilation (see release.yml).
+    // If unset, Sentry is silently disabled (empty string = no-op).
+    let dsn = option_env!("SENTRY_DSN").unwrap_or("");
     let client = sentry::init((
-        "https://a451fbc1d5091713d710f6db748a29af@o4509859895181312.ingest.de.sentry.io/4511112066695248",
+        dsn,
         sentry::ClientOptions {
             release: sentry::release_name!(),
+            environment: Some(
+                option_env!("SENTRY_ENVIRONMENT").unwrap_or("development").into(),
+            ),
             auto_session_tracking: true,
             ..Default::default()
         },
@@ -27,6 +34,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_sentry::init(&client))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_keyring::init())
         .manage(CryptoState::new(OlmAccountManager::new()))

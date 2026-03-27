@@ -154,14 +154,34 @@ All database schema changes follow the Supabase local-first workflow (ADR-043).
 2. Make your changes following the code standards above
 3. Run `just wall` in both projects — all checks must pass
 4. If you changed the Rust API DTOs/handlers, regenerate the OpenAPI spec
-5. Open a PR using the template — fill in all sections
-6. Wait for CI to pass and a maintainer to review
+5. Open a PR targeting `main` — fill in all sections of the template
+6. **Tier 1 CI** (quality walls) runs automatically on your PR — no secrets needed
+7. A maintainer reviews your code. Once approved, they add the `safe-to-test` label
+8. **Tier 2 CI** (E2E tests) runs after the label is added — these need secrets
+9. Once all checks pass and the PR is approved, a maintainer squash-merges it
+
+### Why two CI tiers?
+
+GitHub Actions does not expose secrets to PRs from forks (security). Quality wall checks (linting, type checking, unit tests) don't need secrets and run immediately. E2E tests need a real database and run only after a maintainer reviews your code and adds the `safe-to-test` label.
 
 ### PR Size
 
 - Keep PRs small and focused (< 400 lines changed)
 - One feature or fix per PR
 - If a change is large, discuss the approach in an issue first
+
+### Database Migrations in PRs
+
+Contributors are welcome to include migrations in their PRs. All migrations go through the same CI pipeline — `supabase db push` applies them to the CI database, pgTAP tests validate RLS/constraints, and E2E tests verify the app works.
+
+**Important:** Branch protection enforces `strict` mode — your PR branch must be up-to-date with `main` before merging. This means if another migration PR merges first, your PR must rebase and CI re-runs against the combined state. This prevents migration conflicts.
+
+Migration requirements:
+- Create with `supabase migration new <name>`
+- Write idempotent SQL (`IF NOT EXISTS`, `IF EXISTS`)
+- Must be non-destructive: no `DROP COLUMN`, no `DROP TABLE` (ADR-019)
+- RLS must be enabled on every new table (ADR-040)
+- Test locally with `supabase db reset` before pushing
 
 ## Reporting Issues
 

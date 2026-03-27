@@ -9,5 +9,12 @@
   "unknownUser": "Unknown",
   "typingOne": "{{username}} is typing",
   "typingTwo": "{{first}} and {{second}} are typing",
-  "typingSeveral": "Several people are typing"
+  "typingSeveral": "Several people are typing",
+  "threads": "Threads",
+  "notifications": "Notifications",
+  "pinnedMessages": "Pinned Messages",
+  "memberList": "Member List",
+  "attachFile": "Attach File",
+  "stickers": "Stickers",
+  "emojiPicker": "Emoji Picker"
 }

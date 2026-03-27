@@ -282,17 +282,17 @@ function ChatToolbar({
         </div>
       )}
       <div className="flex items-center gap-1">
-        <Button variant="light" isIconOnly size="sm">
+        <Button variant="light" isIconOnly size="sm" aria-label={t('threads')}>
           <MessageSquare className="h-5 w-5 text-default-500" />
         </Button>
-        <Button variant="light" isIconOnly size="sm">
+        <Button variant="light" isIconOnly size="sm" aria-label={t('notifications')}>
           <Bell className="h-5 w-5 text-default-500" />
         </Button>
-        <Button variant="light" isIconOnly size="sm">
+        <Button variant="light" isIconOnly size="sm" aria-label={t('pinnedMessages')}>
           <Pin className="h-5 w-5 text-default-500" />
         </Button>
         {!isDm && (
-          <Button variant="light" isIconOnly size="sm">
+          <Button variant="light" isIconOnly size="sm" aria-label={t('memberList')}>
             <Users className="h-5 w-5 text-default-500" />
           </Button>
         )}
@@ -321,11 +321,13 @@ function MessageInput({
   onKeyDown: (e: React.KeyboardEvent) => void
   onSendTyping: () => void
 }) {
+  const { t } = useTranslation('chat')
+
   return (
     <div className="px-4 pb-6 pt-1">
       <div className="relative flex items-center rounded-lg bg-default-100">
         {!isInputDisabled && (
-          <Button variant="light" isIconOnly size="sm" className="ml-1 shrink-0">
+          <Button variant="light" isIconOnly size="sm" className="ml-1 shrink-0" aria-label={t('attachFile')}>
             <PlusCircle className="h-5 w-5 text-default-500" />
           </Button>
         )}
@@ -345,16 +347,16 @@ function MessageInput({
           onKeyDown={isInputDisabled ? undefined : onKeyDown}
           classNames={{
             base: 'flex-1',
-            inputWrapper: 'border-0 bg-transparent shadow-none',
+            inputWrapper: 'border-0 bg-transparent shadow-none hover:!bg-transparent focus-within:!bg-transparent',
             input: 'text-sm text-foreground placeholder:text-default-500 px-2 py-3',
           }}
         />
         {!isInputDisabled && (
           <div className="flex shrink-0 items-center gap-0.5 pr-2">
-            <Button variant="light" isIconOnly size="sm">
+            <Button variant="light" isIconOnly size="sm" aria-label={t('stickers')}>
               <Sticker className="h-5 w-5 text-default-500" />
             </Button>
-            <Button variant="light" isIconOnly size="sm">
+            <Button variant="light" isIconOnly size="sm" aria-label={t('emojiPicker')}>
               <SmilePlus className="h-5 w-5 text-default-500" />
             </Button>
           </div>
