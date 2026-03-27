@@ -48,4 +48,13 @@ pub trait ChannelRepository: Send + Sync + std::fmt::Debug {
 
     /// Count channels in a server (used for position auto-assignment on create).
     async fn count_for_server(&self, server_id: &ServerId) -> Result<i64, DomainError>;
+
+    /// Find the default (lowest position) channel for a server.
+    ///
+    /// Used for system messages (join announcements). Returns `None` if the
+    /// server has no channels (should never happen — servers always have #general).
+    async fn find_default_for_server(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<Option<Channel>, DomainError>;
 }

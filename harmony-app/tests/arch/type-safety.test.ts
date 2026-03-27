@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 const SRC_DIR = join(__dirname, '../../src')
 const FEATURES_DIR = join(SRC_DIR, 'features')
+const COMPONENTS_DIR = join(SRC_DIR, 'components')
 
 /**
  * Architecture tests for type safety and API access patterns.
@@ -31,21 +32,56 @@ function getAllFiles(dir: string, extensions: string[]): string[] {
   return files
 }
 
+function isCommentLine(line: string): boolean {
+  const trimmed = line.trimStart()
+  return trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')
+}
+
+/** WHY: Shared line-scanning helper reduces cognitive complexity in each test. */
+function scanFilesForViolations(
+  files: string[],
+  matcher: (line: string, lineIndex: number, filePath: string) => string | null,
+): string[] {
+  const violations: string[] = []
+  for (const filePath of files) {
+    const content = readFileSync(filePath, 'utf-8')
+    const lines = content.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const result = matcher(lines[i], i, filePath)
+      if (result !== null) violations.push(result)
+    }
+  }
+  return violations
+}
+
+/** WHY: Scans full file content (not line-by-line) for pattern matches. */
+function scanFilesForContentViolations(
+  files: string[],
+  patterns: RegExp[],
+  excludePaths: string[] = [],
+): string[] {
+  const violations: string[] = []
+  for (const filePath of files) {
+    if (excludePaths.includes(filePath)) continue
+    const content = readFileSync(filePath, 'utf-8')
+    for (const pattern of patterns) {
+      if (pattern.test(content)) {
+        violations.push(relative(SRC_DIR, filePath))
+        break
+      }
+    }
+  }
+  return violations
+}
+
 describe('Type Safety', () => {
   describe('no_direct_supabase_data_access', () => {
     it('should not use supabase.from() or supabase.rpc() in features', () => {
-      const ALLOWLIST = [join(SRC_DIR, 'lib/supabase.ts')]
       const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
-      const violations: string[] = []
-
-      for (const filePath of files) {
-        if (ALLOWLIST.includes(filePath)) continue
-
-        const content = readFileSync(filePath, 'utf-8')
-        if (/supabase\.from\(/.test(content) || /supabase\.rpc\(/.test(content)) {
-          violations.push(relative(SRC_DIR, filePath))
-        }
-      }
+      const violations = scanFilesForContentViolations(files, [
+        /supabase\.from\(/,
+        /supabase\.rpc\(/,
+      ])
 
       expect(
         violations,
@@ -59,22 +95,13 @@ describe('Type Safety', () => {
       // WHY allowlist: auth-provider syncs the Supabase session with the Rust API
       // before the generated SDK is configured. This raw fetch is the bootstrap call.
       const ALLOWLIST = [join(FEATURES_DIR, 'auth/auth-provider.tsx')]
-      const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
-      const violations: string[] = []
+      const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx']).filter((f) => !ALLOWLIST.includes(f))
 
-      for (const filePath of files) {
-        if (ALLOWLIST.includes(filePath)) continue
-        const content = readFileSync(filePath, 'utf-8')
-        const lines = content.split('\n')
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
-          // Match fetch( but not .fetch( (method on generated client) and not in comments
-          if (/(?<!\w)fetch\(/.test(line) && !line.trimStart().startsWith('//')) {
-            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
-          }
-        }
-      }
+      const violations = scanFilesForViolations(files, (line, i, filePath) => {
+        if (isCommentLine(line)) return null
+        if (/(?<!\w)fetch\(/.test(line)) return `${relative(SRC_DIR, filePath)}:${i + 1}`
+        return null
+      })
 
       expect(
         violations,
@@ -86,28 +113,18 @@ describe('Type Safety', () => {
   describe('no_hardcoded_urls', () => {
     it('should not contain hardcoded http:// or https:// URLs in source', () => {
       const ALLOWLIST = [join(SRC_DIR, 'lib/env.ts'), join(SRC_DIR, 'lib/api-client.ts')]
-      const files = getAllFiles(SRC_DIR, ['.ts', '.tsx'])
-      const violations: string[] = []
+      const files = getAllFiles(SRC_DIR, ['.ts', '.tsx']).filter((f) => {
+        if (ALLOWLIST.includes(f)) return false
+        if (f.includes('.test.') || f.includes('.spec.')) return false
+        if (f.includes(`${join('lib', 'api')}/`)) return false
+        return true
+      })
 
-      for (const filePath of files) {
-        if (ALLOWLIST.includes(filePath)) continue
-        // Exclude test files
-        if (filePath.includes('.test.') || filePath.includes('.spec.')) continue
-        // Exclude generated API client
-        if (filePath.includes(`${join('lib', 'api')}/`)) continue
-
-        const content = readFileSync(filePath, 'utf-8')
-        const lines = content.split('\n')
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
-          // Skip comment lines
-          if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) continue
-          if (/https?:\/\//.test(line)) {
-            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
-          }
-        }
-      }
+      const violations = scanFilesForViolations(files, (line, i, filePath) => {
+        if (isCommentLine(line)) return null
+        if (/https?:\/\//.test(line)) return `${relative(SRC_DIR, filePath)}:${i + 1}`
+        return null
+      })
 
       expect(
         violations,
@@ -119,32 +136,15 @@ describe('Type Safety', () => {
   describe('route_constants_enforcement', () => {
     it('should not hardcode route paths in features (ADR-033)', () => {
       const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
-      const violations: string[] = []
-
-      // Known route segments that should use ROUTES.* constants
       const ROUTE_SEGMENTS = ['servers', 'channels', 'settings', 'auth']
-      // Match template literals like `/servers/${` or `/channels/${`
       const routePatterns = ROUTE_SEGMENTS.map(
         (segment) => new RegExp(`\`[^\`]*/${segment}/\\$\\{`),
       )
 
-      for (const filePath of files) {
-        const content = readFileSync(filePath, 'utf-8')
-        const lines = content.split('\n')
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
-          // Skip comment lines
-          if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) continue
-
-          for (const pattern of routePatterns) {
-            if (pattern.test(line)) {
-              violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
-              break
-            }
-          }
-        }
-      }
+      const violations = scanFilesForViolations(files, (line, i, filePath) => {
+        if (isCommentLine(line)) return null
+        return matchAnyPattern(line, routePatterns, filePath, i)
+      })
 
       expect(
         violations,
@@ -156,22 +156,14 @@ describe('Type Safety', () => {
   describe('logger_bypass_enforcement', () => {
     it('should not bypass noConsole via biome-ignore outside logger.ts (ADR-042)', () => {
       const AUTHORIZED_FILE = join(SRC_DIR, 'lib/logger.ts')
-      const files = getAllFiles(SRC_DIR, ['.ts', '.tsx'])
-      const violations: string[] = []
+      const files = getAllFiles(SRC_DIR, ['.ts', '.tsx']).filter((f) => f !== AUTHORIZED_FILE)
 
-      for (const filePath of files) {
-        // Only logger.ts is authorized to suppress the noConsole rule
-        if (filePath === AUTHORIZED_FILE) continue
-
-        const content = readFileSync(filePath, 'utf-8')
-        const lines = content.split('\n')
-
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].includes('biome-ignore lint/suspicious/noConsole')) {
-            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
-          }
+      const violations = scanFilesForViolations(files, (line, i, filePath) => {
+        if (line.includes('biome-ignore lint/suspicious/noConsole')) {
+          return `${relative(SRC_DIR, filePath)}:${i + 1}`
         }
-      }
+        return null
+      })
 
       expect(
         violations,
@@ -183,22 +175,14 @@ describe('Type Safety', () => {
   describe('no_shadcn_imports', () => {
     it('should not import from @/components/ui/ (Task 4.2 — HeroUI migration)', () => {
       const files = getAllFiles(SRC_DIR, ['.ts', '.tsx'])
-      const violations: string[] = []
 
-      for (const filePath of files) {
-        const content = readFileSync(filePath, 'utf-8')
-        const lines = content.split('\n')
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
-          // Skip comment lines
-          if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) continue
-
-          if (/from ['"]@\/components\/ui\//.test(line)) {
-            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
-          }
+      const violations = scanFilesForViolations(files, (line, i, filePath) => {
+        if (isCommentLine(line)) return null
+        if (/from ['"]@\/components\/ui\//.test(line)) {
+          return `${relative(SRC_DIR, filePath)}:${i + 1}`
         }
-      }
+        return null
+      })
 
       expect(
         violations,
@@ -209,26 +193,15 @@ describe('Type Safety', () => {
 
   describe('no_radix_imports', () => {
     it('should not import @radix-ui packages (Task 4.3 — HeroUI migration)', () => {
-      const COMPONENTS_DIR = join(SRC_DIR, 'components')
       const featureFiles = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
       const componentFiles = getAllFiles(COMPONENTS_DIR, ['.ts', '.tsx'])
       const files = [...featureFiles, ...componentFiles]
-      const violations: string[] = []
 
-      for (const filePath of files) {
-        const content = readFileSync(filePath, 'utf-8')
-        const lines = content.split('\n')
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
-          // Skip comment lines
-          if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) continue
-
-          if (/@radix-ui/.test(line)) {
-            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
-          }
-        }
-      }
+      const violations = scanFilesForViolations(files, (line, i, filePath) => {
+        if (isCommentLine(line)) return null
+        if (/@radix-ui/.test(line)) return `${relative(SRC_DIR, filePath)}:${i + 1}`
+        return null
+      })
 
       expect(
         violations,
@@ -239,56 +212,12 @@ describe('Type Safety', () => {
 
   describe('no_hardcoded_tailwind_colors', () => {
     it('should not use hardcoded Tailwind color classes (Task 4.4 — HeroUI migration)', () => {
-      const COMPONENTS_DIR = join(SRC_DIR, 'components')
       const RESIZABLE_HANDLE = join(COMPONENTS_DIR, 'layout/resizable-handle.tsx')
       const featureFiles = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
       const componentFiles = getAllFiles(COMPONENTS_DIR, ['.ts', '.tsx'])
-      const files = [...featureFiles, ...componentFiles]
-      const violations: string[] = []
+      const files = [...featureFiles, ...componentFiles].filter((f) => f !== RESIZABLE_HANDLE)
 
-      // Hardcoded color prefixes that should use semantic tokens instead
-      const COLOR_PREFIXES = [
-        'bg-emerald-',
-        'bg-red-',
-        'bg-amber-',
-        'bg-zinc-',
-        'bg-gray-',
-        'bg-slate-',
-        'text-emerald-',
-        'text-red-',
-        'text-amber-',
-        'text-zinc-',
-        'text-gray-',
-        'text-slate-',
-        'text-white',
-        'border-emerald-',
-        'border-red-',
-        'border-amber-',
-        'border-zinc-',
-      ]
-
-      // Build a single regex from all prefixes for efficient matching
-      const colorPattern = new RegExp(COLOR_PREFIXES.map((p) => p.replace('-', '\\-')).join('|'))
-
-      for (const filePath of files) {
-        // Exclude resizable-handle.tsx (layout primitive may need raw colors)
-        if (filePath === RESIZABLE_HANDLE) continue
-
-        const content = readFileSync(filePath, 'utf-8')
-        const lines = content.split('\n')
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
-          // Skip comment lines
-          if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) continue
-          // Escape hatch: allow explicit override annotation
-          if (line.includes('// heroui-color-override')) continue
-
-          if (colorPattern.test(line)) {
-            violations.push(`${relative(SRC_DIR, filePath)}:${i + 1}`)
-          }
-        }
-      }
+      const violations = scanFilesForViolations(files, matchHardcodedColor)
 
       expect(
         violations,
@@ -297,3 +226,47 @@ describe('Type Safety', () => {
     })
   })
 })
+
+function matchAnyPattern(
+  line: string,
+  patterns: RegExp[],
+  filePath: string,
+  lineIndex: number,
+): string | null {
+  for (const pattern of patterns) {
+    if (pattern.test(line)) return `${relative(SRC_DIR, filePath)}:${lineIndex + 1}`
+  }
+  return null
+}
+
+// WHY: Hardcoded color prefixes that should use semantic tokens instead.
+const HARDCODED_COLOR_PATTERN = new RegExp(
+  [
+    'bg-emerald-',
+    'bg-red-',
+    'bg-amber-',
+    'bg-zinc-',
+    'bg-gray-',
+    'bg-slate-',
+    'text-emerald-',
+    'text-red-',
+    'text-amber-',
+    'text-zinc-',
+    'text-gray-',
+    'text-slate-',
+    'text-white',
+    'border-emerald-',
+    'border-red-',
+    'border-amber-',
+    'border-zinc-',
+  ]
+    .map((p) => p.replace('-', '\\-'))
+    .join('|'),
+)
+
+function matchHardcodedColor(line: string, lineIndex: number, filePath: string): string | null {
+  if (isCommentLine(line)) return null
+  if (line.includes('// heroui-color-override')) return null
+  if (HARDCODED_COLOR_PATTERN.test(line)) return `${relative(SRC_DIR, filePath)}:${lineIndex + 1}`
+  return null
+}

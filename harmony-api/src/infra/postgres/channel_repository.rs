@@ -391,4 +391,53 @@ impl ChannelRepository for PgChannelRepository {
 
         Ok(row.count)
     }
+
+    async fn find_default_for_server(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<Option<Channel>, DomainError> {
+        let sid = server_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                id,
+                server_id,
+                name,
+                topic,
+                channel_type as "channel_type!: String",
+                position,
+                is_private,
+                is_read_only,
+                encrypted,
+                created_at,
+                updated_at
+            FROM channels
+            WHERE server_id = $1
+            ORDER BY position ASC
+            LIMIT 1
+            "#,
+            sid,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|r| {
+            ChannelRow {
+                id: r.id,
+                server_id: r.server_id,
+                name: r.name,
+                topic: r.topic,
+                channel_type: r.channel_type,
+                position: r.position,
+                is_private: r.is_private,
+                is_read_only: r.is_read_only,
+                encrypted: r.encrypted,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            }
+            .into_channel()
+        }))
+    }
 }

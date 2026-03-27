@@ -79,6 +79,7 @@ export function useSendMessage(
         content: content,
         createdAt: new Date().toISOString(),
         encrypted: encryption !== undefined,
+        messageType: 'default',
       } satisfies MessageResponse
 
       // WHY page 0: useInfiniteQuery stores pages newest-first — same pattern

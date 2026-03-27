@@ -327,7 +327,13 @@ function MessageInput({
     <div className="px-4 pb-6 pt-1">
       <div className="relative flex items-center rounded-lg bg-default-100">
         {!isInputDisabled && (
-          <Button variant="light" isIconOnly size="sm" className="ml-1 shrink-0" aria-label={t('attachFile')}>
+          <Button
+            variant="light"
+            isIconOnly
+            size="sm"
+            className="ml-1 shrink-0"
+            aria-label={t('attachFile')}
+          >
             <PlusCircle className="h-5 w-5 text-default-500" />
           </Button>
         )}
@@ -347,7 +353,8 @@ function MessageInput({
           onKeyDown={isInputDisabled ? undefined : onKeyDown}
           classNames={{
             base: 'flex-1',
-            inputWrapper: 'border-0 bg-transparent shadow-none hover:!bg-transparent focus-within:!bg-transparent',
+            inputWrapper:
+              'border-0 bg-transparent shadow-none hover:!bg-transparent focus-within:!bg-transparent',
             input: 'text-sm text-foreground placeholder:text-default-500 px-2 py-3',
           }}
         />
@@ -720,6 +727,35 @@ function ChatPlaceholder({ isDm }: { isDm: boolean }) {
   )
 }
 
+// WHY extracted: Derives input disabled/blocked state from multiple conditions.
+// Reduces ChatArea cognitive complexity below Biome's limit of 15.
+function useChatInputState(
+  isDm: boolean,
+  isChannelEncrypted: boolean,
+  isReadOnly: boolean,
+  currentUserRole: MemberRole,
+  trustLevel: string,
+  dmRecipient: DmRecipientResponse | null,
+  channelName: string | null,
+) {
+  const isBlocked = isDm && isTauri() && trustLevel === 'blocked'
+  const isWebEncryptionBlocked = !isTauri() && isChannelEncrypted
+  const isInputDisabled =
+    isBlocked ||
+    isWebEncryptionBlocked ||
+    (isReadOnly && ROLE_HIERARCHY[currentUserRole] < ROLE_HIERARCHY.admin)
+  const initFailed = useCryptoStore((s) => s.initFailed)
+  const isDmInitFailed = isDm && isTauri() && initFailed
+  const inputPlaceholder = useInputPlaceholder(
+    isInputDisabled && !isBlocked,
+    isWebEncryptionBlocked,
+    isDm,
+    dmRecipient,
+    channelName,
+  )
+  return { isBlocked, isInputDisabled, isDmInitFailed, inputPlaceholder }
+}
+
 export function ChatArea({
   channelId,
   channelName,
@@ -787,22 +823,12 @@ export function ChatArea({
 
   const handleScroll = useThrottledScroll(scrollRef, hasNextPage, isFetchingNextPage, fetchNextPage)
 
-  /** WHY: Blocked contacts cannot receive messages from us. Read-only also disables. */
-  const isBlocked = isDm && isTauri() && trustLevel === 'blocked'
-  // WHY: Encrypted channels require Tauri desktop (Megolm can't degrade per-message).
-  // DMs are NOT blocked on web — web users send plaintext DMs with clear indicators.
-  const isWebEncryptionBlocked = !isTauri() && isChannelEncrypted
-  const isInputDisabled =
-    isBlocked ||
-    isWebEncryptionBlocked ||
-    (isReadOnly && ROLE_HIERARCHY[currentUserRole] < ROLE_HIERARCHY.admin)
-  // WHY: Show warning when E2EE init failed and user is in a DM on desktop.
-  const initFailed = useCryptoStore((s) => s.initFailed)
-  const isDmInitFailed = isDm && isTauri() && initFailed
-  const inputPlaceholder = useInputPlaceholder(
-    isInputDisabled && !isBlocked,
-    isWebEncryptionBlocked,
+  const { isBlocked, isInputDisabled, isDmInitFailed, inputPlaceholder } = useChatInputState(
     isDm,
+    isChannelEncrypted,
+    isReadOnly,
+    currentUserRole,
+    trustLevel,
     dmRecipient,
     channelName,
   )

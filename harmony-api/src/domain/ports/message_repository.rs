@@ -54,4 +54,16 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         author_id: &UserId,
         window_secs: i64,
     ) -> Result<i64, DomainError>;
+
+    /// Create a system message (e.g. join announcement).
+    ///
+    /// `author_id` is the subject of the event (the user who joined, left, etc.)
+    /// — NOT a "sender". Content is empty; the frontend renders localized text
+    /// from `system_event_key`.
+    async fn create_system(
+        &self,
+        channel_id: &ChannelId,
+        author_id: &UserId,
+        system_event_key: String,
+    ) -> Result<MessageWithAuthor, DomainError>;
 }

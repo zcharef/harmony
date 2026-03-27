@@ -149,5 +149,37 @@ pub async fn join_server(
         .join_via_invite(&code, &user_id)
         .await?;
 
+    // WHY: Best-effort system message — announce the join in the default channel.
+    // Must never fail the join itself. If the announcement fails (e.g. no default
+    // channel, DB error), we log and move on.
+    if let Err(e) = post_join_announcement(&state, &server_id, &user_id).await {
+        tracing::warn!(
+            server_id = %server_id,
+            user_id = %user_id,
+            error = ?e,
+            "Failed to post join announcement (best-effort)"
+        );
+    }
+
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Post a `member_join` system message in the server's default channel.
+async fn post_join_announcement(
+    state: &AppState,
+    server_id: &ServerId,
+    user_id: &crate::domain::models::UserId,
+) -> anyhow::Result<()> {
+    let channel = state
+        .channel_service()
+        .find_default_for_server(server_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("No default channel found for server {server_id}"))?;
+
+    state
+        .message_service()
+        .create_system_message(&channel.id, user_id, "member_join".to_string())
+        .await?;
+
+    Ok(())
 }

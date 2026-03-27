@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH inserted AS (\n                INSERT INTO messages (channel_id, author_id, content)\n                VALUES ($1, $2, $3)\n                RETURNING\n                    id,\n                    channel_id,\n                    author_id,\n                    content,\n                    edited_at,\n                    deleted_at,\n                    deleted_by,\n                    encrypted,\n                    sender_device_id,\n                    created_at\n            )\n            SELECT\n                i.id,\n                i.channel_id,\n                i.author_id,\n                i.content,\n                i.edited_at,\n                i.deleted_at,\n                i.deleted_by,\n                i.encrypted,\n                i.sender_device_id,\n                i.created_at,\n                p.username AS \"author_username?\",\n                p.avatar_url AS \"author_avatar_url?\"\n            FROM inserted i\n            LEFT JOIN profiles p ON p.id = i.author_id\n            ",
+  "query": "\n            SELECT\n                m.id,\n                m.channel_id,\n                m.author_id,\n                m.content,\n                m.edited_at,\n                m.deleted_at,\n                m.deleted_by,\n                m.encrypted,\n                m.sender_device_id,\n                m.message_type as \"message_type!: String\",\n                m.system_event_key,\n                m.created_at,\n                p.username AS \"author_username?\",\n                p.avatar_url AS \"author_avatar_url?\"\n            FROM messages m\n            LEFT JOIN profiles p ON p.id = m.author_id\n            WHERE m.channel_id = $1\n              AND m.deleted_at IS NULL\n              AND ($2::timestamptz IS NULL OR m.created_at < $2)\n            ORDER BY m.created_at DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -50,16 +50,36 @@
       },
       {
         "ordinal": 9,
-        "name": "created_at",
-        "type_info": "Timestamptz"
+        "name": "message_type!: String",
+        "type_info": {
+          "Custom": {
+            "name": "message_type",
+            "kind": {
+              "Enum": [
+                "default",
+                "system"
+              ]
+            }
+          }
+        }
       },
       {
         "ordinal": 10,
-        "name": "author_username?",
+        "name": "system_event_key",
         "type_info": "Text"
       },
       {
         "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "author_username?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
         "name": "author_avatar_url?",
         "type_info": "Text"
       }
@@ -67,8 +87,8 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Text"
+        "Timestamptz",
+        "Int8"
       ]
     },
     "nullable": [
@@ -83,8 +103,10 @@
       true,
       false,
       true,
+      false,
+      false,
       true
     ]
   },
-  "hash": "987719422977ecf94d0998885e557318cb51216821fb54b8bd3ca1930daa3ed3"
+  "hash": "db535e7a6077f62c592dcf73b2cb1cfe4b40a6ffcdd1319dc0c74a0b38629e20"
 }

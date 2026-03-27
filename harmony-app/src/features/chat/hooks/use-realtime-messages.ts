@@ -25,6 +25,9 @@ const realtimeMessageSchema = z.object({
   deleted_by: z.string().nullable().optional(),
   encrypted: z.boolean().optional(),
   sender_device_id: z.string().nullable().optional(),
+  // WHY .default('default'): Backward-compatible with cached data that lacks the field.
+  message_type: z.enum(['default', 'system']).optional().default('default'),
+  system_event_key: z.string().nullable().optional(),
 })
 
 /**
@@ -54,6 +57,8 @@ function toMessageResponse(
     deletedBy: row.deleted_by ?? undefined,
     encrypted: row.encrypted ?? false,
     senderDeviceId: row.sender_device_id ?? undefined,
+    messageType: row.message_type,
+    systemEventKey: row.system_event_key ?? undefined,
   }
 }
 

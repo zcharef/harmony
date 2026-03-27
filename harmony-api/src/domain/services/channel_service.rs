@@ -241,6 +241,20 @@ impl ChannelService {
 
         self.repo.delete_if_not_last(channel_id).await
     }
+
+    /// Find the default (lowest position) channel for a server.
+    ///
+    /// Used for system messages (join announcements). Returns `None` if the
+    /// server has no channels.
+    ///
+    /// # Errors
+    /// Returns a repository error on failure.
+    pub async fn find_default_for_server(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<Option<Channel>, DomainError> {
+        self.repo.find_default_for_server(server_id).await
+    }
 }
 
 #[cfg(test)]

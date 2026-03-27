@@ -19,8 +19,8 @@ use super::dto::{
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
 use crate::domain::models::{
-    CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MessageId, OneTimeKeyId,
-    ServerId, UserId, UserStatus,
+    CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MessageId, MessageType,
+    OneTimeKeyId, ServerId, UserId, UserStatus,
 };
 
 /// `OpenAPI` documentation for Harmony API.
@@ -105,6 +105,7 @@ use crate::domain::models::{
             // Domain enums
             UserStatus,
             ChannelType,
+            MessageType,
             // Profile DTOs
             ProfileResponse,
             CheckUsernameQuery,

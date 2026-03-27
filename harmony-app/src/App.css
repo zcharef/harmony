@@ -9,7 +9,7 @@
 }
 
 @utility bg-gradient-harmony {
-  background-image: linear-gradient(135deg, #15D4C8 0%, #5A4EEA 100%);
+  background-image: linear-gradient(135deg, #15d4c8 0%, #5a4eea 100%);
 }
 
 @layer base {

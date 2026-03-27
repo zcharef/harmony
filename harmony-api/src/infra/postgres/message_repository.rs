@@ -6,8 +6,25 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{ChannelId, Message, MessageId, MessageWithAuthor, UserId};
+use crate::domain::models::{
+    ChannelId, Message, MessageId, MessageType, MessageWithAuthor, UserId,
+};
 use crate::domain::ports::MessageRepository;
+
+/// Parse the Postgres `message_type` enum value into the domain enum.
+fn parse_message_type(value: &str) -> MessageType {
+    match value {
+        "default" => MessageType::Default,
+        "system" => MessageType::System,
+        unknown => {
+            tracing::warn!(
+                message_type = unknown,
+                "Unknown message_type from database, defaulting to Default"
+            );
+            MessageType::Default
+        }
+    }
+}
 
 /// PostgreSQL-backed message repository.
 #[derive(Debug, Clone)]
@@ -36,6 +53,8 @@ struct MessageRow {
     deleted_by: Option<Uuid>,
     encrypted: bool,
     sender_device_id: Option<String>,
+    message_type: String,
+    system_event_key: Option<String>,
     created_at: DateTime<Utc>,
 }
 
@@ -51,6 +70,8 @@ impl MessageRow {
             deleted_by: self.deleted_by.map(UserId::new),
             encrypted: self.encrypted,
             sender_device_id: self.sender_device_id,
+            message_type: parse_message_type(&self.message_type),
+            system_event_key: self.system_event_key,
             created_at: self.created_at,
         }
     }
@@ -70,6 +91,8 @@ struct MessageWithAuthorRow {
     deleted_by: Option<Uuid>,
     encrypted: bool,
     sender_device_id: Option<String>,
+    message_type: String,
+    system_event_key: Option<String>,
     created_at: DateTime<Utc>,
     // Author profile fields from JOIN.
     author_username: Option<String>,
@@ -88,6 +111,8 @@ impl MessageWithAuthorRow {
             deleted_by: self.deleted_by.map(UserId::new),
             encrypted: self.encrypted,
             sender_device_id: self.sender_device_id,
+            message_type: parse_message_type(&self.message_type),
+            system_event_key: self.system_event_key,
             created_at: self.created_at,
         };
 
@@ -130,6 +155,8 @@ impl MessageRepository for PgMessageRepository {
                     deleted_by,
                     encrypted,
                     sender_device_id,
+                    message_type,
+                    system_event_key,
                     created_at
             )
             SELECT
@@ -142,6 +169,8 @@ impl MessageRepository for PgMessageRepository {
                 i.deleted_by,
                 i.encrypted,
                 i.sender_device_id,
+                i.message_type as "message_type!: String",
+                i.system_event_key,
                 i.created_at,
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?"
@@ -166,6 +195,8 @@ impl MessageRepository for PgMessageRepository {
             deleted_by: row.deleted_by,
             encrypted: row.encrypted,
             sender_device_id: row.sender_device_id,
+            message_type: row.message_type,
+            system_event_key: row.system_event_key,
             created_at: row.created_at,
             author_username: row.author_username,
             author_avatar_url: row.author_avatar_url,
@@ -196,6 +227,8 @@ impl MessageRepository for PgMessageRepository {
                 m.deleted_by,
                 m.encrypted,
                 m.sender_device_id,
+                m.message_type as "message_type!: String",
+                m.system_event_key,
                 m.created_at,
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?"
@@ -228,6 +261,8 @@ impl MessageRepository for PgMessageRepository {
                     deleted_by: r.deleted_by,
                     encrypted: r.encrypted,
                     sender_device_id: r.sender_device_id,
+                    message_type: r.message_type,
+                    system_event_key: r.system_event_key,
                     created_at: r.created_at,
                     author_username: r.author_username,
                     author_avatar_url: r.author_avatar_url,
@@ -254,6 +289,8 @@ impl MessageRepository for PgMessageRepository {
                 deleted_by,
                 encrypted,
                 sender_device_id,
+                message_type as "message_type!: String",
+                system_event_key,
                 created_at
             FROM messages
             WHERE id = $1 AND deleted_at IS NULL
@@ -275,6 +312,8 @@ impl MessageRepository for PgMessageRepository {
                 deleted_by: r.deleted_by,
                 encrypted: r.encrypted,
                 sender_device_id: r.sender_device_id,
+                message_type: r.message_type,
+                system_event_key: r.system_event_key,
                 created_at: r.created_at,
             }
             .into_message()
@@ -304,6 +343,8 @@ impl MessageRepository for PgMessageRepository {
                     deleted_by,
                     encrypted,
                     sender_device_id,
+                    message_type,
+                    system_event_key,
                     created_at
             )
             SELECT
@@ -316,6 +357,8 @@ impl MessageRepository for PgMessageRepository {
                 u.deleted_by,
                 u.encrypted,
                 u.sender_device_id,
+                u.message_type as "message_type!: String",
+                u.system_event_key,
                 u.created_at,
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?"
@@ -343,6 +386,8 @@ impl MessageRepository for PgMessageRepository {
             deleted_by: row.deleted_by,
             encrypted: row.encrypted,
             sender_device_id: row.sender_device_id,
+            message_type: row.message_type,
+            system_event_key: row.system_event_key,
             created_at: row.created_at,
             author_username: row.author_username,
             author_avatar_url: row.author_avatar_url,
@@ -409,5 +454,79 @@ impl MessageRepository for PgMessageRepository {
         .map_err(super::db_err)?;
 
         Ok(row.count)
+    }
+
+    async fn create_system(
+        &self,
+        channel_id: &ChannelId,
+        author_id: &UserId,
+        system_event_key: String,
+    ) -> Result<MessageWithAuthor, DomainError> {
+        let cid = channel_id.0;
+        let aid = author_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            WITH inserted AS (
+                INSERT INTO messages (channel_id, author_id, content, message_type, system_event_key)
+                VALUES ($1, $2, '', 'system'::message_type, $3)
+                RETURNING
+                    id,
+                    channel_id,
+                    author_id,
+                    content,
+                    edited_at,
+                    deleted_at,
+                    deleted_by,
+                    encrypted,
+                    sender_device_id,
+                    message_type,
+                    system_event_key,
+                    created_at
+            )
+            SELECT
+                i.id,
+                i.channel_id,
+                i.author_id,
+                i.content,
+                i.edited_at,
+                i.deleted_at,
+                i.deleted_by,
+                i.encrypted,
+                i.sender_device_id,
+                i.message_type as "message_type!: String",
+                i.system_event_key,
+                i.created_at,
+                p.username AS "author_username?",
+                p.avatar_url AS "author_avatar_url?"
+            FROM inserted i
+            LEFT JOIN profiles p ON p.id = i.author_id
+            "#,
+            cid,
+            aid,
+            system_event_key,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        let msg = MessageWithAuthorRow {
+            id: row.id,
+            channel_id: row.channel_id,
+            author_id: row.author_id,
+            content: row.content,
+            edited_at: row.edited_at,
+            deleted_at: row.deleted_at,
+            deleted_by: row.deleted_by,
+            encrypted: row.encrypted,
+            sender_device_id: row.sender_device_id,
+            message_type: row.message_type,
+            system_event_key: row.system_event_key,
+            created_at: row.created_at,
+            author_username: row.author_username,
+            author_avatar_url: row.author_avatar_url,
+        };
+
+        Ok(msg.into_message_with_author())
     }
 }

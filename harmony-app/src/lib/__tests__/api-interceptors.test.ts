@@ -138,7 +138,7 @@ describe('responseInterceptor', () => {
       expect(mockFetch).toHaveBeenCalledOnce()
 
       // Verify the retried request has the new token
-      const retriedRequest = mockFetch.mock.calls[0]![0] as Request
+      const retriedRequest = mockFetch.mock.calls[0]?.[0] as Request
       expect(retriedRequest.headers.get('Authorization')).toBe('Bearer fresh-token')
 
       expect(result).toBe(retryResponse)

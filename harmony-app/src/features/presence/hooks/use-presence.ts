@@ -198,5 +198,5 @@ export function usePresence(
     if (users.size > 0) {
       usePresenceStore.getState().syncPresenceState(users)
     }
-  }, [selectedServerId])
+  }, [selectedServerId, userId])
 }

@@ -24,7 +24,7 @@ pub use ids::{
 };
 pub use invite::Invite;
 pub use member::ServerMember;
-pub use message::Message;
+pub use message::{Message, MessageType};
 pub use message_with_author::MessageWithAuthor;
 pub use plan::{Plan, PlanLimits, ResourceKind};
 pub use profile::{Profile, UserStatus};

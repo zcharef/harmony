@@ -308,6 +308,32 @@ impl MessageService {
 
         self.repo.soft_delete(message_id, user_id).await
     }
+
+    /// Post a system message (e.g. join announcement).
+    ///
+    /// Bypasses rate limits, content validation, and read-only checks — none
+    /// apply to server-generated events. `author_id` is the subject of the
+    /// event (the user who joined), not a "sender".
+    ///
+    /// # Errors
+    /// Returns `DomainError::Validation` if `system_event_key` is blank.
+    /// Returns a repository error on failure.
+    pub async fn create_system_message(
+        &self,
+        channel_id: &ChannelId,
+        author_id: &UserId,
+        system_event_key: String,
+    ) -> Result<MessageWithAuthor, DomainError> {
+        if system_event_key.trim().is_empty() {
+            return Err(DomainError::ValidationError(
+                "system_event_key must not be blank".to_string(),
+            ));
+        }
+
+        self.repo
+            .create_system(channel_id, author_id, system_event_key)
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -431,6 +457,8 @@ mod tests {
             deleted_by: None,
             encrypted: false,
             sender_device_id: None,
+            message_type: crate::domain::models::MessageType::Default,
+            system_event_key: None,
             created_at: Utc::now(),
         };
 
@@ -448,6 +476,26 @@ mod tests {
 
         assert!(deleted_msg.deleted_at.is_some());
         assert!(deleted_msg.deleted_by.is_some());
+    }
+
+    /// WHY: `MessageType` serializes to lowercase strings ("default", "system")
+    /// matching the Postgres enum values and the frontend's expected format.
+    #[test]
+    fn message_type_serialization() {
+        use crate::domain::models::MessageType;
+
+        let default_json = serde_json::to_string(&MessageType::Default).unwrap();
+        assert_eq!(default_json, r#""default""#);
+
+        let system_json = serde_json::to_string(&MessageType::System).unwrap();
+        assert_eq!(system_json, r#""system""#);
+
+        // Deserialization round-trip
+        let parsed_system: MessageType = serde_json::from_str(r#""system""#).unwrap();
+        assert_eq!(parsed_system, MessageType::System);
+
+        let parsed_default: MessageType = serde_json::from_str(r#""default""#).unwrap();
+        assert_eq!(parsed_default, MessageType::Default);
     }
 
     /// WHY: The create method rejects messages exceeding plan-specific limits

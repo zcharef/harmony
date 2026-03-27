@@ -1,6 +1,6 @@
 import { Avatar, Button, Textarea, Tooltip } from '@heroui/react'
 import type { TFunction } from 'i18next'
-import { Lock, LockOpen, Pencil, Trash2 } from 'lucide-react'
+import { ArrowRight, Lock, LockOpen, Pencil, Trash2 } from 'lucide-react'
 import { memo, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import type { DecryptResult } from '@/features/crypto'
@@ -202,6 +202,31 @@ function MessageContent({
 }
 
 /**
+ * WHY: System messages (join/leave announcements) have a distinct layout:
+ * no avatar, no actions, centered text with an icon. The event key resolves
+ * to a localized template via i18n.
+ */
+function SystemMessageItem({ message, t }: { message: MessageResponse; t: TFunction<'messages'> }) {
+  const text =
+    message.systemEventKey === 'member_join'
+      ? t('system.memberJoin', { username: message.authorUsername })
+      : t('system.unknown')
+
+  return (
+    <div
+      data-test="message-item"
+      data-test-system="true"
+      data-message-id={message.id}
+      className="flex items-center gap-2 px-4 py-1 text-sm text-default-500"
+    >
+      <ArrowRight className="h-4 w-4 shrink-0" />
+      <span>{text}</span>
+      <span className="text-xs text-default-400">{formatTimestamp(message.createdAt, t)}</span>
+    </div>
+  )
+}
+
+/**
  * WHY React.memo: The virtualizer re-renders all visible items when the
  * messages array reference changes (on every new message via realtime or
  * pagination). Memoizing skips re-render for messages whose props haven't
@@ -224,6 +249,14 @@ export const MessageItem = memo(function MessageItem({
 }: MessageItemProps) {
   const { t } = useTranslation('messages')
   const { t: tCrypto } = useTranslation('crypto')
+  // WHY: useState must be called before any conditional returns (React rules of hooks).
+  const [editContent, setEditContent] = useState(message.content)
+
+  // WHY: System messages have a completely different layout — early return.
+  if (message.messageType === 'system') {
+    return <SystemMessageItem message={message} t={t} />
+  }
+
   const authorLabel = message.authorUsername
 
   // WHY derive from ID: Optimistic messages use `temp-*` IDs. Deriving pending
@@ -239,8 +272,6 @@ export const MessageItem = memo(function MessageItem({
   const isEncrypted = message.encrypted === true && (isDm || isChannelEncrypted)
   // WHY: Use channel decryption for encrypted channels, Olm decryption for DMs.
   const activeDecryptFn = isChannelEncrypted ? decryptChannelMessage : decryptMessage
-
-  const [editContent, setEditContent] = useState(message.content)
 
   return (
     <div

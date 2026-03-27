@@ -3256,6 +3256,7 @@
           "authorUsername",
           "content",
           "encrypted",
+          "messageType",
           "createdAt"
         ],
         "properties": {
@@ -3308,14 +3309,33 @@
           "id": {
             "$ref": "#/components/schemas/MessageId"
           },
+          "messageType": {
+            "$ref": "#/components/schemas/MessageType",
+            "description": "`default` for user messages, `system` for announcements."
+          },
           "senderDeviceId": {
             "type": [
               "string",
               "null"
             ],
             "description": "Device ID of the sender. Present when `encrypted = true`."
+          },
+          "systemEventKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "System event key (e.g. `member_join`). Only present for system messages."
           }
         }
+      },
+      "MessageType": {
+        "type": "string",
+        "description": "Discriminates user messages from system announcements.\n\n`Default` = regular user message. `System` = server-generated event\n(join, leave, etc.) whose display text is resolved from `system_event_key`\non the frontend via i18n templates.",
+        "enum": [
+          "default",
+          "system"
+        ]
       },
       "OneTimeKeyDto": {
         "type": "object",

@@ -55,7 +55,13 @@ function UsernameField({
       isRequired
       isInvalid={isFormatInvalid || usernameStatus === 'taken'}
       errorMessage={getErrorMessage()}
-      color={usernameStatus === 'available' ? 'success' : usernameStatus === 'taken' ? 'danger' : 'default'}
+      color={
+        usernameStatus === 'available'
+          ? 'success'
+          : usernameStatus === 'taken'
+            ? 'danger'
+            : 'default'
+      }
       endContent={<UsernameStatusIcon status={usernameStatus} />}
       autoComplete="username"
       maxLength={32}
@@ -70,9 +76,7 @@ const PASSWORD_MIN_LENGTH = 8
 
 function isPasswordValid(pw: string): boolean {
   return (
-    pw.length >= PASSWORD_MIN_LENGTH &&
-    PASSWORD_HAS_LETTER.test(pw) &&
-    PASSWORD_HAS_DIGIT.test(pw)
+    pw.length >= PASSWORD_MIN_LENGTH && PASSWORD_HAS_LETTER.test(pw) && PASSWORD_HAS_DIGIT.test(pw)
   )
 }
 
@@ -116,9 +120,18 @@ function PasswordField({
       />
       {showHints && (
         <div className="flex flex-col gap-0.5 px-1">
-          <PasswordRequirement met={password.length >= PASSWORD_MIN_LENGTH} label={t('passwordMinLength')} />
-          <PasswordRequirement met={PASSWORD_HAS_LETTER.test(password)} label={t('passwordNeedsLetter')} />
-          <PasswordRequirement met={PASSWORD_HAS_DIGIT.test(password)} label={t('passwordNeedsDigit')} />
+          <PasswordRequirement
+            met={password.length >= PASSWORD_MIN_LENGTH}
+            label={t('passwordMinLength')}
+          />
+          <PasswordRequirement
+            met={PASSWORD_HAS_LETTER.test(password)}
+            label={t('passwordNeedsLetter')}
+          />
+          <PasswordRequirement
+            met={PASSWORD_HAS_DIGIT.test(password)}
+            label={t('passwordNeedsDigit')}
+          />
         </div>
       )}
     </div>
@@ -339,7 +352,10 @@ export function LoginPage() {
                   isLoading={isSubmitting}
                   isDisabled={
                     captchaToken === null ||
-                    (mode === 'signup' && (!isUsernameValid || usernameStatus === 'taken' || !isPasswordValid(password)))
+                    (mode === 'signup' &&
+                      (!isUsernameValid ||
+                        usernameStatus === 'taken' ||
+                        !isPasswordValid(password)))
                   }
                   className="mt-2"
                 >

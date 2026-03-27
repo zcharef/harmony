@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use crate::domain::models::{ChannelId, MessageId, MessageWithAuthor, UserId};
+use crate::domain::models::{ChannelId, MessageId, MessageType, MessageWithAuthor, UserId};
 
 /// Request body for sending a new message.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -54,6 +54,11 @@ pub struct MessageResponse {
     /// Device ID of the sender. Present when `encrypted = true`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sender_device_id: Option<String>,
+    /// `default` for user messages, `system` for announcements.
+    pub message_type: MessageType,
+    /// System event key (e.g. `member_join`). Only present for system messages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_event_key: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -71,6 +76,8 @@ impl From<MessageWithAuthor> for MessageResponse {
             deleted_by: m.deleted_by,
             encrypted: m.encrypted,
             sender_device_id: m.sender_device_id,
+            message_type: m.message_type,
+            system_event_key: m.system_event_key,
             created_at: m.created_at,
         }
     }
