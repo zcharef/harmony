@@ -10,9 +10,17 @@
 -- Run via: supabase test db
 -- =============================================================
 BEGIN;
-SET search_path TO public, extensions;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
+
+DO $$
+BEGIN
+  EXECUTE format(
+    'SET search_path TO public, %I',
+    (SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON e.extnamespace = n.oid WHERE e.extname = 'pgtap')
+  );
+END $$;
+
 SELECT plan(59);
 
 

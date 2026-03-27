@@ -11,9 +11,19 @@
 -- Run via: supabase test db
 -- =============================================================
 BEGIN;
-SET search_path TO public, extensions;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
+
+-- WHY: On Supabase Cloud, pgtap may be installed in any schema (extensions, pgtap, public).
+-- Dynamically detect its actual schema and add it to search_path.
+DO $$
+BEGIN
+  EXECUTE format(
+    'SET search_path TO public, %I',
+    (SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON e.extnamespace = n.oid WHERE e.extname = 'pgtap')
+  );
+END $$;
+
 SELECT plan(34);
 
 
