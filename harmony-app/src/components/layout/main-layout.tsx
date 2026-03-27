@@ -13,7 +13,40 @@ import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, useSettingsUiStore } from '@/features/settings'
 
+import { env } from '@/lib/env'
+import { logger } from '@/lib/logger'
 import { WelcomeScreen } from './welcome-screen'
+
+// WHY: Persist last-used server/channel to localStorage so the user returns
+// to their last position on page reload. Follows the same localStorage pattern
+// as crypto-store.ts (src/features/crypto/stores/crypto-store.ts:57-63).
+const STORAGE_KEYS = {
+  lastServerId: 'harmony:lastServerId',
+  lastChannelId: (serverId: string) => `harmony:lastChannel:${serverId}`,
+} as const
+
+function readStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStorage(key: string, value: string | null): void {
+  try {
+    if (value === null) {
+      localStorage.removeItem(key)
+    } else {
+      localStorage.setItem(key, value)
+    }
+  } catch (err: unknown) {
+    logger.warn('write_storage_failed', {
+      key,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
 
 function AlphaBadge() {
   const { t } = useTranslation('common')
@@ -69,13 +102,17 @@ function useServerAutoSelect(
   setSelectedServerId: (id: string | null) => void,
   setSelectedChannelId: (id: string | null) => void,
 ) {
-  // WHY: Auto-select the first server on initial load to avoid the
-  // "no server selected" dead-end. Only fires when view is 'servers',
-  // no server is selected, and servers have finished loading.
+  // WHY: Auto-select a server on initial load. Tries the last-used server
+  // from localStorage first, falls back to first server if not found/deleted.
   useEffect(() => {
-    const firstServer = regularServers[0]
-    if (view === 'servers' && selectedServerId === null && firstServer !== undefined) {
-      setSelectedServerId(firstServer.id)
+    if (view !== 'servers' || selectedServerId !== null || regularServers.length === 0) return
+
+    const savedId = readStorage(STORAGE_KEYS.lastServerId)
+    const target =
+      (savedId !== null ? regularServers.find((s) => s.id === savedId) : undefined) ??
+      regularServers[0]
+    if (target !== undefined) {
+      setSelectedServerId(target.id)
     }
   }, [view, selectedServerId, regularServers, setSelectedServerId])
 
@@ -94,6 +131,30 @@ function useServerAutoSelect(
       }
     }
   }, [view, selectedServerId, servers, setSelectedServerId, setSelectedChannelId])
+}
+
+// WHY: Auto-select a channel when a server is selected and channels have loaded.
+// Tries the last-used channel for this server from localStorage, falls back to first.
+function useChannelAutoSelect(
+  view: ViewMode,
+  selectedServerId: string | null,
+  selectedChannelId: string | null,
+  channels: { id: string }[] | undefined,
+  setSelectedChannelId: (id: string | null) => void,
+) {
+  useEffect(() => {
+    if (view !== 'servers' || selectedServerId === null) return
+    if (channels === undefined || channels.length === 0) return
+    // WHY: If the current selection is still valid, don't override user choice
+    if (selectedChannelId !== null && channels.some((c) => c.id === selectedChannelId)) return
+
+    const savedId = readStorage(STORAGE_KEYS.lastChannelId(selectedServerId))
+    const target =
+      (savedId !== null ? channels.find((c) => c.id === savedId) : undefined) ?? channels[0]
+    if (target !== undefined) {
+      setSelectedChannelId(target.id)
+    }
+  }, [view, selectedServerId, selectedChannelId, channels, setSelectedChannelId])
 }
 
 export function MainLayout() {
@@ -166,10 +227,33 @@ export function MainLayout() {
     setSelectedChannelId,
   )
 
+  useChannelAutoSelect(view, selectedServerId, selectedChannelId, channels, setSelectedChannelId)
+
+  // WHY: Persist selection to localStorage so the user returns to their last
+  // position on page reload. Only persists in server view to avoid overwriting
+  // with DM server/channel IDs.
+  useEffect(() => {
+    if (view === 'servers' && selectedServerId !== null) {
+      writeStorage(STORAGE_KEYS.lastServerId, selectedServerId)
+    }
+  }, [view, selectedServerId])
+
+  useEffect(() => {
+    if (view === 'servers' && selectedServerId !== null && selectedChannelId !== null) {
+      writeStorage(STORAGE_KEYS.lastChannelId(selectedServerId), selectedChannelId)
+    }
+  }, [view, selectedServerId, selectedChannelId])
+
   const isDmView = view === 'dms'
   const showServerSettings = useSettingsUiStore((s) => s.showServerSettings)
 
-  const hasNoServers = servers !== undefined && regularServers.length === 0
+  // WHY: Exclude the official Harmony server from the "has servers" check so
+  // new users who were auto-joined still see the onboarding welcome screen.
+  const userServers = useMemo(
+    () => regularServers.filter((s) => s.id !== env.VITE_OFFICIAL_SERVER_ID),
+    [regularServers],
+  )
+  const hasNoServers = servers !== undefined && userServers.length === 0
 
   /** WHY: Server settings replaces the entire main content area (like Discord). */
   if (showServerSettings && selectedServerId !== null) {
