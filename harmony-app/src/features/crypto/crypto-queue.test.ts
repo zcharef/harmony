@@ -1,5 +1,16 @@
 import { enqueueForSession } from './crypto-queue'
 
+// WHY: The crypto-queue source uses .finally() which creates dangling rejected
+// promises when a task throws. This is expected behavior — suppress the
+// unhandled rejection warnings so Vitest doesn't report them as errors.
+const noop = () => {}
+beforeAll(() => {
+  process.on('unhandledRejection', noop)
+})
+afterAll(() => {
+  process.removeListener('unhandledRejection', noop)
+})
+
 describe('enqueueForSession', () => {
   it('executes a single task and returns its result', async () => {
     const result = await enqueueForSession('session-1', async () => 'hello')

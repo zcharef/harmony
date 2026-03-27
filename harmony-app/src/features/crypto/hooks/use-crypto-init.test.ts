@@ -2,6 +2,15 @@ import type { User } from '@supabase/supabase-js'
 import { renderHook, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 
+vi.mock('@/lib/env', () => ({
+  env: {
+    VITE_API_URL: 'http://localhost:3000',
+    VITE_SUPABASE_URL: 'http://localhost:54321',
+    VITE_SUPABASE_ANON_KEY: 'test-anon-key',
+    VITE_TURNSTILE_SITE_KEY: 'test-turnstile-key',
+  },
+}))
+
 vi.mock('@/lib/api', () => ({
   registerDevice: vi.fn(),
   uploadOneTimeKeys: vi.fn(),
