@@ -15,6 +15,7 @@ const envSchema = z.object({
   VITE_SUPABASE_ANON_KEY: z.string().min(1),
   VITE_TURNSTILE_SITE_KEY: z.string().min(1),
   VITE_SENTRY_DSN: z.string().url().optional(),
+  VITE_OFFICIAL_SERVER_ID: z.string().uuid().optional(),
 })
 
 function validateEnv() {
