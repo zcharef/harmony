@@ -29,6 +29,8 @@ jobs:
   app-quality:
     name: App Quality Wall
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: harmony-app
@@ -80,6 +82,8 @@ jobs:
   rust-quality:
     name: Rust Quality Wall
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: harmony-api

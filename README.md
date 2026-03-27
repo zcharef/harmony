@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="mediakit/logo_horizontal_dark.png">
     <source media="(prefers-color-scheme: light)" srcset="mediakit/logo_horizontal.png">
-    <img alt="Harmony" src="mediakit/logo_horizontal.png" height="64">
+    <img alt="Harmony" src="mediakit/logo_horizontal_dark.png" height="64">
   </picture>
   <br /><br />
   <strong>Your chat app shouldn't sell your data.</strong>
@@ -11,15 +11,10 @@
 </p>
 <p align="center">
   <p align="center">
-    <a href="https://github.com/harmony-app/harmony/actions"><img src="https://img.shields.io/github/actions/workflow/status/harmony-app/harmony/ci.yml?style=flat-square&label=CI" alt="CI"></a>
+    <a href="https://github.com/zcharef/harmony/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zcharef/harmony/ci.yml?style=flat-square&label=CI&logo=github" alt="CI"></a>
+    <a href="https://github.com/zcharef/harmony/actions/workflows/e2e-deploy.yml"><img src="https://img.shields.io/github/actions/workflow/status/zcharef/harmony/e2e-deploy.yml?style=flat-square&label=E2E%20%26%20Deploy&logo=playwright" alt="E2E & Deploy"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License"></a>
-    <a href="https://harmony.app"><img src="https://img.shields.io/badge/web-harmony.app-8b5cf6?style=flat-square" alt="Website"></a>
-    <br />
-    <img src="https://img.shields.io/badge/Rust_API_Unit-164_tests-brightgreen?style=flat-square&logo=rust&logoColor=white" alt="Rust API Unit Tests">
-    <img src="https://img.shields.io/badge/Frontend_Unit-310_tests-brightgreen?style=flat-square&logo=vitest&logoColor=white" alt="Frontend Unit Tests">
-    <img src="https://img.shields.io/badge/Tauri_Crypto-53_tests-brightgreen?style=flat-square&logo=tauri&logoColor=white" alt="Tauri Crypto Tests">
-    <img src="https://img.shields.io/badge/E2E-144_tests-green?style=flat-square&logo=playwright&logoColor=white" alt="E2E Tests">
-    <img src="https://img.shields.io/badge/Coverage-~80%25-brightgreen?style=flat-square" alt="Coverage Target">
+    <a href="https://joinharmony.app"><img src="https://img.shields.io/badge/web-joinharmony.app-8b5cf6?style=flat-square" alt="Website"></a>
   </p>
 </p>
 
@@ -34,12 +29,12 @@
 | Client | Electron (~500 MB RAM) | Solid.js PWA | **Web app + Tauri desktop (~80 MB RAM)** |
 | Backend | Proprietary | Rust (6 microservices) | **Rust (single binary)** |
 | Database | Proprietary | MongoDB + Redis + RabbitMQ | **PostgreSQL only** |
-| Self-host complexity | N/A | 6 services + MongoDB + Redis + RabbitMQ + MinIO | **`docker compose up` (PostgreSQL only)** |
+| Self-host complexity | N/A | 6 services + MongoDB + Redis + RabbitMQ + MinIO | **PostgreSQL + one binary** |
 | Data privacy | Scans messages, shares data | Good | **No data collection, fully auditable** |
 | ID verification | Requiring it | No | **Never** |
-| E2EE | No | No | **Yes (DMs) — opt-in for channels** |
+| E2EE | No | No | **Yes (desktop DMs + opt-in channels)** |
 | Sustainable business model | Nitro + Ads | Donations (unclear sustainability) | **Open source + SaaS** |
-| Voice / Video | Proprietary | Vortex | **LiveKit (open-source SFU)** |
+| Voice / Video | Proprietary | Vortex | **LiveKit (open-source SFU) — planned** |
 
 ### Privacy that you can verify
 
@@ -65,7 +60,7 @@ A mobile app is planned for a future release.
 
 ### Self-hosting that actually works
 
-Other alternatives require you to deploy and maintain MongoDB, Redis, RabbitMQ, MinIO, and half a dozen interconnected services just to send a message. Harmony runs on PostgreSQL. That's it. One database, one API binary, one `docker compose up`. If you can run Postgres, you can run Harmony.
+Other alternatives require you to deploy and maintain MongoDB, Redis, RabbitMQ, MinIO, and half a dozen interconnected services just to send a message. Harmony runs on PostgreSQL. That's it. One database, one API binary. If you can run Postgres, you can run Harmony.
 
 ### Built to last
 
@@ -97,30 +92,25 @@ Harmony isn't just for gaming communities. Small teams and co-workers who want p
             │                 └───────────────┼─────────────────────┘
             │                                 │
             └──────────┬──────────────────────┘
-                       │ HTTP (Bearer JWT)
+                       │ HTTPS
             ┌──────────▼──────────┐
             │   HARMONY RUST API  │
-            │  (Axum · Hexagonal) │
-            │  ├─ REST /v1/*      │
-            │  ├─ Supabase JWT    │
-            │  └─ RFC 9457 errors │
+            │   (single binary)   │
             └───┬────────────┬────┘
                 │            │
-       ┌────────▼──┐   ┌────▼───────┐
-       │ Supabase  │   │  LiveKit   │
-       │ ├ Postgres│   │  (SFU)     │
-       │ ├ Auth    │   │  Voice     │
-       │ ├ Storage │   │  Video     │
-       │ └ Realtime│   │  Screen    │
-       └───────────┘   └────────────┘
+       ┌────────▼──┐   ┌─────────────┐
+       │ Supabase  │   │  LiveKit    │
+       │ ├ Postgres│   │  (planned)  │
+       │ ├ Auth    │   │  Voice      │
+       │ ├ Storage │   │  Video      │
+       │ └ Realtime│   │  Screen     │
+       └───────────┘   └─────────────┘
 ```
 
 **Key decisions:**
-- **OpenAPI SSoT** — Rust structs generate `openapi.json`, which generates the TypeScript client. Zero manual type definitions.
-- **Hexagonal architecture** — Domain logic has zero infrastructure imports. Swap the DB without touching business rules.
-- **Supabase Realtime** for push — no custom WebSocket/SSE server. Writes go through REST; Supabase pushes changes to clients.
-- **RFC 9457** — All API errors are machine-readable `ProblemDetails` JSON.
-- **Single binary** — The API is one Rust binary. No microservice orchestration, no message queues, no cache servers. Simpler to deploy, debug, and maintain.
+- **Single binary** — One Rust binary serves the entire API. No microservices, no message queues, no cache servers.
+- **PostgreSQL only** — No Redis, no MongoDB. Supabase handles auth, storage, and real-time push.
+- **Same codebase, two targets** — The React app runs in the browser or as a Tauri desktop app. E2EE is desktop-only (keys never touch JavaScript).
 
 ---
 
@@ -138,7 +128,7 @@ Harmony isn't just for gaming communities. Small teams and co-workers who want p
 
 ```bash
 # 1. Clone
-git clone https://github.com/harmony-app/harmony.git
+git clone https://github.com/zcharef/harmony.git
 cd harmony
 
 # 2. Start Supabase (Postgres + Auth + Realtime)
@@ -188,7 +178,16 @@ harmony/
 ├── harmony-app/         Web app + Tauri desktop (React 19 + Vite)
 │   ├── src/
 │   │   ├── features/    Feature-first business domains
-│   │   ├── components/  UI primitives (HeroUI) + shared + layout
+│   │   │   ├── auth/        Login, session management
+│   │   │   ├── channels/    Channel management
+│   │   │   ├── chat/        Messaging
+│   │   │   ├── crypto/      E2EE key management (desktop only)
+│   │   │   ├── dms/         Direct messages
+│   │   │   ├── members/     Member list, presence
+│   │   │   ├── presence/    Online/offline status
+│   │   │   ├── server-nav/  Server sidebar navigation
+│   │   │   └── settings/    User settings
+│   │   ├── components/  Shared UI + layout shell
 │   │   └── lib/         Generated API client, utils
 │   └── src-tauri/       Tauri Rust runtime (E2EE crypto, keychain)
 │
@@ -199,15 +198,11 @@ harmony/
 
 ## Self-Hosting
 
-Harmony is designed to be self-hosted with a single command:
-
-```bash
-docker compose up
-```
-
-No MongoDB. No Redis. No RabbitMQ. No MinIO. Just PostgreSQL and one API binary.
+Harmony is designed to be simple to self-host: one API binary and PostgreSQL. No MongoDB. No Redis. No RabbitMQ. No MinIO.
 
 Self-hosting gives you the complete product with no feature restrictions. Unlimited users, unlimited history, all features. Your server, your rules.
+
+> **Coming soon:** A `docker compose up` one-liner and full self-hosting guide are planned for beta.
 
 ---
 
@@ -223,7 +218,7 @@ Self-hosting gives you the complete product with no feature restrictions. Unlimi
 | Database | PostgreSQL (via Supabase) |
 | Auth | Supabase Auth (JWT) |
 | Real-time | Supabase Realtime (Postgres Changes + Broadcast + Presence) |
-| Voice / Video | LiveKit (open-source SFU) |
+| Voice / Video | LiveKit (open-source SFU) — planned |
 | API docs | Code-first OpenAPI (utoipa) |
 | Observability | tracing + OpenTelemetry + Sentry |
 | CI | GitHub Actions |

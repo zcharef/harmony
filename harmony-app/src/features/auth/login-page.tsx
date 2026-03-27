@@ -1,5 +1,6 @@
-import { Button, Card, CardBody, CardHeader, Chip, Divider, Input } from '@heroui/react'
+import { Button, Card, CardBody, CardHeader, Chip, Divider, Input, Spinner } from '@heroui/react'
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
+import { CircleCheck, CircleX } from 'lucide-react'
 import type { FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -16,6 +17,13 @@ const USERNAME_REGEX = /^[a-z0-9_]{3,32}$/
 type UsernameStatus = 'idle' | 'checking' | 'available' | 'taken'
 
 // WHY extracted: Keeps LoginPage below Biome's cognitive complexity limit of 15.
+function UsernameStatusIcon({ status }: { status: UsernameStatus }) {
+  if (status === 'checking') return <Spinner size="sm" />
+  if (status === 'available') return <CircleCheck className="h-5 w-5 text-success" />
+  if (status === 'taken') return <CircleX className="h-5 w-5 text-danger" />
+  return null
+}
+
 function UsernameField({
   username,
   onValueChange,
@@ -29,12 +37,6 @@ function UsernameField({
 
   const isFormatInvalid = username.length > 0 && !USERNAME_REGEX.test(username)
 
-  function getDescription(): string {
-    if (usernameStatus === 'checking') return t('usernameChecking')
-    if (usernameStatus === 'available') return t('usernameAvailable')
-    return t('usernameHelp')
-  }
-
   function getErrorMessage(): string | undefined {
     if (usernameStatus === 'taken') return t('usernameTaken')
     if (isFormatInvalid) return t('usernameInvalid')
@@ -47,16 +49,79 @@ function UsernameField({
       label={t('username')}
       type="text"
       placeholder={t('usernamePlaceholder')}
-      description={getDescription()}
+      description={usernameStatus === 'available' ? t('usernameAvailable') : t('usernameHelp')}
       value={username}
       onValueChange={onValueChange}
       isRequired
       isInvalid={isFormatInvalid || usernameStatus === 'taken'}
       errorMessage={getErrorMessage()}
-      color={usernameStatus === 'available' ? 'success' : 'default'}
+      color={usernameStatus === 'available' ? 'success' : usernameStatus === 'taken' ? 'danger' : 'default'}
+      endContent={<UsernameStatusIcon status={usernameStatus} />}
       autoComplete="username"
       maxLength={32}
     />
+  )
+}
+
+// WHY: Matches supabase config.toml — minimum_password_length = 8, password_requirements = "letters_digits".
+const PASSWORD_HAS_LETTER = /[a-zA-Z]/
+const PASSWORD_HAS_DIGIT = /\d/
+const PASSWORD_MIN_LENGTH = 8
+
+function isPasswordValid(pw: string): boolean {
+  return (
+    pw.length >= PASSWORD_MIN_LENGTH &&
+    PASSWORD_HAS_LETTER.test(pw) &&
+    PASSWORD_HAS_DIGIT.test(pw)
+  )
+}
+
+function PasswordRequirement({ met, label }: { met: boolean; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {met ? (
+        <CircleCheck className="h-3.5 w-3.5 text-success" />
+      ) : (
+        <CircleX className="h-3.5 w-3.5 text-default-400" />
+      )}
+      <span className={met ? 'text-xs text-success' : 'text-xs text-default-400'}>{label}</span>
+    </div>
+  )
+}
+
+// WHY extracted: Keeps LoginPage below Biome's cognitive complexity limit of 15.
+function PasswordField({
+  password,
+  onValueChange,
+  isSignup,
+}: {
+  password: string
+  onValueChange: (value: string) => void
+  isSignup: boolean
+}) {
+  const { t } = useTranslation('auth')
+  const showHints = isSignup && password.length > 0
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Input
+        data-test="login-password-input"
+        label={t('password')}
+        type="password"
+        placeholder={t('passwordPlaceholder')}
+        value={password}
+        onValueChange={onValueChange}
+        isRequired
+        autoComplete={isSignup ? 'new-password' : 'current-password'}
+      />
+      {showHints && (
+        <div className="flex flex-col gap-0.5 px-1">
+          <PasswordRequirement met={password.length >= PASSWORD_MIN_LENGTH} label={t('passwordMinLength')} />
+          <PasswordRequirement met={PASSWORD_HAS_LETTER.test(password)} label={t('passwordNeedsLetter')} />
+          <PasswordRequirement met={PASSWORD_HAS_DIGIT.test(password)} label={t('passwordNeedsDigit')} />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -226,15 +291,10 @@ export function LoginPage() {
                   autoComplete="email"
                 />
 
-                <Input
-                  data-test="login-password-input"
-                  label={t('password')}
-                  type="password"
-                  placeholder={t('passwordPlaceholder')}
-                  value={password}
+                <PasswordField
+                  password={password}
                   onValueChange={setPassword}
-                  isRequired
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  isSignup={mode === 'signup'}
                 />
 
                 {/* WHY: Honeypot field — invisible to real users, auto-filled by bots.
@@ -278,7 +338,7 @@ export function LoginPage() {
                   isLoading={isSubmitting}
                   isDisabled={
                     captchaToken === null ||
-                    (mode === 'signup' && (!isUsernameValid || usernameStatus === 'taken'))
+                    (mode === 'signup' && (!isUsernameValid || usernameStatus === 'taken' || !isPasswordValid(password)))
                   }
                   className="mt-2"
                 >

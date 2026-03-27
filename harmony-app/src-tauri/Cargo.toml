@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Harmony — open-source, privacy-first group communication"
 authors = ["Harmony Contributors"]
 license = "AGPL-3.0"
-repository = "https://github.com/harmony-app/harmony"
-homepage = "https://harmony.app"
+repository = "https://github.com/zcharef/harmony"
+homepage = "https://joinharmony.app"
 edition = "2021"
 
 [lib]
