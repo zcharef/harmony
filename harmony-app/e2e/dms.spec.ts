@@ -191,8 +191,7 @@ test.describe('Direct Messages', () => {
       const invite = await createInvite(msgUserA.token, msgServer.id)
       await joinServer(msgUserB.token, msgServer.id, invite.code)
 
-      // WHY: DM input is disabled on web (E2EE requires Tauri desktop — chat-area.tsx:789).
-      // Create DM and send message via API (before page load so caches include it).
+      // WHY: Create DM and seed a message via API so the conversation exists before page load.
       dm = await createDm(msgUserA.token, msgUserB.id)
       uniqueMessage = `Hello from E2E DM test ${Date.now()}`
       await sendMessage(msgUserA.token, dm.channelId, uniqueMessage)

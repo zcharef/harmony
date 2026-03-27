@@ -1,11 +1,12 @@
-import { Avatar, Button, Textarea } from '@heroui/react'
+import { Avatar, Button, Textarea, Tooltip } from '@heroui/react'
 import type { TFunction } from 'i18next'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Lock, LockOpen, Pencil, Trash2 } from 'lucide-react'
 import { memo, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import type { DecryptResult } from '@/features/crypto'
 import { EncryptedMessageContent } from '@/features/crypto'
 import type { MessageResponse } from '@/lib/api'
+import { isTauri } from '@/lib/platform'
 
 interface MessageItemProps {
   message: MessageResponse
@@ -77,6 +78,7 @@ function MessageContent({
   getCachedPlaintext?: (messageId: string) => string | undefined
 }) {
   const { t } = useTranslation('messages')
+  const { t: tCrypto } = useTranslation('crypto')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   function handleEditKeyDown(e: React.KeyboardEvent) {
@@ -173,6 +175,20 @@ function MessageContent({
     )
   }
 
+  // WHY: On web, encrypted messages from desktop users cannot be decrypted.
+  // Show a user-friendly fallback instead of raw ciphertext.
+  if (message.encrypted === true && !isTauri()) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 text-sm italic text-default-400"
+        data-test="message-content"
+      >
+        <Lock className="h-3.5 w-3.5" />
+        {tCrypto('encryptedWebFallback')}
+      </span>
+    )
+  }
+
   return (
     <p data-test="message-content" className="text-sm text-foreground/90">
       {message.content}
@@ -207,9 +223,8 @@ export const MessageItem = memo(function MessageItem({
   getCachedPlaintext,
 }: MessageItemProps) {
   const { t } = useTranslation('messages')
-  // WHY: authorId is a UUID — use first 8 chars as label fallback.
-  // A proper profile lookup would be a future enhancement.
-  const authorLabel = message.authorId.slice(0, 8)
+  const { t: tCrypto } = useTranslation('crypto')
+  const authorLabel = message.authorUsername
 
   // WHY derive from ID: Optimistic messages use `temp-*` IDs. Deriving pending
   // state from the ID avoids an extra prop and stays in sync automatically —
@@ -253,6 +268,24 @@ export const MessageItem = memo(function MessageItem({
           <span data-test="message-timestamp" className="text-xs text-default-500">
             {isPending ? t('sending') : formatTimestamp(message.createdAt, t)}
           </span>
+          {isDm && (
+            <Tooltip
+              content={
+                message.encrypted === true
+                  ? tCrypto('encryptedTooltip')
+                  : tCrypto('notEncryptedTooltip')
+              }
+              size="sm"
+            >
+              <span data-test="message-encryption-indicator" className="inline-flex items-center">
+                {message.encrypted === true ? (
+                  <Lock className="h-3 w-3 text-success-500" />
+                ) : (
+                  <LockOpen className="h-3 w-3 text-default-400" />
+                )}
+              </span>
+            </Tooltip>
+          )}
         </div>
 
         <MessageContent

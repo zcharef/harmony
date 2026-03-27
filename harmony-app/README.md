@@ -1,7 +1,17 @@
-# Tauri + React + Typescript
+# Harmony App
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Web app + Tauri desktop client for Harmony — Discord's UX with Signal's principles.
 
-## Recommended IDE Setup
+- **Web:** React 19 SPA (Vite) — servers, channels, DMs, invites, moderation
+- **Desktop:** Same codebase wrapped in [Tauri 2](https://tauri.app/) — adds E2EE for DMs via [vodozemac](https://github.com/matrix-org/vodozemac)
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Development
+
+```bash
+pnpm install
+just dev          # Web dev server (port 1420)
+just tauri dev    # Desktop app with E2EE
+just wall         # Full quality wall
+```
+
+See the [root README](../README.md) for full setup instructions.

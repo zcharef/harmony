@@ -9,6 +9,12 @@
     <a href="https://github.com/harmony-app/harmony/actions"><img src="https://img.shields.io/github/actions/workflow/status/harmony-app/harmony/ci.yml?style=flat-square&label=CI" alt="CI"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License"></a>
     <a href="https://harmony.app"><img src="https://img.shields.io/badge/web-harmony.app-8b5cf6?style=flat-square" alt="Website"></a>
+    <br />
+    <img src="https://img.shields.io/badge/Rust_API_Unit-164_tests-brightgreen?style=flat-square&logo=rust&logoColor=white" alt="Rust API Unit Tests">
+    <img src="https://img.shields.io/badge/Frontend_Unit-310_tests-brightgreen?style=flat-square&logo=vitest&logoColor=white" alt="Frontend Unit Tests">
+    <img src="https://img.shields.io/badge/Tauri_Crypto-53_tests-brightgreen?style=flat-square&logo=tauri&logoColor=white" alt="Tauri Crypto Tests">
+    <img src="https://img.shields.io/badge/E2E-144_tests-green?style=flat-square&logo=playwright&logoColor=white" alt="E2E Tests">
+    <img src="https://img.shields.io/badge/Coverage-~80%25-brightgreen?style=flat-square" alt="Coverage Target">
   </p>
 </p>
 
@@ -34,9 +40,9 @@
 
 Your conversations are yours. Harmony is fully open source under AGPL-3.0 — you don't have to take our word for it, you can read every line of code that handles your data. We don't scan your messages, sell your data to advertisers, train AI on your conversations, or require ID verification to use the app. Chatting with your friends or running your community shouldn't cost you your privacy.
 
-### End-to-end encrypted by default
+### End-to-end encrypted where it matters
 
-Direct messages are end-to-end encrypted using the [Olm protocol](https://gitlab.matrix.org/matrix-org/olm/-/blob/master/docs/olm.md) via [vodozemac](https://github.com/matrix-org/vodozemac) (NCC Group audited). The server stores ciphertext only — even we can't read your DMs. Server owners can also enable E2EE per channel for group conversations. All cryptography runs natively in Rust inside the Tauri runtime — private keys never touch JavaScript.
+Direct messages from the desktop app are end-to-end encrypted using the [Olm protocol](https://gitlab.matrix.org/matrix-org/olm/-/blob/master/docs/olm.md) via [vodozemac](https://github.com/matrix-org/vodozemac) (NCC Group audited). The server stores ciphertext only — even we can't read encrypted DMs. Web users can also send and receive DMs, but their messages are transmitted as plaintext since no crypto runtime is available in the browser yet. The same conversation can contain both encrypted and plaintext messages — per-message lock icons make the encryption status of every message visible. Server owners can also enable E2EE per channel for group conversations.
 
 > **Alpha disclaimer:** E2EE is functional but the integration layer has not yet undergone a professional security audit. The underlying cryptographic library (vodozemac) has been [audited by NCC Group](https://matrix.org/media/Hodgson_vodozemac_audit.pdf). We plan to commission a full integration audit before beta. Do not rely on Harmony for sensitive communications until the audit is complete.
 
@@ -44,11 +50,11 @@ Direct messages are end-to-end encrypted using the [Olm protocol](https://gitlab
 
 Harmony works in the browser and as a native desktop app. The React frontend is the same codebase — the web app is what you get when you open Harmony in a browser, and the desktop app wraps it in [Tauri](https://tauri.app/) for native performance (~80 MB RAM vs Electron's ~500 MB).
 
-**Web app:** Full access to servers, channels, invites, members, roles, and moderation. Zero download, zero friction — just open the URL. This is how most people will first try Harmony.
+**Web app:** Full access to servers, channels, DMs, invites, members, roles, and moderation. DM messages sent from the web are not encrypted — per-message indicators show which messages are protected. Zero download, zero friction — just open the URL. This is how most people will first try Harmony.
 
-**Desktop app:** Everything the web app does, plus end-to-end encrypted DMs. The desktop app stores your encryption keys in your operating system's keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) and runs all cryptography natively in Rust — private keys never touch JavaScript.
+**Desktop app:** Everything the web app does, plus end-to-end encrypted DMs. Messages you send from the desktop app are automatically encrypted — no setup required. The desktop app stores your encryption keys in your operating system's keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) and runs all cryptography natively in Rust — private keys never touch JavaScript.
 
-**Why E2EE requires the desktop app:** A web client downloads its code from the server on every page load. If the server is compromised, a modified JavaScript bundle could silently exfiltrate encryption keys. This is why Signal has never shipped a web client. We plan to add browser-based E2EE via vodozemac compiled to WebAssembly (proven in production by Element/Matrix) — but for v1, encrypted DMs are desktop-only.
+**Why E2EE requires the desktop app:** A web client downloads its code from the server on every page load. If the server is compromised, a modified JavaScript bundle could silently exfiltrate encryption keys. This is why Signal has never shipped a web client. We plan to add browser-based E2EE via vodozemac compiled to WebAssembly (proven in production by Element/Matrix) — but for v1, encrypted DMs are desktop-only. Web users can still send and receive DMs — their messages are transmitted as plaintext, while messages from desktop users remain encrypted. Per-message lock icons make the encryption status of every message visible.
 
 A mobile app is planned for a future release.
 
@@ -226,7 +232,7 @@ Self-hosting gives you the complete product with no feature restrictions. Unlimi
 | **0 — Walking Skeleton** | Sign up, create server, send message | Done |
 | **1 — Real-Time** | Two users chatting live, invites, presence | Done |
 | **2 — Roles & DMs** | Permissions, private messages | Done |
-| **3 — E2EE + Web** | E2EE DMs (desktop), web app for channels, opt-in channel E2EE | In Progress |
+| **3 — E2EE + Web** | E2EE DMs (desktop), plaintext DMs (web), mixed-encryption conversations, opt-in channel E2EE | In Progress |
 | **4 — Voice & Files** | LiveKit voice/video, file uploads, public beta | Planned |
 | **5 — SaaS Launch** | Harmony Cloud, server discovery, push notifications | Planned |
 | **6 — Growth** | Mobile app, web E2EE (WASM), bot API, key backup, multi-device | Planned |

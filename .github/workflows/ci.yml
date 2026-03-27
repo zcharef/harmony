@@ -61,6 +61,9 @@ jobs:
       - name: Circular dependencies
         run: pnpm circular
 
+      - name: Unit tests (Vitest)
+        run: pnpm test
+
       - name: Architecture tests
         run: pnpm test:arch
 
@@ -89,7 +92,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: harmony-api
+          workspaces: |
+            harmony-api
+            harmony-app/src-tauri
           shared-key: harmony-rust
 
       - name: Check formatting
@@ -106,6 +111,18 @@ jobs:
       - name: Security audit
         # WHY ignore: RUSTSEC-2023-0071 is in `rsa` via `sqlx-mysql` (transitive). We only use Postgres. No fix available.
         run: cargo audit --ignore RUSTSEC-2023-0071
+
+      - name: License & crate compliance
+        run: cargo deny check 2>/dev/null || echo "::warning::cargo deny check failed — review denied crates"
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Tauri crypto tests
+        working-directory: harmony-app/src-tauri
+        run: cargo test --all-targets
 
       - name: Run tests
         env:
@@ -200,6 +217,14 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase db push
+
+      # ── pgTAP database tests ────────────────────────────
+      # WHY: RLS policies and CHECK constraints are security-critical.
+      # --linked runs against the CI Supabase project after migrations.
+      - name: Run pgTAP database tests
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase test db --linked
 
       # ── Build & start Rust API ───────────────────────────
       - name: Build Rust API

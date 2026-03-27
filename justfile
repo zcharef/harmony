@@ -11,8 +11,8 @@ default:
 # QUALITY WALL — Run ALL checks across BOTH projects
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# Full quality wall: API + App checks (the one command to rule them all)
-wall: wall-api wall-app
+# Full quality wall: API + Tauri + App checks (the one command to rule them all)
+wall: wall-api wall-tauri wall-app
     @echo ""
     @echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     @echo "  FULL QUALITY WALL PASSED"
@@ -22,6 +22,11 @@ wall: wall-api wall-app
 wall-api:
     @echo "━━━ API Quality Wall ━━━"
     cd harmony-api && just wall
+
+# Run Tauri crypto quality wall
+wall-tauri:
+    @echo "━━━ Tauri Crypto Wall ━━━"
+    cd harmony-app/src-tauri && cargo test --all-targets
 
 # Run React App quality wall
 wall-app:

@@ -7,7 +7,9 @@ use chrono::{DateTime, Utc};
 use crate::domain::errors::DomainError;
 use crate::domain::models::{ChannelId, ServerId, UserId};
 use crate::domain::ports::dm_repository::DmRow;
-use crate::domain::ports::{DmRepository, MemberRepository, ProfileRepository, ServerRepository};
+use crate::domain::ports::{
+    DmRepository, MemberRepository, PlanLimitChecker, ProfileRepository, ServerRepository,
+};
 
 /// Hydrated DM conversation returned from service methods.
 #[derive(Debug, Clone)]
@@ -47,6 +49,7 @@ pub struct DmService {
     profile_repo: Arc<dyn ProfileRepository>,
     server_repo: Arc<dyn ServerRepository>,
     member_repo: Arc<dyn MemberRepository>,
+    plan_checker: Arc<dyn PlanLimitChecker>,
 }
 
 impl DmService {
@@ -56,12 +59,14 @@ impl DmService {
         profile_repo: Arc<dyn ProfileRepository>,
         server_repo: Arc<dyn ServerRepository>,
         member_repo: Arc<dyn MemberRepository>,
+        plan_checker: Arc<dyn PlanLimitChecker>,
     ) -> Self {
         Self {
             dm_repo,
             profile_repo,
             server_repo,
             member_repo,
+            plan_checker,
         }
     }
 
@@ -216,4 +221,138 @@ impl DmService {
 
         self.member_repo.remove_member(server_id, caller_id).await
     }
+}
+
+/// Validate that a DM is not being created with oneself.
+///
+/// WHY: Extracted from `create_or_get_dm` for unit testing without repos.
+fn validate_dm_participants(caller_id: &UserId, recipient_id: &UserId) -> Result<(), DomainError> {
+    if *caller_id == *recipient_id {
+        return Err(DomainError::ValidationError(
+            "Cannot create a DM with yourself".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    // ── Helper ───────────────────────────────────────────────────
+
+    fn user_id(n: u128) -> UserId {
+        UserId::new(Uuid::from_u128(n))
+    }
+
+    fn server_id(n: u128) -> ServerId {
+        ServerId::new(Uuid::from_u128(n))
+    }
+
+    fn channel_id(n: u128) -> ChannelId {
+        ChannelId::new(Uuid::from_u128(n))
+    }
+
+    // ── Self-DM rejection ────────────────────────────────────────
+
+    #[test]
+    fn self_dm_rejected() {
+        let user = user_id(1);
+        let result = validate_dm_participants(&user, &user);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DomainError::ValidationError(msg) => {
+                assert_eq!(msg, "Cannot create a DM with yourself");
+            }
+            other => panic!("Expected ValidationError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn different_users_dm_allowed() {
+        let alice = user_id(1);
+        let bob = user_id(2);
+        assert!(validate_dm_participants(&alice, &bob).is_ok());
+    }
+
+    #[test]
+    fn dm_validation_is_symmetric() {
+        let alice = user_id(1);
+        let bob = user_id(2);
+        // Both directions should succeed.
+        assert!(validate_dm_participants(&alice, &bob).is_ok());
+        assert!(validate_dm_participants(&bob, &alice).is_ok());
+    }
+
+    // ── DmConversation::from(DmRow) ─────────────────────────────
+
+    #[test]
+    fn dm_conversation_from_row_maps_all_fields() {
+        let now = Utc::now();
+        let row = DmRow {
+            server_id: server_id(10),
+            channel_id: channel_id(20),
+            other_user_id: user_id(30),
+            other_username: "alice".to_string(),
+            other_display_name: Some("Alice Wonderland".to_string()),
+            other_avatar_url: Some("https://example.com/avatar.png".to_string()),
+            last_message_content: Some("Hello!".to_string()),
+            last_message_at: Some(now),
+            joined_at: now,
+        };
+
+        let conversation = DmConversation::from(row);
+
+        assert_eq!(conversation.server_id, server_id(10));
+        assert_eq!(conversation.channel_id, channel_id(20));
+        assert_eq!(conversation.recipient_id, user_id(30));
+        assert_eq!(conversation.recipient_username, "alice");
+        assert_eq!(
+            conversation.recipient_display_name.as_deref(),
+            Some("Alice Wonderland")
+        );
+        assert_eq!(
+            conversation.recipient_avatar_url.as_deref(),
+            Some("https://example.com/avatar.png")
+        );
+        assert_eq!(conversation.last_message_content.as_deref(), Some("Hello!"));
+        assert_eq!(conversation.last_message_at, Some(now));
+        assert_eq!(conversation.joined_at, now);
+    }
+
+    #[test]
+    fn dm_conversation_from_row_handles_none_fields() {
+        let now = Utc::now();
+        let row = DmRow {
+            server_id: server_id(10),
+            channel_id: channel_id(20),
+            other_user_id: user_id(30),
+            other_username: "bob".to_string(),
+            other_display_name: None,
+            other_avatar_url: None,
+            last_message_content: None,
+            last_message_at: None,
+            joined_at: now,
+        };
+
+        let conversation = DmConversation::from(row);
+
+        assert!(conversation.recipient_display_name.is_none());
+        assert!(conversation.recipient_avatar_url.is_none());
+        assert!(conversation.last_message_content.is_none());
+        assert!(conversation.last_message_at.is_none());
+    }
+
+    // ── Async service methods requiring repos ────────────────────
+    //
+    // The following business rules are enforced in async methods that
+    // require repository trait objects (banned by ADR-018: no mocks):
+    //
+    // - create_or_get_dm: profile existence, rate limiting, idempotent create
+    // - close_dm: DM server validation, membership check
+    // - list_dms: cursor pagination
+    //
+    // These are covered by integration tests with real Postgres.
 }

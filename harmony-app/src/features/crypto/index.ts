@@ -1,3 +1,4 @@
+export { DmPlaintextBanner } from './components/dm-plaintext-banner'
 export { E2eeAlphaBanner } from './components/e2ee-alpha-banner'
 export { EncryptedChannelBadge } from './components/encrypted-channel-badge'
 export { EncryptedChannelNotice } from './components/encrypted-channel-notice'

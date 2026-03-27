@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{ChannelId, Message, MessageId, UserId};
+use crate::domain::models::{ChannelId, Message, MessageId, MessageWithAuthor, UserId};
 use crate::domain::ports::MessageRepository;
 
 /// PostgreSQL-backed message repository.
@@ -22,7 +22,10 @@ impl PgMessageRepository {
     }
 }
 
-/// Intermediate row type for sqlx decoding.
+/// Intermediate row type for sqlx decoding (plain `Message` without author data).
+///
+/// Used by `find_by_id` which only needs the core message for authorization
+/// checks and does not need author profile enrichment.
 struct MessageRow {
     id: Uuid,
     channel_id: Uuid,
@@ -53,6 +56,54 @@ impl MessageRow {
     }
 }
 
+/// Intermediate row type for queries that JOIN `profiles` to include author data.
+///
+/// Used by `create`, `list_for_channel`, and `update_content` — all endpoints
+/// whose responses need the author's display name and avatar.
+struct MessageWithAuthorRow {
+    id: Uuid,
+    channel_id: Uuid,
+    author_id: Uuid,
+    content: Option<String>,
+    edited_at: Option<DateTime<Utc>>,
+    deleted_at: Option<DateTime<Utc>>,
+    deleted_by: Option<Uuid>,
+    encrypted: bool,
+    sender_device_id: Option<String>,
+    created_at: DateTime<Utc>,
+    // Author profile fields from JOIN.
+    author_username: Option<String>,
+    author_avatar_url: Option<String>,
+}
+
+impl MessageWithAuthorRow {
+    fn into_message_with_author(self) -> MessageWithAuthor {
+        let message = Message {
+            id: MessageId::new(self.id),
+            channel_id: ChannelId::new(self.channel_id),
+            author_id: UserId::new(self.author_id),
+            content: self.content.unwrap_or_default(),
+            edited_at: self.edited_at,
+            deleted_at: self.deleted_at,
+            deleted_by: self.deleted_by.map(UserId::new),
+            encrypted: self.encrypted,
+            sender_device_id: self.sender_device_id,
+            created_at: self.created_at,
+        };
+
+        MessageWithAuthor {
+            message,
+            // WHY: LEFT JOIN means username may be NULL if the profile was
+            // deleted. Fall back to "Unknown" so the API never returns an
+            // empty author_username field.
+            author_username: self
+                .author_username
+                .unwrap_or_else(|| "Unknown".to_string()),
+            author_avatar_url: self.author_avatar_url,
+        }
+    }
+}
+
 #[async_trait]
 impl MessageRepository for PgMessageRepository {
     async fn create(
@@ -60,25 +111,42 @@ impl MessageRepository for PgMessageRepository {
         channel_id: &ChannelId,
         author_id: &UserId,
         content: String,
-    ) -> Result<Message, DomainError> {
+    ) -> Result<MessageWithAuthor, DomainError> {
         let cid = channel_id.0;
         let aid = author_id.0;
 
         let row = sqlx::query!(
             r#"
-            INSERT INTO messages (channel_id, author_id, content)
-            VALUES ($1, $2, $3)
-            RETURNING
-                id,
-                channel_id,
-                author_id,
-                content,
-                edited_at,
-                deleted_at,
-                deleted_by,
-                encrypted,
-                sender_device_id,
-                created_at
+            WITH inserted AS (
+                INSERT INTO messages (channel_id, author_id, content)
+                VALUES ($1, $2, $3)
+                RETURNING
+                    id,
+                    channel_id,
+                    author_id,
+                    content,
+                    edited_at,
+                    deleted_at,
+                    deleted_by,
+                    encrypted,
+                    sender_device_id,
+                    created_at
+            )
+            SELECT
+                i.id,
+                i.channel_id,
+                i.author_id,
+                i.content,
+                i.edited_at,
+                i.deleted_at,
+                i.deleted_by,
+                i.encrypted,
+                i.sender_device_id,
+                i.created_at,
+                p.username AS "author_username?",
+                p.avatar_url AS "author_avatar_url?"
+            FROM inserted i
+            LEFT JOIN profiles p ON p.id = i.author_id
             "#,
             cid,
             aid,
@@ -88,7 +156,7 @@ impl MessageRepository for PgMessageRepository {
         .await
         .map_err(super::db_err)?;
 
-        let msg = MessageRow {
+        let msg = MessageWithAuthorRow {
             id: row.id,
             channel_id: row.channel_id,
             author_id: row.author_id,
@@ -99,9 +167,11 @@ impl MessageRepository for PgMessageRepository {
             encrypted: row.encrypted,
             sender_device_id: row.sender_device_id,
             created_at: row.created_at,
+            author_username: row.author_username,
+            author_avatar_url: row.author_avatar_url,
         };
 
-        Ok(msg.into_message())
+        Ok(msg.into_message_with_author())
     }
 
     async fn list_for_channel(
@@ -109,7 +179,7 @@ impl MessageRepository for PgMessageRepository {
         channel_id: &ChannelId,
         cursor: Option<DateTime<Utc>>,
         limit: i64,
-    ) -> Result<Vec<Message>, DomainError> {
+    ) -> Result<Vec<MessageWithAuthor>, DomainError> {
         let cid = channel_id.0;
 
         // Cursor pagination (ADR-036): filter by created_at < cursor when present.
@@ -117,21 +187,24 @@ impl MessageRepository for PgMessageRepository {
         let rows = sqlx::query!(
             r#"
             SELECT
-                id,
-                channel_id,
-                author_id,
-                content,
-                edited_at,
-                deleted_at,
-                deleted_by,
-                encrypted,
-                sender_device_id,
-                created_at
-            FROM messages
-            WHERE channel_id = $1
-              AND deleted_at IS NULL
-              AND ($2::timestamptz IS NULL OR created_at < $2)
-            ORDER BY created_at DESC
+                m.id,
+                m.channel_id,
+                m.author_id,
+                m.content,
+                m.edited_at,
+                m.deleted_at,
+                m.deleted_by,
+                m.encrypted,
+                m.sender_device_id,
+                m.created_at,
+                p.username AS "author_username?",
+                p.avatar_url AS "author_avatar_url?"
+            FROM messages m
+            LEFT JOIN profiles p ON p.id = m.author_id
+            WHERE m.channel_id = $1
+              AND m.deleted_at IS NULL
+              AND ($2::timestamptz IS NULL OR m.created_at < $2)
+            ORDER BY m.created_at DESC
             LIMIT $3
             "#,
             cid,
@@ -145,7 +218,7 @@ impl MessageRepository for PgMessageRepository {
         let messages = rows
             .into_iter()
             .map(|r| {
-                MessageRow {
+                MessageWithAuthorRow {
                     id: r.id,
                     channel_id: r.channel_id,
                     author_id: r.author_id,
@@ -156,8 +229,10 @@ impl MessageRepository for PgMessageRepository {
                     encrypted: r.encrypted,
                     sender_device_id: r.sender_device_id,
                     created_at: r.created_at,
+                    author_username: r.author_username,
+                    author_avatar_url: r.author_avatar_url,
                 }
-                .into_message()
+                .into_message_with_author()
             })
             .collect();
 
@@ -210,25 +285,42 @@ impl MessageRepository for PgMessageRepository {
         &self,
         message_id: &MessageId,
         content: String,
-    ) -> Result<Message, DomainError> {
+    ) -> Result<MessageWithAuthor, DomainError> {
         let mid = message_id.0;
 
         let row = sqlx::query!(
             r#"
-            UPDATE messages
-            SET content = $2, is_edited = true, edited_at = now()
-            WHERE id = $1 AND deleted_at IS NULL
-            RETURNING
-                id,
-                channel_id,
-                author_id,
-                content,
-                edited_at,
-                deleted_at,
-                deleted_by,
-                encrypted,
-                sender_device_id,
-                created_at
+            WITH updated AS (
+                UPDATE messages
+                SET content = $2, is_edited = true, edited_at = now()
+                WHERE id = $1 AND deleted_at IS NULL
+                RETURNING
+                    id,
+                    channel_id,
+                    author_id,
+                    content,
+                    edited_at,
+                    deleted_at,
+                    deleted_by,
+                    encrypted,
+                    sender_device_id,
+                    created_at
+            )
+            SELECT
+                u.id,
+                u.channel_id,
+                u.author_id,
+                u.content,
+                u.edited_at,
+                u.deleted_at,
+                u.deleted_by,
+                u.encrypted,
+                u.sender_device_id,
+                u.created_at,
+                p.username AS "author_username?",
+                p.avatar_url AS "author_avatar_url?"
+            FROM updated u
+            LEFT JOIN profiles p ON p.id = u.author_id
             "#,
             mid,
             content,
@@ -241,7 +333,7 @@ impl MessageRepository for PgMessageRepository {
             id: message_id.to_string(),
         })?;
 
-        let msg = MessageRow {
+        let msg = MessageWithAuthorRow {
             id: row.id,
             channel_id: row.channel_id,
             author_id: row.author_id,
@@ -252,9 +344,11 @@ impl MessageRepository for PgMessageRepository {
             encrypted: row.encrypted,
             sender_device_id: row.sender_device_id,
             created_at: row.created_at,
+            author_username: row.author_username,
+            author_avatar_url: row.author_avatar_url,
         };
 
-        Ok(msg.into_message())
+        Ok(msg.into_message_with_author())
     }
 
     async fn soft_delete(

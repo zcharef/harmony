@@ -15,9 +15,9 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { z } from 'zod'
-import { useAuthStore } from '@/features/auth'
+import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import {
+  DmPlaintextBanner,
   E2eeAlphaBanner,
   EncryptedChannelNotice,
   EncryptionRequiredBanner,
@@ -139,25 +139,16 @@ function useThrottledScroll(
 }
 
 /**
- * WHY Zod: user_metadata is external data from Supabase Auth (CLAUDE.md §1.2).
- * Using `as string` would lie to the compiler if the shape ever changes.
- * Fallback to email prefix ensures a display name always exists.
+ * WHY: Combines Supabase Auth user ID (available immediately) with the DB
+ * profile username (SSoT via GET /v1/profiles/me). Falls back to i18n
+ * 'unknownUser' while the profile is loading.
  */
-const userMetaSchema = z.object({
-  username: z.string().optional(),
-  display_name: z.string().optional(),
-})
-
 function useCurrentUser() {
   const { t } = useTranslation('chat')
   const user = useAuthStore((s) => s.user)
+  const { data: profile } = useCurrentProfile()
   const id = user?.id ?? ''
-  const meta = userMetaSchema.safeParse(user?.user_metadata)
-  const username =
-    (meta.success ? meta.data.username : undefined) ??
-    (meta.success ? meta.data.display_name : undefined) ??
-    user?.email?.split('@')[0] ??
-    t('unknownUser')
+  const username = profile?.username ?? t('unknownUser')
   return { id, username }
 }
 
@@ -165,10 +156,11 @@ function useCurrentUser() {
 function useMessageActions(
   channelId: string | null,
   currentUserId: string,
+  currentUsername: string,
   encryption?: SendMessageEncryption,
 ) {
   const safeChannelId = channelId ?? ''
-  const sendMessage = useSendMessage(safeChannelId, currentUserId, encryption)
+  const sendMessage = useSendMessage(safeChannelId, currentUserId, currentUsername, encryption)
   const editMessageMutation = useEditMessage(safeChannelId)
   const deleteMessageMutation = useDeleteMessage(safeChannelId)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
@@ -422,14 +414,20 @@ function ChatWelcome({
 // WHY extracted: Keeps ChatArea below Biome's cognitive complexity limit of 15.
 function useInputPlaceholder(
   isInputDisabled: boolean,
+  isWebEncryptionBlocked: boolean,
   isDm: boolean,
   dmRecipient: DmRecipientResponse | null,
   channelName: string | null,
 ) {
   const { t } = useTranslation('chat')
   const { t: tDms } = useTranslation('dms')
+  const { t: tCrypto } = useTranslation('crypto')
 
-  if (isInputDisabled) return t('settings:announcementPlaceholder')
+  if (isInputDisabled) {
+    // WHY: Distinguish encrypted-channel-on-web from read-only announcement channels.
+    if (isWebEncryptionBlocked) return tCrypto('encryptionDesktopOnly')
+    return t('settings:announcementPlaceholder')
+  }
 
   const dmDisplayName =
     dmRecipient !== null ? (dmRecipient.displayName ?? dmRecipient.username) : null
@@ -601,7 +599,8 @@ function useDecryptionCachePreload(
 
 /**
  * WHY extracted: Renders encryption banners for the chat welcome section.
- * Shows EncryptionRequiredBanner on web for encrypted DMs/channels.
+ * Encrypted channels on web get the blocking EncryptionRequiredBanner.
+ * DMs on web get the softer DmPlaintextBanner (web DMs work, just unencrypted).
  */
 function EncryptionBannerSection({
   isDm,
@@ -610,10 +609,18 @@ function EncryptionBannerSection({
   isDm: boolean
   isChannelEncrypted: boolean
 }) {
-  if ((isDm || isChannelEncrypted) && !isTauri()) {
+  if (!isTauri() && isChannelEncrypted) {
     return (
       <div className="mt-4">
         <EncryptionRequiredBanner />
+      </div>
+    )
+  }
+  // WHY: DMs on web work (plaintext), but show a softer informational banner.
+  if (!isTauri() && isDm) {
+    return (
+      <div className="mt-4">
+        <DmPlaintextBanner />
       </div>
     )
   }
@@ -744,7 +751,7 @@ export function ChatArea({
     handleCancelEdit,
     handleSaveEdit,
     handleDelete,
-  } = useMessageActions(channelId, currentUser.id, activeEncryption)
+  } = useMessageActions(channelId, currentUser.id, currentUser.username, activeEncryption)
   const [messageContent, setMessageContent] = useState('')
   const [isVerifyOpen, setIsVerifyOpen] = useState(false)
 
@@ -780,8 +787,9 @@ export function ChatArea({
 
   /** WHY: Blocked contacts cannot receive messages from us. Read-only also disables. */
   const isBlocked = isDm && isTauri() && trustLevel === 'blocked'
-  // WHY: Web users must not send plaintext to E2EE channels/DMs — encryption requires Tauri desktop.
-  const isWebEncryptionBlocked = !isTauri() && (isDm || isChannelEncrypted)
+  // WHY: Encrypted channels require Tauri desktop (Megolm can't degrade per-message).
+  // DMs are NOT blocked on web — web users send plaintext DMs with clear indicators.
+  const isWebEncryptionBlocked = !isTauri() && isChannelEncrypted
   const isInputDisabled =
     isBlocked ||
     isWebEncryptionBlocked ||
@@ -791,6 +799,7 @@ export function ChatArea({
   const isDmInitFailed = isDm && isTauri() && initFailed
   const inputPlaceholder = useInputPlaceholder(
     isInputDisabled && !isBlocked,
+    isWebEncryptionBlocked,
     isDm,
     dmRecipient,
     channelName,

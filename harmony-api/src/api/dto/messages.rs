@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use crate::domain::models::{ChannelId, Message, MessageId, UserId};
+use crate::domain::models::{ChannelId, MessageId, MessageWithAuthor, UserId};
 
 /// Request body for sending a new message.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -37,6 +37,11 @@ pub struct MessageResponse {
     pub id: MessageId,
     pub channel_id: ChannelId,
     pub author_id: UserId,
+    /// Author's username from their profile.
+    pub author_username: String,
+    /// Author's avatar URL (if set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_avatar_url: Option<String>,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edited_at: Option<DateTime<Utc>>,
@@ -52,12 +57,15 @@ pub struct MessageResponse {
     pub created_at: DateTime<Utc>,
 }
 
-impl From<Message> for MessageResponse {
-    fn from(m: Message) -> Self {
+impl From<MessageWithAuthor> for MessageResponse {
+    fn from(mwa: MessageWithAuthor) -> Self {
+        let m = mwa.message;
         Self {
             id: m.id,
             channel_id: m.channel_id,
             author_id: m.author_id,
+            author_username: mwa.author_username,
+            author_avatar_url: mwa.author_avatar_url,
             content: m.content,
             edited_at: m.edited_at,
             deleted_by: m.deleted_by,
@@ -79,9 +87,9 @@ pub struct MessageListResponse {
 }
 
 impl MessageListResponse {
-    /// Build from domain messages with an optional cursor for the next page.
+    /// Build from enriched messages with an optional cursor for the next page.
     #[must_use]
-    pub fn from_messages(messages: Vec<Message>, next_cursor: Option<String>) -> Self {
+    pub fn from_messages(messages: Vec<MessageWithAuthor>, next_cursor: Option<String>) -> Self {
         Self {
             items: messages.into_iter().map(MessageResponse::from).collect(),
             next_cursor,

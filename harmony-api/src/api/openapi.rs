@@ -6,13 +6,14 @@ use utoipa::OpenApi;
 
 use super::dto::{
     AssignRoleRequest, BanListResponse, BanResponse, BanUserRequest, ChannelListResponse,
-    ChannelResponse, ClaimedKeyResponse, CreateChannelRequest, CreateDmRequest,
-    CreateInviteRequest, CreateMegolmSessionRequest, CreateServerRequest, DeviceListResponse,
-    DeviceResponse, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,
-    DmRecipientResponse, DmResponse, EditMessageRequest, InvitePreviewResponse, InviteResponse,
-    JoinServerRequest, KeyCountResponse, MegolmSessionResponse, MemberListResponse, MemberResponse,
-    MessageListQuery, MessageListResponse, MessageResponse, OneTimeKeyDto, PreKeyBundleResponse,
-    ProfileResponse, RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
+    ChannelResponse, CheckUsernameQuery, CheckUsernameResponse, ClaimedKeyResponse,
+    CreateChannelRequest, CreateDmRequest, CreateInviteRequest, CreateMegolmSessionRequest,
+    CreateServerRequest, DeviceListResponse, DeviceResponse, DmLastMessageResponse, DmListItem,
+    DmListQuery, DmListResponse, DmRecipientResponse, DmResponse, EditMessageRequest,
+    InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse,
+    MegolmSessionResponse, MemberListResponse, MemberResponse, MessageListQuery,
+    MessageListResponse, MessageResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
+    RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
     TransferOwnershipRequest, UpdateChannelRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
@@ -40,6 +41,7 @@ use crate::domain::models::{
         handlers::liveness_check,
         // Auth
         handlers::profiles::sync_profile,
+        handlers::profiles::check_username,
         // Profiles
         handlers::profiles::get_my_profile,
         // Servers
@@ -105,6 +107,8 @@ use crate::domain::models::{
             ChannelType,
             // Profile DTOs
             ProfileResponse,
+            CheckUsernameQuery,
+            CheckUsernameResponse,
             // Server DTOs
             CreateServerRequest,
             UpdateServerRequest,

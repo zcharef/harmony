@@ -9,6 +9,7 @@ mod ids;
 mod invite;
 mod member;
 mod message;
+mod message_with_author;
 mod plan;
 mod profile;
 pub mod role;
@@ -24,6 +25,7 @@ pub use ids::{
 pub use invite::Invite;
 pub use member::ServerMember;
 pub use message::Message;
+pub use message_with_author::MessageWithAuthor;
 pub use plan::{Plan, PlanLimits, ResourceKind};
 pub use profile::{Profile, UserStatus};
 pub use role::Role;

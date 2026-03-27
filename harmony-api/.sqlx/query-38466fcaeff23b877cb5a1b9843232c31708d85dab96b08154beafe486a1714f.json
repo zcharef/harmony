@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO messages (channel_id, author_id, content)\n            VALUES ($1, $2, $3)\n            RETURNING\n                id,\n                channel_id,\n                author_id,\n                content,\n                edited_at,\n                deleted_at,\n                deleted_by,\n                encrypted,\n                sender_device_id,\n                created_at\n            ",
+  "query": "\n            SELECT\n                m.id,\n                m.channel_id,\n                m.author_id,\n                m.content,\n                m.edited_at,\n                m.deleted_at,\n                m.deleted_by,\n                m.encrypted,\n                m.sender_device_id,\n                m.created_at,\n                p.username AS \"author_username?\",\n                p.avatar_url AS \"author_avatar_url?\"\n            FROM messages m\n            LEFT JOIN profiles p ON p.id = m.author_id\n            WHERE m.channel_id = $1\n              AND m.deleted_at IS NULL\n              AND ($2::timestamptz IS NULL OR m.created_at < $2)\n            ORDER BY m.created_at DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -52,13 +52,23 @@
         "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "author_username?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "author_avatar_url?",
+        "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Text"
+        "Timestamptz",
+        "Int8"
       ]
     },
     "nullable": [
@@ -71,8 +81,10 @@
       true,
       false,
       true,
-      false
+      false,
+      false,
+      true
     ]
   },
-  "hash": "70bd09e78c9714b5af170d60a5bafd3d183192b3eeca2cb53479c608e5a081d1"
+  "hash": "38466fcaeff23b877cb5a1b9843232c31708d85dab96b08154beafe486a1714f"
 }

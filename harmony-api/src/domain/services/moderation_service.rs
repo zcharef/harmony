@@ -9,6 +9,9 @@ use crate::domain::errors::DomainError;
 use crate::domain::models::{Role, Server, ServerBan, ServerId, UserId};
 use crate::domain::ports::{BanRepository, MemberRepository, ServerRepository};
 
+/// Maximum length for a ban reason. Validated in `ban_user`.
+const MAX_BAN_REASON_LENGTH: usize = 512;
+
 /// Service for moderation-related business logic (ban, kick, unban, roles).
 #[derive(Debug)]
 pub struct ModerationService {
@@ -159,11 +162,11 @@ impl ModerationService {
         }
 
         if let Some(ref r) = reason
-            && r.chars().count() > 512
+            && r.chars().count() > MAX_BAN_REASON_LENGTH
         {
-            return Err(DomainError::ValidationError(
-                "Ban reason must not exceed 512 characters".to_string(),
-            ));
+            return Err(DomainError::ValidationError(format!(
+                "Ban reason must not exceed {MAX_BAN_REASON_LENGTH} characters"
+            )));
         }
 
         self.ban_repo
@@ -364,4 +367,95 @@ fn require_higher_role(caller_role: Role, target_role: Role) -> Result<(), Domai
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    // ── require_higher_role (pure validation) ─────────────────────
+
+    #[test]
+    fn higher_role_owner_can_moderate_all_lower() {
+        assert!(require_higher_role(Role::Owner, Role::Admin).is_ok());
+        assert!(require_higher_role(Role::Owner, Role::Moderator).is_ok());
+        assert!(require_higher_role(Role::Owner, Role::Member).is_ok());
+    }
+
+    #[test]
+    fn higher_role_admin_can_moderate_below() {
+        assert!(require_higher_role(Role::Admin, Role::Moderator).is_ok());
+        assert!(require_higher_role(Role::Admin, Role::Member).is_ok());
+    }
+
+    #[test]
+    fn higher_role_moderator_can_moderate_member() {
+        assert!(require_higher_role(Role::Moderator, Role::Member).is_ok());
+    }
+
+    #[test]
+    fn higher_role_same_level_rejected() {
+        for role in [Role::Owner, Role::Admin, Role::Moderator, Role::Member] {
+            let result = require_higher_role(role, role);
+            assert!(result.is_err(), "{} vs {} should fail", role, role);
+            match result.unwrap_err() {
+                DomainError::Forbidden(msg) => {
+                    assert_eq!(msg, "Cannot moderate a user with equal or higher role");
+                }
+                other => panic!("Expected Forbidden, got {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn higher_role_lower_vs_higher_rejected() {
+        assert!(require_higher_role(Role::Member, Role::Moderator).is_err());
+        assert!(require_higher_role(Role::Member, Role::Admin).is_err());
+        assert!(require_higher_role(Role::Member, Role::Owner).is_err());
+        assert!(require_higher_role(Role::Moderator, Role::Admin).is_err());
+        assert!(require_higher_role(Role::Moderator, Role::Owner).is_err());
+        assert!(require_higher_role(Role::Admin, Role::Owner).is_err());
+    }
+
+    #[test]
+    fn higher_role_owner_cannot_moderate_owner() {
+        // WHY: Even owner-vs-owner must fail (strict greater-than).
+        let result = require_higher_role(Role::Owner, Role::Owner);
+        assert!(result.is_err());
+    }
+
+    // ── Role::is_assignable (used by assign_role pre-check) ──────
+
+    #[test]
+    fn owner_role_not_assignable() {
+        assert!(!Role::Owner.is_assignable());
+    }
+
+    #[test]
+    fn non_owner_roles_are_assignable() {
+        assert!(Role::Admin.is_assignable());
+        assert!(Role::Moderator.is_assignable());
+        assert!(Role::Member.is_assignable());
+    }
+
+    // ── Ban reason length constant ───────────────────────────────
+
+    #[test]
+    fn ban_reason_max_length_constant() {
+        // WHY: Must match the 512-char limit enforced in ban_user.
+        assert_eq!(MAX_BAN_REASON_LENGTH, 512);
+    }
+
+    // ── Validation logic documented but requiring repos ──────────
+    //
+    // The following business rules are enforced in async methods that
+    // require repository trait objects (banned by ADR-018: no mocks):
+    //
+    // - ban_user: rejects DM servers, self-ban, banning owner, reason > 512 chars
+    // - kick_member: rejects DM servers, self-kick, kicking owner
+    // - assign_role: rejects Owner assignment, self-role-change, hierarchy violations
+    // - transfer_ownership: rejects self-transfer, non-member targets
+    //
+    // These are covered by integration tests with real Postgres.
 }

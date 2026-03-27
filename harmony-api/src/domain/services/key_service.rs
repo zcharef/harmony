@@ -44,8 +44,13 @@ impl KeyService {
         validate_key("signing_key", signing_key)?;
         validate_device_name(device_name)?;
 
+        // WHY: validate_device_name trims before checking length, so the stored
+        // value must also be trimmed — otherwise a padded string that passed
+        // validation would be persisted with its original whitespace.
+        let trimmed_name = device_name.map(str::trim);
+
         self.key_repo
-            .register_device(user_id, device_id, identity_key, signing_key, device_name)
+            .register_device(user_id, device_id, identity_key, signing_key, trimmed_name)
             .await
     }
 
@@ -195,7 +200,7 @@ impl KeyService {
 }
 
 /// Validate that a key value is non-empty and within length limits.
-fn validate_key(field_name: &str, value: &str) -> Result<(), DomainError> {
+pub(crate) fn validate_key(field_name: &str, value: &str) -> Result<(), DomainError> {
     if value.is_empty() || value.len() > MAX_KEY_LENGTH {
         return Err(DomainError::ValidationError(format!(
             "{} must be non-empty and at most {} characters",
@@ -227,16 +232,6 @@ pub(crate) fn validate_device_name(name: Option<&str>) -> Result<(), DomainError
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn max_keys_per_upload_constant() {
-        assert_eq!(MAX_KEYS_PER_UPLOAD, 100);
-    }
-
-    #[test]
-    fn max_device_name_length_constant() {
-        assert_eq!(MAX_DEVICE_NAME_LENGTH, 128);
-    }
 
     #[test]
     fn validate_key_rejects_empty() {

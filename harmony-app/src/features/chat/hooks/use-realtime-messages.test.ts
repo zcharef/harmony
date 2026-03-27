@@ -29,6 +29,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     id: 'msg-1',
     channelId: CHANNEL_ID,
     authorId: 'user-99',
+    authorUsername: 'testuser',
     content: 'existing message',
     createdAt: '2026-03-16T00:00:00.000Z',
     encrypted: false,

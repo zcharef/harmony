@@ -99,7 +99,7 @@ pub async fn list_messages(
 
     // WHY: If we received exactly `limit` rows, there may be more — provide a cursor.
     let next_cursor = if i64::try_from(messages.len()).unwrap_or(0) == limit {
-        messages.last().map(|m| m.created_at.to_rfc3339())
+        messages.last().map(|m| m.message.created_at.to_rfc3339())
     } else {
         None
     };

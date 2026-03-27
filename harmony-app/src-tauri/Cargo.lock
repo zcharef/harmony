@@ -1946,6 +1946,7 @@ dependencies = [
  "tauri-plugin-keyring",
  "tauri-plugin-opener",
  "tauri-plugin-sentry",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

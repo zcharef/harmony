@@ -38,3 +38,6 @@ tracing = "0.1"
 sentry = "0.42"
 tauri-plugin-sentry = "0.5"
 
+[dev-dependencies]
+tempfile = "3"
+

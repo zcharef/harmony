@@ -26,6 +26,7 @@ export interface SendMessageEncryption {
 export function useSendMessage(
   channelId: string,
   userId: string,
+  username: string,
   encryption?: SendMessageEncryption,
 ) {
   const queryClient = useQueryClient()
@@ -72,6 +73,7 @@ export function useSendMessage(
         id: optimisticId,
         channelId: channelId,
         authorId: userId,
+        authorUsername: username,
         // WHY: Show plaintext in optimistic entry so user sees their message immediately.
         // The encrypted version is what goes to the API, not what displays.
         content: content,

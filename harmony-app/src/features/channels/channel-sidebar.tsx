@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAuthStore } from '@/features/auth'
+import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { EncryptedChannelBadge } from '@/features/crypto'
 import { ROLE_HIERARCHY, useMyMemberRole } from '@/features/members'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
@@ -227,14 +227,9 @@ export function ChannelSidebar({
   /** WHY: Only admin+ can access server settings. */
   const canAccessSettings = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
   const user = useAuthStore((s) => s.user)
+  const { data: profile } = useCurrentProfile()
   const status = useUserStatus(user?.id ?? '')
-  const username =
-    (typeof user?.user_metadata?.username === 'string' ? user.user_metadata.username : undefined) ??
-    (typeof user?.user_metadata?.display_name === 'string'
-      ? user.user_metadata.display_name
-      : undefined) ??
-    user?.email?.split('@')[0] ??
-    t('youFallback')
+  const username = profile?.username ?? t('youFallback')
 
   const statusLabels = {
     online: t('statusOnline'),

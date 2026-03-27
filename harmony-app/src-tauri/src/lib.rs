@@ -67,3 +67,157 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── greet command ────────────────────────────────────────
+
+    #[test]
+    fn greet_includes_name_in_response() {
+        let result = greet("Alice");
+        assert!(
+            result.contains("Alice"),
+            "Greeting should contain the provided name, got: {result}"
+        );
+    }
+
+    #[test]
+    fn greet_with_empty_name() {
+        let result = greet("");
+        assert!(
+            result.contains("Hello, !"),
+            "Greeting with empty name should still produce output, got: {result}"
+        );
+    }
+
+    #[test]
+    fn greet_with_special_characters() {
+        let result = greet("O'Brien <script>");
+        assert!(
+            result.contains("O'Brien <script>"),
+            "Greeting should preserve special characters verbatim, got: {result}"
+        );
+    }
+
+    // ── CryptoError serialization ────────────────────────────
+
+    #[test]
+    fn crypto_error_serializes_as_string() {
+        let error = crypto::CryptoError::NotInitialized;
+        let json = serde_json::to_string(&error)
+            .expect("CryptoError should be JSON-serializable");
+
+        // WHY: Tauri commands return errors as serialized strings.
+        // The Display impl produces "Account not initialized".
+        assert!(
+            json.contains("Account not initialized"),
+            "Serialized error should contain the Display message, got: {json}"
+        );
+    }
+
+    #[test]
+    fn crypto_error_variants_serialize_with_context() {
+        let variants: Vec<(crypto::CryptoError, &str)> = vec![
+            (
+                crypto::CryptoError::SessionNotFound("sess-123".to_string()),
+                "sess-123",
+            ),
+            (
+                crypto::CryptoError::DecryptionFailed("bad MAC".to_string()),
+                "bad MAC",
+            ),
+            (
+                crypto::CryptoError::KeychainError("access denied".to_string()),
+                "access denied",
+            ),
+            (
+                crypto::CryptoError::StoreError("disk full".to_string()),
+                "disk full",
+            ),
+            (
+                crypto::CryptoError::InvalidKey("wrong length".to_string()),
+                "wrong length",
+            ),
+            (
+                crypto::CryptoError::CacheError("not initialized".to_string()),
+                "not initialized",
+            ),
+        ];
+
+        for (error, expected_fragment) in variants {
+            let json = serde_json::to_string(&error)
+                .expect("CryptoError variant should serialize");
+            assert!(
+                json.contains(expected_fragment),
+                "Serialized '{error}' should contain '{expected_fragment}', got: {json}"
+            );
+        }
+    }
+
+    // ── Safety number (pure function, no runtime) ────────────
+
+    #[test]
+    fn safety_number_is_commutative() {
+        let key_a = "TestKeyAlpha000000000000000000000000000==";
+        let key_b = "TestKeyBravo000000000000000000000000000==";
+
+        let ab = crypto::olm::generate_safety_number(key_a, key_b);
+        let ba = crypto::olm::generate_safety_number(key_b, key_a);
+
+        assert_eq!(
+            ab, ba,
+            "Safety number must be the same regardless of argument order"
+        );
+    }
+
+    #[test]
+    fn safety_number_changes_with_different_keys() {
+        let key_a = "TestKeyAlpha000000000000000000000000000==";
+        let key_b = "TestKeyBravo000000000000000000000000000==";
+        let key_c = "TestKeyCharl000000000000000000000000000==";
+
+        let ab = crypto::olm::generate_safety_number(key_a, key_b);
+        let ac = crypto::olm::generate_safety_number(key_a, key_c);
+
+        assert_ne!(
+            ab, ac,
+            "Different key pairs must produce different safety numbers"
+        );
+    }
+
+    // ── State types are constructible ────────────────────────
+
+    #[test]
+    fn crypto_state_type_is_constructible() {
+        // WHY: Verify the Mutex<OlmAccountManager> type alias works as expected.
+        let state = CryptoState::new(OlmAccountManager::new());
+        // Confirm we can lock it (not deadlocked)
+        let guard = state.try_lock();
+        assert!(
+            guard.is_ok(),
+            "CryptoState should be lockable immediately after construction"
+        );
+    }
+
+    #[test]
+    fn message_cache_state_type_is_constructible() {
+        let state = MessageCacheState::new(MessageCache::new());
+        let guard = state.try_lock();
+        assert!(
+            guard.is_ok(),
+            "MessageCacheState should be lockable immediately after construction"
+        );
+    }
+
+    #[test]
+    fn megolm_state_type_is_constructible() {
+        let state = MegolmState::new(MegolmSessionManager::new());
+        let guard = state.try_lock();
+        assert!(
+            guard.is_ok(),
+            "MegolmState should be lockable immediately after construction"
+        );
+    }
+}

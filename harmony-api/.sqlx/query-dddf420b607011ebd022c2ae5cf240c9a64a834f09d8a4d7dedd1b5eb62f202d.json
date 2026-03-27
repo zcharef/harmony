@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO profiles (id, username, status)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (id) DO UPDATE\n                SET username = EXCLUDED.username,\n                    updated_at = now()\n            RETURNING\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                created_at,\n                updated_at\n            ",
+  "query": "\n            INSERT INTO profiles (id, username, status)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (id) DO UPDATE\n                SET id = profiles.id\n            RETURNING\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                created_at,\n                updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -62,5 +62,5 @@
       false
     ]
   },
-  "hash": "42dcf29cc758a9248f2513a7f0491d7fb0aa26b04b4f85b7666e7491044f3918"
+  "hash": "dddf420b607011ebd022c2ae5cf240c9a64a834f09d8a4d7dedd1b5eb62f202d"
 }

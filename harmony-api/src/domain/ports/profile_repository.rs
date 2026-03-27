@@ -21,4 +21,7 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
 
     /// Get a profile by user ID. Returns `None` if not found.
     async fn get_by_id(&self, user_id: &UserId) -> Result<Option<Profile>, DomainError>;
+
+    /// Check whether a username is already taken.
+    async fn is_username_taken(&self, username: &str) -> Result<bool, DomainError>;
 }
