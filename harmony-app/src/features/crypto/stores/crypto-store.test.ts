@@ -115,7 +115,7 @@ describe('useCryptoStore', () => {
 
       const stored = localStorage.getItem('harmony_known_identity_keys')
       expect(stored).not.toBeNull()
-      const parsed = JSON.parse(stored!)
+      const parsed = JSON.parse(stored ?? '{}')
       expect(parsed).toContainEqual(['user-1', 'key-xyz'])
     })
   })

@@ -19,7 +19,7 @@
  * - chat-area.tsx:468 (chat-area), :286 (message-input)
  */
 import { expect, test } from '@playwright/test'
-import { authenticatePage, selectChannel, selectServer } from './fixtures/auth-fixture'
+import { authenticatePage } from './fixtures/auth-fixture'
 import {
   banUser,
   createInvite,

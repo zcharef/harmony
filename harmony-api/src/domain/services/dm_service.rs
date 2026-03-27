@@ -317,10 +317,7 @@ mod tests {
             conversation.recipient_avatar_url.as_deref(),
             Some("https://example.com/avatar.png")
         );
-        assert_eq!(
-            conversation.last_message_content.as_deref(),
-            Some("Hello!")
-        );
+        assert_eq!(conversation.last_message_content.as_deref(), Some("Hello!"));
         assert_eq!(conversation.last_message_at, Some(now));
         assert_eq!(conversation.joined_at, now);
     }
