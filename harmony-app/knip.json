@@ -1,8 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["src/main.tsx"],
   "project": ["src/**/*.{ts,tsx}"],
-  "ignore": ["src/lib/api/**"],
+  "tags": ["-@public"],
   "commitlint": {
     "config": ["commitlint.config.js"]
   },
@@ -16,7 +15,6 @@
   "ignoreDependencies": [
     "@commitlint/cli",
     "tailwindcss",
-    "@tauri-apps/api",
     "@tauri-apps/plugin-opener",
     "motion",
     "react-error-boundary"

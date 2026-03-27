@@ -12,6 +12,7 @@ import { env } from '@/lib/env'
 import { supabase } from '@/lib/supabase'
 import type { CreateClientConfig } from './api/client.gen'
 
+/** @public Consumed by generated client.gen.ts (gitignored, invisible to knip). */
 export const createClientConfig: CreateClientConfig = (config) => ({
   ...config,
   baseUrl: env.VITE_API_URL,

@@ -12,9 +12,9 @@ import servers from '@/lib/locales/en/servers.json'
 import settings from '@/lib/locales/en/settings.json'
 import { logger } from '@/lib/logger'
 
-export const defaultNS = 'common' as const
+const defaultNS = 'common' as const
 
-export const resources = {
+const resources = {
   en: {
     common,
     auth,
@@ -58,4 +58,5 @@ i18n.use(initReactI18next).init({
   },
 })
 
-export default i18n
+// WHY: Side-effect module — imported via `import '@/lib/i18n'` in main.tsx.
+// No default export needed; the side-effect (i18n.init) runs on import.

@@ -19,7 +19,7 @@ import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
 import type { DecryptResult } from './use-encrypted-messages'
 
-export interface ChannelEncryptResult {
+interface ChannelEncryptResult {
   /** WHY: JSON envelope containing session_id + ciphertext for the API. */
   content: string
   senderDeviceId: string

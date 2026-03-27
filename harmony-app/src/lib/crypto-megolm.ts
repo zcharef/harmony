@@ -22,34 +22,21 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 
 // --- Return types matching Phase F Rust commands ---
 
-export interface MegolmOutboundSession {
+interface MegolmOutboundSession {
   session_id: string
   session_key: string
 }
 
-export interface MegolmEncryptedPayload {
+interface MegolmEncryptedPayload {
   session_id: string
   ciphertext: string
 }
 
 // --- Megolm operations ---
 
-/** Initialize the Megolm subsystem for a user. Must be called after Olm init. */
-export function initMegolm(userId: string): Promise<void> {
-  return invoke<void>('megolm_init', { userId })
-}
-
 /** Create an outbound Megolm session for a channel. Returns session ID + session key for sharing. */
 export function createOutboundSession(channelId: string): Promise<MegolmOutboundSession> {
   return invoke<MegolmOutboundSession>('megolm_create_outbound_session', { channelId })
-}
-
-/** Create an inbound Megolm session from a shared session key. */
-export function createInboundSession(channelId: string, sessionKey: string): Promise<string> {
-  return invoke<string>('megolm_create_inbound_session', {
-    channelId,
-    sessionKey,
-  })
 }
 
 /** Encrypt plaintext using the outbound Megolm session for a channel. */
@@ -67,9 +54,4 @@ export function megolmDecrypt(
   ciphertext: string,
 ): Promise<string> {
   return invoke<string>('megolm_decrypt', { channelId, sessionId, ciphertext })
-}
-
-/** Get the current session key for sharing with new members. */
-export function getSessionKey(channelId: string): Promise<MegolmOutboundSession> {
-  return invoke<MegolmOutboundSession>('megolm_get_session_key', { channelId })
 }

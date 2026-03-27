@@ -19,7 +19,7 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
   return tauriInvoke<T>(cmd, args)
 }
 
-export interface CachedMessage {
+interface CachedMessage {
   message_id: string
   channel_id: string
   plaintext: string

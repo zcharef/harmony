@@ -22,47 +22,30 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 
 // --- Return types matching Rust commands (src-tauri/src/crypto/mod.rs) ---
 
-export interface OneTimeKeyInfo {
+interface OneTimeKeyInfo {
   key_id: string
   public_key: string
 }
 
-export interface FallbackKeyInfo {
-  key_id: string
-  public_key: string
-}
-
-export interface CryptoIdentityKeys {
+interface CryptoIdentityKeys {
   identity_key: string
   signing_key: string
   one_time_keys: OneTimeKeyInfo[]
 }
 
-export interface CryptoKeyPair {
+interface CryptoKeyPair {
   identity_key: string
   signing_key: string
 }
 
-export interface EncryptedPayload {
+interface EncryptedPayload {
   message_type: number
   ciphertext: string
 }
 
-export interface InboundSessionResult {
+interface InboundSessionResult {
   session_id: string
   plaintext: string
-}
-
-export interface BatchDecryptInput {
-  session_id: string
-  message_type: number
-  ciphertext: string
-}
-
-export interface BatchDecryptResult {
-  session_id: string
-  plaintext: string | null
-  error: string | null
 }
 
 // --- Crypto operations ---
@@ -80,11 +63,6 @@ export function getIdentityKeys(): Promise<CryptoKeyPair> {
 /** Generate new one-time pre-keys for upload. */
 export function generateOneTimeKeys(count: number): Promise<OneTimeKeyInfo[]> {
   return invoke<OneTimeKeyInfo[]>('crypto_generate_one_time_keys', { count })
-}
-
-/** Generate a new fallback key. */
-export function generateFallbackKey(): Promise<FallbackKeyInfo> {
-  return invoke<FallbackKeyInfo>('crypto_generate_fallback_key')
 }
 
 /** Create an outbound Olm session using the recipient's pre-key bundle. */
@@ -121,11 +99,6 @@ export function decrypt(
   ciphertext: string,
 ): Promise<string> {
   return invoke<string>('crypto_decrypt', { sessionId, messageType, ciphertext })
-}
-
-/** Decrypt a batch of messages. Returns results indexed by input position. */
-export function decryptBatch(messages: BatchDecryptInput[]): Promise<BatchDecryptResult[]> {
-  return invoke<BatchDecryptResult[]>('crypto_decrypt_batch', { messages })
 }
 
 /** Generate a deterministic safety number for identity verification. */

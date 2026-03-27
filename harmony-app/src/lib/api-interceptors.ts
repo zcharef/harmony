@@ -21,8 +21,8 @@ import { supabase } from '@/lib/supabase'
 // 401s arrive simultaneously (e.g., parallel queries on page load).
 let refreshPromise: Promise<boolean> | null = null
 
-/** @internal Exported for testing only. */
-export async function refreshToken(): Promise<boolean> {
+/** @internal Used by responseInterceptor below. */
+async function refreshToken(): Promise<boolean> {
   if (refreshPromise !== null) {
     return refreshPromise
   }
@@ -37,8 +37,8 @@ export async function refreshToken(): Promise<boolean> {
   return refreshPromise
 }
 
-/** @internal Exported for testing only. */
-export function delay(ms: number): Promise<void> {
+/** @internal Used by responseInterceptor for rate-limit retry. */
+function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
   })
