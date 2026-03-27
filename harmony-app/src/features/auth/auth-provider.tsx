@@ -41,9 +41,9 @@ async function syncProfile(
           typeof body === 'object' &&
           body !== null &&
           'detail' in body &&
-          typeof (body as { detail: unknown }).detail === 'string'
+          typeof body.detail === 'string'
         ) {
-          detail = (body as { detail: string }).detail
+          detail = body.detail
         }
       } catch {
         // WHY: Response may not be JSON (e.g., 502 from proxy). Use generic message.

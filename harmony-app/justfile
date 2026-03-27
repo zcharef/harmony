@@ -81,8 +81,8 @@ circular:
 unused:
     pnpm knip
 
-# Full quality wall: lint + typecheck + boundaries + circular + arch tests + unused deps
-wall: lint typecheck boundaries circular test-arch unused
+# Full quality wall: lint + typecheck + boundaries + circular + tests + arch tests + unused deps
+wall: lint typecheck boundaries circular test test-arch unused
     @echo "Quality wall passed!"
 
 # Auto-fix everything (lint + format)
