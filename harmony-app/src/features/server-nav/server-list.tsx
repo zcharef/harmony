@@ -3,8 +3,8 @@ import { Compass, LogOut, MessageSquare, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ServerResponse } from '@/lib/api'
-import { logger } from '@/lib/logger'
 import { supabase } from '@/lib/supabase'
+import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { CreateServerDialog } from './create-server-dialog'
 import { useServers } from './hooks/use-servers'
@@ -217,7 +217,7 @@ export function ServerList({
           data-test="logout-button"
           onClick={() => {
             supabase.auth.signOut().catch((err: unknown) => {
-              logger.error('sign_out_failed', {
+              toast.error(tAuth('logoutFailed'), {
                 error: err instanceof Error ? err.message : String(err),
               })
             })

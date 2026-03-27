@@ -228,6 +228,7 @@ export function LoginPage() {
   function toggleMode() {
     setMode((prev) => (prev === 'login' ? 'signup' : 'login'))
     setUsername('')
+    setPassword('')
     setUsernameStatus('idle')
     setError(null)
     setSuccessMessage(null)

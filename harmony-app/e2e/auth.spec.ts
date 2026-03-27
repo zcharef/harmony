@@ -53,6 +53,7 @@ test.describe('Authentication', () => {
 
     // WHY: Hints only appear once the user starts typing
     await passwordInput.fill('a')
+    await expect(passwordInput).toHaveValue('a')
 
     // All three requirement indicators should be visible
     await expect(page.getByText('At least 8 characters')).toBeVisible()
@@ -73,6 +74,7 @@ test.describe('Authentication', () => {
 
     // Satisfy all requirements
     await passwordInput.fill('abcdefg1')
+    await expect(passwordInput).toHaveValue('abcdefg1')
 
     await expect(lengthRow.locator('.text-success')).toBeAttached()
     await expect(letterRow.locator('.text-success')).toBeAttached()
@@ -84,9 +86,10 @@ test.describe('Authentication', () => {
 
     const passwordInput = page.locator('[data-test="login-password-input"]')
     await passwordInput.fill('short')
+    await expect(passwordInput).toHaveValue('short')
 
-    // Hints should NOT appear in login mode
-    await expect(page.getByText('At least 8 characters')).not.toBeVisible()
+    // WHY: Hints are conditionally rendered — not in the DOM at all in login mode
+    await expect(page.getByText('At least 8 characters')).not.toBeAttached()
   })
 
   test('should disable signup button when password is invalid', async ({ page }) => {
@@ -98,12 +101,15 @@ test.describe('Authentication', () => {
 
     const usernameInput = page.locator('[data-test="login-username-input"]')
     await usernameInput.fill('validuser')
+    await expect(usernameInput).toHaveValue('validuser')
 
     const emailInput = page.locator('[data-test="login-email-input"]')
     await emailInput.fill('test@example.com')
+    await expect(emailInput).toHaveValue('test@example.com')
 
     const passwordInput = page.locator('[data-test="login-password-input"]')
     await passwordInput.fill('short')
+    await expect(passwordInput).toHaveValue('short')
 
     // WHY: Even after captcha resolves, button stays disabled with an invalid password
     const submitButton = page.locator('[data-test="login-submit-button"]')
@@ -111,6 +117,7 @@ test.describe('Authentication', () => {
 
     // Satisfy password requirements
     await passwordInput.fill('validpass1')
+    await expect(passwordInput).toHaveValue('validpass1')
 
     // WHY: Button may still be disabled if captcha or username check hasn't resolved,
     // but we verify it's not disabled due to password alone by checking the attribute
