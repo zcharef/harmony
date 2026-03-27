@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(COUNT(*)::BIGINT, 0) as \"count!\"\n               FROM invites\n               WHERE server_id = $1\n                 AND (expires_at IS NULL OR expires_at > NOW())\n                 AND (max_uses IS NULL OR use_count < max_uses)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ffff9d75186161bbd5c5b2edcc0b406913864d900ccf758c2bc3d0e7f17ac1be"
+}

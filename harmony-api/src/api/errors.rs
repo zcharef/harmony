@@ -167,7 +167,7 @@ impl From<DomainError> for ApiError {
                 let mut problem = ProblemDetails::new(
                     status,
                     "Plan Limit Exceeded",
-                    format!("Server has reached the {plan} plan limit of {limit} {resource}"),
+                    format!("Plan limit reached: {limit} {resource} on the {plan} plan"),
                 );
                 // WHY: Hardcoded for now. When billing is added (Phase 4), this
                 // will come from config. YAGNI — no config mechanism until needed.

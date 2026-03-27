@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Server, ServerId, UserId};
-use crate::domain::ports::ServerRepository;
+use crate::domain::ports::{PlanLimitChecker, ServerRepository};
 
 /// Maximum length for a server name.
 const MAX_SERVER_NAME_LENGTH: usize = 100;
@@ -13,6 +13,7 @@ const MAX_SERVER_NAME_LENGTH: usize = 100;
 #[derive(Debug)]
 pub struct ServerService {
     repo: Arc<dyn ServerRepository>,
+    plan_checker: Arc<dyn PlanLimitChecker>,
 }
 
 /// Validate a server name: 1-100 chars after trim, no control characters.
@@ -47,8 +48,8 @@ fn validate_server_name(name: &str) -> Result<String, DomainError> {
 
 impl ServerService {
     #[must_use]
-    pub fn new(repo: Arc<dyn ServerRepository>) -> Self {
-        Self { repo }
+    pub fn new(repo: Arc<dyn ServerRepository>, plan_checker: Arc<dyn PlanLimitChecker>) -> Self {
+        Self { repo, plan_checker }
     }
 
     /// Create a new server with default setup (member + `#general` channel).
@@ -62,6 +63,17 @@ impl ServerService {
         owner_id: UserId,
     ) -> Result<Server, DomainError> {
         let validated_name = validate_server_name(&name)?;
+
+        // WHY: TOCTOU race exists between this limit check and create_with_defaults below.
+        // Acceptable: same pattern as channel/member limits. Plan limits are billing
+        // guard-rails, not hard DB constraints.
+        //
+        // Check owned server limit AFTER validation (no point hitting DB for invalid input)
+        // but BEFORE resource creation to enforce billing constraints.
+        // Free: 3, Supporter: 10, Creator: 25.
+        self.plan_checker
+            .check_owned_server_limit(&owner_id)
+            .await?;
 
         self.repo
             .create_with_defaults(validated_name, owner_id)

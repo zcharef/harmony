@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::ServerId;
+use crate::domain::models::{PlanLimits, ServerId, UserId};
 
 /// Checks whether a server has reached its plan limit for a given resource.
 ///
@@ -31,16 +31,32 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     /// exceeds the plan limit, or `DomainError::Internal` on infrastructure failure.
     async fn check_member_limit(&self, server_id: &ServerId) -> Result<(), DomainError>;
 
-    // ── TODO(plan-limits-v3): §1 — Servers (per user) ───────────────────
-    //
-    // async fn check_owned_server_limit(&self, user_id: &UserId) -> Result<(), DomainError>;
-    // async fn check_joined_server_limit(&self, user_id: &UserId) -> Result<(), DomainError>;
-    //
-    // Call check_owned_server_limit from ServerService::create_server BEFORE repo.create().
-    //   Free: 3, Supporter: 10, Creator: 25.
-    // Call check_joined_server_limit from InviteService::join_via_invite BEFORE join.
-    //   Free: 20, Supporter: 100, Creator: 500.
-    // NOTE: Per-user limits need profiles.plan or derived user plan.
+    /// Return the plan limits for a server. Used by services that need
+    /// per-plan validation values (message length, topic length, edit window).
+    /// Self-hosted returns `SELF_HOSTED_LIMITS`. (§1/§3/§5)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::NotFound` if the server does not exist,
+    /// or `DomainError::Internal` on infrastructure failure.
+    async fn get_server_plan_limits(&self, server_id: &ServerId)
+    -> Result<PlanLimits, DomainError>;
+
+    /// Check if the user can create another server. (§1, per-user)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::LimitExceeded` when the owned server count equals or
+    /// exceeds the plan limit, or `DomainError::Internal` on infrastructure failure.
+    async fn check_owned_server_limit(&self, user_id: &UserId) -> Result<(), DomainError>;
+
+    /// Check if the user can join another server. (§1, per-user)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::LimitExceeded` when the joined server count equals or
+    /// exceeds the plan limit, or `DomainError::Internal` on infrastructure failure.
+    async fn check_joined_server_limit(&self, user_id: &UserId) -> Result<(), DomainError>;
 
     // ── TODO(plan-limits-v3): §3 — Categories (per server) ──────────────
     //
@@ -56,17 +72,13 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     // Call from RoleService::create_role AFTER validation, BEFORE repo.create().
     //   Free: 20, Supporter: 250, Creator: 500.
 
-    // ── TODO(plan-limits-v3): §5 — Messages ─────────────────────────────
+    // ── TODO(plan-limits-v3): §5 — Messages (remaining) ──────────────────
     //
-    // Message char limit: Make MessageService::MAX_MESSAGE_LENGTH plan-aware.
-    //   Free: 2,000 chars, Supporter/Creator: 4,000 chars, Self-Hosted: 8,000 chars.
-    //   Requires PlanLimitChecker::get_server_plan() or inject plan into service.
-    //
-    // Edit window: Add time check in MessageService::edit_message.
-    //   Free: 15 minutes, Supporter: 24 hours, Creator: 7 days.
+    // DONE: Message char limit (via get_server_plan_limits in MessageService::create + edit_message)
+    // DONE: Edit window (via get_server_plan_limits in MessageService::edit_message)
     //
     // Message history cap (per channel):
-    //   Free: 10,000 messages, Supporter/Creator: unlimited.
+    //   Free: 1M messages, Supporter: 50M, Creator: 500M.
     //   Implement when history trimming is added.
     //
     // Embeds per message:
@@ -95,12 +107,15 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     //   Creator: 500 concurrent, 100 channels, 256kbps, 1080p, 1080p 30fps screen share, 24h.
     // Call from voice join handler when LiveKit integration lands (Phase 3).
 
-    // ── TODO(plan-limits-v3): §8 — Invites (per server) ─────────────────
-    //
-    // async fn check_invite_limit(&self, server_id: &ServerId) -> Result<(), DomainError>;
-    //
-    // Call from InviteService::create_invite BEFORE repo.create().
-    //   Free: 5 active, Supporter: 25, Creator: 100.
+    /// Check if the server can create another active invite. (§8)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::LimitExceeded` when the active invite count equals or
+    /// exceeds the plan limit, or `DomainError::Internal` on infrastructure failure.
+    async fn check_invite_limit(&self, server_id: &ServerId) -> Result<(), DomainError>;
+
+    // ── TODO(plan-limits-v3): §8 — Invite options (per server) ────────
     //
     // Duration options:
     //   Free: 24h/7d only, Supporter: +30d/never, Creator: all.
@@ -118,13 +133,15 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     //   Creator: 500 custom, 1MB, animated, 50 reactions/msg.
     // Implement when EmojiService is created.
 
-    // ── TODO(plan-limits-v3): §10 — DMs (per user) ──────────────────────
-    //
-    // async fn check_dm_limit(&self, user_id: &UserId) -> Result<(), DomainError>;
-    //
-    // Call from DmService::create_or_get_dm BEFORE creating new DM.
-    //   Free: 20 open, Supporter: 100, Creator: 500.
-    // NOTE: Per-user limit, needs profiles.plan.
+    /// Check if the user can open another DM conversation. (§10, per-user)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::LimitExceeded` when the open DM count equals or
+    /// exceeds the plan limit, or `DomainError::Internal` on infrastructure failure.
+    async fn check_dm_limit(&self, user_id: &UserId) -> Result<(), DomainError>;
+
+    // ── TODO(plan-limits-v3): §10 — Group DMs (per user) ──────────────
     //
     // Group DM max size:
     //   Free: 5, Supporter: 15, Creator: 25.
@@ -144,10 +161,9 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     // Custom status length:
     //   Free: 50 chars, Supporter: 128 chars, Creator: 128 chars.
 
-    // ── TODO(plan-limits-v3): §12 — Rate limits (per user) ──────────────
+    // ── TODO(plan-limits-v3): §12 — Rate limits (remaining) ─────────────
     //
-    // Message rate: Make MessageService::RATE_LIMIT_MAX plan-aware.
-    //   Free: 5/5s, Supporter: 10/5s, Creator: 20/5s.
+    // DONE: Message rate (via get_server_plan_limits in MessageService::create)
     //
     // Upload rate:
     //   Free: 3/min, Supporter: 10/min, Creator: 20/min.

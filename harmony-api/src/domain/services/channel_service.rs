@@ -9,8 +9,9 @@ use crate::domain::ports::{ChannelRepository, PlanLimitChecker};
 /// Maximum length for a channel name (lowercase slug).
 const MAX_CHANNEL_NAME_LENGTH: usize = 100;
 
-/// Maximum length for a channel topic.
-const MAX_CHANNEL_TOPIC_LENGTH: usize = 1024;
+/// Maximum length for a channel topic (DB ceiling — self-hosted max).
+/// Per-plan enforcement uses `PlanLimits::max_channel_topic_chars`.
+const MAX_CHANNEL_TOPIC_LENGTH: usize = 4096;
 
 /// Service for channel-related business logic.
 #[derive(Debug)]
@@ -191,8 +192,19 @@ impl ChannelService {
         };
 
         // Validate topic length when provided (outer Some = field present).
+        // WHY: Per-plan enforcement — Free: 256, Supporter: 512, Creator: 1024.
+        // validate_channel_topic checks the DB ceiling (4096); the plan limit is stricter.
         if let Some(Some(ref t)) = topic {
             validate_channel_topic(t)?;
+            let limits = self.plan_checker.get_server_plan_limits(server_id).await?;
+            #[allow(clippy::cast_possible_truncation)] // WHY: max is 4096, fits in usize
+            let max_topic = limits.max_channel_topic_chars as usize;
+            if t.chars().count() > max_topic {
+                return Err(DomainError::ValidationError(format!(
+                    "Channel topic must not exceed {} characters on this plan",
+                    max_topic
+                )));
+            }
         }
 
         self.repo

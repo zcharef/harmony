@@ -61,12 +61,12 @@ pub async fn sync_profile(
         .ok_or_else(|| ApiError::bad_request("JWT must contain an email claim"))?;
 
     // Extract username: prefer user_metadata.username, fall back to email-derived
-    let username_from_meta = auth_user
+    let username_from_meta: Option<String> = auth_user
         .user_metadata
         .as_ref()
-        .and_then(|m| m.get("username"))
+        .and_then(|m: &serde_json::Value| m.get("username"))
         .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
+        .map(String::from);
 
     let username = if let Some(ref meta_username) = username_from_meta {
         if !is_valid_username(meta_username) {
@@ -76,7 +76,7 @@ pub async fn sync_profile(
             );
             derive_username_from_email(&email)
         } else {
-            meta_username.clone()
+            meta_username.to_string()
         }
     } else {
         derive_username_from_email(&email)

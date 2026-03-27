@@ -9,6 +9,12 @@
     <a href="https://github.com/harmony-app/harmony/actions"><img src="https://img.shields.io/github/actions/workflow/status/harmony-app/harmony/ci.yml?style=flat-square&label=CI" alt="CI"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License"></a>
     <a href="https://harmony.app"><img src="https://img.shields.io/badge/web-harmony.app-8b5cf6?style=flat-square" alt="Website"></a>
+    <br />
+    <img src="https://img.shields.io/badge/Rust_API_Unit-164_tests-brightgreen?style=flat-square&logo=rust&logoColor=white" alt="Rust API Unit Tests">
+    <img src="https://img.shields.io/badge/Frontend_Unit-310_tests-brightgreen?style=flat-square&logo=vitest&logoColor=white" alt="Frontend Unit Tests">
+    <img src="https://img.shields.io/badge/Tauri_Crypto-53_tests-brightgreen?style=flat-square&logo=tauri&logoColor=white" alt="Tauri Crypto Tests">
+    <img src="https://img.shields.io/badge/E2E-144_tests-green?style=flat-square&logo=playwright&logoColor=white" alt="E2E Tests">
+    <img src="https://img.shields.io/badge/Coverage-~80%25-brightgreen?style=flat-square" alt="Coverage Target">
   </p>
 </p>
 

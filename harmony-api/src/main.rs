@@ -125,11 +125,15 @@ async fn init_app_state(config: &Config) -> AppState {
 
     // Construct domain services (injected with repository ports)
     let profile_service = Arc::new(domain::services::ProfileService::new(profile_repo.clone()));
-    let server_service = Arc::new(domain::services::ServerService::new(server_repo.clone()));
+    let server_service = Arc::new(domain::services::ServerService::new(
+        server_repo.clone(),
+        plan_limit_checker.clone(),
+    ));
     let message_service = Arc::new(domain::services::MessageService::new(
         message_repo,
         channel_repo.clone(),
         member_repo.clone(),
+        plan_limit_checker.clone(),
     ));
     let invite_service = Arc::new(domain::services::InviteService::new(
         invite_repo,
@@ -152,6 +156,7 @@ async fn init_app_state(config: &Config) -> AppState {
         profile_repo,
         server_repo,
         member_repo.clone(),
+        plan_limit_checker.clone(),
     ));
     let key_service = Arc::new(domain::services::KeyService::new(key_repo));
 
