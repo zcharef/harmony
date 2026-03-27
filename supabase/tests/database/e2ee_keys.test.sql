@@ -14,7 +14,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE SCHEMA IF NOT EXISTS tests;
 GRANT USAGE ON SCHEMA tests TO authenticated;
-SELECT plan(58);
+SELECT plan(59);
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -195,11 +195,16 @@ SELECT throws_ok(
 );
 
 -- 2.4 UPDATE: authenticated user CAN update own row
+-- WHY: lives_ok is false-positive — it passes even if 0 rows were updated.
+-- We execute the UPDATE then verify the value actually changed.
 SELECT tests.clear_auth();
 SAVEPOINT sp_dk_upd_own;
 SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
-SELECT lives_ok(
-    $$UPDATE device_keys SET device_name = 'Alice Laptop (updated)' WHERE id = 'd00a0001-0001-0001-0001-000100010001'$$,
+UPDATE device_keys SET device_name = 'Alice Laptop (updated)' WHERE id = 'd00a0001-0001-0001-0001-000100010001';
+SELECT tests.clear_auth();
+SELECT is(
+    (SELECT device_name FROM device_keys WHERE id = 'd00a0001-0001-0001-0001-000100010001'),
+    'Alice Laptop (updated)',
     'RLS UPDATE: authenticated user can update own device key'
 );
 ROLLBACK TO sp_dk_upd_own;
@@ -220,11 +225,16 @@ SELECT is(
 ROLLBACK TO sp_dk_upd_other;
 
 -- 2.6 DELETE: authenticated user CAN delete own row
+-- WHY: lives_ok is false-positive — it passes even if 0 rows were deleted.
+-- We execute the DELETE then verify the row is actually gone.
 SELECT tests.clear_auth();
 SAVEPOINT sp_dk_del_own;
 SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
-SELECT lives_ok(
-    $$DELETE FROM device_keys WHERE id = 'd00a0001-0001-0001-0001-000100010001'$$,
+DELETE FROM device_keys WHERE id = 'd00a0001-0001-0001-0001-000100010001';
+SELECT tests.clear_auth();
+SELECT is(
+    (SELECT count(*)::int FROM device_keys WHERE id = 'd00a0001-0001-0001-0001-000100010001'),
+    0,
     'RLS DELETE: authenticated user can delete own device key'
 );
 ROLLBACK TO sp_dk_del_own;
@@ -338,6 +348,10 @@ SELECT col_is_pk('public', 'one_time_keys', 'id',
 SELECT col_is_unique('public', 'one_time_keys', ARRAY['user_id', 'device_id', 'key_id'],
     'schema: unique constraint one_time_keys_unique on (user_id, device_id, key_id)');
 
+-- Foreign key: user_id -> profiles(id)
+SELECT fk_ok('public', 'one_time_keys', 'user_id', 'public', 'profiles', 'id',
+    'schema: one_time_keys.user_id FK -> profiles(id)');
+
 -- WHY: pgTAP's fk_ok() does not support composite FK verification directly.
 -- We verify the constraint exists by querying pg_constraint for the named FK.
 SELECT is(
@@ -391,11 +405,16 @@ SELECT throws_ok(
 );
 
 -- 4.4 DELETE: authenticated user CAN delete own one-time key
+-- WHY: lives_ok is false-positive — it passes even if 0 rows were deleted.
+-- We execute the DELETE then verify the row is actually gone.
 SELECT tests.clear_auth();
 SAVEPOINT sp_otk_del_own;
 SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
-SELECT lives_ok(
-    $$DELETE FROM one_time_keys WHERE id = '0e0b0001-0001-0001-0001-000100010001'$$,
+DELETE FROM one_time_keys WHERE id = '0e0b0001-0001-0001-0001-000100010001';
+SELECT tests.clear_auth();
+SELECT is(
+    (SELECT count(*)::int FROM one_time_keys WHERE id = '0e0b0001-0001-0001-0001-000100010001'),
+    0,
     'RLS DELETE: authenticated user can delete own one-time key'
 );
 ROLLBACK TO sp_otk_del_own;

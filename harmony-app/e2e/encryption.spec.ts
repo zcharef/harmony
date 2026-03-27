@@ -215,10 +215,10 @@ test.describe('Encryption UI', () => {
     const chatArea = page.locator('[data-test="chat-area"]')
     await chatArea.waitFor({ timeout: 10_000 })
 
-    // EncryptionRequiredBanner should be visible on web
-    await expect(page.locator('[data-test="encryption-required-banner"]')).toBeVisible({
-      timeout: 10_000,
-    })
+    // EncryptionRequiredBanner should be visible on web with desktop-app messaging
+    const encBanner = page.locator('[data-test="encryption-required-banner"]')
+    await expect(encBanner).toBeVisible({ timeout: 10_000 })
+    await expect(encBanner).toContainText('desktop')
 
     // Message input should be read-only on web for encrypted channels.
     // WHY: HeroUI Textarea passes data-test directly to the <textarea> element,
@@ -266,7 +266,9 @@ test.describe('Encryption UI', () => {
     const toolbar = page.locator('[data-test="chat-toolbar"]')
     await toolbar.waitFor({ timeout: 10_000 })
 
-    await expect(toolbar.locator('[data-test="e2ee-alpha-banner"]')).toBeVisible()
+    const alphaBanner = toolbar.locator('[data-test="e2ee-alpha-banner"]')
+    await expect(alphaBanner).toBeVisible()
+    await expect(alphaBanner).toContainText('E2EE Alpha')
   })
 
   test('plain channel does NOT show E2EE alpha banner in toolbar', async ({ page }) => {
@@ -354,9 +356,9 @@ test.describe('Encryption UI', () => {
     const chatArea = page.locator('[data-test="chat-area"]')
     await chatArea.waitFor({ timeout: 10_000 })
 
-    await expect(page.locator('[data-test="encryption-required-banner"]')).toBeVisible({
-      timeout: 10_000,
-    })
+    const encBannerMember = page.locator('[data-test="encryption-required-banner"]')
+    await expect(encBannerMember).toBeVisible({ timeout: 10_000 })
+    await expect(encBannerMember).toContainText('desktop')
   })
 
   // ── Encryption toggle state on already-encrypted channel ──────────
@@ -479,9 +481,9 @@ test.describe('DM Encryption on Web', () => {
 
     // DmPlaintextBanner should be visible (softer informational banner for web DMs).
     // WHY: dm-plaintext-banner.tsx:18 — data-test="dm-plaintext-banner".
-    await expect(page.locator('[data-test="dm-plaintext-banner"]')).toBeVisible({
-      timeout: 10_000,
-    })
+    const dmBanner = page.locator('[data-test="dm-plaintext-banner"]')
+    await expect(dmBanner).toBeVisible({ timeout: 10_000 })
+    await expect(dmBanner).toContainText('not encrypted')
 
     // EncryptionRequiredBanner should NOT appear — that banner is for encrypted channels only.
     await expect(page.locator('[data-test="encryption-required-banner"]')).not.toBeAttached()
@@ -495,7 +497,16 @@ test.describe('DM Encryption on Web', () => {
     // Type and send a new message from the web client to verify input works end-to-end.
     const newMessage = `Web DM reply ${Date.now()}`
     await messageInput.fill(newMessage)
+
+    // WHY: Set up waitForResponse BEFORE triggering the send to avoid a race condition
+    // where the response arrives before the listener is attached.
+    const responsePromise = page.waitForResponse((response) =>
+      response.url().includes('/messages'),
+    )
     await messageInput.press('Enter')
+
+    const response = await responsePromise
+    expect(response.status()).toBeLessThan(400)
 
     // Verify the new message appears in the message list.
     const sentContent = page
@@ -530,6 +541,10 @@ test.describe('DM Encryption on Web', () => {
     // inside a Tooltip with lock/lock-open icon for every DM message.
     const encryptionIndicator = page.locator('[data-test="message-encryption-indicator"]')
     await expect(encryptionIndicator.first()).toBeVisible({ timeout: 10_000 })
+
+    // WHY: Verify the indicator contains an SVG icon (Lock or LockOpen from Lucide).
+    // API-sent messages have encrypted=false, so the LockOpen icon is rendered.
+    await expect(encryptionIndicator.first().locator('svg')).toBeAttached()
   })
 
   test('encrypted message from desktop shows fallback text on web', async ({ page }) => {
