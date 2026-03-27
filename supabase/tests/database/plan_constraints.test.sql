@@ -8,12 +8,11 @@
 -- =============================================================
 BEGIN;
 
+-- WHY: On Supabase Cloud, pgtap is in the `extensions` schema.
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET search_path TO public, extensions;
 
--- DIAGNOSTIC: test fully qualified call
-DO $$ BEGIN RAISE NOTICE 'DIAG: calling extensions.plan() directly'; END $$;
-SELECT extensions.plan(17);
+SELECT plan(17);
 
 
 -- ═══════════════════════════════════════════════════════════════
