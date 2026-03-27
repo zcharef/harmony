@@ -34,7 +34,7 @@ jobs:
         working-directory: harmony-app
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@v4
         with:
@@ -87,7 +87,7 @@ jobs:
       SQLX_OFFLINE: "true"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:

@@ -38,7 +38,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # ── Node / pnpm ──────────────────────────────────────
       - uses: pnpm/action-setup@v4
