@@ -220,13 +220,11 @@ jobs:
 
       # ── pgTAP database tests ────────────────────────────
       # WHY: RLS policies and CHECK constraints are security-critical.
-      # --linked runs against the CI Supabase project after migrations.
-      # NOTE: GRANT USAGE ON SCHEMA extensions is handled by migration
-      # 20260327100000 so the test login role can access pgtap functions.
+      # WHY --db-url: `--linked` creates a restricted login role that lacks
+      # CREATE on public schema and access to auth tables. Using --db-url
+      # with the full database URL bypasses this and runs as postgres.
       - name: Run pgTAP database tests
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase test db --linked
+        run: supabase test db --db-url "${{ secrets.CI_SUPABASE_DB_URL }}"
 
       # ── Build & start Rust API ───────────────────────────
       - name: Build Rust API
