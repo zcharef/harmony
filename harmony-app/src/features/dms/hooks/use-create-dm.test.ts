@@ -19,10 +19,10 @@ const mockDmResponse = {
   serverId: 'srv-dm-1',
   channelId: 'ch-dm-1',
   recipient: {
-    userId: 'user-2',
+    id: 'user-2',
     username: 'alice',
     avatarUrl: null,
-    status: 'online' as const,
+    displayName: null,
   },
 }
 
