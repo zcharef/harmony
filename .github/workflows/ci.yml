@@ -221,15 +221,8 @@ jobs:
       # ── pgTAP database tests ────────────────────────────
       # WHY: RLS policies and CHECK constraints are security-critical.
       # --linked runs against the CI Supabase project after migrations.
-      # WHY grant: supabase test db --linked creates a login role that lacks
-      # USAGE on the extensions schema where pgtap functions live.
-      - name: Grant pgtap access to test role
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          supabase db execute --linked \
-            "GRANT USAGE ON SCHEMA extensions TO postgres, anon, authenticated, service_role;"
-
+      # NOTE: GRANT USAGE ON SCHEMA extensions is handled by migration
+      # 20260327100000 so the test login role can access pgtap functions.
       - name: Run pgTAP database tests
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
