@@ -107,30 +107,28 @@ SELECT throws_ok(
 
 
 -- ═══════════════════════════════════════════════════════════════
--- 4. CHECK CONSTRAINT — messages_content_length (updated)
+-- 4. CHECK CONSTRAINT — messages_content_length
 --
--- Rule: content IS NULL
---    OR (encrypted = false AND char_length(content) <= 4000)
---    OR (encrypted = true  AND char_length(content) <= 8000)
--- (from 20260322180002_add_encryption_to_messages.sql:L40-44)
+-- Rule: content IS NULL OR char_length(content) <= 8000
+-- (from 20260327000000_v3_tier_rename.sql — unified 8000 char limit)
 -- ═══════════════════════════════════════════════════════════════
 
--- 4.1 Positive: encrypted=false with 4000-char content → allowed
+-- 4.1 Positive: content at 8000 chars → allowed
 SAVEPOINT sp_len_plain_ok;
 SELECT lives_ok(
     $$INSERT INTO public.messages (channel_id, author_id, content, encrypted)
-      VALUES ('deadbeef-0e00-0e00-0e00-cccccccccccc', 'deadbeef-0e00-0e00-0e00-000000000001', repeat('a', 4000), false)$$,
-    'check: plaintext content at 4000 chars is allowed'
+      VALUES ('deadbeef-0e00-0e00-0e00-cccccccccccc', 'deadbeef-0e00-0e00-0e00-000000000001', repeat('a', 8000), false)$$,
+    'check: content at 8000 chars is allowed'
 );
 ROLLBACK TO sp_len_plain_ok;
 
--- 4.2 Negative: encrypted=false with 4001-char content → REJECTED
+-- 4.2 Negative: content at 8001 chars → REJECTED
 SELECT throws_ok(
     $$INSERT INTO public.messages (channel_id, author_id, content, encrypted)
-      VALUES ('deadbeef-0e00-0e00-0e00-cccccccccccc', 'deadbeef-0e00-0e00-0e00-000000000001', repeat('a', 4001), false)$$,
+      VALUES ('deadbeef-0e00-0e00-0e00-cccccccccccc', 'deadbeef-0e00-0e00-0e00-000000000001', repeat('a', 8001), false)$$,
     23514,  -- check_violation
     NULL,
-    'check: plaintext content at 4001 chars is rejected'
+    'check: content at 8001 chars is rejected'
 );
 
 -- 4.3 Positive: encrypted=true with 8000-char content + sender_device_id → allowed

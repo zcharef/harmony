@@ -1,7 +1,7 @@
 -- =============================================================
 -- Plan Constraints Tests — CHECK constraints + defaults
 --
--- Validates the 3-tier plan system (free/pro/community) on both
+-- Validates the 3-tier plan system (free/supporter/creator) on both
 -- servers and profiles tables.
 --
 -- Run via: supabase test db
@@ -47,16 +47,16 @@ SELECT lives_ok(
     'servers.plan accepts free'
 );
 
--- Test: 'pro' is accepted
+-- Test: 'supporter' is accepted (renamed from 'pro' in v3 tier rename)
 SELECT lives_ok(
-    $$INSERT INTO public.servers (name, owner_id, plan) VALUES ('plan-test-pro', 'deadbeef-0000-4e57-a000-000000000001', 'pro')$$,
-    'servers.plan accepts pro'
+    $$INSERT INTO public.servers (name, owner_id, plan) VALUES ('plan-test-supporter', 'deadbeef-0000-4e57-a000-000000000001', 'supporter')$$,
+    'servers.plan accepts supporter'
 );
 
--- Test: 'community' is accepted
+-- Test: 'creator' is accepted (renamed from 'community' in v3 tier rename)
 SELECT lives_ok(
-    $$INSERT INTO public.servers (name, owner_id, plan) VALUES ('plan-test-community', 'deadbeef-0000-4e57-a000-000000000001', 'community')$$,
-    'servers.plan accepts community'
+    $$INSERT INTO public.servers (name, owner_id, plan) VALUES ('plan-test-creator', 'deadbeef-0000-4e57-a000-000000000001', 'creator')$$,
+    'servers.plan accepts creator'
 );
 
 
@@ -112,13 +112,13 @@ SELECT lives_ok(
 );
 
 SELECT lives_ok(
-    $$UPDATE public.profiles SET plan = 'pro' WHERE id = 'deadbeef-0000-4e57-a000-000000000001'$$,
-    'profiles.plan accepts pro'
+    $$UPDATE public.profiles SET plan = 'supporter' WHERE id = 'deadbeef-0000-4e57-a000-000000000001'$$,
+    'profiles.plan accepts supporter'
 );
 
 SELECT lives_ok(
-    $$UPDATE public.profiles SET plan = 'community' WHERE id = 'deadbeef-0000-4e57-a000-000000000001'$$,
-    'profiles.plan accepts community'
+    $$UPDATE public.profiles SET plan = 'creator' WHERE id = 'deadbeef-0000-4e57-a000-000000000001'$$,
+    'profiles.plan accepts creator'
 );
 
 
