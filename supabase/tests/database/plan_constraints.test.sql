@@ -8,35 +8,11 @@
 -- =============================================================
 BEGIN;
 
+-- WHY: On Supabase Cloud, pgtap is installed in the `extensions` schema.
+-- The default search_path ("$user", public) doesn't include it.
+-- SET must be OUTSIDE any DO $$ block — PL/pgSQL reverts SET on exit.
 CREATE EXTENSION IF NOT EXISTS pgtap;
-
--- DIAGNOSTIC: emit pgtap schema and function locations via NOTICE
-DO $$
-DECLARE
-  pgtap_schema text;
-  plan_schema text;
-  cur_path text;
-BEGIN
-  SELECT n.nspname INTO pgtap_schema
-  FROM pg_extension e JOIN pg_namespace n ON e.extnamespace = n.oid
-  WHERE e.extname = 'pgtap';
-  RAISE NOTICE 'DIAG pgtap extension schema: %', COALESCE(pgtap_schema, 'NOT FOUND');
-
-  SELECT n.nspname INTO plan_schema
-  FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
-  WHERE p.proname = 'plan' LIMIT 1;
-  RAISE NOTICE 'DIAG plan() function schema: %', COALESCE(plan_schema, 'NOT FOUND');
-
-  SHOW search_path INTO cur_path;
-  RAISE NOTICE 'DIAG search_path before SET: %', cur_path;
-
-  IF pgtap_schema IS NOT NULL THEN
-    EXECUTE format('SET search_path TO public, %I', pgtap_schema);
-  END IF;
-
-  SHOW search_path INTO cur_path;
-  RAISE NOTICE 'DIAG search_path after SET: %', cur_path;
-END $$;
+SET search_path TO public, extensions;
 
 SELECT plan(17);
 
