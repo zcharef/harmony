@@ -8,13 +8,12 @@
 -- =============================================================
 BEGIN;
 
--- WHY: On Supabase Cloud, pgtap is installed in the `extensions` schema.
--- The default search_path ("$user", public) doesn't include it.
--- SET must be OUTSIDE any DO $$ block — PL/pgSQL reverts SET on exit.
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET search_path TO public, extensions;
 
-SELECT plan(17);
+-- DIAGNOSTIC: test fully qualified call
+DO $$ BEGIN RAISE NOTICE 'DIAG: calling extensions.plan() directly'; END $$;
+SELECT extensions.plan(17);
 
 
 -- ═══════════════════════════════════════════════════════════════
