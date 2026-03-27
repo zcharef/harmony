@@ -61,9 +61,11 @@ GRANT EXECUTE ON FUNCTION clear_auth() TO authenticated;
 -- Bob:     member      b2222222-...
 -- Eve:     non-member  e5555555-...
 
--- Auth users (Alice + Bob exist from seed; Eve needs inserting)
+-- Auth users (profiles FK -> auth.users; ensure all test users exist)
 INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, is_sso_user, is_anonymous, confirmation_token, recovery_token, email_change_token_new, email_change)
 VALUES
+    ('a1111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'alice@harmony.test', crypt('password123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"display_name":"Alice"}', now(), now(), false, false, '', '', '', ''),
+    ('b2222222-2222-2222-2222-222222222222', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'bob@harmony.test', crypt('password123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"display_name":"Bob"}', now(), now(), false, false, '', '', '', ''),
     ('e5555555-5555-5555-5555-555555555555', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'eve@harmony.test', crypt('password123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"display_name":"Eve"}', now(), now(), false, false, '', '', '', '')
 ON CONFLICT (id) DO NOTHING;
 

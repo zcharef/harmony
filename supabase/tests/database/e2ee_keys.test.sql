@@ -156,8 +156,10 @@ SELECT has_index('public', 'device_keys', 'idx_device_keys_user_id',
     'schema: index idx_device_keys_user_id exists');
 
 -- RLS enabled
-SELECT row_level_security_is_on('public', 'device_keys',
-    'schema: RLS is enabled on device_keys');
+SELECT ok(
+    (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.device_keys'::regclass),
+    'schema: RLS is enabled on device_keys'
+);
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -366,8 +368,10 @@ SELECT has_index('public', 'one_time_keys', 'idx_one_time_keys_claim',
     'schema: index idx_one_time_keys_claim exists');
 
 -- RLS enabled
-SELECT row_level_security_is_on('public', 'one_time_keys',
-    'schema: RLS is enabled on one_time_keys');
+SELECT ok(
+    (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.one_time_keys'::regclass),
+    'schema: RLS is enabled on one_time_keys'
+);
 
 
 -- ═══════════════════════════════════════════════════════════════
