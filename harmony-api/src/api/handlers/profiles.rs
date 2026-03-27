@@ -76,7 +76,7 @@ pub async fn sync_profile(
             );
             derive_username_from_email(&email)
         } else {
-            meta_username.to_string()
+            meta_username.clone()
         }
     } else {
         derive_username_from_email(&email)

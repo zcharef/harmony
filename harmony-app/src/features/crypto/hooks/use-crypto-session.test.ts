@@ -1,5 +1,5 @@
-import { vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
+import { vi } from 'vitest'
 
 vi.mock('@/lib/api', () => ({
   getPreKeyBundle: vi.fn(),
@@ -171,9 +171,9 @@ describe('useCryptoSession', () => {
 
       const { result } = renderHook(() => useCryptoSession())
 
-      await expect(
-        result.current.createInbound('user-1', 'id-key', 'prekey-msg'),
-      ).rejects.toThrow('E2EE sessions require desktop app')
+      await expect(result.current.createInbound('user-1', 'id-key', 'prekey-msg')).rejects.toThrow(
+        'E2EE sessions require desktop app',
+      )
     })
 
     it('creates an inbound session and stores it', async () => {

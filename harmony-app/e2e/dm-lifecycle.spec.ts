@@ -36,7 +36,7 @@ import {
   sendMessage,
   syncProfile,
 } from './fixtures/test-data-factory'
-import { createTestUser, type TestUser } from './fixtures/user-factory'
+import { createTestUser } from './fixtures/user-factory'
 
 test.describe('DM Lifecycle', () => {
   // ── Message Persistence After Close and Reopen ──────────────────
@@ -236,10 +236,7 @@ test.describe('DM Lifecycle', () => {
   // ── DM Message Visible to Both Parties ──────────────────────────
 
   test.describe('bidirectional visibility', () => {
-    test('message sent by User E is visible to User F in their DM', async ({
-      page,
-      browser,
-    }) => {
+    test('message sent by User E is visible to User F in their DM', async ({ page, browser }) => {
       const userE = await createTestUser('dml-bidir-e')
       const userF = await createTestUser('dml-bidir-f')
       for (const u of [userE, userF]) await syncProfile(u.token)
@@ -350,9 +347,7 @@ test.describe('DM Lifecycle', () => {
         .filter({ hasText: initialMsg })
       await expect(initialF.first()).toBeVisible({ timeout: 10_000 })
 
-      const replyF2 = pageF
-        .locator('[data-test="message-content"]')
-        .filter({ hasText: replyMsg })
+      const replyF2 = pageF.locator('[data-test="message-content"]').filter({ hasText: replyMsg })
       await expect(replyF2.first()).toBeVisible({ timeout: 10_000 })
 
       await contextF.close()

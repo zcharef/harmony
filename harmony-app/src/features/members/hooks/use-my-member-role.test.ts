@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 import type { MemberListResponse, MemberResponse } from '@/lib/api'
-import { createTestQueryClient, createQueryWrapper } from '@/tests/test-utils'
+import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 import { useMyMemberRole } from './use-my-member-role'
 
 vi.mock('@/lib/api', () => ({

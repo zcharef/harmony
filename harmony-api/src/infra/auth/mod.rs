@@ -137,7 +137,7 @@ mod tests {
     /// Test-only JWT secret. NOT a real secret.
     const TEST_SECRET: &str = "test-jwt-secret-for-unit-tests-only";
 
-    /// Build a claims map for JWT encoding. Returns a serde_json::Value
+    /// Build a claims map for JWT encoding. Returns a `serde_json::Value`
     /// so tests can omit or tamper individual fields.
     fn base_claims(sub: Uuid) -> serde_json::Value {
         let now = chrono::Utc::now().timestamp();

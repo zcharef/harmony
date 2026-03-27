@@ -500,9 +500,7 @@ test.describe('DM Encryption on Web', () => {
 
     // WHY: Set up waitForResponse BEFORE triggering the send to avoid a race condition
     // where the response arrives before the listener is attached.
-    const responsePromise = page.waitForResponse((response) =>
-      response.url().includes('/messages'),
-    )
+    const responsePromise = page.waitForResponse((response) => response.url().includes('/messages'))
     await messageInput.press('Enter')
 
     const response = await responsePromise

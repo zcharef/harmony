@@ -179,7 +179,10 @@ function MessageContent({
   // Show a user-friendly fallback instead of raw ciphertext.
   if (message.encrypted === true && !isTauri()) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-sm italic text-default-400" data-test="message-content">
+      <span
+        className="inline-flex items-center gap-1.5 text-sm italic text-default-400"
+        data-test="message-content"
+      >
         <Lock className="h-3.5 w-3.5" />
         {tCrypto('encryptedWebFallback')}
       </span>

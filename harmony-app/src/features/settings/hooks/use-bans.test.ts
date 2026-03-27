@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { queryKeys } from '@/lib/query-keys'
-import { createTestQueryClient, createQueryWrapper } from '@/tests/test-utils'
+import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 
 vi.mock('@/lib/api', () => ({
   listBans: vi.fn(),
@@ -23,9 +23,7 @@ beforeEach(() => {
 
 describe('useBans', () => {
   it('fetches bans with correct path and throwOnError', async () => {
-    const bansData = [
-      { userId: 'user-1', username: 'banned-user', reason: 'spam' },
-    ]
+    const bansData = [{ userId: 'user-1', username: 'banned-user', reason: 'spam' }]
     vi.mocked(listBans).mockResolvedValueOnce({ data: bansData } as never)
 
     const queryClient = createTestQueryClient()

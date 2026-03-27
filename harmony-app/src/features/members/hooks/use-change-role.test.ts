@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { queryKeys } from '@/lib/query-keys'
-import { createTestQueryClient, createQueryWrapper } from '@/tests/test-utils'
+import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 
 vi.mock('@/lib/api/client.gen', () => ({
   client: { patch: vi.fn() },
@@ -77,9 +77,12 @@ describe('useChangeRole', () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true))
 
-    expect(logger.error).toHaveBeenCalledWith('Failed to change member role', expect.objectContaining({
-      serverId: SERVER_ID,
-    }))
+    expect(logger.error).toHaveBeenCalledWith(
+      'Failed to change member role',
+      expect.objectContaining({
+        serverId: SERVER_ID,
+      }),
+    )
   })
 
   it('logs error via logger.error on rejection', async () => {

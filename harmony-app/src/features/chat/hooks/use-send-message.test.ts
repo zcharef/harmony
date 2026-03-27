@@ -80,7 +80,9 @@ describe('useSendMessage', () => {
     queryClient.setQueryData(messageKey, buildCacheData([]))
 
     const wrapper = createQueryWrapper(queryClient)
-    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), { wrapper })
+    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+      wrapper,
+    })
 
     await act(async () => {
       result.current.mutate('hello')
@@ -112,7 +114,9 @@ describe('useSendMessage', () => {
     queryClient.setQueryData(messageKey, buildCacheData([existingMsg]))
 
     const wrapper = createQueryWrapper(queryClient)
-    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), { wrapper })
+    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+      wrapper,
+    })
 
     await act(async () => {
       result.current.mutate('optimistic text')
@@ -149,7 +153,9 @@ describe('useSendMessage', () => {
     queryClient.setQueryData(messageKey, buildCacheData([]))
 
     const wrapper = createQueryWrapper(queryClient)
-    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), { wrapper })
+    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+      wrapper,
+    })
 
     await act(async () => {
       result.current.mutate('hello')
@@ -175,7 +181,9 @@ describe('useSendMessage', () => {
     queryClient.setQueryData(messageKey, buildCacheData([existingMsg]))
 
     const wrapper = createQueryWrapper(queryClient)
-    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), { wrapper })
+    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+      wrapper,
+    })
 
     await act(async () => {
       result.current.mutate('will fail')
@@ -207,7 +215,9 @@ describe('useSendMessage', () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
     const wrapper = createQueryWrapper(queryClient)
-    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), { wrapper })
+    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+      wrapper,
+    })
 
     await act(async () => {
       result.current.mutate('hello')
@@ -228,7 +238,9 @@ describe('useSendMessage', () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
     const wrapper = createQueryWrapper(queryClient)
-    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), { wrapper })
+    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+      wrapper,
+    })
 
     await act(async () => {
       result.current.mutate('will fail')

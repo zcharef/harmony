@@ -1,5 +1,5 @@
-import { vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { vi } from 'vitest'
 
 vi.mock('@/lib/crypto-cache', () => ({
   getTrustLevel: vi.fn(),
@@ -155,10 +155,13 @@ describe('useTrustLevel', () => {
 
       // State should remain unchanged since the write failed
       expect(result.current.trustLevel).toBe('unverified')
-      expect(logger.error).toHaveBeenCalledWith('set_trust_level_failed', expect.objectContaining({
-        userId: 'user-1',
-        level: 'blocked',
-      }))
+      expect(logger.error).toHaveBeenCalledWith(
+        'set_trust_level_failed',
+        expect.objectContaining({
+          userId: 'user-1',
+          level: 'blocked',
+        }),
+      )
     })
   })
 })

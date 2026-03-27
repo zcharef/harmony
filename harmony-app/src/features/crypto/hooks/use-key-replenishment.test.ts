@@ -1,5 +1,5 @@
-import { vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
+import { vi } from 'vitest'
 
 vi.mock('@/lib/api', () => ({
   getKeyCount: vi.fn(),

@@ -13,7 +13,15 @@ const { isTauri } = await import('@/lib/platform')
 const { invoke } = await import('@tauri-apps/api/core')
 
 // Import after mocks are set up
-const { initCache, cacheMessage, getCachedMessages, updateCachedMessage, deleteCachedMessage, setTrustLevel, getTrustLevel } = await import('@/lib/crypto-cache')
+const {
+  initCache,
+  cacheMessage,
+  getCachedMessages,
+  updateCachedMessage,
+  deleteCachedMessage,
+  setTrustLevel,
+  getTrustLevel,
+} = await import('@/lib/crypto-cache')
 
 describe('crypto-cache', () => {
   beforeEach(() => {
@@ -36,9 +44,7 @@ describe('crypto-cache', () => {
     })
 
     it('getCachedMessages throws on web', async () => {
-      await expect(getCachedMessages('ch-1')).rejects.toThrow(
-        'Message cache requires desktop app',
-      )
+      await expect(getCachedMessages('ch-1')).rejects.toThrow('Message cache requires desktop app')
     })
 
     it('setTrustLevel throws on web', async () => {
@@ -48,9 +54,7 @@ describe('crypto-cache', () => {
     })
 
     it('getTrustLevel throws on web', async () => {
-      await expect(getTrustLevel('user-1')).rejects.toThrow(
-        'Message cache requires desktop app',
-      )
+      await expect(getTrustLevel('user-1')).rejects.toThrow('Message cache requires desktop app')
     })
   })
 

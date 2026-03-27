@@ -1,5 +1,5 @@
-import { vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
+import { vi } from 'vitest'
 
 vi.mock('@/lib/crypto-megolm', () => ({
   megolmEncrypt: vi.fn(),
@@ -170,7 +170,10 @@ describe('useChannelEncryption', () => {
         error: 'bad ciphertext',
         identityKeyChanged: false,
       })
-      expect(logger.error).toHaveBeenCalledWith('Channel message decryption failed', expect.any(Object))
+      expect(logger.error).toHaveBeenCalledWith(
+        'Channel message decryption failed',
+        expect.any(Object),
+      )
     })
 
     it('returns error for invalid envelope JSON', async () => {
@@ -201,7 +204,12 @@ describe('useChannelEncryption', () => {
     it('pre-warms the in-memory cache from SQLCipher', async () => {
       vi.mocked(isTauri).mockReturnValue(true)
       vi.mocked(getCachedMessages).mockResolvedValueOnce([
-        { message_id: 'msg-1', channel_id: 'ch-1', plaintext: 'cached hello', created_at: '2026-01-01' },
+        {
+          message_id: 'msg-1',
+          channel_id: 'ch-1',
+          plaintext: 'cached hello',
+          created_at: '2026-01-01',
+        },
       ])
 
       const { result } = renderHook(() => useChannelEncryption())
@@ -220,9 +228,12 @@ describe('useChannelEncryption', () => {
 
       await result.current.loadCachedChannelDecryptions('ch-1')
 
-      expect(logger.warn).toHaveBeenCalledWith('Failed to load cached channel decryptions', expect.objectContaining({
-        channelId: 'ch-1',
-      }))
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Failed to load cached channel decryptions',
+        expect.objectContaining({
+          channelId: 'ch-1',
+        }),
+      )
     })
   })
 

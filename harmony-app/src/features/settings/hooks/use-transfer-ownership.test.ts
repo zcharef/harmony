@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { queryKeys } from '@/lib/query-keys'
-import { createTestQueryClient, createQueryWrapper } from '@/tests/test-utils'
+import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 
 vi.mock('@/lib/api', () => ({
   transferOwnership: vi.fn(),

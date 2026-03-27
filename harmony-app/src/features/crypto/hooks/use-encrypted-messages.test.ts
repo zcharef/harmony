@@ -1,5 +1,5 @@
-import { vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
+import { vi } from 'vitest'
 
 vi.mock('@/lib/crypto', () => ({
   decrypt: vi.fn(),
@@ -150,7 +150,11 @@ describe('useEncryptedMessages', () => {
       const decrypted = await result.current.decryptMessage(msg as never, 'sender-id-key')
 
       expect(decrypted.plaintext).toBe('first message')
-      expect(mockCreateInbound).toHaveBeenCalledWith('user-sender', 'sender-id-key', 'pre-key-ciphertext')
+      expect(mockCreateInbound).toHaveBeenCalledWith(
+        'user-sender',
+        'sender-id-key',
+        'pre-key-ciphertext',
+      )
     })
 
     it('returns no_session for pre-key message without senderIdentityKey', async () => {
@@ -240,7 +244,12 @@ describe('useEncryptedMessages', () => {
     it('loads cached messages into the in-memory cache', async () => {
       vi.mocked(isTauri).mockReturnValue(true)
       vi.mocked(getCachedMessages).mockResolvedValueOnce([
-        { message_id: 'msg-1', channel_id: 'ch-1', plaintext: 'cached text', created_at: '2026-01-01' },
+        {
+          message_id: 'msg-1',
+          channel_id: 'ch-1',
+          plaintext: 'cached text',
+          created_at: '2026-01-01',
+        },
       ])
 
       const { result } = renderHook(() => useEncryptedMessages())
@@ -258,9 +267,12 @@ describe('useEncryptedMessages', () => {
 
       await result.current.loadCachedDecryptions('ch-1')
 
-      expect(logger.warn).toHaveBeenCalledWith('Failed to load cached decryptions', expect.objectContaining({
-        channelId: 'ch-1',
-      }))
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Failed to load cached decryptions',
+        expect.objectContaining({
+          channelId: 'ch-1',
+        }),
+      )
     })
   })
 

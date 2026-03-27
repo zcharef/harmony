@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 import type { DmListItem, DmListResponse } from '@/lib/api'
-import { createTestQueryClient, createQueryWrapper } from '@/tests/test-utils'
+import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 import { useDms } from './use-dms'
 
 vi.mock('@/lib/api', () => ({

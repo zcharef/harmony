@@ -1,5 +1,5 @@
-import { vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
+import { vi } from 'vitest'
 
 vi.mock('@/lib/crypto', () => ({
   generateSafetyNumber: vi.fn(),

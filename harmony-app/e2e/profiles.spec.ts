@@ -81,9 +81,7 @@ test.describe('Profile & Username Display', () => {
     const memberList = page.locator('[data-test="member-list"]')
     await memberList.waitFor({ timeout: 10_000 })
 
-    const memberItem = memberList.locator(
-      `[data-test="member-item"][data-user-id="${member.id}"]`,
-    )
+    const memberItem = memberList.locator(`[data-test="member-item"][data-user-id="${member.id}"]`)
     await expect(memberItem).toBeVisible({ timeout: 10_000 })
 
     const username = memberItem.locator('[data-test="member-username"]')
@@ -123,9 +121,7 @@ test.describe('Profile & Username Display', () => {
     const memberList = page.locator('[data-test="member-list"]')
     await memberList.waitFor({ timeout: 10_000 })
 
-    const memberItem = memberList.locator(
-      `[data-test="member-item"][data-user-id="${member.id}"]`,
-    )
+    const memberItem = memberList.locator(`[data-test="member-item"][data-user-id="${member.id}"]`)
     await memberItem.waitFor({ timeout: 10_000 })
 
     // WHY: Dismiss any lingering popover before right-click (pattern from moderation.spec.ts).
@@ -194,9 +190,7 @@ test.describe('Profile & Username Display', () => {
     await memberList.waitFor({ timeout: 10_000 })
 
     // Verify the new member appears
-    const newItem = memberList.locator(
-      `[data-test="member-item"][data-user-id="${newMember.id}"]`,
-    )
+    const newItem = memberList.locator(`[data-test="member-item"][data-user-id="${newMember.id}"]`)
     await expect(newItem).toBeVisible({ timeout: 10_000 })
 
     // Verify the username contains the expected prefix

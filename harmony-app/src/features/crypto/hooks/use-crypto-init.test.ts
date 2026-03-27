@@ -1,6 +1,6 @@
-import { vi } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
 import type { User } from '@supabase/supabase-js'
+import { renderHook, waitFor } from '@testing-library/react'
+import { vi } from 'vitest'
 
 vi.mock('@/lib/api', () => ({
   registerDevice: vi.fn(),

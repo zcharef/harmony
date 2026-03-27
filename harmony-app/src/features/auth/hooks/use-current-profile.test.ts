@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 import type { ProfileResponse } from '@/lib/api'
-import { createTestQueryClient, createQueryWrapper } from '@/tests/test-utils'
+import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 import { useCurrentProfile } from './use-current-profile'
 
 vi.mock('@/lib/api', () => ({
