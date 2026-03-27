@@ -11,10 +11,9 @@
 -- Run via: supabase test db
 -- =============================================================
 BEGIN;
+SET search_path TO public, extensions;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-CREATE SCHEMA IF NOT EXISTS tests;
-GRANT USAGE ON SCHEMA tests TO authenticated;
 SELECT plan(34);
 
 
@@ -26,7 +25,7 @@ SELECT plan(34);
 -- These helpers impersonate users by setting JWT claims + switching
 -- to the authenticated role (which activates RLS).
 
-CREATE OR REPLACE FUNCTION tests.authenticate_as(p_user_id uuid)
+CREATE OR REPLACE FUNCTION authenticate_as(p_user_id uuid)
 RETURNS void AS $$
 BEGIN
     PERFORM set_config(
@@ -43,7 +42,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION tests.clear_auth()
+CREATE OR REPLACE FUNCTION clear_auth()
 RETURNS void AS $$
 BEGIN
     EXECUTE 'SET LOCAL ROLE postgres';
@@ -51,7 +50,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA tests TO authenticated;
+GRANT EXECUTE ON FUNCTION authenticate_as(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION clear_auth() TO authenticated;
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -193,7 +193,7 @@ SELECT col_not_null('public', 'megolm_sessions', 'created_at',
 -- ═══════════════════════════════════════════════════════════════
 
 -- 3.1 SELECT: authenticated member CAN see megolm_sessions
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob (member)
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob (member)
 SELECT is(
     (SELECT count(*)::int FROM megolm_sessions WHERE channel_id = '11111111-1111-1111-1111-111111111111'),
     1,
@@ -203,7 +203,7 @@ SELECT is(
 -- 3.2 SELECT: authenticated non-member CANNOT see megolm_sessions
 -- WHY: The policy (megolm_sessions_select_member) uses is_channel_member(channel_id)
 -- which requires server membership. Non-members are correctly denied at the RLS level.
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555'); -- Eve (non-member)
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555'); -- Eve (non-member)
 SELECT is(
     (SELECT count(*)::int FROM megolm_sessions WHERE channel_id = '11111111-1111-1111-1111-111111111111'),
     0,
@@ -211,7 +211,7 @@ SELECT is(
 );
 
 -- 3.3 SELECT: anonymous CANNOT see megolm_sessions
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SET LOCAL ROLE anon;
 SELECT is(
     (SELECT count(*)::int FROM megolm_sessions),
@@ -222,7 +222,7 @@ SELECT is(
 -- 3.4 INSERT: authenticated user CAN insert own megolm_session (creator_id = own uid)
 SET LOCAL ROLE postgres;
 SAVEPOINT sp_megolm_ins_own;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
 SELECT lives_ok(
     $$INSERT INTO megolm_sessions (id, channel_id, session_id, creator_id) VALUES ('deadbeef-0002-0002-0002-000200020002', '11111111-1111-1111-1111-111111111111', 'session-bob-1', 'b2222222-2222-2222-2222-222222222222')$$,
     'RLS INSERT: authenticated user can insert own megolm_session'
@@ -230,7 +230,7 @@ SELECT lives_ok(
 ROLLBACK TO sp_megolm_ins_own;
 
 -- 3.5 INSERT: authenticated user CANNOT insert with someone else's creator_id
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
 SELECT throws_ok(
     $$INSERT INTO megolm_sessions (id, channel_id, session_id, creator_id) VALUES ('deadbeef-0003-0003-0003-000300030003', '11111111-1111-1111-1111-111111111111', 'session-spoof', 'a1111111-1111-1111-1111-111111111111')$$,
     NULL, NULL,
@@ -241,8 +241,8 @@ SELECT throws_ok(
 -- WHY: Different from the spoofed creator_id test above — here Eve uses
 -- her real UID but she's not a server/channel member, so the
 -- is_channel_member(channel_id) check in the INSERT policy blocks her.
-SELECT tests.clear_auth();
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555'); -- Eve (non-member)
+SELECT clear_auth();
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555'); -- Eve (non-member)
 SELECT throws_ok(
     $$INSERT INTO megolm_sessions (id, channel_id, session_id, creator_id) VALUES ('deadbeef-0005-0005-0005-000500050005', '11111111-1111-1111-1111-111111111111', 'session-eve-own', 'e5555555-5555-5555-5555-555555555555')$$,
     NULL, NULL,
@@ -250,7 +250,7 @@ SELECT throws_ok(
 );
 
 -- 3.7 INSERT: anonymous CANNOT insert megolm_session
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SET LOCAL ROLE anon;
 SELECT throws_ok(
     $$INSERT INTO megolm_sessions (id, channel_id, session_id, creator_id) VALUES ('deadbeef-0004-0004-0004-000400040004', '11111111-1111-1111-1111-111111111111', 'session-anon', 'e5555555-5555-5555-5555-555555555555')$$,
@@ -273,7 +273,7 @@ SELECT cmp_ok(
 
 -- 4.1 Creating a channel defaults encrypted to false
 SAVEPOINT sp_enc_default;
-SELECT tests.clear_auth();
+SELECT clear_auth();
 INSERT INTO public.channels (id, server_id, name, channel_type, position)
 VALUES ('44444444-4444-4444-4444-444444444444', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'new-channel', 'text', 3);
 SELECT is(
@@ -285,7 +285,7 @@ ROLLBACK TO sp_enc_default;
 
 -- 4.2 Updating encrypted from false to true succeeds
 SAVEPOINT sp_enc_on;
-SELECT tests.clear_auth();
+SELECT clear_auth();
 UPDATE public.channels SET encrypted = true WHERE id = '11111111-1111-1111-1111-111111111111';
 SELECT is(
     (SELECT encrypted FROM channels WHERE id = '11111111-1111-1111-1111-111111111111'),
@@ -299,6 +299,6 @@ ROLLBACK TO sp_enc_on;
 -- DONE
 -- ═══════════════════════════════════════════════════════════════
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT * FROM finish();
 ROLLBACK;

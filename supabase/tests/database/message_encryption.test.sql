@@ -10,6 +10,7 @@
 -- Run via: supabase test db
 -- =============================================================
 BEGIN;
+SET search_path TO public, extensions;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(17);

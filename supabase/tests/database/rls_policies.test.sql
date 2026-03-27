@@ -7,10 +7,9 @@
 -- Run via: supabase test db
 -- =============================================================
 BEGIN;
+SET search_path TO public, extensions;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-CREATE SCHEMA IF NOT EXISTS tests;
-GRANT USAGE ON SCHEMA tests TO authenticated;
 SELECT plan(97);
 
 
@@ -22,7 +21,7 @@ SELECT plan(97);
 -- These helpers impersonate users by setting JWT claims + switching
 -- to the authenticated role (which activates RLS).
 
-CREATE OR REPLACE FUNCTION tests.authenticate_as(p_user_id uuid)
+CREATE OR REPLACE FUNCTION authenticate_as(p_user_id uuid)
 RETURNS void AS $$
 BEGIN
     PERFORM set_config(
@@ -39,7 +38,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION tests.clear_auth()
+CREATE OR REPLACE FUNCTION clear_auth()
 RETURNS void AS $$
 BEGIN
     EXECUTE 'SET LOCAL ROLE postgres';
@@ -47,8 +46,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Grant execute on helper functions to authenticated role
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA tests TO authenticated;
+GRANT EXECUTE ON FUNCTION authenticate_as(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION clear_auth() TO authenticated;
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -168,45 +167,45 @@ SELECT is(public.get_role_level('member'),    1, 'get_role_level: member = 1');
 SELECT is(public.get_role_level('garbage'),   0, 'get_role_level: unknown = 0');
 
 -- 1.2 has_server_role
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111'); -- owner
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111'); -- owner
 SELECT is(public.has_server_role('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'admin'), true,  'has_server_role: owner >= admin');
 
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333'); -- admin
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333'); -- admin
 SELECT is(public.has_server_role('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'admin'), true,  'has_server_role: admin >= admin');
 
-SELECT tests.authenticate_as('d4444444-4444-4444-4444-444444444444'); -- moderator
+SELECT authenticate_as('d4444444-4444-4444-4444-444444444444'); -- moderator
 SELECT is(public.has_server_role('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'admin'), false, 'has_server_role: moderator < admin');
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- member
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- member
 SELECT is(public.has_server_role('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'moderator'), false, 'has_server_role: member < moderator');
 
 -- 1.3 is_server_member
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- member
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- member
 SELECT is(public.is_server_member('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), true,  'is_server_member: member = true');
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555'); -- non-member
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555'); -- non-member
 SELECT is(public.is_server_member('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), false, 'is_server_member: non-member = false');
 
-SELECT tests.authenticate_as('f6666666-6666-6666-6666-666666666666'); -- banned
+SELECT authenticate_as('f6666666-6666-6666-6666-666666666666'); -- banned
 SELECT is(public.is_server_member('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), false, 'is_server_member: banned user = false');
 
 -- 1.4 is_channel_member
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- member
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- member
 SELECT is(public.is_channel_member('11111111-1111-1111-1111-111111111111'), true,  'is_channel_member: member sees public channel');
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555'); -- non-member
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555'); -- non-member
 SELECT is(public.is_channel_member('11111111-1111-1111-1111-111111111111'), false, 'is_channel_member: non-member blocked from public channel');
 
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333'); -- admin
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333'); -- admin
 SELECT is(public.is_channel_member('22222222-2222-2222-2222-222222222222'), true,  'is_channel_member: admin sees private channel (implicit)');
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- member
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- member
 SELECT is(public.is_channel_member('22222222-2222-2222-2222-222222222222'), false, 'is_channel_member: member blocked from private channel (no access)');
 
-SELECT tests.authenticate_as('d4444444-4444-4444-4444-444444444444'); -- moderator
+SELECT authenticate_as('d4444444-4444-4444-4444-444444444444'); -- moderator
 SELECT is(public.is_channel_member('22222222-2222-2222-2222-222222222222'), true,  'is_channel_member: moderator sees private channel (channel_role_access)');
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -214,7 +213,7 @@ SELECT tests.clear_auth();
 -- ═══════════════════════════════════════════════════════════════
 
 -- 2.1 SELECT: any authenticated can see all profiles
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT cmp_ok(
     (SELECT count(*)::int FROM profiles),
     '>=', 6,
@@ -224,7 +223,7 @@ SELECT cmp_ok(
 -- 2.2 INSERT: can only insert own profile
 -- WHY: WITH CHECK (id = auth.uid()) enforces self-only insert.
 -- Eve's profile exists; test that Bob cannot insert for Alice.
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT throws_ok(
     $$INSERT INTO profiles (id, username, display_name) VALUES ('c3333333-3333-3333-3333-333333333333', 'imposter', 'Fake')$$,
     NULL, NULL,
@@ -233,7 +232,7 @@ SELECT throws_ok(
 
 -- 2.4 UPDATE: can update own profile
 SAVEPOINT sp_prof_upd;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 UPDATE profiles SET display_name = 'Bobby' WHERE id = 'b2222222-2222-2222-2222-222222222222';
 SELECT is(
     (SELECT display_name FROM profiles WHERE id = 'b2222222-2222-2222-2222-222222222222'),
@@ -244,9 +243,9 @@ ROLLBACK TO sp_prof_upd;
 
 -- 2.5 UPDATE: cannot update other user's profile
 SAVEPOINT sp_prof_upd2;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 UPDATE profiles SET display_name = 'Hacked' WHERE id = 'a1111111-1111-1111-1111-111111111111';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT display_name FROM profiles WHERE id = 'a1111111-1111-1111-1111-111111111111'),
     'Alice',
@@ -254,7 +253,7 @@ SELECT is(
 );
 ROLLBACK TO sp_prof_upd2;
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -262,25 +261,25 @@ SELECT tests.clear_auth();
 -- ═══════════════════════════════════════════════════════════════
 
 -- 3.1 SELECT: owner, member can see; non-member, banned cannot
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111');
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111');
 SELECT is(
     (SELECT count(*)::int FROM servers WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     1, 'servers SELECT: owner can see server'
 );
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT is(
     (SELECT count(*)::int FROM servers WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     1, 'servers SELECT: member can see server'
 );
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT is(
     (SELECT count(*)::int FROM servers WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     0, 'servers SELECT: non-member cannot see server'
 );
 
-SELECT tests.authenticate_as('f6666666-6666-6666-6666-666666666666');
+SELECT authenticate_as('f6666666-6666-6666-6666-666666666666');
 SELECT is(
     (SELECT count(*)::int FROM servers WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     0, 'servers SELECT: banned user cannot see server'
@@ -288,14 +287,14 @@ SELECT is(
 
 -- 3.2 INSERT: owner_id must equal auth.uid()
 SAVEPOINT sp_srv_ins;
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT lives_ok(
     $$INSERT INTO servers (id, name, owner_id) VALUES ('99999999-9999-9999-9999-999999999991', 'Eve Server', 'e5555555-5555-5555-5555-555555555555')$$,
     'servers INSERT: can create with own owner_id'
 );
 ROLLBACK TO sp_srv_ins;
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT throws_ok(
     $$INSERT INTO servers (id, name, owner_id) VALUES ('99999999-9999-9999-9999-999999999992', 'Spoofed', 'a1111111-1111-1111-1111-111111111111')$$,
     NULL, NULL,
@@ -304,7 +303,7 @@ SELECT throws_ok(
 
 -- 3.3 UPDATE: admin+ can update; member cannot
 SAVEPOINT sp_srv_upd;
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111');
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111');
 UPDATE servers SET name = 'Updated by Owner' WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 SELECT is(
     (SELECT name FROM servers WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
@@ -314,7 +313,7 @@ SELECT is(
 ROLLBACK TO sp_srv_upd;
 
 SAVEPOINT sp_srv_upd2;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 UPDATE servers SET name = 'Updated by Admin' WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 SELECT is(
     (SELECT name FROM servers WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
@@ -324,9 +323,9 @@ SELECT is(
 ROLLBACK TO sp_srv_upd2;
 
 SAVEPOINT sp_srv_upd3;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 UPDATE servers SET name = 'Hacked' WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT name FROM servers WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     'RLS Test Server',
@@ -336,9 +335,9 @@ ROLLBACK TO sp_srv_upd3;
 
 -- 3.4 DELETE: owner only
 SAVEPOINT sp_srv_del;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 DELETE FROM servers WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM servers WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     1,
@@ -346,7 +345,7 @@ SELECT is(
 );
 ROLLBACK TO sp_srv_del;
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -354,38 +353,38 @@ SELECT tests.clear_auth();
 -- ═══════════════════════════════════════════════════════════════
 
 -- 4.1 SELECT: public channel visibility
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT is(
     (SELECT count(*)::int FROM channels WHERE id = '11111111-1111-1111-1111-111111111111'),
     1, 'channels SELECT: member sees public channel'
 );
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT is(
     (SELECT count(*)::int FROM channels WHERE id = '11111111-1111-1111-1111-111111111111'),
     0, 'channels SELECT: non-member cannot see public channel'
 );
 
-SELECT tests.authenticate_as('f6666666-6666-6666-6666-666666666666');
+SELECT authenticate_as('f6666666-6666-6666-6666-666666666666');
 SELECT is(
     (SELECT count(*)::int FROM channels WHERE id = '11111111-1111-1111-1111-111111111111'),
     0, 'channels SELECT: banned user cannot see channel'
 );
 
 -- 4.2 SELECT: private channel visibility
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 SELECT is(
     (SELECT count(*)::int FROM channels WHERE id = '22222222-2222-2222-2222-222222222222'),
     1, 'channels SELECT: admin sees private channel'
 );
 
-SELECT tests.authenticate_as('d4444444-4444-4444-4444-444444444444');
+SELECT authenticate_as('d4444444-4444-4444-4444-444444444444');
 SELECT is(
     (SELECT count(*)::int FROM channels WHERE id = '22222222-2222-2222-2222-222222222222'),
     1, 'channels SELECT: moderator with access sees private channel'
 );
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT is(
     (SELECT count(*)::int FROM channels WHERE id = '22222222-2222-2222-2222-222222222222'),
     0, 'channels SELECT: member without access cannot see private channel'
@@ -393,14 +392,14 @@ SELECT is(
 
 -- 4.3 INSERT: admin+ only
 SAVEPOINT sp_ch_ins;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 SELECT lives_ok(
     $$INSERT INTO channels (id, server_id, name, channel_type, position) VALUES ('44444444-4444-4444-4444-444444444444', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'new-chan', 'text', 10)$$,
     'channels INSERT: admin can create channel'
 );
 ROLLBACK TO sp_ch_ins;
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT throws_ok(
     $$INSERT INTO channels (id, server_id, name, channel_type, position) VALUES ('44444444-4444-4444-4444-444444444445', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bad-chan', 'text', 11)$$,
     NULL, NULL,
@@ -409,7 +408,7 @@ SELECT throws_ok(
 
 -- 4.4 UPDATE: admin+ only
 SAVEPOINT sp_ch_upd;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 UPDATE channels SET name = 'renamed' WHERE id = '11111111-1111-1111-1111-111111111111';
 SELECT is(
     (SELECT name FROM channels WHERE id = '11111111-1111-1111-1111-111111111111'),
@@ -419,9 +418,9 @@ SELECT is(
 ROLLBACK TO sp_ch_upd;
 
 SAVEPOINT sp_ch_upd2;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 UPDATE channels SET name = 'hacked' WHERE id = '11111111-1111-1111-1111-111111111111';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT name FROM channels WHERE id = '11111111-1111-1111-1111-111111111111'),
     'general',
@@ -431,9 +430,9 @@ ROLLBACK TO sp_ch_upd2;
 
 -- 4.5 DELETE: admin+ only
 SAVEPOINT sp_ch_del;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 DELETE FROM channels WHERE id = '11111111-1111-1111-1111-111111111111';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM channels WHERE id = '11111111-1111-1111-1111-111111111111'),
     0,
@@ -441,7 +440,7 @@ SELECT is(
 );
 ROLLBACK TO sp_ch_del;
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -449,19 +448,19 @@ SELECT tests.clear_auth();
 -- ═══════════════════════════════════════════════════════════════
 
 -- 5.1 SELECT: member sees messages; non-member/banned cannot; deleted hidden
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT is(
     (SELECT count(*)::int FROM messages WHERE channel_id = '11111111-1111-1111-1111-111111111111'),
     2, 'messages SELECT: member sees non-deleted messages (2 of 3)'
 );
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT is(
     (SELECT count(*)::int FROM messages WHERE channel_id = '11111111-1111-1111-1111-111111111111'),
     0, 'messages SELECT: non-member sees nothing'
 );
 
-SELECT tests.authenticate_as('f6666666-6666-6666-6666-666666666666');
+SELECT authenticate_as('f6666666-6666-6666-6666-666666666666');
 SELECT is(
     (SELECT count(*)::int FROM messages WHERE channel_id = '11111111-1111-1111-1111-111111111111'),
     0, 'messages SELECT: banned user sees nothing'
@@ -469,21 +468,21 @@ SELECT is(
 
 -- 5.2 INSERT: author=self, channel member, read-only checks
 SAVEPOINT sp_msg_ins;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT lives_ok(
     $$INSERT INTO messages (id, channel_id, author_id, content) VALUES ('eeee0001-0001-0001-0001-000100010001', '11111111-1111-1111-1111-111111111111', 'b2222222-2222-2222-2222-222222222222', 'New message')$$,
     'messages INSERT: member can post in normal channel'
 );
 ROLLBACK TO sp_msg_ins;
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT throws_ok(
     $$INSERT INTO messages (id, channel_id, author_id, content) VALUES ('eeee0002-0002-0002-0002-000200020002', '11111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'Spoofed author')$$,
     NULL, NULL,
     'messages INSERT: cannot set author_id to another user'
 );
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT throws_ok(
     $$INSERT INTO messages (id, channel_id, author_id, content) VALUES ('eeee0003-0003-0003-0003-000300030003', '11111111-1111-1111-1111-111111111111', 'e5555555-5555-5555-5555-555555555555', 'Non-member post')$$,
     NULL, NULL,
@@ -491,7 +490,7 @@ SELECT throws_ok(
 );
 
 -- Read-only channel: member cannot post, admin can
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT throws_ok(
     $$INSERT INTO messages (id, channel_id, author_id, content) VALUES ('eeee0004-0004-0004-0004-000400040004', '33333333-3333-3333-3333-333333333333', 'b2222222-2222-2222-2222-222222222222', 'Readonly attempt')$$,
     NULL, NULL,
@@ -499,7 +498,7 @@ SELECT throws_ok(
 );
 
 SAVEPOINT sp_msg_ro;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 SELECT lives_ok(
     $$INSERT INTO messages (id, channel_id, author_id, content) VALUES ('eeee0005-0005-0005-0005-000500050005', '33333333-3333-3333-3333-333333333333', 'c3333333-3333-3333-3333-333333333333', 'Admin announcement')$$,
     'messages INSERT: admin can post in read-only channel'
@@ -508,7 +507,7 @@ ROLLBACK TO sp_msg_ro;
 
 -- 5.3 UPDATE (author): own message only, not deleted
 SAVEPOINT sp_msg_ed;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 UPDATE messages SET content = 'Edited by Bob', is_edited = true WHERE id = 'bbbb0002-0002-0002-0002-000200020002';
 SELECT is(
     (SELECT content FROM messages WHERE id = 'bbbb0002-0002-0002-0002-000200020002'),
@@ -518,9 +517,9 @@ SELECT is(
 ROLLBACK TO sp_msg_ed;
 
 SAVEPOINT sp_msg_ed2;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 UPDATE messages SET content = 'Hacked' WHERE id = 'aaaa0001-0001-0001-0001-000100010001';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT content FROM messages WHERE id = 'aaaa0001-0001-0001-0001-000100010001'),
     'Hello from Alice',
@@ -530,9 +529,9 @@ ROLLBACK TO sp_msg_ed2;
 
 -- 5.4 UPDATE (moderator softdelete): moderator+ can soft-delete
 SAVEPOINT sp_msg_mod;
-SELECT tests.authenticate_as('d4444444-4444-4444-4444-444444444444');
+SELECT authenticate_as('d4444444-4444-4444-4444-444444444444');
 UPDATE messages SET deleted_at = now(), deleted_by = 'd4444444-4444-4444-4444-444444444444' WHERE id = 'bbbb0002-0002-0002-0002-000200020002';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT isnt(
     (SELECT deleted_at FROM messages WHERE id = 'bbbb0002-0002-0002-0002-000200020002'),
     NULL,
@@ -540,7 +539,7 @@ SELECT isnt(
 );
 ROLLBACK TO sp_msg_mod;
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -548,20 +547,20 @@ SELECT tests.clear_auth();
 -- ═══════════════════════════════════════════════════════════════
 
 -- 6.1 SELECT: member sees all members; non-member/banned cannot
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT cmp_ok(
     (SELECT count(*)::int FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     '>=', 4,
     'server_members SELECT: member sees all members'
 );
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT is(
     (SELECT count(*)::int FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     0, 'server_members SELECT: non-member sees nothing'
 );
 
-SELECT tests.authenticate_as('f6666666-6666-6666-6666-666666666666');
+SELECT authenticate_as('f6666666-6666-6666-6666-666666666666');
 SELECT is(
     (SELECT count(*)::int FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     0, 'server_members SELECT: banned user sees nothing'
@@ -569,9 +568,9 @@ SELECT is(
 
 -- 6.2 DELETE (self-leave): user can leave
 SAVEPOINT sp_sm_leave;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 DELETE FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'b2222222-2222-2222-2222-222222222222';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'b2222222-2222-2222-2222-222222222222'),
     0,
@@ -582,9 +581,9 @@ ROLLBACK TO sp_sm_leave;
 -- 6.3 DELETE (kick): hierarchy enforcement
 -- Owner can kick admin
 SAVEPOINT sp_sm_kick1;
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111');
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111');
 DELETE FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'c3333333-3333-3333-3333-333333333333';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'c3333333-3333-3333-3333-333333333333'),
     0,
@@ -594,9 +593,9 @@ ROLLBACK TO sp_sm_kick1;
 
 -- Moderator can kick member
 SAVEPOINT sp_sm_kick2;
-SELECT tests.authenticate_as('d4444444-4444-4444-4444-444444444444');
+SELECT authenticate_as('d4444444-4444-4444-4444-444444444444');
 DELETE FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'b2222222-2222-2222-2222-222222222222';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'b2222222-2222-2222-2222-222222222222'),
     0,
@@ -606,9 +605,9 @@ ROLLBACK TO sp_sm_kick2;
 
 -- Moderator cannot kick admin (hierarchy blocks)
 SAVEPOINT sp_sm_kick3;
-SELECT tests.authenticate_as('d4444444-4444-4444-4444-444444444444');
+SELECT authenticate_as('d4444444-4444-4444-4444-444444444444');
 DELETE FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'c3333333-3333-3333-3333-333333333333';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'c3333333-3333-3333-3333-333333333333'),
     1,
@@ -618,9 +617,9 @@ ROLLBACK TO sp_sm_kick3;
 
 -- Member cannot kick anyone
 SAVEPOINT sp_sm_kick4;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 DELETE FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'd4444444-4444-4444-4444-444444444444';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM server_members WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'd4444444-4444-4444-4444-444444444444'),
     1,
@@ -628,7 +627,7 @@ SELECT is(
 );
 ROLLBACK TO sp_sm_kick4;
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -636,25 +635,25 @@ SELECT tests.clear_auth();
 -- ═══════════════════════════════════════════════════════════════
 
 -- 7.1 SELECT: admin+ can see bans; mod/member cannot
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111');
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111');
 SELECT is(
     (SELECT count(*)::int FROM server_bans WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     1, 'server_bans SELECT: owner can see bans'
 );
 
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 SELECT is(
     (SELECT count(*)::int FROM server_bans WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     1, 'server_bans SELECT: admin can see bans'
 );
 
-SELECT tests.authenticate_as('d4444444-4444-4444-4444-444444444444');
+SELECT authenticate_as('d4444444-4444-4444-4444-444444444444');
 SELECT is(
     (SELECT count(*)::int FROM server_bans WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     0, 'server_bans SELECT: moderator cannot see bans'
 );
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT is(
     (SELECT count(*)::int FROM server_bans WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     0, 'server_bans SELECT: member cannot see bans'
@@ -662,14 +661,14 @@ SELECT is(
 
 -- 7.2 INSERT: admin+ can create ban
 SAVEPOINT sp_ban_ins;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 SELECT lives_ok(
     $$INSERT INTO server_bans (server_id, user_id, banned_by, reason) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'e5555555-5555-5555-5555-555555555555', 'c3333333-3333-3333-3333-333333333333', 'test')$$,
     'server_bans INSERT: admin can create ban'
 );
 ROLLBACK TO sp_ban_ins;
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT throws_ok(
     $$INSERT INTO server_bans (server_id, user_id, banned_by, reason) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'e5555555-5555-5555-5555-555555555555', 'b2222222-2222-2222-2222-222222222222', 'test')$$,
     NULL, NULL,
@@ -678,9 +677,9 @@ SELECT throws_ok(
 
 -- 7.3 DELETE: admin+ can remove ban
 SAVEPOINT sp_ban_del;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 DELETE FROM server_bans WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'f6666666-6666-6666-6666-666666666666';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM server_bans WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'f6666666-6666-6666-6666-666666666666'),
     0,
@@ -689,9 +688,9 @@ SELECT is(
 ROLLBACK TO sp_ban_del;
 
 SAVEPOINT sp_ban_del2;
-SELECT tests.authenticate_as('d4444444-4444-4444-4444-444444444444');
+SELECT authenticate_as('d4444444-4444-4444-4444-444444444444');
 DELETE FROM server_bans WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'f6666666-6666-6666-6666-666666666666';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM server_bans WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND user_id = 'f6666666-6666-6666-6666-666666666666'),
     1,
@@ -699,7 +698,7 @@ SELECT is(
 );
 ROLLBACK TO sp_ban_del2;
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -707,13 +706,13 @@ SELECT tests.clear_auth();
 -- ═══════════════════════════════════════════════════════════════
 
 -- 8.1 SELECT: member can see; non-member cannot
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT is(
     (SELECT count(*)::int FROM invites WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     1, 'invites SELECT: member can see invites'
 );
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT is(
     (SELECT count(*)::int FROM invites WHERE server_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     0, 'invites SELECT: non-member cannot see invites'
@@ -721,7 +720,7 @@ SELECT is(
 
 -- 8.2 INSERT: member can create (creator_id = self, not DM)
 SAVEPOINT sp_inv_ins;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT lives_ok(
     $$INSERT INTO invites (code, server_id, creator_id) VALUES ('testcode2', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'b2222222-2222-2222-2222-222222222222')$$,
     'invites INSERT: member can create invite'
@@ -729,7 +728,7 @@ SELECT lives_ok(
 ROLLBACK TO sp_inv_ins;
 
 -- Cannot spoof creator_id
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT throws_ok(
     $$INSERT INTO invites (code, server_id, creator_id) VALUES ('testcode3', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'a1111111-1111-1111-1111-111111111111')$$,
     NULL, NULL,
@@ -737,7 +736,7 @@ SELECT throws_ok(
 );
 
 -- Cannot create invite for DM server
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111');
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111');
 SELECT throws_ok(
     $$INSERT INTO invites (code, server_id, creator_id) VALUES ('testcode4', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'a1111111-1111-1111-1111-111111111111')$$,
     NULL, NULL,
@@ -745,7 +744,7 @@ SELECT throws_ok(
 );
 
 -- Non-member cannot create invite
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT throws_ok(
     $$INSERT INTO invites (code, server_id, creator_id) VALUES ('testcode5', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'e5555555-5555-5555-5555-555555555555')$$,
     NULL, NULL,
@@ -754,9 +753,9 @@ SELECT throws_ok(
 
 -- 8.3 DELETE: creator or admin+ can delete
 SAVEPOINT sp_inv_del;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 DELETE FROM invites WHERE code = 'testcode1';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM invites WHERE code = 'testcode1'),
     0,
@@ -765,9 +764,9 @@ SELECT is(
 ROLLBACK TO sp_inv_del;
 
 SAVEPOINT sp_inv_del2;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 DELETE FROM invites WHERE code = 'testcode1';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM invites WHERE code = 'testcode1'),
     0,
@@ -775,7 +774,7 @@ SELECT is(
 );
 ROLLBACK TO sp_inv_del2;
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -783,20 +782,20 @@ SELECT tests.clear_auth();
 -- ═══════════════════════════════════════════════════════════════
 
 -- 9.1 SELECT: own only + channel member
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT is(
     (SELECT count(*)::int FROM channel_read_states WHERE channel_id = '11111111-1111-1111-1111-111111111111' AND user_id = 'b2222222-2222-2222-2222-222222222222'),
     1, 'channel_read_states SELECT: can see own read state'
 );
 
 -- Cannot see other user's read state (user_id filter in USING)
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111');
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111');
 SELECT is(
     (SELECT count(*)::int FROM channel_read_states WHERE user_id = 'b2222222-2222-2222-2222-222222222222'),
     0, 'channel_read_states SELECT: cannot see other user''s read state'
 );
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT is(
     (SELECT count(*)::int FROM channel_read_states),
     0, 'channel_read_states SELECT: non-member sees nothing'
@@ -804,14 +803,14 @@ SELECT is(
 
 -- 9.2 INSERT: own + channel member
 SAVEPOINT sp_crs_ins;
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111');
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111');
 SELECT lives_ok(
     $$INSERT INTO channel_read_states (channel_id, user_id, last_read_at) VALUES ('11111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', now())$$,
     'channel_read_states INSERT: can insert own read state'
 );
 ROLLBACK TO sp_crs_ins;
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT throws_ok(
     $$INSERT INTO channel_read_states (channel_id, user_id, last_read_at) VALUES ('11111111-1111-1111-1111-111111111111', 'e5555555-5555-5555-5555-555555555555', now())$$,
     NULL, NULL,
@@ -820,12 +819,12 @@ SELECT throws_ok(
 
 -- 9.3 UPDATE: own + channel member
 SAVEPOINT sp_crs_upd;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 UPDATE channel_read_states SET last_read_at = now() WHERE channel_id = '11111111-1111-1111-1111-111111111111' AND user_id = 'b2222222-2222-2222-2222-222222222222';
 SELECT pass('channel_read_states UPDATE: can update own read state');
 ROLLBACK TO sp_crs_upd;
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -833,13 +832,13 @@ SELECT tests.clear_auth();
 -- ═══════════════════════════════════════════════════════════════
 
 -- 10.1 SELECT: channel member can see
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT is(
     (SELECT count(*)::int FROM message_reactions WHERE message_id = 'aaaa0001-0001-0001-0001-000100010001'),
     1, 'message_reactions SELECT: member sees reactions'
 );
 
-SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555');
+SELECT authenticate_as('e5555555-5555-5555-5555-555555555555');
 SELECT is(
     (SELECT count(*)::int FROM message_reactions),
     0, 'message_reactions SELECT: non-member sees nothing'
@@ -847,14 +846,14 @@ SELECT is(
 
 -- 10.2 INSERT: own + channel member
 SAVEPOINT sp_rxn_ins;
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111');
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111');
 SELECT lives_ok(
     $$INSERT INTO message_reactions (id, message_id, user_id, emoji) VALUES ('fea20001-0001-0001-0001-000200010001', 'aaaa0001-0001-0001-0001-000100010001', 'a1111111-1111-1111-1111-111111111111', '❤️')$$,
     'message_reactions INSERT: member can add own reaction'
 );
 ROLLBACK TO sp_rxn_ins;
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT throws_ok(
     $$INSERT INTO message_reactions (id, message_id, user_id, emoji) VALUES ('fea20002-0002-0002-0002-000200020002', 'aaaa0001-0001-0001-0001-000100010001', 'a1111111-1111-1111-1111-111111111111', '😀')$$,
     NULL, NULL,
@@ -863,9 +862,9 @@ SELECT throws_ok(
 
 -- 10.3 DELETE: own + channel member
 SAVEPOINT sp_rxn_del;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 DELETE FROM message_reactions WHERE id = 'fea10001-0001-0001-0001-000100010001';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM message_reactions WHERE id = 'fea10001-0001-0001-0001-000100010001'),
     0,
@@ -873,7 +872,7 @@ SELECT is(
 );
 ROLLBACK TO sp_rxn_del;
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -881,19 +880,19 @@ SELECT tests.clear_auth();
 -- ═══════════════════════════════════════════════════════════════
 
 -- 11.1 SELECT: admin+ only
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 SELECT is(
     (SELECT count(*)::int FROM channel_role_access),
     1, 'channel_role_access SELECT: admin can see access rules'
 );
 
-SELECT tests.authenticate_as('d4444444-4444-4444-4444-444444444444');
+SELECT authenticate_as('d4444444-4444-4444-4444-444444444444');
 SELECT is(
     (SELECT count(*)::int FROM channel_role_access),
     0, 'channel_role_access SELECT: moderator cannot see access rules'
 );
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT is(
     (SELECT count(*)::int FROM channel_role_access),
     0, 'channel_role_access SELECT: member cannot see access rules'
@@ -901,14 +900,14 @@ SELECT is(
 
 -- 11.2 INSERT: admin+ only
 SAVEPOINT sp_cra_ins;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 SELECT lives_ok(
     $$INSERT INTO channel_role_access (channel_id, role) VALUES ('22222222-2222-2222-2222-222222222222', 'member')$$,
     'channel_role_access INSERT: admin can create access rule'
 );
 ROLLBACK TO sp_cra_ins;
 
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222');
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222');
 SELECT throws_ok(
     $$INSERT INTO channel_role_access (channel_id, role) VALUES ('22222222-2222-2222-2222-222222222222', 'member')$$,
     NULL, NULL,
@@ -917,9 +916,9 @@ SELECT throws_ok(
 
 -- 11.3 DELETE: admin+ only
 SAVEPOINT sp_cra_del;
-SELECT tests.authenticate_as('c3333333-3333-3333-3333-333333333333');
+SELECT authenticate_as('c3333333-3333-3333-3333-333333333333');
 DELETE FROM channel_role_access WHERE channel_id = '22222222-2222-2222-2222-222222222222' AND role = 'moderator';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM channel_role_access WHERE channel_id = '22222222-2222-2222-2222-222222222222' AND role = 'moderator'),
     0,
@@ -928,9 +927,9 @@ SELECT is(
 ROLLBACK TO sp_cra_del;
 
 SAVEPOINT sp_cra_del2;
-SELECT tests.authenticate_as('d4444444-4444-4444-4444-444444444444');
+SELECT authenticate_as('d4444444-4444-4444-4444-444444444444');
 DELETE FROM channel_role_access WHERE channel_id = '22222222-2222-2222-2222-222222222222' AND role = 'moderator';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM channel_role_access WHERE channel_id = '22222222-2222-2222-2222-222222222222' AND role = 'moderator'),
     1,
@@ -938,7 +937,7 @@ SELECT is(
 );
 ROLLBACK TO sp_cra_del2;
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -956,7 +955,7 @@ SELECT is(
 SAVEPOINT sp_belt;
 INSERT INTO public.server_members (server_id, user_id, role)
 VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'f6666666-6666-6666-6666-666666666666', 'member');
-SELECT tests.authenticate_as('f6666666-6666-6666-6666-666666666666');
+SELECT authenticate_as('f6666666-6666-6666-6666-666666666666');
 SELECT is(
     public.is_server_member('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
     false,
@@ -969,6 +968,6 @@ ROLLBACK TO sp_belt;
 -- DONE
 -- ═══════════════════════════════════════════════════════════════
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT * FROM finish();
 ROLLBACK;

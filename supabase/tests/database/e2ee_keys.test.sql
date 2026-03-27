@@ -10,10 +10,9 @@
 -- Run via: supabase test db
 -- =============================================================
 BEGIN;
+SET search_path TO public, extensions;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-CREATE SCHEMA IF NOT EXISTS tests;
-GRANT USAGE ON SCHEMA tests TO authenticated;
 SELECT plan(59);
 
 
@@ -25,7 +24,7 @@ SELECT plan(59);
 -- These helpers impersonate users by setting JWT claims + switching
 -- to the authenticated role (which activates RLS).
 
-CREATE OR REPLACE FUNCTION tests.authenticate_as(p_user_id uuid)
+CREATE OR REPLACE FUNCTION authenticate_as(p_user_id uuid)
 RETURNS void AS $$
 BEGIN
     PERFORM set_config(
@@ -42,7 +41,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION tests.clear_auth()
+CREATE OR REPLACE FUNCTION clear_auth()
 RETURNS void AS $$
 BEGIN
     EXECUTE 'SET LOCAL ROLE postgres';
@@ -50,7 +49,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA tests TO authenticated;
+GRANT EXECUTE ON FUNCTION authenticate_as(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION clear_auth() TO authenticated;
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -167,7 +167,7 @@ SELECT row_level_security_is_on('public', 'device_keys',
 -- ═══════════════════════════════════════════════════════════════
 
 -- 2.1 SELECT: authenticated user CAN select all device keys
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
 SELECT is(
     (SELECT count(*)::int FROM device_keys),
     2,
@@ -175,9 +175,9 @@ SELECT is(
 );
 
 -- 2.2 INSERT: authenticated user CAN insert with own user_id
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SAVEPOINT sp_dk_ins_own;
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
 SELECT lives_ok(
     $$INSERT INTO device_keys (id, user_id, device_id, identity_key, signing_key, device_name)
       VALUES ('d00a0099-0099-0099-0099-009900990099', 'a1111111-1111-1111-1111-111111111111', 'ALICE_DEVICE_2', 'alice-key2-curve', 'alice-key2-ed', 'Alice Tablet')$$,
@@ -186,7 +186,7 @@ SELECT lives_ok(
 ROLLBACK TO sp_dk_ins_own;
 
 -- 2.3 INSERT: authenticated user CANNOT insert with another user's user_id
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
 SELECT throws_ok(
     $$INSERT INTO device_keys (id, user_id, device_id, identity_key, signing_key, device_name)
       VALUES ('d00a0098-0098-0098-0098-009800980098', 'b2222222-2222-2222-2222-222222222222', 'SPOOF_DEVICE', 'spoof-curve', 'spoof-ed', 'Spoofed')$$,
@@ -197,11 +197,11 @@ SELECT throws_ok(
 -- 2.4 UPDATE: authenticated user CAN update own row
 -- WHY: lives_ok is false-positive — it passes even if 0 rows were updated.
 -- We execute the UPDATE then verify the value actually changed.
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SAVEPOINT sp_dk_upd_own;
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
 UPDATE device_keys SET device_name = 'Alice Laptop (updated)' WHERE id = 'd00a0001-0001-0001-0001-000100010001';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT device_name FROM device_keys WHERE id = 'd00a0001-0001-0001-0001-000100010001'),
     'Alice Laptop (updated)',
@@ -212,11 +212,11 @@ ROLLBACK TO sp_dk_upd_own;
 -- 2.5 UPDATE: authenticated user CANNOT update another user's row
 -- WHY: UPDATE with RLS silently skips rows that don't match the USING clause.
 -- We verify 0 rows were affected by checking the value is unchanged.
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SAVEPOINT sp_dk_upd_other;
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
 UPDATE device_keys SET device_name = 'HACKED' WHERE id = 'd00b0002-0002-0002-0002-000200020002';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT device_name FROM device_keys WHERE id = 'd00b0002-0002-0002-0002-000200020002'),
     'Bob Phone',
@@ -227,11 +227,11 @@ ROLLBACK TO sp_dk_upd_other;
 -- 2.6 DELETE: authenticated user CAN delete own row
 -- WHY: lives_ok is false-positive — it passes even if 0 rows were deleted.
 -- We execute the DELETE then verify the row is actually gone.
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SAVEPOINT sp_dk_del_own;
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
 DELETE FROM device_keys WHERE id = 'd00a0001-0001-0001-0001-000100010001';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM device_keys WHERE id = 'd00a0001-0001-0001-0001-000100010001'),
     0,
@@ -240,11 +240,11 @@ SELECT is(
 ROLLBACK TO sp_dk_del_own;
 
 -- 2.7 DELETE: authenticated user CANNOT delete another user's row
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SAVEPOINT sp_dk_del_other;
-SELECT tests.authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
+SELECT authenticate_as('a1111111-1111-1111-1111-111111111111'); -- Alice
 DELETE FROM device_keys WHERE id = 'd00b0002-0002-0002-0002-000200020002';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM device_keys WHERE id = 'd00b0002-0002-0002-0002-000200020002'),
     1,
@@ -253,7 +253,7 @@ SELECT is(
 ROLLBACK TO sp_dk_del_other;
 
 -- 2.8 Anonymous: CANNOT select
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SET LOCAL ROLE anon;
 SELECT is(
     (SELECT count(*)::int FROM device_keys),
@@ -275,7 +275,7 @@ SET LOCAL ROLE anon;
 -- WHY: anon sees 0 rows (SELECT policy is authenticated-only), so UPDATE affects nothing.
 -- We verify the row is unchanged as postgres.
 UPDATE device_keys SET device_name = 'HACKED_ANON' WHERE id = 'd00a0001-0001-0001-0001-000100010001';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT device_name FROM device_keys WHERE id = 'd00a0001-0001-0001-0001-000100010001'),
     'Alice Laptop',
@@ -285,7 +285,7 @@ SELECT is(
 -- 2.11 Anonymous: CANNOT delete
 SET LOCAL ROLE anon;
 DELETE FROM device_keys WHERE id = 'd00a0001-0001-0001-0001-000100010001';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM device_keys WHERE id = 'd00a0001-0001-0001-0001-000100010001'),
     1,
@@ -377,7 +377,7 @@ SELECT row_level_security_is_on('public', 'one_time_keys',
 -- ═══════════════════════════════════════════════════════════════
 
 -- 4.1 SELECT: authenticated user CAN select all one-time keys
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
 SELECT is(
     (SELECT count(*)::int FROM one_time_keys),
     3,
@@ -385,9 +385,9 @@ SELECT is(
 );
 
 -- 4.2 INSERT: authenticated user CAN insert with own user_id
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SAVEPOINT sp_otk_ins_own;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
 SELECT lives_ok(
     $$INSERT INTO one_time_keys (id, user_id, device_id, key_id, public_key, is_fallback)
       VALUES ('0e0b0099-0099-0099-0099-009900990099', 'b2222222-2222-2222-2222-222222222222', 'BOB_DEVICE_1', 'BBBBBZ', 'bob-new-otk-base64', false)$$,
@@ -396,7 +396,7 @@ SELECT lives_ok(
 ROLLBACK TO sp_otk_ins_own;
 
 -- 4.3 INSERT: authenticated user CANNOT insert for another user
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
 SELECT throws_ok(
     $$INSERT INTO one_time_keys (id, user_id, device_id, key_id, public_key, is_fallback)
       VALUES ('0e0b0098-0098-0098-0098-009800980098', 'a1111111-1111-1111-1111-111111111111', 'ALICE_DEVICE_1', 'SPOOF1', 'spoof-key', false)$$,
@@ -407,11 +407,11 @@ SELECT throws_ok(
 -- 4.4 DELETE: authenticated user CAN delete own one-time key
 -- WHY: lives_ok is false-positive — it passes even if 0 rows were deleted.
 -- We execute the DELETE then verify the row is actually gone.
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SAVEPOINT sp_otk_del_own;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
 DELETE FROM one_time_keys WHERE id = '0e0b0001-0001-0001-0001-000100010001';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM one_time_keys WHERE id = '0e0b0001-0001-0001-0001-000100010001'),
     0,
@@ -420,11 +420,11 @@ SELECT is(
 ROLLBACK TO sp_otk_del_own;
 
 -- 4.5 DELETE: authenticated user CANNOT delete another user's one-time key
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SAVEPOINT sp_otk_del_other;
-SELECT tests.authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
+SELECT authenticate_as('b2222222-2222-2222-2222-222222222222'); -- Bob
 DELETE FROM one_time_keys WHERE id = '0e0a0001-0001-0001-0001-000100010001'; -- Alice's key
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM one_time_keys WHERE id = '0e0a0001-0001-0001-0001-000100010001'),
     1,
@@ -433,7 +433,7 @@ SELECT is(
 ROLLBACK TO sp_otk_del_other;
 
 -- 4.6 Anonymous: CANNOT select
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SET LOCAL ROLE anon;
 SELECT is(
     (SELECT count(*)::int FROM one_time_keys),
@@ -453,7 +453,7 @@ SELECT throws_ok(
 -- 4.8 Anonymous: CANNOT delete
 SET LOCAL ROLE anon;
 DELETE FROM one_time_keys WHERE id = '0e0a0001-0001-0001-0001-000100010001';
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT is(
     (SELECT count(*)::int FROM one_time_keys WHERE id = '0e0a0001-0001-0001-0001-000100010001'),
     1,
@@ -465,6 +465,6 @@ SELECT is(
 -- DONE
 -- ═══════════════════════════════════════════════════════════════
 
-SELECT tests.clear_auth();
+SELECT clear_auth();
 SELECT * FROM finish();
 ROLLBACK;
