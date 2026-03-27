@@ -15,7 +15,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 CREATE SCHEMA IF NOT EXISTS tests;
 GRANT USAGE ON SCHEMA tests TO authenticated;
-SELECT plan(24);
+SELECT plan(34);
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -156,6 +156,37 @@ SELECT fk_ok('public', 'megolm_sessions', 'creator_id', 'auth', 'users', 'id',
 SELECT has_index('public', 'megolm_sessions', 'idx_megolm_sessions_channel_id',
     'schema: index idx_megolm_sessions_channel_id exists');
 
+-- WHY: Verify RLS is actually enabled on the table — without this,
+-- all the policy tests below would pass vacuously.
+SELECT ok(
+    (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.megolm_sessions'::regclass),
+    'schema: RLS is enabled on megolm_sessions'
+);
+
+SELECT col_type_is('public', 'megolm_sessions', 'channel_id', 'uuid',
+    'schema: megolm_sessions.channel_id is UUID');
+
+SELECT col_type_is('public', 'megolm_sessions', 'session_id', 'text',
+    'schema: megolm_sessions.session_id is TEXT');
+
+SELECT col_type_is('public', 'megolm_sessions', 'creator_id', 'uuid',
+    'schema: megolm_sessions.creator_id is UUID');
+
+SELECT col_type_is('public', 'megolm_sessions', 'created_at', 'timestamp with time zone',
+    'schema: megolm_sessions.created_at is TIMESTAMPTZ');
+
+SELECT col_not_null('public', 'megolm_sessions', 'channel_id',
+    'schema: megolm_sessions.channel_id is NOT NULL');
+
+SELECT col_not_null('public', 'megolm_sessions', 'session_id',
+    'schema: megolm_sessions.session_id is NOT NULL');
+
+SELECT col_not_null('public', 'megolm_sessions', 'creator_id',
+    'schema: megolm_sessions.creator_id is NOT NULL');
+
+SELECT col_not_null('public', 'megolm_sessions', 'created_at',
+    'schema: megolm_sessions.created_at is NOT NULL');
+
 
 -- ═══════════════════════════════════════════════════════════════
 -- 3. RLS TESTS — megolm_sessions
@@ -206,7 +237,19 @@ SELECT throws_ok(
     'RLS INSERT: cannot insert megolm_session with another creator_id'
 );
 
--- 3.6 INSERT: anonymous CANNOT insert megolm_session
+-- 3.6 INSERT: non-member CANNOT insert even with own creator_id
+-- WHY: Different from the spoofed creator_id test above — here Eve uses
+-- her real UID but she's not a server/channel member, so the
+-- is_channel_member(channel_id) check in the INSERT policy blocks her.
+SELECT tests.clear_auth();
+SELECT tests.authenticate_as('e5555555-5555-5555-5555-555555555555'); -- Eve (non-member)
+SELECT throws_ok(
+    $$INSERT INTO megolm_sessions (id, channel_id, session_id, creator_id) VALUES ('deadbeef-0005-0005-0005-000500050005', '11111111-1111-1111-1111-111111111111', 'session-eve-own', 'e5555555-5555-5555-5555-555555555555')$$,
+    NULL, NULL,
+    'RLS INSERT: non-member cannot insert megolm_session even with own creator_id'
+);
+
+-- 3.7 INSERT: anonymous CANNOT insert megolm_session
 SELECT tests.clear_auth();
 SET LOCAL ROLE anon;
 SELECT throws_ok(
@@ -215,7 +258,7 @@ SELECT throws_ok(
     'RLS INSERT: anonymous cannot insert megolm_session'
 );
 
--- 3.7 SELECT: service role (postgres) CAN see all rows
+-- 3.8 SELECT: service role (postgres) CAN see all rows
 SET LOCAL ROLE postgres;
 SELECT cmp_ok(
     (SELECT count(*)::int FROM megolm_sessions),
