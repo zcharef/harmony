@@ -353,9 +353,7 @@ test.describe('Kick & Ban Moderation', () => {
     // The settings-ban-list div renders even when empty (0 children = 0 height = invisible).
     // Waiting for a concrete ban-row ensures the useBans query resolved with data.
     const banList = page.locator('[data-test="settings-ban-list"]')
-    const banRow = banList.locator(
-      `[data-test="ban-row"][data-user-id="${banListTarget.id}"]`,
-    )
+    const banRow = banList.locator(`[data-test="ban-row"][data-user-id="${banListTarget.id}"]`)
     await banRow.waitFor({ timeout: 10_000 })
     await expect(banList).toBeVisible()
   })

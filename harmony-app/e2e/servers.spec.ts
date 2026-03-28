@@ -96,9 +96,7 @@ test.describe('Server CRUD', () => {
     expect(channelCount).toBeGreaterThanOrEqual(1)
 
     // WHY: The API auto-creates a "general" channel when a server is created.
-    const generalChannel = page.locator(
-      '[data-test="channel-button"][data-channel-name="general"]',
-    )
+    const generalChannel = page.locator('[data-test="channel-button"][data-channel-name="general"]')
     await expect(generalChannel).toBeVisible()
   })
 
