@@ -1,0 +1,96 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                c.id,\n                c.server_id,\n                c.name,\n                c.topic,\n                c.channel_type as \"channel_type!: String\",\n                c.position,\n                c.is_private,\n                c.is_read_only,\n                c.encrypted,\n                c.created_at,\n                c.updated_at\n            FROM channels c\n            WHERE c.server_id = $1\n              AND (\n                  c.is_private = false\n                  OR EXISTS (\n                      SELECT 1 FROM server_members sm\n                      WHERE sm.server_id = c.server_id\n                        AND sm.user_id = $2\n                        AND (\n                            sm.role IN ($3, $4)\n                            OR EXISTS (\n                                SELECT 1 FROM channel_role_access cra\n                                WHERE cra.channel_id = c.id AND cra.role = sm.role\n                            )\n                        )\n                  )\n              )\n            ORDER BY c.position\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "topic",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "channel_type!: String",
+        "type_info": {
+          "Custom": {
+            "name": "channel_type",
+            "kind": {
+              "Enum": [
+                "text",
+                "voice",
+                "forum"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "position",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_private",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_read_only",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "encrypted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5eb69359341aab96f6f7fb3e78afb615c8d91a23650f43cbcf814153a76a87cc"
+}

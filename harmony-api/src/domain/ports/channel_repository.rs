@@ -1,0 +1,60 @@
+//! Port: channel persistence.
+
+use async_trait::async_trait;
+
+use crate::domain::errors::DomainError;
+use crate::domain::models::{Channel, ChannelId, ServerId, UserId};
+
+/// Intent-based repository for channels.
+#[async_trait]
+pub trait ChannelRepository: Send + Sync + std::fmt::Debug {
+    /// List channels visible to `caller_user_id` in a server, ordered by position.
+    ///
+    /// Private channels are only returned if the caller is admin+ or has
+    /// explicit access via `channel_role_access`.
+    async fn list_for_server(
+        &self,
+        server_id: &ServerId,
+        caller_user_id: &UserId,
+    ) -> Result<Vec<Channel>, DomainError>;
+
+    /// Get a channel by ID. Returns `None` if not found.
+    async fn get_by_id(&self, channel_id: &ChannelId) -> Result<Option<Channel>, DomainError>;
+
+    /// Create a new channel. Returns the created channel.
+    async fn create(&self, channel: &Channel) -> Result<Channel, DomainError>;
+
+    /// Update a channel's name, topic, permission flags, and/or encryption toggle.
+    ///
+    /// `topic` uses `Option<Option<String>>`: outer = "was field provided?",
+    /// inner = "null (clear) or a value". Follows JSON PATCH semantics.
+    /// `is_private` / `is_read_only` / `encrypted` use `Option<bool>`: `None` = no change.
+    async fn update(
+        &self,
+        channel_id: &ChannelId,
+        name: Option<String>,
+        topic: Option<Option<String>>,
+        is_private: Option<bool>,
+        is_read_only: Option<bool>,
+        encrypted: Option<bool>,
+    ) -> Result<Channel, DomainError>;
+
+    /// Delete a channel by ID, unless it is the last channel in its server.
+    ///
+    /// Returns `Ok(())` on success, `DomainError::ValidationError` if this is
+    /// the last channel, or `DomainError::NotFound` if the channel does not exist.
+    /// The check and delete are atomic (single SQL statement) to prevent TOCTOU races.
+    async fn delete_if_not_last(&self, channel_id: &ChannelId) -> Result<(), DomainError>;
+
+    /// Count channels in a server (used for position auto-assignment on create).
+    async fn count_for_server(&self, server_id: &ServerId) -> Result<i64, DomainError>;
+
+    /// Find the default (lowest position) channel for a server.
+    ///
+    /// Used for system messages (join announcements). Returns `None` if the
+    /// server has no channels (should never happen — servers always have #general).
+    async fn find_default_for_server(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<Option<Channel>, DomainError>;
+}

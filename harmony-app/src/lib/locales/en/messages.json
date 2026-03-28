@@ -1,0 +1,13 @@
+{
+  "sending": "Sending...",
+  "edited": "(edited)",
+  "deletedMessage": "[Message deleted]",
+  "removedByModerator": "[Message removed by moderator]",
+  "todayAt": "Today at {{time}}",
+  "dateAt": "{{date}} at {{time}}",
+  "escapeToCancel": "escape to <cancel>cancel</cancel> \u2022 enter to <save>save</save>",
+  "system": {
+    "memberJoin": "{{username}} joined the server",
+    "unknown": "[System message]"
+  }
+}

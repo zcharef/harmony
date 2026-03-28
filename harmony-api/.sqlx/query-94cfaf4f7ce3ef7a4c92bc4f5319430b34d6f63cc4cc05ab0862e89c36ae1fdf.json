@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM server_bans\n            WHERE server_id = $1 AND user_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "94cfaf4f7ce3ef7a4c92bc4f5319430b34d6f63cc4cc05ab0862e89c36ae1fdf"
+}

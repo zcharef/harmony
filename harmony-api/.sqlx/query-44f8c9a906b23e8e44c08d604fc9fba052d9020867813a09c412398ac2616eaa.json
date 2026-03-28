@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(COUNT(*)::BIGINT, 0) as \"count!\"\n               FROM servers\n               WHERE owner_id = $1 AND is_dm = false",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "44f8c9a906b23e8e44c08d604fc9fba052d9020867813a09c412398ac2616eaa"
+}

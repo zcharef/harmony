@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO channels (server_id, name, channel_type, position)\n            VALUES ($1, 'general', 'text', 0)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "35fc025c475402dbff09f384922b40f59ae37b2ae7f2d6690ad172e4240cc4ac"
+}

@@ -1,0 +1,175 @@
+//! Member handlers.
+
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use serde::Deserialize;
+
+use crate::api::dto::members::{AssignRoleRequest, MemberListResponse, TransferOwnershipRequest};
+use crate::api::dto::{MemberResponse, ServerResponse};
+use crate::api::errors::{ApiError, ProblemDetails};
+use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
+use crate::api::state::AppState;
+use crate::domain::models::{ServerId, UserId};
+
+/// List all members of a server.
+///
+/// # Errors
+/// Returns `ApiError` on repository error.
+#[utoipa::path(
+    get,
+    path = "/v1/servers/{id}/members",
+    tag = "Members",
+    security(("bearer_auth" = [])),
+    params(("id" = ServerId, Path, description = "Server ID")),
+    responses(
+        (status = 200, description = "Member list", body = MemberListResponse),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 404, description = "Server not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn list_members(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(server_id): ApiPath<ServerId>,
+) -> Result<impl IntoResponse, ApiError> {
+    let is_member = state
+        .member_repository()
+        .is_member(&server_id, &user_id)
+        .await?;
+    if !is_member {
+        return Err(ApiError::forbidden(
+            "You must be a server member to view the member list",
+        ));
+    }
+
+    let members = state.member_repository().list_by_server(&server_id).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(MemberListResponse::from_members(members)),
+    ))
+}
+
+/// Path parameters for member-specific operations.
+#[derive(Debug, Deserialize)]
+pub struct MemberPath {
+    pub id: ServerId,
+    pub user_id: UserId,
+}
+
+/// Kick a member from a server. Requires moderator+ role with hierarchy enforcement.
+///
+/// # Errors
+/// Returns `ApiError` on authorization failure or repository error.
+#[utoipa::path(
+    delete,
+    path = "/v1/servers/{id}/members/{user_id}",
+    tag = "Members",
+    security(("bearer_auth" = [])),
+    params(
+        ("id" = ServerId, Path, description = "Server ID"),
+        ("user_id" = UserId, Path, description = "User ID to kick"),
+    ),
+    responses(
+        (status = 204, description = "Member kicked"),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Insufficient role or hierarchy violation", body = ProblemDetails),
+        (status = 404, description = "Server or member not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn kick_member(
+    AuthUser(caller_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(path): ApiPath<MemberPath>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .moderation_service()
+        .kick_member(&path.id, &path.user_id, &caller_id)
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Assign a role to a server member. Requires admin+ role with hierarchy enforcement.
+///
+/// # Errors
+/// Returns `ApiError` on validation failure, authorization failure, or repository error.
+#[utoipa::path(
+    patch,
+    path = "/v1/servers/{id}/members/{user_id}/role",
+    tag = "Members",
+    security(("bearer_auth" = [])),
+    params(
+        ("id" = ServerId, Path, description = "Server ID"),
+        ("user_id" = UserId, Path, description = "Target user ID"),
+    ),
+    request_body = AssignRoleRequest,
+    responses(
+        (status = 200, description = "Role assigned", body = MemberResponse),
+        (status = 400, description = "Invalid role or self-assignment", body = ProblemDetails),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Insufficient role or hierarchy violation", body = ProblemDetails),
+        (status = 404, description = "Server or member not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state, req))]
+pub async fn assign_role(
+    AuthUser(caller_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(path): ApiPath<MemberPath>,
+    ApiJson(req): ApiJson<AssignRoleRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .moderation_service()
+        .assign_role(&path.id, &caller_id, &path.user_id, req.role)
+        .await?;
+
+    // Return the updated member
+    let member = state
+        .member_repository()
+        .get_member(&path.id, &path.user_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError::not_found(format!(
+                "ServerMember with id 'server={}, user={}' not found",
+                path.id, path.user_id
+            ))
+        })?;
+
+    Ok((StatusCode::OK, Json(MemberResponse::from(member))))
+}
+
+/// Transfer server ownership. Only the current owner can do this.
+///
+/// # Errors
+/// Returns `ApiError` on authorization failure or repository error.
+#[utoipa::path(
+    post,
+    path = "/v1/servers/{id}/transfer-ownership",
+    tag = "Members",
+    security(("bearer_auth" = [])),
+    params(("id" = ServerId, Path, description = "Server ID")),
+    request_body = TransferOwnershipRequest,
+    responses(
+        (status = 200, description = "Ownership transferred", body = ServerResponse),
+        (status = 400, description = "Cannot transfer to self", body = ProblemDetails),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Not server owner", body = ProblemDetails),
+        (status = 404, description = "Server or new owner not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state, req))]
+pub async fn transfer_ownership(
+    AuthUser(caller_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(server_id): ApiPath<ServerId>,
+    ApiJson(req): ApiJson<TransferOwnershipRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let server = state
+        .moderation_service()
+        .transfer_ownership(&server_id, &caller_id, &req.new_owner_id)
+        .await?;
+
+    Ok((StatusCode::OK, Json(ServerResponse::from(server))))
+}

@@ -1,0 +1,102 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE channels\n            SET name = COALESCE($2, name),\n                topic = CASE WHEN $3 THEN $4 ELSE topic END,\n                is_private = CASE WHEN $5 THEN $6 ELSE is_private END,\n                is_read_only = CASE WHEN $7 THEN $8 ELSE is_read_only END,\n                encrypted = CASE WHEN $9 THEN $10 ELSE encrypted END\n            WHERE id = $1\n            RETURNING\n                id,\n                server_id,\n                name,\n                topic,\n                channel_type as \"channel_type!: String\",\n                position,\n                is_private,\n                is_read_only,\n                encrypted,\n                created_at,\n                updated_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "topic",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "channel_type!: String",
+        "type_info": {
+          "Custom": {
+            "name": "channel_type",
+            "kind": {
+              "Enum": [
+                "text",
+                "voice",
+                "forum"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "position",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_private",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_read_only",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "encrypted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool",
+        "Text",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c35242537a8ec6e9f46ce0cc92e5e44fa8d16b9b3dc70dab5414348cf4033ab1"
+}

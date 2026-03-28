@@ -1,0 +1,320 @@
+# Harmony E2E & Deploy (Tier 2: Secrets Required)
+#
+# Triggers:
+#   - push to main: runs E2E then deploys (continuous delivery)
+#   - pull_request_target + "safe-to-test" label: runs E2E for fork PRs
+#
+# Security model:
+#   pull_request_target runs the workflow YAML from the BASE branch (main),
+#   not the PR branch — so attackers cannot modify the workflow itself.
+#   The "safe-to-test" label is a maintainer gate: review the code BEFORE
+#   adding the label, since the PR's code will run with secrets.
+#   Only the "labeled" event type is allowed — after each new push, the
+#   maintainer must re-apply the label to re-trigger, preventing secret
+#   exfiltration via force-push after initial approval.
+#   --frozen-lockfile prevents supply-chain attacks via lockfile manipulation.
+
+name: E2E & Deploy
+
+# Least-privilege: no permissions by default. Jobs declare what they need.
+permissions: {}
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    branches: [main]
+    types: [labeled]
+
+concurrency:
+  # WHY ref not sha: pushes to main must cancel previous E2E runs to avoid
+  # concurrent migrations on the shared CI database. PRs use their number.
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # E2E Tests
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  e2e-tests:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push'
+      || contains(github.event.pull_request.labels.*.name, 'safe-to-test')
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # pull_request_target checks out the base branch by default.
+          # We need the PR's code for testing.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # ── Node / pnpm ──────────────────────────────────────
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: harmony-app/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: harmony-app
+        run: pnpm install --frozen-lockfile
+
+      # ── Playwright with browser cache ───────────────────
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('harmony-app/pnpm-lock.yaml') }}
+
+      - name: Install Playwright (chromium only)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: harmony-app
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: harmony-app
+        run: npx playwright install-deps chromium
+
+      # ── Rust toolchain (shared cache from rust-quality) ─
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: harmony-api
+          shared-key: harmony-rust
+
+      # ── Supabase Cloud: apply pending migrations ─────────
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link Supabase CI project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          CI_SUPABASE_PROJECT_REF: ${{ secrets.CI_SUPABASE_PROJECT_REF }}
+        run: supabase link --project-ref "$CI_SUPABASE_PROJECT_REF"
+
+      # WARNING: supabase db push targets a shared CI database. If two PRs
+      # run E2E concurrently, their migrations can race and corrupt state.
+      # Only one "safe-to-test" PR should be tested at a time. The per-PR
+      # concurrency group above prevents parallel runs for the SAME PR, but
+      # does NOT prevent two DIFFERENT PRs from racing. A global concurrency
+      # group is intentionally not used here to avoid blocking main deploys.
+      - name: Push pending migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase db push
+
+      # ── pgTAP database tests ────────────────────────────
+      # WHY: RLS policies and CHECK constraints are security-critical.
+      # WHY --db-url: `--linked` creates a restricted login role that lacks
+      # CREATE on public schema and access to auth tables. Using --db-url
+      # with the full database URL bypasses this and runs as postgres.
+      - name: Run pgTAP database tests
+        run: supabase test db --db-url "${{ secrets.CI_SUPABASE_DB_URL }}"
+
+      # ── Build & start Rust API ───────────────────────────
+      - name: Build Rust API
+        working-directory: harmony-api
+        env:
+          SQLX_OFFLINE: "true"
+        run: cargo build --release
+
+      - name: Start Rust API (background)
+        working-directory: harmony-api
+        env:
+          DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
+          SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
+          SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
+          ENVIRONMENT: test
+          SERVER_PORT: "3000"
+        run: ./target/release/harmony-api > /tmp/api-stdout.log 2>&1 &
+
+      # ── Generate API client (gitignored, must be regenerated) ─
+      # WHY: src/lib/api/ is gitignored — generated from openapi.json.
+      # Without this, every import from @/lib/api fails and Vite returns 500.
+      - name: Generate API client from OpenAPI spec
+        working-directory: harmony-app
+        run: pnpm gen:api
+
+      # ── Start Vite dev server ────────────────────────────
+      - name: Start Vite dev server (background)
+        working-directory: harmony-app
+        env:
+          VITE_API_URL: http://localhost:3000
+          VITE_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
+        run: pnpm dev &
+
+      # ── Wait for services ────────────────────────────────
+      - name: Wait for API and Vite to be ready
+        run: |
+          echo "Waiting for Rust API..."
+          timeout 60 bash -c 'until curl -sf http://localhost:3000/health; do sleep 1; done' || {
+            echo "::error::API failed to start. Logs:"
+            cat /tmp/api-stdout.log
+            exit 1
+          }
+          echo "Waiting for Vite dev server..."
+          timeout 60 bash -c 'until curl -sf http://localhost:1420; do sleep 1; done'
+          echo "All services ready."
+
+      # ── Smoke check: verify React app renders ────────────
+      # WHY: The Vite health check only confirms the HTML shell is served.
+      # If Zod env validation or Supabase init fails, the React app crashes
+      # silently and all E2E tests timeout. This step catches that early.
+      - name: Verify React app renders (smoke check)
+        working-directory: harmony-app
+        env:
+          VITE_API_URL: http://localhost:3000
+          VITE_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
+        run: |
+          npx playwright test --grep "should return 200 on health endpoint" --reporter=list 2>&1 || true
+          echo "--- Smoke check: navigating to app root ---"
+          node -e "
+          const { chromium } = require('@playwright/test');
+          (async () => {
+            const browser = await chromium.launch();
+            const page = await browser.newPage();
+            const errors = [];
+            page.on('pageerror', e => { console.error('PAGE ERROR:', e.message); errors.push(e.message); });
+            page.on('console', msg => {
+              const type = msg.type();
+              const text = msg.text();
+              if (type === 'error') { console.error('CONSOLE ERROR:', text); errors.push(text); }
+              else if (type === 'warn') { console.warn('CONSOLE WARN:', text); }
+            });
+            try {
+              await page.goto('http://localhost:1420', { waitUntil: 'networkidle', timeout: 30000 });
+            } catch(e) {
+              console.error('Navigation failed:', e.message);
+            }
+            const html = await page.content();
+            console.log('Page title:', await page.title());
+            console.log('HTML length:', html.length);
+            console.log('Has #root:', html.includes('id=\"root\"'));
+            console.log('First 1000 chars of body:', html.substring(html.indexOf('<body'), html.indexOf('<body') + 1000));
+            await page.screenshot({ path: 'smoke-check.png' });
+            console.log('Screenshot saved to smoke-check.png');
+            await browser.close();
+            if (errors.length > 0) {
+              console.error('Total browser errors:', errors.length);
+              // WHY: Don't fail the pipeline here — let the actual Playwright tests
+              // run and report specific failures with traces/screenshots.
+              console.warn('Smoke check detected errors. Continuing to Playwright tests for detailed diagnostics.');
+            } else {
+              console.log('Smoke check passed — no browser errors.');
+            }
+          })().catch(e => { console.error('Smoke check crashed:', e); process.exit(1); });
+          "
+
+      # ── Run E2E tests ────────────────────────────────────
+      - name: Run Playwright E2E tests
+        working-directory: harmony-app
+        env:
+          CI_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
+          CI_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
+          CI_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.CI_SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx playwright test --retries=1 --fail-on-flaky-tests
+
+      # ── Artifacts (on failure only) ──────────────────────
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: harmony-app/playwright-report/
+          retention-days: 14
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: |
+            harmony-app/test-results/
+            harmony-app/smoke-check.png
+          retention-days: 14
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Deploy API (only on push to main, after E2E passes)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  deploy-api:
+    name: Deploy API (Fly.io)
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly.io
+        working-directory: harmony-api
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Deploy SPA (only on push to main, after E2E passes)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  deploy-spa:
+    name: Deploy SPA (Cloudflare Pages)
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: harmony-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: harmony-app
+        run: pnpm install --frozen-lockfile
+
+      - name: Build production SPA
+        working-directory: harmony-app
+        env:
+          VITE_API_URL: https://api.joinharmony.app
+          VITE_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.PROD_TURNSTILE_SITE_KEY }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+        run: pnpm build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy harmony-app/dist --project-name=harmony-app --branch=main

@@ -1,0 +1,93 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                server_id,\n                name,\n                topic,\n                channel_type as \"channel_type!: String\",\n                position,\n                is_private,\n                is_read_only,\n                encrypted,\n                created_at,\n                updated_at\n            FROM channels\n            WHERE server_id = $1\n            ORDER BY position ASC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "topic",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "channel_type!: String",
+        "type_info": {
+          "Custom": {
+            "name": "channel_type",
+            "kind": {
+              "Enum": [
+                "text",
+                "voice",
+                "forum"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "position",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_private",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_read_only",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "encrypted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "71909c58c5f837b11fd28585b1769c6bc1b804f006c7cb33842460e1201de7bf"
+}

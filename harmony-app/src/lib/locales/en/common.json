@@ -1,0 +1,18 @@
+{
+  "alphaLabel": "Alpha",
+  "alphaDisclaimer": "This is an early alpha build. Expect bugs, missing features, and breaking changes.",
+  "cancel": "Cancel",
+  "save": "Save",
+  "create": "Create",
+  "back": "Back",
+  "done": "Done",
+  "join": "Join",
+  "preview": "Preview",
+  "search": "Search",
+  "error": "Error",
+  "loading": "Loading",
+  "tryAgain": "Try again",
+  "somethingWentWrong": "Something went wrong",
+  "anUnexpectedError": "An unexpected error occurred",
+  "dismiss": "Dismiss"
+}

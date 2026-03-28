@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH inserted AS (\n                INSERT INTO messages (channel_id, author_id, content)\n                VALUES ($1, $2, $3)\n                RETURNING\n                    id,\n                    channel_id,\n                    author_id,\n                    content,\n                    edited_at,\n                    deleted_at,\n                    deleted_by,\n                    encrypted,\n                    sender_device_id,\n                    message_type,\n                    system_event_key,\n                    created_at\n            )\n            SELECT\n                i.id,\n                i.channel_id,\n                i.author_id,\n                i.content,\n                i.edited_at,\n                i.deleted_at,\n                i.deleted_by,\n                i.encrypted,\n                i.sender_device_id,\n                i.message_type as \"message_type!: String\",\n                i.system_event_key,\n                i.created_at,\n                p.username AS \"author_username?\",\n                p.avatar_url AS \"author_avatar_url?\"\n            FROM inserted i\n            LEFT JOIN profiles p ON p.id = i.author_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "author_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "edited_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "deleted_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "encrypted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "sender_device_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "message_type!: String",
+        "type_info": {
+          "Custom": {
+            "name": "message_type",
+            "kind": {
+              "Enum": [
+                "default",
+                "system"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "system_event_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "author_username?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "author_avatar_url?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "0379efb0c1edc5d2f783e6cd0dea81a5f432e97445754a4fd633bdf6ed0b8004"
+}

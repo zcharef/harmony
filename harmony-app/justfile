@@ -1,0 +1,135 @@
+# Harmony App — Command Center
+# Usage: just <recipe> or just --list
+#
+# Philosophy: Zero-friction DX. No flags to remember.
+
+set dotenv-load := true
+
+# Default: show available commands
+default:
+    @just --list --unsorted
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DEVELOPMENT
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Run Vite dev server (port 1420)
+dev:
+    pnpm dev
+
+# Run Tauri desktop app in dev mode
+tauri-dev:
+    pnpm tauri dev
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# TESTING
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Run all tests
+test:
+    pnpm vitest run
+
+# Run architecture tests (feature structure, barrel exports)
+test-arch:
+    pnpm vitest run --config vitest.config.arch.ts
+
+# Run tests in watch mode
+test-watch:
+    pnpm vitest
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# E2E TESTING
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Run Playwright E2E tests
+e2e:
+    pnpm exec playwright test
+
+# Run Playwright E2E tests with UI mode
+e2e-ui:
+    pnpm exec playwright test --ui
+
+# Show Playwright test report
+e2e-report:
+    pnpm exec playwright show-report
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CODE QUALITY (Biome + ESLint boundaries)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Lint code (Biome)
+lint:
+    pnpm biome check .
+
+# Lint and auto-fix (Biome)
+lint-fix:
+    pnpm biome check --write .
+
+# Type check (tsc --noEmit)
+typecheck:
+    pnpm tsc --noEmit
+
+# Check module boundaries (eslint-plugin-boundaries)
+boundaries:
+    pnpm eslint --config eslint.config.mjs src/
+
+# Check for circular dependencies
+circular:
+    pnpm madge --circular --extensions ts,tsx --exclude 'lib/api/' src/
+
+# Find unused exports/files/deps (Knip)
+unused:
+    pnpm knip
+
+# Full quality wall: lint + typecheck + boundaries + circular + tests + arch tests + unused deps
+wall: lint typecheck boundaries circular test test-arch unused
+    @echo "Quality wall passed!"
+
+# Auto-fix everything (lint + format)
+fix: lint-fix
+    @echo "Code fixed!"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# BUILD
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Build for production (tsc + vite build)
+build:
+    pnpm build
+
+# Build Tauri desktop app
+tauri-build:
+    pnpm tauri build
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CODE GENERATION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Generate TypeScript API client from Rust OpenAPI spec
+gen-api:
+    cd ../harmony-api && just export-openapi
+    pnpm openapi-ts
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MAINTENANCE
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Clean build output
+clean:
+    rm -rf dist
+
+# Deep clean (includes node_modules, then reinstall)
+clean-deep:
+    rm -rf dist node_modules
+    pnpm install
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SETUP (run once after clone)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Install dependencies and setup hooks
+setup:
+    pnpm install
+    cd .. && lefthook install
+    @echo ""
+    @echo "Setup complete! Run 'just dev' to start."

@@ -1,0 +1,111 @@
+# cargo-deny configuration for harmony-app/src-tauri
+# https://embarkstudios.github.io/cargo-deny/
+#
+# Run: cargo deny check
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+# ============================================================================
+# ADVISORIES - Check for known security vulnerabilities
+# ============================================================================
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# WHY: Tauri's transitive tree includes many unmaintained GTK3/unic crates
+# that we cannot fix (upstream Tauri responsibility). Ignore known non-exploitable advisories.
+ignore = [
+    "RUSTSEC-2024-0370",  # proc-macro-error (build-time only)
+    # GTK3 bindings — unmaintained, no known vulns. Tauri upstream must migrate to GTK4.
+    "RUSTSEC-2024-0411",  # atk
+    "RUSTSEC-2024-0412",  # atk-sys
+    "RUSTSEC-2024-0413",  # gdk
+    "RUSTSEC-2024-0414",  # gdk-sys
+    "RUSTSEC-2024-0415",  # gdkwayland-sys
+    "RUSTSEC-2024-0416",  # gdkx11
+    "RUSTSEC-2024-0417",  # gdkx11-sys
+    "RUSTSEC-2024-0418",  # gtk
+    "RUSTSEC-2024-0419",  # gtk-sys
+    "RUSTSEC-2024-0420",  # gtk3-macros
+    # Unmaintained unic/fxhash crates — parser utilities with no security surface
+    "RUSTSEC-2025-0057",  # fxhash
+    "RUSTSEC-2025-0075",  # unic-*
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0098",
+    "RUSTSEC-2025-0100",
+]
+
+# ============================================================================
+# LICENSES - Ensure all dependencies have acceptable licenses
+# ============================================================================
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "0BSD",
+    "CDLA-Permissive-2.0",
+    "AGPL-3.0",
+    "OpenSSL",
+]
+
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[[licenses.clarify]]
+name = "webpki"
+expression = "ISC"
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
+
+[licenses.private]
+ignore = true
+registries = []
+
+# ============================================================================
+# BANS - Deny specific crates or features
+# ============================================================================
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+deny = [
+    { name = "openssl", wrappers = ["openssl-sys", "native-tls"] },
+    { name = "failure" },
+    { name = "error-chain" },
+    { name = "rust-crypto" },
+]
+
+skip = []
+skip-tree = []
+
+# ============================================================================
+# SOURCES - Ensure dependencies come from trusted sources
+# ============================================================================
+[sources]
+unknown-registry = "deny"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[sources.allow-org]
+github = []

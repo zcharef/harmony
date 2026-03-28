@@ -1,0 +1,37 @@
+{
+  "selectServerToViewMembers": "Select a server to view members",
+  "members": "Members",
+  "membersWithCount": "Members — {{total}}",
+  "failedToLoadMembers": "Failed to load members",
+  "onlineWithCount": "Online — {{count}}",
+  "offlineWithCount": "Offline — {{count}}",
+  "noMembersYet": "No members yet",
+
+  "roleSection_owner": "Owner — {{count}}",
+  "roleSection_admin": "Admins — {{count}}",
+  "roleSection_moderator": "Moderators — {{count}}",
+  "roleSection_member": "Members — {{count}}",
+
+  "roleOwner": "Owner",
+  "roleAdmin": "Admin",
+  "roleModerator": "Moderator",
+  "roleMember": "Member",
+
+  "memberActions": "Actions for {{username}}",
+  "changeRole": "Change Role",
+  "noActionsAvailable": "No actions available",
+
+  "kickUser": "Kick {{username}}",
+  "kickConfirmation": "Kick @{{username}} from {{serverName}}? They can rejoin with an invite.",
+  "kickAction": "Kick",
+  "kickFailed": "Failed to kick member. Please try again.",
+
+  "banUser": "Ban {{username}}",
+  "banConfirmation": "Ban @{{username}} from {{serverName}}? They will not be able to rejoin.",
+  "banReason": "Reason (optional)",
+  "banReasonPlaceholder": "Why is this user being banned?",
+  "banAction": "Ban",
+  "banFailed": "Failed to ban member. Please try again.",
+
+  "sendMessage": "Message {{username}}"
+}

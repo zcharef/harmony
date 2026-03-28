@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(COUNT(*)::BIGINT, 0) AS \"count!\"\n            FROM messages\n            WHERE channel_id = $1\n              AND author_id = $2\n              AND deleted_at IS NULL\n              AND created_at > now() - make_interval(secs => $3::double precision)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "88580f0d58d0cf7a5584b7ca117a0a084e08dd27a1d87c1f1f1171fd0a82cc5e"
+}

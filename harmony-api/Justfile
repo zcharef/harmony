@@ -1,0 +1,172 @@
+# Harmony Rust API — Command Center
+# Usage: just <recipe> or just --list
+
+set dotenv-load := true
+
+# Default: show available commands
+default:
+    @just --list --unsorted
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DEVELOPMENT
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Run server once (default RUST_LOG=info)
+run:
+    cargo run
+
+# Run server with auto-restart on file changes
+dev:
+    cargo watch -x run
+
+# Run server with debug logging
+debug:
+    RUST_LOG=debug cargo run
+
+# Run with per-crate debug (API + HTTP layers)
+debug-http:
+    RUST_LOG=harmony_api=debug,tower_http=debug cargo run
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# TESTING
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Run all tests
+test:
+    cargo test
+
+# Run unit tests only (lib)
+test-unit:
+    cargo test --lib
+
+# Run hexagonal architecture boundary tests
+test-arch:
+    cargo test --test architecture_test
+
+# Run OpenAPI + RFC 9457 enforcement tests
+test-enforce:
+    cargo test --test openapi_enforcement_test
+    cargo test --test rfc9457_contract_test
+
+# Review pending snapshot changes (insta interactive UI)
+test-review:
+    cargo insta review
+
+# Run tests with stdout visible (for debugging)
+test-verbose:
+    cargo test -- --nocapture
+
+# Run tests matching a pattern
+test-filter pattern:
+    cargo test {{pattern}}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CODE QUALITY
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Format code
+fmt:
+    cargo fmt
+
+# Check formatting (CI mode - fails if unformatted)
+fmt-check:
+    cargo fmt --check
+
+# Lint with Clippy (warnings = errors, including test code)
+lint:
+    cargo clippy --all-targets -- -D warnings
+
+# Auto-fix lint warnings
+lint-fix:
+    cargo clippy --all-targets --fix --allow-dirty --allow-staged
+
+# Fast compile check (no codegen, no linking)
+check:
+    cargo check
+
+# Full quality wall: fmt + clippy + tests + arch + enforce
+wall: fmt-check lint test test-arch test-enforce
+    @echo "Quality wall passed!"
+
+# Auto-fix everything (format + lint)
+fix: fmt lint-fix
+    @echo "Code fixed!"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECURITY & COMPLIANCE
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Audit dependencies for known vulnerabilities (RustSec)
+audit:
+    cargo audit
+
+# Check licenses and banned crates (deny.toml)
+deny:
+    cargo deny check
+
+# Full security check (audit + deny)
+security: audit deny
+    @echo "Security checks passed!"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# BUILD
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Build debug binary
+build:
+    cargo build
+
+# Build optimized release binary
+build-release:
+    cargo build --release
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DOCUMENTATION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Generate and open Rust docs
+doc:
+    cargo doc --open --no-deps
+
+# Show OpenAPI endpoints (requires server running)
+openapi:
+    @echo "Swagger UI: http://localhost:3000/swagger-ui"
+    @echo "OpenAPI JSON: http://localhost:3000/api-docs/openapi.json"
+
+# Export OpenAPI spec to JSON (no running server needed)
+export-openapi:
+    cargo run --bin export_openapi > openapi.json
+    @echo "Exported openapi.json from Rust structs (SSoT)"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MAINTENANCE
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Clean build artifacts
+clean:
+    cargo clean
+
+# Check for outdated dependencies
+outdated:
+    cargo outdated
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SETUP (run once after clone)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Install development tools
+setup:
+    @echo "Installing Rust dev tools..."
+    cargo install cargo-watch
+    cargo install cargo-audit
+    cargo install cargo-deny
+    cargo install cargo-outdated
+    @echo ""
+    @echo "Copy .env.example to .env and configure:"
+    @echo "   cp .env.example .env"
+    @echo ""
+    @echo "Setup complete! Run 'just dev' to start."
+
+# Copy env example (if .env doesn't exist)
+env:
+    @[ -f .env ] && echo ".env already exists" || cp .env.example .env && echo "Created .env from .env.example"
