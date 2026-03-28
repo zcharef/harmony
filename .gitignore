@@ -43,6 +43,8 @@ harmony-app/src-tauri/gen/schemas
 *.png
 !harmony-app/src-tauri/icons/*.png
 !harmony-app/public/*.png
+!mediakit/*.png
+!.github/*.png
 
 # Playwright
 harmony-app/test-results/
