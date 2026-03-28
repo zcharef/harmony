@@ -353,4 +353,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy harmony-app/dist --project-name=harmony-app --branch=main
+          command: pages deploy harmony-app/dist --project-name=harmony-app --branch=main --commit-dirty=true --commit-message="${{ github.sha }}"
