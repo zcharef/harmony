@@ -302,6 +302,10 @@ jobs:
         working-directory: harmony-app
         run: pnpm install --frozen-lockfile
 
+      - name: Generate API client from OpenAPI spec
+        working-directory: harmony-app
+        run: pnpm gen:api
+
       - name: Build production SPA
         working-directory: harmony-app
         env:
