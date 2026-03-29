@@ -5,15 +5,15 @@
 use utoipa::OpenApi;
 
 use super::dto::{
-    AssignRoleRequest, BanListResponse, BanResponse, BanUserRequest, ChannelListResponse,
-    ChannelResponse, CheckUsernameQuery, CheckUsernameResponse, ClaimedKeyResponse,
-    CreateChannelRequest, CreateDmRequest, CreateInviteRequest, CreateMegolmSessionRequest,
-    CreateServerRequest, DeviceListResponse, DeviceResponse, DmLastMessageResponse, DmListItem,
-    DmListQuery, DmListResponse, DmRecipientResponse, DmResponse, EditMessageRequest,
-    InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse,
-    MegolmSessionResponse, MemberListResponse, MemberResponse, MessageListQuery,
-    MessageListResponse, MessageResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
-    RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
+    AssignRoleRequest, BanListQuery, BanListResponse, BanResponse, BanUserRequest,
+    ChannelListResponse, ChannelResponse, CheckUsernameQuery, CheckUsernameResponse,
+    ClaimedKeyResponse, CreateChannelRequest, CreateDmRequest, CreateInviteRequest,
+    CreateMegolmSessionRequest, CreateServerRequest, DeviceListResponse, DeviceResponse,
+    DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse, DmRecipientResponse,
+    DmResponse, EditMessageRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest,
+    KeyCountResponse, MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
+    MessageListQuery, MessageListResponse, MessageResponse, OneTimeKeyDto, PreKeyBundleResponse,
+    ProfileResponse, RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
     TransferOwnershipRequest, UpdateChannelRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
@@ -130,12 +130,14 @@ use crate::domain::models::{
             // Member DTOs
             MemberResponse,
             MemberListResponse,
+            MemberListQuery,
             AssignRoleRequest,
             TransferOwnershipRequest,
             // Ban DTOs
             BanUserRequest,
             BanResponse,
             BanListResponse,
+            BanListQuery,
             // Message DTOs
             SendMessageRequest,
             EditMessageRequest,

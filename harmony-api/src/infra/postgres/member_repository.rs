@@ -99,6 +99,56 @@ impl MemberRepository for PgMemberRepository {
             .collect()
     }
 
+    async fn list_by_server_paginated(
+        &self,
+        server_id: &ServerId,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<ServerMember>, DomainError> {
+        let sid = server_id.0;
+
+        // Cursor pagination (ADR-036): filter by joined_at < cursor when present.
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                sm.user_id,
+                sm.server_id,
+                p.username,
+                p.avatar_url,
+                sm.nickname,
+                sm.role as "role!",
+                sm.joined_at
+            FROM server_members sm
+            INNER JOIN profiles p ON p.id = sm.user_id
+            WHERE sm.server_id = $1
+              AND ($2::timestamptz IS NULL OR sm.joined_at < $2)
+            ORDER BY sm.joined_at DESC
+            LIMIT $3
+            "#,
+            sid,
+            cursor,
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        rows.into_iter()
+            .map(|r| {
+                MemberRow {
+                    user_id: r.user_id,
+                    server_id: r.server_id,
+                    username: r.username,
+                    avatar_url: r.avatar_url,
+                    nickname: r.nickname,
+                    role: r.role,
+                    joined_at: r.joined_at,
+                }
+                .into_member()
+            })
+            .collect()
+    }
+
     async fn get_member(
         &self,
         server_id: &ServerId,

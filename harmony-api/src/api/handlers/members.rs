@@ -1,27 +1,41 @@
 //! Member handlers.
 
+use axum::extract::Query;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::Deserialize;
 
-use crate::api::dto::members::{AssignRoleRequest, MemberListResponse, TransferOwnershipRequest};
+use crate::api::dto::members::{
+    AssignRoleRequest, MemberListQuery, MemberListResponse, TransferOwnershipRequest,
+};
 use crate::api::dto::{MemberResponse, ServerResponse};
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ServerId, UserId};
 
-/// List all members of a server.
+/// Default member page size.
+const DEFAULT_MEMBER_LIMIT: i64 = 50;
+/// Maximum member page size.
+const MAX_MEMBER_LIMIT: i64 = 100;
+
+/// List members of a server with cursor-based pagination.
+///
+/// Use `before` (ISO 8601) to paginate backward. Default limit is 50, max is 100.
 ///
 /// # Errors
-/// Returns `ApiError` on repository error.
+/// Returns `ApiError` if the cursor is invalid or a repository error occurs.
 #[utoipa::path(
     get,
     path = "/v1/servers/{id}/members",
     tag = "Members",
     security(("bearer_auth" = [])),
-    params(("id" = ServerId, Path, description = "Server ID")),
+    params(
+        ("id" = ServerId, Path, description = "Server ID"),
+        MemberListQuery,
+    ),
     responses(
         (status = 200, description = "Member list", body = MemberListResponse),
+        (status = 400, description = "Invalid cursor or limit", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
         (status = 404, description = "Server not found", body = ProblemDetails),
     )
@@ -31,6 +45,7 @@ pub async fn list_members(
     AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
     ApiPath(server_id): ApiPath<ServerId>,
+    Query(query): Query<MemberListQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let is_member = state
         .member_repository()
@@ -42,11 +57,35 @@ pub async fn list_members(
         ));
     }
 
-    let members = state.member_repository().list_by_server(&server_id).await?;
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_MEMBER_LIMIT)
+        .clamp(1, MAX_MEMBER_LIMIT);
+
+    let cursor = query
+        .before
+        .map(|s| {
+            s.parse::<chrono::DateTime<chrono::Utc>>()
+                .map_err(|_| "Invalid 'before' cursor: expected ISO 8601 timestamp")
+        })
+        .transpose()
+        .map_err(ApiError::bad_request)?;
+
+    let members = state
+        .member_repository()
+        .list_by_server_paginated(&server_id, cursor, limit)
+        .await?;
+
+    // WHY: If we received exactly `limit` rows, there may be more — provide a cursor.
+    let next_cursor = if i64::try_from(members.len()).unwrap_or(0) == limit {
+        members.last().map(|m| m.joined_at.to_rfc3339())
+    } else {
+        None
+    };
 
     Ok((
         StatusCode::OK,
-        Json(MemberListResponse::from_members(members)),
+        Json(MemberListResponse::from_members(members, next_cursor)),
     ))
 }
 

@@ -1,6 +1,7 @@
 //! Port: server member persistence.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Role, ServerId, ServerMember, UserId};
@@ -10,6 +11,17 @@ use crate::domain::models::{Role, ServerId, ServerMember, UserId};
 pub trait MemberRepository: Send + Sync + std::fmt::Debug {
     /// List all members of a server (joined with profile data).
     async fn list_by_server(&self, server_id: &ServerId) -> Result<Vec<ServerMember>, DomainError>;
+
+    /// List members of a server with cursor-based pagination (ADR-036).
+    ///
+    /// Returns members who joined before `cursor` (if provided), limited to `limit` rows,
+    /// ordered by `joined_at DESC`.
+    async fn list_by_server_paginated(
+        &self,
+        server_id: &ServerId,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<ServerMember>, DomainError>;
 
     /// Check if a user is a member of a server.
     async fn is_member(&self, server_id: &ServerId, user_id: &UserId) -> Result<bool, DomainError>;

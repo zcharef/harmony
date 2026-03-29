@@ -1,6 +1,7 @@
 //! Port: server ban persistence.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{ServerBan, ServerId, UserId};
@@ -27,6 +28,17 @@ pub trait BanRepository: Send + Sync + std::fmt::Debug {
 
     /// List all bans for a server.
     async fn list_bans(&self, server_id: &ServerId) -> Result<Vec<ServerBan>, DomainError>;
+
+    /// List bans for a server with cursor-based pagination (ADR-036).
+    ///
+    /// Returns bans created before `cursor` (if provided), limited to `limit` rows,
+    /// ordered by `created_at DESC`.
+    async fn list_bans_paginated(
+        &self,
+        server_id: &ServerId,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<ServerBan>, DomainError>;
 
     /// Check if a user is banned from a server.
     async fn is_banned(&self, server_id: &ServerId, user_id: &UserId) -> Result<bool, DomainError>;

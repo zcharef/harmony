@@ -174,6 +174,49 @@ impl BanRepository for PgBanRepository {
         Ok(bans)
     }
 
+    async fn list_bans_paginated(
+        &self,
+        server_id: &ServerId,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<ServerBan>, DomainError> {
+        let sid = server_id.0;
+
+        // Cursor pagination (ADR-036): filter by created_at < cursor when present.
+        let rows = sqlx::query!(
+            r#"
+            SELECT server_id, user_id, banned_by, reason, created_at
+            FROM server_bans
+            WHERE server_id = $1
+              AND ($2::timestamptz IS NULL OR created_at < $2)
+            ORDER BY created_at DESC
+            LIMIT $3
+            "#,
+            sid,
+            cursor,
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        let bans = rows
+            .into_iter()
+            .map(|r| {
+                BanRow {
+                    server_id: r.server_id,
+                    user_id: r.user_id,
+                    banned_by: r.banned_by,
+                    reason: r.reason,
+                    created_at: r.created_at,
+                }
+                .into_ban()
+            })
+            .collect();
+
+        Ok(bans)
+    }
+
     async fn is_banned(&self, server_id: &ServerId, user_id: &UserId) -> Result<bool, DomainError> {
         let sid = server_id.0;
         let uid = user_id.0;

@@ -11,7 +11,7 @@ pub mod pagination;
 pub mod profiles;
 pub mod servers;
 
-pub use bans::{BanListResponse, BanResponse, BanUserRequest};
+pub use bans::{BanListQuery, BanListResponse, BanResponse, BanUserRequest};
 pub use channels::{
     ChannelListResponse, ChannelResponse, CreateChannelRequest, CreateMegolmSessionRequest,
     MegolmSessionResponse, UpdateChannelRequest,
@@ -26,7 +26,8 @@ pub use keys::{
     PreKeyBundleResponse, RegisterDeviceRequest, UploadOneTimeKeysRequest,
 };
 pub use members::{
-    AssignRoleRequest, MemberListResponse, MemberResponse, TransferOwnershipRequest,
+    AssignRoleRequest, MemberListQuery, MemberListResponse, MemberResponse,
+    TransferOwnershipRequest,
 };
 pub use messages::{
     EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, SendMessageRequest,

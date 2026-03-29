@@ -5,6 +5,8 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Role, Server, ServerBan, ServerId, UserId};
 use crate::domain::ports::{BanRepository, MemberRepository, ServerRepository};
@@ -239,7 +241,7 @@ impl ModerationService {
             .await
     }
 
-    /// List all bans for a server. Requires admin+ role.
+    /// List bans for a server with cursor-based pagination. Requires admin+ role.
     ///
     /// # Errors
     /// - `DomainError::NotFound` if the server doesn't exist.
@@ -248,10 +250,14 @@ impl ModerationService {
         &self,
         server_id: &ServerId,
         caller_id: &UserId,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
     ) -> Result<Vec<ServerBan>, DomainError> {
         self.require_role(server_id, caller_id, Role::Admin).await?;
 
-        self.ban_repo.list_bans(server_id).await
+        self.ban_repo
+            .list_bans_paginated(server_id, cursor, limit)
+            .await
     }
 
     /// Assign a role to a server member. Requires admin+ role with hierarchy enforcement.

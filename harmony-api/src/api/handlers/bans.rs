@@ -1,26 +1,38 @@
 //! Ban handlers.
 
+use axum::extract::Query;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::Deserialize;
 
-use crate::api::dto::bans::{BanListResponse, BanResponse, BanUserRequest};
+use crate::api::dto::bans::{BanListQuery, BanListResponse, BanResponse, BanUserRequest};
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ServerId, UserId};
 
-/// List all bans for a server. Requires admin+ role.
+/// Default ban page size.
+const DEFAULT_BAN_LIMIT: i64 = 50;
+/// Maximum ban page size.
+const MAX_BAN_LIMIT: i64 = 100;
+
+/// List bans for a server with cursor-based pagination. Requires admin+ role.
+///
+/// Use `before` (ISO 8601) to paginate backward. Default limit is 50, max is 100.
 ///
 /// # Errors
-/// Returns `ApiError` on authorization failure or repository error.
+/// Returns `ApiError` if the cursor is invalid, authorization fails, or a repository error occurs.
 #[utoipa::path(
     get,
     path = "/v1/servers/{id}/bans",
     tag = "Moderation",
     security(("bearer_auth" = [])),
-    params(("id" = ServerId, Path, description = "Server ID")),
+    params(
+        ("id" = ServerId, Path, description = "Server ID"),
+        BanListQuery,
+    ),
     responses(
         (status = 200, description = "Ban list", body = BanListResponse),
+        (status = 400, description = "Invalid cursor or limit", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
         (status = 403, description = "Insufficient role", body = ProblemDetails),
         (status = 404, description = "Server not found", body = ProblemDetails),
@@ -31,13 +43,38 @@ pub async fn list_bans(
     AuthUser(caller_id): AuthUser,
     State(state): State<AppState>,
     ApiPath(server_id): ApiPath<ServerId>,
+    Query(query): Query<BanListQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_BAN_LIMIT)
+        .clamp(1, MAX_BAN_LIMIT);
+
+    let cursor = query
+        .before
+        .map(|s| {
+            s.parse::<chrono::DateTime<chrono::Utc>>()
+                .map_err(|_| "Invalid 'before' cursor: expected ISO 8601 timestamp")
+        })
+        .transpose()
+        .map_err(ApiError::bad_request)?;
+
     let bans = state
         .moderation_service()
-        .list_bans(&server_id, &caller_id)
+        .list_bans(&server_id, &caller_id, cursor, limit)
         .await?;
 
-    Ok((StatusCode::OK, Json(BanListResponse::from_bans(bans))))
+    // WHY: If we received exactly `limit` rows, there may be more — provide a cursor.
+    let next_cursor = if i64::try_from(bans.len()).unwrap_or(0) == limit {
+        bans.last().map(|b| b.created_at.to_rfc3339())
+    } else {
+        None
+    };
+
+    Ok((
+        StatusCode::OK,
+        Json(BanListResponse::from_bans(bans, next_cursor)),
+    ))
 }
 
 /// Ban a user from a server and remove their membership.

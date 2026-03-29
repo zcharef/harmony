@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::domain::models::{ServerBan, UserId};
 
@@ -38,21 +38,37 @@ impl From<ServerBan> for BanResponse {
     }
 }
 
-/// Envelope for a list of server bans (ADR-036).
+/// Envelope for a list of server bans with cursor pagination (ADR-036).
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BanListResponse {
     pub items: Vec<BanResponse>,
-    pub total: i64,
+    /// Cursor for the next page. `None` if this is the last page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 impl BanListResponse {
+    /// Build from a list of domain bans with an optional cursor for the next page.
     #[must_use]
-    pub fn from_bans(bans: Vec<ServerBan>) -> Self {
-        let total = i64::try_from(bans.len()).unwrap_or(0);
+    pub fn from_bans(bans: Vec<ServerBan>, next_cursor: Option<String>) -> Self {
         Self {
             items: bans.into_iter().map(BanResponse::from).collect(),
-            total,
+            next_cursor,
         }
     }
+}
+
+/// Query parameters for listing bans (cursor-based pagination).
+// WHY: Query parameter structs cannot use deny_unknown_fields because
+// Axum's query deserializer passes all URL query params to the struct,
+// and extra params (e.g., cache-busters) would cause 400 errors.
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct BanListQuery {
+    /// ISO 8601 timestamp cursor -- fetch bans created before this time.
+    pub before: Option<String>,
+    /// Maximum number of bans to return (1-100, default 50).
+    pub limit: Option<i64>,
 }
