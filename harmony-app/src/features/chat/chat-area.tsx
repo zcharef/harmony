@@ -163,7 +163,7 @@ function useMessageActions(
   const safeChannelId = channelId ?? ''
   const sendMessage = useSendMessage(safeChannelId, currentUserId, currentUsername, encryption)
   const editMessageMutation = useEditMessage(safeChannelId)
-  const deleteMessageMutation = useDeleteMessage(safeChannelId)
+  const deleteMessageMutation = useDeleteMessage(safeChannelId, currentUserId)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
 
   const handleStartEdit = useCallback((messageId: string) => {
