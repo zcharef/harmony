@@ -100,6 +100,8 @@ impl MessageService {
         channel_id: &ChannelId,
         author_id: &UserId,
         content: String,
+        encrypted: bool,
+        sender_device_id: Option<String>,
     ) -> Result<MessageWithAuthor, DomainError> {
         let channel = self
             .verify_channel_membership(channel_id, author_id)
@@ -120,6 +122,15 @@ impl MessageService {
                     "This channel is read-only".to_string(),
                 ));
             }
+        }
+
+        // WHY: sender_device_id is required when encrypted = true so recipients can
+        // look up the Olm session for decryption. Without it, encrypted messages are
+        // unreadable. Documented in dto/messages.rs:17.
+        if encrypted && sender_device_id.is_none() {
+            return Err(DomainError::ValidationError(
+                "sender_device_id is required when encrypted is true".to_string(),
+            ));
         }
 
         if content.trim().is_empty() {
@@ -165,7 +176,9 @@ impl MessageService {
             ));
         }
 
-        self.repo.create(channel_id, author_id, content).await
+        self.repo
+            .create(channel_id, author_id, content, encrypted, sender_device_id)
+            .await
     }
 
     /// List messages in a channel with cursor-based pagination.

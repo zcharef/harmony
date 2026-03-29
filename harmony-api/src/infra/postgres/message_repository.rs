@@ -136,6 +136,8 @@ impl MessageRepository for PgMessageRepository {
         channel_id: &ChannelId,
         author_id: &UserId,
         content: String,
+        encrypted: bool,
+        sender_device_id: Option<String>,
     ) -> Result<MessageWithAuthor, DomainError> {
         let cid = channel_id.0;
         let aid = author_id.0;
@@ -143,8 +145,8 @@ impl MessageRepository for PgMessageRepository {
         let row = sqlx::query!(
             r#"
             WITH inserted AS (
-                INSERT INTO messages (channel_id, author_id, content)
-                VALUES ($1, $2, $3)
+                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id)
+                VALUES ($1, $2, $3, $4, $5)
                 RETURNING
                     id,
                     channel_id,
@@ -180,6 +182,8 @@ impl MessageRepository for PgMessageRepository {
             cid,
             aid,
             content,
+            encrypted,
+            sender_device_id,
         )
         .fetch_one(&self.pool)
         .await

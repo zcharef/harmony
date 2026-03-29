@@ -13,7 +13,6 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::MessagePayload;
 use crate::domain::models::{ChannelId, MessageId, ServerEvent};
-use crate::domain::ports::EventBus;
 
 /// Default message page size.
 const DEFAULT_MESSAGE_LIMIT: i64 = 50;
@@ -44,43 +43,41 @@ pub async fn send_message(
     ApiPath(channel_id): ApiPath<ChannelId>,
     ApiJson(req): ApiJson<SendMessageRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // WHY: Fetch channel before mutation to capture server_id for the SSE event.
+    // The service also validates channel existence internally, but fetching here
+    // avoids a redundant post-commit lookup and guarantees event emission.
+    let channel = state.channel_service().get_by_id(&channel_id).await?;
+
     let message = state
         .message_service()
-        .create(&channel_id, &user_id, req.content)
+        .create(
+            &channel_id,
+            &user_id,
+            req.content,
+            req.encrypted.unwrap_or(false),
+            req.sender_device_id,
+        )
         .await?;
 
-    // WHY: Look up channel to get server_id for the SSE event envelope.
-    // Best-effort — the message already committed, so channel lookup failure is logged, not propagated.
-    match state.channel_service().get_by_id(&channel_id).await {
-        Ok(channel) => {
-            let event = ServerEvent::MessageCreated {
-                sender_id: user_id.clone(),
-                server_id: channel.server_id,
-                channel_id: channel_id.clone(),
-                message: MessagePayload {
-                    id: message.message.id.clone(),
-                    channel_id: channel_id.clone(),
-                    content: message.message.content.clone(),
-                    author_id: message.message.author_id.clone(),
-                    author_username: message.author_username.clone(),
-                    author_avatar_url: message.author_avatar_url.clone(),
-                    encrypted: message.message.encrypted,
-                    sender_device_id: message.message.sender_device_id.clone(),
-                    edited_at: message.message.edited_at,
-                    created_at: message.message.created_at,
-                },
-            };
-            let receivers = state.event_bus().publish(event);
-            tracing::debug!(channel_id = %channel_id, receivers, "emitted message.created");
-        }
-        Err(e) => {
-            tracing::warn!(
-                channel_id = %channel_id,
-                error = ?e,
-                "Failed to fetch channel for MessageCreated event — skipping event emission"
-            );
-        }
-    }
+    let event = ServerEvent::MessageCreated {
+        sender_id: user_id.clone(),
+        server_id: channel.server_id,
+        channel_id: channel_id.clone(),
+        message: MessagePayload {
+            id: message.message.id.clone(),
+            channel_id: channel_id.clone(),
+            content: message.message.content.clone(),
+            author_id: message.message.author_id.clone(),
+            author_username: message.author_username.clone(),
+            author_avatar_url: message.author_avatar_url.clone(),
+            encrypted: message.message.encrypted,
+            sender_device_id: message.message.sender_device_id.clone(),
+            edited_at: message.message.edited_at,
+            created_at: message.message.created_at,
+        },
+    };
+    let receivers = state.event_bus().publish(event);
+    tracing::debug!(channel_id = %channel_id, receivers, "emitted message.created");
 
     Ok((StatusCode::CREATED, Json(MessageResponse::from(message))))
 }
@@ -181,49 +178,40 @@ pub async fn edit_message(
     ApiPath(path): ApiPath<MessagePath>,
     ApiJson(req): ApiJson<EditMessageRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // WHY: Fetch channel before mutation to capture server_id for the SSE event.
+    // The service also fetches the channel internally (for plan limits), but
+    // fetching here avoids a redundant post-commit lookup and guarantees event emission.
+    let channel = state.channel_service().get_by_id(&path.channel_id).await?;
+
     let message = state
         .message_service()
         .edit_message(&path.message_id, &user_id, req.content)
         .await?;
 
-    // WHY: Look up channel to get server_id for the SSE event envelope.
-    // Best-effort — the edit already committed, so channel lookup failure is logged, not propagated.
-    match state.channel_service().get_by_id(&path.channel_id).await {
-        Ok(channel) => {
-            let event = ServerEvent::MessageUpdated {
-                sender_id: user_id.clone(),
-                server_id: channel.server_id,
-                channel_id: path.channel_id.clone(),
-                message: MessagePayload {
-                    id: message.message.id.clone(),
-                    channel_id: path.channel_id.clone(),
-                    content: message.message.content.clone(),
-                    author_id: message.message.author_id.clone(),
-                    author_username: message.author_username.clone(),
-                    author_avatar_url: message.author_avatar_url.clone(),
-                    encrypted: message.message.encrypted,
-                    sender_device_id: message.message.sender_device_id.clone(),
-                    edited_at: message.message.edited_at,
-                    created_at: message.message.created_at,
-                },
-            };
-            let receivers = state.event_bus().publish(event);
-            tracing::debug!(
-                channel_id = %path.channel_id,
-                message_id = %path.message_id,
-                receivers,
-                "emitted message.updated"
-            );
-        }
-        Err(e) => {
-            tracing::warn!(
-                channel_id = %path.channel_id,
-                message_id = %path.message_id,
-                error = ?e,
-                "Failed to fetch channel for MessageUpdated event — skipping event emission"
-            );
-        }
-    }
+    let event = ServerEvent::MessageUpdated {
+        sender_id: user_id.clone(),
+        server_id: channel.server_id,
+        channel_id: path.channel_id.clone(),
+        message: MessagePayload {
+            id: message.message.id.clone(),
+            channel_id: path.channel_id.clone(),
+            content: message.message.content.clone(),
+            author_id: message.message.author_id.clone(),
+            author_username: message.author_username.clone(),
+            author_avatar_url: message.author_avatar_url.clone(),
+            encrypted: message.message.encrypted,
+            sender_device_id: message.message.sender_device_id.clone(),
+            edited_at: message.message.edited_at,
+            created_at: message.message.created_at,
+        },
+    };
+    let receivers = state.event_bus().publish(event);
+    tracing::debug!(
+        channel_id = %path.channel_id,
+        message_id = %path.message_id,
+        receivers,
+        "emitted message.updated"
+    );
 
     Ok((StatusCode::OK, Json(MessageResponse::from(message))))
 }
@@ -254,38 +242,30 @@ pub async fn delete_message(
     State(state): State<AppState>,
     ApiPath(path): ApiPath<MessagePath>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // WHY: Fetch channel before mutation to capture server_id for the SSE event.
+    // The service also fetches the channel internally (for moderator permission
+    // checks), but fetching here avoids a redundant post-commit lookup and
+    // guarantees event emission.
+    let channel = state.channel_service().get_by_id(&path.channel_id).await?;
+
     state
         .message_service()
         .delete_message(&path.message_id, &user_id)
         .await?;
 
-    // WHY: Look up channel to get server_id for the SSE event envelope.
-    // Best-effort — the delete already committed, so channel lookup failure is logged, not propagated.
-    match state.channel_service().get_by_id(&path.channel_id).await {
-        Ok(channel) => {
-            let event = ServerEvent::MessageDeleted {
-                sender_id: user_id.clone(),
-                server_id: channel.server_id,
-                channel_id: path.channel_id.clone(),
-                message_id: path.message_id.clone(),
-            };
-            let receivers = state.event_bus().publish(event);
-            tracing::debug!(
-                channel_id = %path.channel_id,
-                message_id = %path.message_id,
-                receivers,
-                "emitted message.deleted"
-            );
-        }
-        Err(e) => {
-            tracing::warn!(
-                channel_id = %path.channel_id,
-                message_id = %path.message_id,
-                error = ?e,
-                "Failed to fetch channel for MessageDeleted event — skipping event emission"
-            );
-        }
-    }
+    let event = ServerEvent::MessageDeleted {
+        sender_id: user_id.clone(),
+        server_id: channel.server_id,
+        channel_id: path.channel_id.clone(),
+        message_id: path.message_id.clone(),
+    };
+    let receivers = state.event_bus().publish(event);
+    tracing::debug!(
+        channel_id = %path.channel_id,
+        message_id = %path.message_id,
+        receivers,
+        "emitted message.deleted"
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }
