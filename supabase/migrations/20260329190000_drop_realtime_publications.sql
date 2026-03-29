@@ -10,7 +10,7 @@
 DO $$ BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_publication_tables
-        WHERE pubname = 'supabase_realtime' AND tablename = 'messages'
+        WHERE pubname = 'supabase_realtime' AND tablename = 'messages' AND schemaname = 'public'
     ) THEN
         ALTER PUBLICATION supabase_realtime DROP TABLE public.messages;
     END IF;
@@ -19,7 +19,7 @@ END $$;
 DO $$ BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_publication_tables
-        WHERE pubname = 'supabase_realtime' AND tablename = 'server_members'
+        WHERE pubname = 'supabase_realtime' AND tablename = 'server_members' AND schemaname = 'public'
     ) THEN
         ALTER PUBLICATION supabase_realtime DROP TABLE public.server_members;
     END IF;
@@ -28,7 +28,7 @@ END $$;
 DO $$ BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_publication_tables
-        WHERE pubname = 'supabase_realtime' AND tablename = 'channel_role_access'
+        WHERE pubname = 'supabase_realtime' AND tablename = 'channel_role_access' AND schemaname = 'public'
     ) THEN
         ALTER PUBLICATION supabase_realtime DROP TABLE public.channel_role_access;
     END IF;
