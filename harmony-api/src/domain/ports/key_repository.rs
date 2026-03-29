@@ -56,6 +56,9 @@ pub trait KeyRepository: Send + Sync + std::fmt::Debug {
         device_id: &DeviceId,
     ) -> Result<Option<OneTimeKey>, DomainError>;
 
+    /// Count the total number of registered devices for a user.
+    async fn count_user_devices(&self, user_id: &UserId) -> Result<i64, DomainError>;
+
     /// Count remaining non-fallback one-time keys for a device.
     async fn count_one_time_keys(
         &self,

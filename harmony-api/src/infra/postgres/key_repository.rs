@@ -363,6 +363,24 @@ impl KeyRepository for PgKeyRepository {
         }))
     }
 
+    async fn count_user_devices(&self, user_id: &UserId) -> Result<i64, DomainError> {
+        let uid = user_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            SELECT COALESCE(COUNT(*)::BIGINT, 0) AS "count!"
+            FROM device_keys
+            WHERE user_id = $1
+            "#,
+            uid,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.count)
+    }
+
     async fn count_one_time_keys(
         &self,
         user_id: &UserId,

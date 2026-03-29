@@ -15,6 +15,9 @@ const MAX_KEY_LENGTH: usize = 256;
 /// Maximum device name length.
 const MAX_DEVICE_NAME_LENGTH: usize = 128;
 
+/// Maximum number of devices a single user can register (abuse prevention).
+const MAX_DEVICES_PER_USER: i64 = 25;
+
 /// Service for E2EE key distribution business logic.
 #[derive(Debug)]
 pub struct KeyService {
@@ -31,6 +34,7 @@ impl KeyService {
     ///
     /// # Errors
     /// - `DomainError::ValidationError` if inputs exceed length limits.
+    /// - `DomainError::LimitExceeded` if the user already has 25 devices.
     /// - Repository errors on failure.
     pub async fn register_device(
         &self,
@@ -43,6 +47,20 @@ impl KeyService {
         validate_key("identity_key", identity_key)?;
         validate_key("signing_key", signing_key)?;
         validate_device_name(device_name)?;
+
+        // WHY: Prevent key store flooding — a malicious user could register
+        // thousands of devices, each with 100 one-time keys, to exhaust storage.
+        let device_count = self.key_repo.count_user_devices(user_id).await?;
+        if device_count >= MAX_DEVICES_PER_USER {
+            // SAFETY: MAX_DEVICES_PER_USER is a positive constant (25).
+            #[allow(clippy::cast_sign_loss)]
+            let limit = MAX_DEVICES_PER_USER as u64;
+            return Err(DomainError::LimitExceeded {
+                resource: "devices",
+                plan: "all".to_string(),
+                limit,
+            });
+        }
 
         // WHY: validate_device_name trims before checking length, so the stored
         // value must also be trimmed — otherwise a padded string that passed
