@@ -1,5 +1,6 @@
 use base64::engine::general_purpose::STANDARD_NO_PAD as BASE64;
 use base64::Engine;
+use serde_json;
 use vodozemac::megolm::{
     GroupSession, InboundGroupSession, MegolmMessage,
     SessionConfig as MegolmSessionConfig, SessionKey,
@@ -654,4 +655,762 @@ fn test_getrandom_key_hex_roundtrip() {
     let decoded = hex::decode(&hex_key).expect("hex decode should succeed");
     let roundtrip_key: [u8; 32] = decoded.try_into().expect("decoded key should be exactly 32 bytes");
     assert_eq!(roundtrip_key, key, "Hex roundtrip should preserve key bytes");
+}
+
+// ── Integration Tests: Full Encrypt→Transit→Decrypt Cycle ───
+
+#[test]
+fn test_olm_json_envelope_roundtrip() {
+    // WHY: Proves the exact wire format the frontend uses for DMs survives
+    // a full JSON serialize → deserialize → decrypt cycle.
+
+    // Alice creates an account and publishes one-time keys
+    let mut alice = Account::new();
+    alice.generate_one_time_keys(1);
+    let alice_identity_key = alice.curve25519_key();
+    let alice_otk = *alice.one_time_keys().values().next().unwrap();
+    alice.mark_keys_as_published();
+
+    // Bob creates an account and outbound session to Alice
+    let bob = Account::new();
+    let bob_identity_key = bob.curve25519_key();
+    let mut bob_session = bob.create_outbound_session(
+        SessionConfig::version_2(),
+        alice_identity_key,
+        alice_otk,
+    );
+
+    // Bob encrypts a DM
+    let original = "Hello Alice!";
+    let encrypted = bob_session.encrypt(original.as_bytes());
+    let (message_type, ciphertext_bytes) = encrypted.to_parts();
+
+    // Build JSON envelope — mirrors the `content` field stored in the DB
+    let envelope = serde_json::json!({
+        "message_type": message_type,
+        "ciphertext": BASE64.encode(&ciphertext_bytes),
+    });
+    let wire_json = serde_json::to_string(&envelope)
+        .expect("JSON serialization should succeed");
+
+    // --- transit boundary (DB write → DB read) ---
+
+    // Parse JSON back
+    let parsed: serde_json::Value = serde_json::from_str(&wire_json)
+        .expect("JSON deserialization should succeed");
+    let recv_msg_type = parsed["message_type"]
+        .as_u64()
+        .expect("message_type should be a number") as usize;
+    let recv_ciphertext_b64 = parsed["ciphertext"]
+        .as_str()
+        .expect("ciphertext should be a string");
+
+    // Alice decodes base64 and reconstructs OlmMessage
+    let recv_bytes = BASE64.decode(recv_ciphertext_b64)
+        .expect("Base64 decode should succeed");
+    let olm_message = OlmMessage::from_parts(recv_msg_type, &recv_bytes)
+        .expect("Should reconstruct OlmMessage from parts");
+
+    let pre_key = match olm_message {
+        OlmMessage::PreKey(m) => m,
+        OlmMessage::Normal(_) => panic!("Expected PreKey message for first envelope"),
+    };
+
+    let InboundCreationResult {
+        session: _,
+        plaintext,
+    } = alice
+        .create_inbound_session(bob_identity_key, &pre_key)
+        .expect("Alice should create inbound session from envelope");
+
+    assert_eq!(
+        String::from_utf8(plaintext).unwrap(),
+        original,
+        "DM plaintext should survive full JSON envelope roundtrip"
+    );
+}
+
+#[test]
+fn test_megolm_json_envelope_roundtrip() {
+    // WHY: Proves the exact wire format the frontend uses for channel messages
+    // survives a full JSON serialize → deserialize → decrypt cycle.
+
+    let mut outbound = GroupSession::new(MegolmSessionConfig::version_2());
+    let session_key = outbound.session_key();
+    let session_id = outbound.session_id();
+
+    let mut inbound = InboundGroupSession::new(&session_key, MegolmSessionConfig::version_2());
+
+    // Sender encrypts a channel message
+    let original = "Secret channel message";
+    let megolm_msg = outbound.encrypt(original.as_bytes());
+    let ciphertext_b64 = megolm_msg.to_base64();
+
+    // Build JSON envelope — mirrors the `content` field stored in the DB
+    let envelope = serde_json::json!({
+        "session_id": session_id,
+        "ciphertext": ciphertext_b64,
+    });
+    let wire_json = serde_json::to_string(&envelope)
+        .expect("JSON serialization should succeed");
+
+    // --- transit boundary (DB write → DB read) ---
+
+    // Parse JSON back
+    let parsed: serde_json::Value = serde_json::from_str(&wire_json)
+        .expect("JSON deserialization should succeed");
+    let recv_session_id = parsed["session_id"]
+        .as_str()
+        .expect("session_id should be a string");
+    let recv_ciphertext_b64 = parsed["ciphertext"]
+        .as_str()
+        .expect("ciphertext should be a string");
+
+    // Verify session_id survived transit
+    assert_eq!(
+        recv_session_id, session_id,
+        "session_id should survive JSON roundtrip"
+    );
+
+    // Receiver reconstructs MegolmMessage from base64 and decrypts
+    let received: MegolmMessage = recv_ciphertext_b64
+        .try_into()
+        .expect("Should parse MegolmMessage from base64");
+    let decrypted = inbound
+        .decrypt(&received)
+        .expect("Receiver should decrypt channel message from envelope");
+
+    assert_eq!(
+        String::from_utf8(decrypted.plaintext).unwrap(),
+        original,
+        "Channel plaintext should survive full JSON envelope roundtrip"
+    );
+    assert_eq!(
+        decrypted.message_index, 0,
+        "First message should have index 0"
+    );
+}
+
+#[test]
+fn test_olm_bidirectional_conversation_10_messages() {
+    // WHY: Proves that alternating senders over an extended conversation
+    // all decrypt correctly through the base64 wire format, and that
+    // message_type transitions from PreKey (0) to Normal (1) after handshake.
+
+    // Set up Alice and Bob
+    let mut alice = Account::new();
+    alice.generate_one_time_keys(1);
+    let alice_identity_key = alice.curve25519_key();
+    let alice_otk = *alice.one_time_keys().values().next().unwrap();
+    alice.mark_keys_as_published();
+
+    let bob = Account::new();
+    let bob_identity_key = bob.curve25519_key();
+
+    let mut bob_session = bob.create_outbound_session(
+        SessionConfig::version_2(),
+        alice_identity_key,
+        alice_otk,
+    );
+
+    // Bob sends the first (pre-key) message to establish session
+    let first_msg = "Hey Alice, starting our conversation";
+    let encrypted_first = bob_session.encrypt(first_msg.as_bytes());
+    let (first_type, first_ct) = encrypted_first.to_parts();
+    assert_eq!(first_type, 0, "First message from Bob should be PreKey type (0)");
+
+    // Alice receives via wire format and creates inbound session
+    let wire_b64 = BASE64.encode(&first_ct);
+    let recv_bytes = BASE64.decode(&wire_b64).unwrap();
+    let olm_msg = OlmMessage::from_parts(first_type, &recv_bytes).unwrap();
+    let pre_key = match olm_msg {
+        OlmMessage::PreKey(m) => m,
+        OlmMessage::Normal(_) => panic!("Expected PreKey for session establishment"),
+    };
+    let InboundCreationResult {
+        session: mut alice_session,
+        plaintext: first_plaintext,
+    } = alice
+        .create_inbound_session(bob_identity_key, &pre_key)
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(first_plaintext).unwrap(),
+        first_msg,
+        "First message should decrypt correctly"
+    );
+
+    // Conversation: alternate 5 messages each (messages 2-10, first was #1)
+    let conversation = [
+        ("alice", "Hi Bob! Good to hear from you."),
+        ("bob", "How's the E2EE integration going?"),
+        ("alice", "Great, the vodozemac primitives are solid."),
+        ("bob", "Did you test the JSON envelope format?"),
+        ("alice", "Yes, base64 roundtrip works perfectly."),
+        ("bob", "What about message ordering?"),
+        ("alice", "Ratchet state advances correctly each time."),
+        ("bob", "Excellent. Let's ship it."),
+        ("alice", "Agreed. Merging the PR now."),
+    ];
+
+    for (i, (sender, content)) in conversation.iter().enumerate() {
+        if *sender == "bob" {
+            // Bob encrypts, sends through wire format, Alice decrypts
+            let encrypted = bob_session.encrypt(content.as_bytes());
+            let (msg_type, ct_bytes) = encrypted.to_parts();
+
+            // After the first PreKey, all Bob messages should be Normal (1)
+            assert_eq!(
+                msg_type, 1,
+                "Bob's message {} should be Normal type (1)",
+                i + 2
+            );
+
+            let wire = BASE64.encode(&ct_bytes);
+            let recv = BASE64.decode(&wire).unwrap();
+            let olm = OlmMessage::from_parts(msg_type, &recv).unwrap();
+            let decrypted_bytes = alice_session
+                .decrypt(&olm)
+                .expect("Alice should decrypt Bob's message");
+            assert_eq!(
+                String::from_utf8(decrypted_bytes).unwrap(),
+                *content,
+                "Message {} from Bob should match",
+                i + 2
+            );
+        } else {
+            // Alice encrypts, sends through wire format, Bob decrypts
+            let encrypted = alice_session.encrypt(content.as_bytes());
+            let (msg_type, ct_bytes) = encrypted.to_parts();
+            let wire = BASE64.encode(&ct_bytes);
+            let recv = BASE64.decode(&wire).unwrap();
+            let olm = OlmMessage::from_parts(msg_type, &recv).unwrap();
+            let decrypted_bytes = bob_session
+                .decrypt(&olm)
+                .expect("Bob should decrypt Alice's message");
+            assert_eq!(
+                String::from_utf8(decrypted_bytes).unwrap(),
+                *content,
+                "Message {} from Alice should match",
+                i + 2
+            );
+        }
+    }
+}
+
+#[test]
+fn test_megolm_multi_message_with_session_key_export() {
+    // WHY: Proves session_key survives base64 serialization (simulating wire
+    // transfer from sender to receiver), and multiple messages decrypt in order.
+
+    let mut outbound = GroupSession::new(MegolmSessionConfig::version_2());
+
+    // Export session_key as base64 string (simulates sending key over the wire)
+    let session_key = outbound.session_key();
+    let key_b64 = session_key.to_base64();
+
+    // Receiver parses session_key from base64 (simulates receiving key)
+    let restored_key = SessionKey::from_base64(&key_b64)
+        .expect("Should parse session key from base64 wire transfer");
+    let mut inbound = InboundGroupSession::new(&restored_key, MegolmSessionConfig::version_2());
+
+    // Sender encrypts 5 messages, all go through base64 wire format
+    let messages = [
+        "Channel announcement: v0.1.0 released",
+        "Bug fix incoming for the crypto module",
+        "Code review requested on PR #42",
+        "Deployment to staging complete",
+        "All tests passing, merging to main",
+    ];
+
+    for (idx, original) in messages.iter().enumerate() {
+        let megolm_msg = outbound.encrypt(original.as_bytes());
+        let ciphertext_b64 = megolm_msg.to_base64();
+
+        // Build JSON envelope
+        let envelope = serde_json::json!({
+            "session_id": outbound.session_id(),
+            "ciphertext": ciphertext_b64,
+        });
+        let wire_json = serde_json::to_string(&envelope).unwrap();
+
+        // Parse back from JSON
+        let parsed: serde_json::Value = serde_json::from_str(&wire_json).unwrap();
+        let recv_ct = parsed["ciphertext"].as_str().unwrap();
+
+        let received: MegolmMessage = recv_ct
+            .try_into()
+            .expect("Should parse MegolmMessage from wire base64");
+        let decrypted = inbound
+            .decrypt(&received)
+            .expect("Should decrypt channel message from wire");
+
+        assert_eq!(
+            String::from_utf8(decrypted.plaintext).unwrap(),
+            *original,
+            "Message {} should decrypt correctly after key export roundtrip",
+            idx
+        );
+        assert_eq!(
+            decrypted.message_index, idx as u32,
+            "Message {} should have correct index",
+            idx
+        );
+    }
+}
+
+#[test]
+fn test_megolm_cross_channel_isolation() {
+    // WHY: Proves that an inbound session for channel A cannot decrypt
+    // messages from channel B — channels are cryptographically isolated.
+
+    // Channel A
+    let mut outbound_a = GroupSession::new(MegolmSessionConfig::version_2());
+    let session_key_a = outbound_a.session_key();
+    let mut inbound_a = InboundGroupSession::new(&session_key_a, MegolmSessionConfig::version_2());
+
+    // Channel B (separate outbound, receiver does NOT have this key)
+    let mut outbound_b = GroupSession::new(MegolmSessionConfig::version_2());
+
+    // Channel A message encrypts and decrypts correctly
+    let msg_a = "This message belongs to channel A";
+    let encrypted_a = outbound_a.encrypt(msg_a.as_bytes());
+    let ct_a_b64 = encrypted_a.to_base64();
+    let received_a: MegolmMessage = ct_a_b64.as_str().try_into().unwrap();
+    let decrypted_a = inbound_a
+        .decrypt(&received_a)
+        .expect("Channel A inbound should decrypt channel A message");
+    assert_eq!(
+        String::from_utf8(decrypted_a.plaintext).unwrap(),
+        msg_a,
+        "Channel A message should decrypt correctly"
+    );
+
+    // Channel B message cannot be decrypted with channel A's inbound session
+    let msg_b = "This message belongs to channel B";
+    let encrypted_b = outbound_b.encrypt(msg_b.as_bytes());
+    let ct_b_b64 = encrypted_b.to_base64();
+    let received_b: MegolmMessage = ct_b_b64.as_str().try_into().unwrap();
+    let cross_result = inbound_a.decrypt(&received_b);
+    assert!(
+        cross_result.is_err(),
+        "Channel A inbound must NOT decrypt channel B message — channels must be isolated"
+    );
+}
+
+#[test]
+fn test_olm_session_not_reusable_for_different_recipient() {
+    // WHY: Proves that a pre-key message encrypted for Alice cannot be used
+    // by Charlie to create an inbound session — wrong identity key is rejected.
+
+    // Alice, Bob, Charlie each create accounts
+    let mut alice = Account::new();
+    alice.generate_one_time_keys(1);
+    let alice_identity_key = alice.curve25519_key();
+    let alice_otk = *alice.one_time_keys().values().next().unwrap();
+    alice.mark_keys_as_published();
+
+    let bob = Account::new();
+    let bob_identity_key = bob.curve25519_key();
+
+    let mut charlie = Account::new();
+    charlie.generate_one_time_keys(1);
+
+    // Bob creates a session targeting Alice and encrypts a message
+    let mut bob_session = bob.create_outbound_session(
+        SessionConfig::version_2(),
+        alice_identity_key,
+        alice_otk,
+    );
+    let encrypted = bob_session.encrypt(b"Secret for Alice only");
+    let (msg_type, ct_bytes) = encrypted.to_parts();
+
+    // Simulate wire transfer
+    let wire_b64 = BASE64.encode(&ct_bytes);
+    let recv_bytes = BASE64.decode(&wire_b64).unwrap();
+
+    let olm_msg = OlmMessage::from_parts(msg_type, &recv_bytes).unwrap();
+    let pre_key = match olm_msg {
+        OlmMessage::PreKey(m) => m,
+        OlmMessage::Normal(_) => panic!("Expected PreKey message"),
+    };
+
+    // Charlie tries to create an inbound session with the message meant for Alice.
+    // This must fail because the pre-key message is bound to Alice's identity key,
+    // and Charlie provides Bob's identity key expecting it to match his own account.
+    let charlie_result = charlie.create_inbound_session(bob_identity_key, &pre_key);
+    assert!(
+        charlie_result.is_err(),
+        "Charlie must NOT create an inbound session from a message encrypted for Alice"
+    );
+}
+
+// ── Adversarial / Edge-Case Tests ───────────────────────────
+
+#[test]
+fn test_olm_wrong_session_decryption_fails() {
+    // WHY: Proves that Olm sessions are isolated — a message encrypted for one
+    // session cannot be decrypted by a different session, even if both target
+    // the same recipient.
+
+    // Alice creates an account with two one-time keys (one for Bob, one for Charlie)
+    let mut alice = Account::new();
+    alice.generate_one_time_keys(2);
+    let alice_identity_key = alice.curve25519_key();
+    let mut otk_iter = alice.one_time_keys().into_values();
+    let alice_otk_for_bob = otk_iter.next().expect("Alice should have a first one-time key");
+    let alice_otk_for_charlie = otk_iter.next().expect("Alice should have a second one-time key");
+    alice.mark_keys_as_published();
+
+    // Bob creates an outbound session to Alice and encrypts a message
+    let bob = Account::new();
+    let bob_identity_key = bob.curve25519_key();
+    let mut bob_session = bob.create_outbound_session(
+        SessionConfig::version_2(),
+        alice_identity_key,
+        alice_otk_for_bob,
+    );
+    let bob_msg = bob_session.encrypt(b"Hello from Bob");
+    let (bob_msg_type, bob_ct_bytes) = bob_msg.to_parts();
+
+    // Alice creates an inbound session from Bob's pre-key message (should succeed)
+    let bob_olm = OlmMessage::from_parts(bob_msg_type, &bob_ct_bytes)
+        .expect("Should parse Bob's OlmMessage");
+    let bob_pre_key = match bob_olm {
+        OlmMessage::PreKey(m) => m,
+        OlmMessage::Normal(_) => panic!("Expected PreKey from Bob"),
+    };
+    let InboundCreationResult {
+        session: mut alice_bob_session,
+        plaintext: bob_plaintext,
+    } = alice
+        .create_inbound_session(bob_identity_key, &bob_pre_key)
+        .expect("Alice should create inbound session from Bob");
+    assert_eq!(
+        String::from_utf8(bob_plaintext).unwrap(),
+        "Hello from Bob",
+        "Alice should decrypt Bob's initial message"
+    );
+
+    // Charlie creates a DIFFERENT outbound session to Alice and encrypts a message
+    let charlie = Account::new();
+    let mut charlie_session = charlie.create_outbound_session(
+        SessionConfig::version_2(),
+        alice_identity_key,
+        alice_otk_for_charlie,
+    );
+    let charlie_msg = charlie_session.encrypt(b"Hello from Charlie");
+
+    // Try to decrypt Charlie's message with Alice-Bob session — must fail
+    let charlie_decrypt_result = alice_bob_session.decrypt(&charlie_msg);
+    assert!(
+        charlie_decrypt_result.is_err(),
+        "Decrypting Charlie's message with Alice-Bob session should fail (session isolation)"
+    );
+}
+
+#[test]
+fn test_olm_corrupt_ciphertext_graceful_error() {
+    // WHY: Verifies that tampering with ciphertext bytes produces a clean error,
+    // not a panic or undefined behavior.
+
+    let mut alice = Account::new();
+    alice.generate_one_time_keys(1);
+    let alice_identity_key = alice.curve25519_key();
+    let alice_otk = *alice.one_time_keys().values().next().unwrap();
+    alice.mark_keys_as_published();
+
+    let bob = Account::new();
+    let bob_identity_key = bob.curve25519_key();
+    let mut bob_session = bob.create_outbound_session(
+        SessionConfig::version_2(),
+        alice_identity_key,
+        alice_otk,
+    );
+
+    // Encrypt a real message
+    let encrypted = bob_session.encrypt(b"Legitimate message");
+    let (message_type, ciphertext_bytes) = encrypted.to_parts();
+
+    // Tamper with the ciphertext: flip one byte in the middle
+    let mut tampered = ciphertext_bytes.clone();
+    let mid = tampered.len() / 2;
+    tampered[mid] ^= 0xFF;
+
+    // Reconstruct OlmMessage from tampered bytes — parsing may or may not succeed
+    let parse_result = OlmMessage::from_parts(message_type, &tampered);
+    if let Ok(tampered_msg) = parse_result {
+        // If it parsed, Alice should fail to decrypt or fail to create a session
+        match tampered_msg {
+            OlmMessage::PreKey(pre_key) => {
+                let session_result =
+                    alice.create_inbound_session(bob_identity_key, &pre_key);
+                assert!(
+                    session_result.is_err(),
+                    "Tampered pre-key message should fail inbound session creation"
+                );
+            }
+            OlmMessage::Normal(normal) => {
+                // Alice needs an established session first to attempt normal decryption.
+                // Create the real session first, then try the tampered normal message.
+                let real_msg = OlmMessage::from_parts(message_type, &ciphertext_bytes)
+                    .expect("Original message should parse");
+                let real_pre_key = match real_msg {
+                    OlmMessage::PreKey(m) => m,
+                    OlmMessage::Normal(_) => panic!("Expected PreKey for session setup"),
+                };
+                let InboundCreationResult {
+                    session: mut alice_session,
+                    ..
+                } = alice
+                    .create_inbound_session(bob_identity_key, &real_pre_key)
+                    .expect("Session from real message should succeed");
+
+                let decrypt_result =
+                    alice_session.decrypt(&OlmMessage::Normal(normal));
+                assert!(
+                    decrypt_result.is_err(),
+                    "Tampered normal message should fail decryption"
+                );
+            }
+        }
+    }
+    // If from_parts itself returned Err, that is also a graceful failure — no panic occurred.
+}
+
+#[test]
+fn test_olm_invalid_prekey_message_graceful_error() {
+    // WHY: Verifies that feeding garbage bytes into the Olm message parser
+    // and session creation does not panic — errors are returned gracefully.
+
+    let mut alice = Account::new();
+    alice.generate_one_time_keys(1);
+
+    // Fabricate random bytes that are NOT a valid pre-key message
+    let garbage_bytes: Vec<u8> = vec![0xDE; 32];
+
+    // Attempt to parse as a PreKey OlmMessage (message_type 0)
+    let parse_result = OlmMessage::from_parts(0, &garbage_bytes);
+    if let Ok(olm_msg) = parse_result {
+        match olm_msg {
+            OlmMessage::PreKey(pre_key) => {
+                // Use a random identity key — create a throwaway account for it
+                let random_sender = Account::new();
+                let random_identity_key = random_sender.curve25519_key();
+
+                let session_result =
+                    alice.create_inbound_session(random_identity_key, &pre_key);
+                assert!(
+                    session_result.is_err(),
+                    "Creating inbound session from garbage pre-key should fail gracefully"
+                );
+            }
+            OlmMessage::Normal(_) => {
+                // Parsed as Normal instead of PreKey — unexpected but not a panic.
+                // This is acceptable: the point is no panic occurred.
+            }
+        }
+    }
+    // If from_parts returned Err, that is also graceful — no panic.
+}
+
+#[test]
+fn test_megolm_corrupt_ciphertext_graceful_error() {
+    // WHY: Verifies that corrupted Megolm ciphertext produces an error,
+    // not a panic, whether at the parsing or decryption stage.
+
+    let mut outbound = GroupSession::new(MegolmSessionConfig::version_2());
+    let session_key = outbound.session_key();
+    let mut inbound = InboundGroupSession::new(&session_key, MegolmSessionConfig::version_2());
+
+    let message = outbound.encrypt(b"Real channel message");
+    let mut ciphertext_b64 = message.to_base64();
+
+    // Tamper with the base64 string: replace the last 4 characters
+    let len = ciphertext_b64.len();
+    assert!(
+        len >= 4,
+        "Ciphertext base64 should be at least 4 characters for tampering"
+    );
+    ciphertext_b64.replace_range((len - 4).., "XXXX");
+
+    // Try to parse the tampered base64 as a MegolmMessage
+    let parse_result: Result<MegolmMessage, _> = ciphertext_b64.as_str().try_into();
+    match parse_result {
+        Err(_) => {
+            // Parsing failed — graceful error, no panic.
+        }
+        Ok(tampered_msg) => {
+            // If it somehow parsed, decryption must fail
+            let decrypt_result = inbound.decrypt(&tampered_msg);
+            assert!(
+                decrypt_result.is_err(),
+                "Decrypting tampered Megolm ciphertext should fail"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_olm_empty_plaintext_roundtrip() {
+    // WHY: Edge case — empty string must survive encrypt/decrypt without error.
+
+    let mut alice = Account::new();
+    alice.generate_one_time_keys(1);
+    let alice_identity_key = alice.curve25519_key();
+    let alice_otk = *alice.one_time_keys().values().next().unwrap();
+    alice.mark_keys_as_published();
+
+    let bob = Account::new();
+    let bob_identity_key = bob.curve25519_key();
+    let mut bob_session = bob.create_outbound_session(
+        SessionConfig::version_2(),
+        alice_identity_key,
+        alice_otk,
+    );
+
+    // Encrypt empty string
+    let encrypted = bob_session.encrypt(b"");
+    let (msg_type, ct_bytes) = encrypted.to_parts();
+    assert_eq!(msg_type, 0, "First message should be PreKey type (0)");
+
+    let olm_msg = OlmMessage::from_parts(msg_type, &ct_bytes)
+        .expect("Should parse OlmMessage from empty plaintext encryption");
+    let pre_key = match olm_msg {
+        OlmMessage::PreKey(m) => m,
+        OlmMessage::Normal(_) => panic!("Expected PreKey message"),
+    };
+
+    let InboundCreationResult {
+        session: _,
+        plaintext,
+    } = alice
+        .create_inbound_session(bob_identity_key, &pre_key)
+        .expect("Alice should create inbound session for empty message");
+
+    let decrypted = String::from_utf8(plaintext)
+        .expect("Empty plaintext should be valid UTF-8");
+    assert_eq!(
+        decrypted, "",
+        "Decrypted empty plaintext should be an empty string"
+    );
+}
+
+#[test]
+fn test_megolm_empty_plaintext_roundtrip() {
+    // WHY: Edge case — empty string must survive Megolm encrypt/decrypt without error.
+
+    let mut outbound = GroupSession::new(MegolmSessionConfig::version_2());
+    let session_key = outbound.session_key();
+    let mut inbound = InboundGroupSession::new(&session_key, MegolmSessionConfig::version_2());
+
+    let message = outbound.encrypt(b"");
+    let ciphertext_b64 = message.to_base64();
+
+    let received: MegolmMessage = ciphertext_b64
+        .as_str()
+        .try_into()
+        .expect("Empty plaintext Megolm ciphertext should parse");
+    let decrypted = inbound
+        .decrypt(&received)
+        .expect("Megolm should decrypt empty plaintext without error");
+
+    assert_eq!(
+        String::from_utf8(decrypted.plaintext).unwrap(),
+        "",
+        "Decrypted Megolm empty plaintext should be an empty string"
+    );
+    assert_eq!(
+        decrypted.message_index, 0,
+        "First message index should be 0"
+    );
+}
+
+#[test]
+fn test_olm_large_plaintext_roundtrip() {
+    // WHY: Verifies that Olm handles large messages (10KB) without truncation
+    // or corruption during encrypt/decrypt.
+
+    let mut alice = Account::new();
+    alice.generate_one_time_keys(1);
+    let alice_identity_key = alice.curve25519_key();
+    let alice_otk = *alice.one_time_keys().values().next().unwrap();
+    alice.mark_keys_as_published();
+
+    let bob = Account::new();
+    let bob_identity_key = bob.curve25519_key();
+    let mut bob_session = bob.create_outbound_session(
+        SessionConfig::version_2(),
+        alice_identity_key,
+        alice_otk,
+    );
+
+    // 10KB plaintext
+    let large_plaintext = "A".repeat(10240);
+    let encrypted = bob_session.encrypt(large_plaintext.as_bytes());
+    let (msg_type, ct_bytes) = encrypted.to_parts();
+
+    let olm_msg = OlmMessage::from_parts(msg_type, &ct_bytes)
+        .expect("Should parse OlmMessage from large plaintext encryption");
+    let pre_key = match olm_msg {
+        OlmMessage::PreKey(m) => m,
+        OlmMessage::Normal(_) => panic!("Expected PreKey message"),
+    };
+
+    let InboundCreationResult {
+        session: _,
+        plaintext,
+    } = alice
+        .create_inbound_session(bob_identity_key, &pre_key)
+        .expect("Alice should create inbound session for large message");
+
+    let decrypted = String::from_utf8(plaintext)
+        .expect("Large plaintext should be valid UTF-8");
+    assert_eq!(
+        decrypted.len(),
+        10240,
+        "Decrypted large plaintext should be exactly 10240 bytes (no truncation)"
+    );
+    assert_eq!(
+        decrypted, large_plaintext,
+        "Decrypted large plaintext should match original exactly"
+    );
+}
+
+#[test]
+fn test_megolm_large_plaintext_roundtrip() {
+    // WHY: Verifies that Megolm handles large messages (10KB) without truncation
+    // or corruption during group session encrypt/decrypt.
+
+    let mut outbound = GroupSession::new(MegolmSessionConfig::version_2());
+    let session_key = outbound.session_key();
+    let mut inbound = InboundGroupSession::new(&session_key, MegolmSessionConfig::version_2());
+
+    // 10KB plaintext
+    let large_plaintext = "A".repeat(10240);
+    let message = outbound.encrypt(large_plaintext.as_bytes());
+    let ciphertext_b64 = message.to_base64();
+
+    let received: MegolmMessage = ciphertext_b64
+        .as_str()
+        .try_into()
+        .expect("Large plaintext Megolm ciphertext should parse");
+    let decrypted = inbound
+        .decrypt(&received)
+        .expect("Megolm should decrypt large plaintext without error");
+
+    let decrypted_str = String::from_utf8(decrypted.plaintext)
+        .expect("Large plaintext should be valid UTF-8");
+    assert_eq!(
+        decrypted_str.len(),
+        10240,
+        "Decrypted Megolm large plaintext should be exactly 10240 bytes (no truncation)"
+    );
+    assert_eq!(
+        decrypted_str, large_plaintext,
+        "Decrypted Megolm large plaintext should match original exactly"
+    );
+    assert_eq!(
+        decrypted.message_index, 0,
+        "First message index should be 0"
+    );
 }

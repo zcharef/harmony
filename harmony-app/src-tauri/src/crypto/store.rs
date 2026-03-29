@@ -329,6 +329,8 @@ pub async fn crypto_set_trust_level(
     user_id: String,
     level: String,
 ) -> Result<(), CryptoError> {
+    validate_user_id(&user_id)?;
+
     // WHY: Validate the level string to prevent garbage data in SQLite.
     if level != "unverified" && level != "verified" && level != "blocked" {
         return Err(CryptoError::CacheError(format!(
@@ -364,6 +366,8 @@ pub async fn crypto_get_trust_level(
     state: tauri::State<'_, MessageCacheState>,
     user_id: String,
 ) -> Result<String, CryptoError> {
+    validate_user_id(&user_id)?;
+
     let cache = state.lock().await;
     let conn = cache.conn()?;
 
