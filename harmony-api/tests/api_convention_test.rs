@@ -7,7 +7,7 @@
 //! Rules enforced:
 //! 1. All routes must be versioned (`/v1/...`) except system endpoints
 //! 2. Handlers must not construct response DTOs inline
-//! 3. No WebSocket/SSE imports (Supabase Realtime handles push)
+//! 3. No WebSocket imports (real-time uses SSE per ADR-SSE-001)
 //! 4. All handlers must have `#[tracing::instrument]`
 //! 5. No OFFSET-based pagination in SQL (use cursor-based)
 //! 6. No page/offset fields in DTOs
