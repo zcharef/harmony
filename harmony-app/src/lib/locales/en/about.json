@@ -1,0 +1,23 @@
+{
+  "title": "About Harmony",
+  "tagline": "Open-source, privacy-first group communication",
+  "version": "Version",
+  "commit": "Commit",
+  "close": "Close about page",
+
+  "linksTitle": "Quick Links",
+  "github": "GitHub",
+  "reportBug": "Report a Bug",
+
+  "supportTitle": "Support the Project",
+  "starDescription": "Star us on GitHub to help others discover Harmony",
+  "starButton": "Star on GitHub",
+  "contributeDescription": "Help build the future of private communication",
+  "contributeButton": "Contributing Guide",
+  "sponsorDescription": "Fund development and keep Harmony free",
+  "sponsorButton": "Sponsor",
+
+  "builtWith": "Built With",
+  "license": "Licensed under AGPL-3.0 — Free and open source forever.",
+  "madeWith": "Made with care by the Harmony community"
+}

@@ -1,3 +1,5 @@
+import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
@@ -5,9 +7,21 @@ import { defineConfig } from 'vite'
 
 const host = process.env.TAURI_DEV_HOST
 
+// WHY: Inject version + commit SHA at build time for the About page.
+// try/catch: build may run outside a git repo (CI archive, Docker tarball).
+const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
+let commitSha = 'unknown'
+try {
+  commitSha = execSync('git rev-parse --short HEAD').toString().trim()
+} catch {}
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [tailwindcss(), react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __COMMIT_SHA__: JSON.stringify(commitSha),
+  },
   css: {
     // Disable PostCSS — @tailwindcss/vite handles CSS processing directly.
     // Without this, Vite's built-in PostCSS picks up tailwindcss@3 (a transitive

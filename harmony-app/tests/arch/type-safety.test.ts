@@ -112,7 +112,12 @@ describe('Type Safety', () => {
 
   describe('no_hardcoded_urls', () => {
     it('should not contain hardcoded http:// or https:// URLs in source', () => {
-      const ALLOWLIST = [join(SRC_DIR, 'lib/env.ts'), join(SRC_DIR, 'lib/api-client.ts')]
+      const ALLOWLIST = [
+        join(SRC_DIR, 'lib/env.ts'),
+        join(SRC_DIR, 'lib/api-client.ts'),
+        // WHY: About page has static GitHub project links (not API URLs that vary by env).
+        join(SRC_DIR, 'components/layout/about-page.tsx'),
+      ]
       const files = getAllFiles(SRC_DIR, ['.ts', '.tsx']).filter((f) => {
         if (ALLOWLIST.includes(f)) return false
         if (f.includes('.test.') || f.includes('.spec.')) return false

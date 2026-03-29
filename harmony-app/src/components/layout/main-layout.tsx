@@ -13,8 +13,10 @@ import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, useSettingsUiStore } from '@/features/settings'
 
+import { useAboutUiStore } from '@/lib/about-ui-store'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
+import { AboutPage } from './about-page'
 import { WelcomeScreen } from './welcome-screen'
 
 // WHY: Persist last-used server/channel to localStorage so the user returns
@@ -245,6 +247,7 @@ export function MainLayout() {
   }, [view, selectedServerId, selectedChannelId])
 
   const isDmView = view === 'dms'
+  const showAboutPage = useAboutUiStore((s) => s.showAboutPage)
   const showServerSettings = useSettingsUiStore((s) => s.showServerSettings)
 
   // WHY: Exclude the official Harmony server from the "has servers" check so
@@ -254,6 +257,15 @@ export function MainLayout() {
     [regularServers],
   )
   const hasNoServers = servers !== undefined && userServers.length === 0
+
+  /** WHY: About page renders before server settings so it's accessible from any state. */
+  if (showAboutPage) {
+    return (
+      <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+        <AboutPage />
+      </div>
+    )
+  }
 
   /** WHY: Server settings replaces the entire main content area (like Discord). */
   if (showServerSettings && selectedServerId !== null) {

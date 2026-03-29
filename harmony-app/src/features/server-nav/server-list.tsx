@@ -1,7 +1,8 @@
 import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
-import { Compass, LogOut, MessageSquare, Plus } from 'lucide-react'
+import { Compass, Info, LogOut, MessageSquare, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAboutUiStore } from '@/lib/about-ui-store'
 import type { ServerResponse } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
 import { toast } from '@/lib/toast'
@@ -209,6 +210,28 @@ export function ServerList({
       </Tooltip>
 
       <Divider className="mx-auto my-2 w-8 bg-divider" />
+
+      {/* About button */}
+      <Tooltip content={t('common:about', { defaultValue: 'About' })} placement="right" offset={8}>
+        <button
+          type="button"
+          data-test="about-button"
+          onClick={() => useAboutUiStore.getState().openAboutPage()}
+          aria-label={t('common:about', { defaultValue: 'About' })}
+          className="mb-2 flex items-center justify-center"
+        >
+          <Avatar
+            icon={<Info className="h-5 w-5" />}
+            classNames={{
+              base: cn(
+                'h-12 w-12 cursor-pointer rounded-[24px] bg-default-100 text-default-foreground',
+                'transition-all duration-200 hover:rounded-2xl hover:bg-primary hover:text-primary-foreground',
+              ),
+              icon: 'text-current',
+            }}
+          />
+        </button>
+      </Tooltip>
 
       {/* Logout button */}
       <Tooltip content={tAuth('logout')} placement="right" offset={8}>

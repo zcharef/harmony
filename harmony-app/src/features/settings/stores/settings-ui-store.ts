@@ -8,6 +8,12 @@ interface SettingsUiState {
 
 export const useSettingsUiStore = create<SettingsUiState>()((set) => ({
   showServerSettings: false,
-  openServerSettings: () => set({ showServerSettings: true }),
+  openServerSettings: () => {
+    // WHY: Mutual exclusivity — only one full-screen view at a time.
+    import('@/lib/about-ui-store').then(({ useAboutUiStore }) => {
+      useAboutUiStore.getState().closeAboutPage()
+    })
+    set({ showServerSettings: true })
+  },
   closeServerSettings: () => set({ showServerSettings: false }),
 }))
