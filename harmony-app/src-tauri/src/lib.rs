@@ -3,6 +3,7 @@ mod crypto;
 use crypto::megolm::{MegolmSessionManager, MegolmState};
 use crypto::olm::{CryptoState, OlmAccountManager};
 use crypto::store::{MessageCache, MessageCacheState};
+use tauri::Manager;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -33,6 +34,17 @@ pub fn run() {
     let _guard = tauri_plugin_sentry::minidump::init(&client);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // WHY: On Windows/Linux, deep links spawn a new process.
+            // The single-instance plugin with "deep-link" feature forwards
+            // the URL to the existing process via onOpenUrl instead.
+            // Focus the existing window so the user sees the app respond.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_sentry::init(&client))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())

@@ -2,13 +2,17 @@
 
 pub mod bans;
 pub mod channels;
+pub mod desktop_auth;
 pub mod dms;
+pub mod events;
 pub mod invites;
 pub mod keys;
 pub mod members;
 pub mod messages;
+pub mod presence;
 pub mod profiles;
 pub mod servers;
+pub mod typing;
 
 use std::time::Instant;
 

@@ -1,0 +1,237 @@
+//! Desktop auth exchange handlers (PKCE-based token exchange for Tauri deep links).
+//!
+//! WHY: Tauri can't run Cloudflare Turnstile in its webview. Auth is delegated
+//! to the system browser, which redirects back via `harmony://` deep link.
+//! Passing raw tokens in the deep link URL is unsafe (scheme hijacking).
+//! Instead, the browser creates a one-time auth code here, and the desktop
+//! app redeems it by proving possession of the PKCE code_verifier.
+
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use axum::http::HeaderMap;
+use base64::Engine;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
+use utoipa::ToSchema;
+
+use crate::api::errors::{ApiError, ProblemDetails};
+use crate::api::extractors::{ApiJson, AuthUser};
+use crate::api::state::AppState;
+
+/// TTL for desktop auth codes (seconds).
+const CODE_TTL_SECONDS: i64 = 60;
+
+// ─── Create (authenticated) ─────────────────────────────────────────
+
+/// Request body for creating a desktop auth code.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateDesktopAuthRequest {
+    /// PKCE code_challenge (S256-hashed code_verifier, base64url-encoded).
+    pub code_challenge: String,
+    /// Supabase refresh token to store for the desktop app.
+    pub refresh_token: String,
+}
+
+/// Response containing the one-time auth code.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CreateDesktopAuthResponse {
+    pub auth_code: String,
+}
+
+/// Create a one-time desktop auth code (browser side of the PKCE exchange).
+///
+/// The authenticated user's access token is extracted from the Authorization header,
+/// and the refresh token + PKCE code_challenge are provided in the request body.
+/// Returns a short-lived auth code that the desktop app can redeem.
+///
+/// # Errors
+/// Returns `ApiError` on missing Authorization header, validation failure, or DB error.
+#[utoipa::path(
+    post,
+    path = "/v1/auth/desktop-exchange/create",
+    tag = "Auth",
+    security(("bearer_auth" = [])),
+    request_body = CreateDesktopAuthRequest,
+    responses(
+        (status = 200, description = "Auth code created", body = CreateDesktopAuthResponse),
+        (status = 400, description = "Validation error", body = ProblemDetails),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state, headers, req))]
+pub async fn create_desktop_auth_code(
+    AuthUser(_user_id): AuthUser,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    ApiJson(req): ApiJson<CreateDesktopAuthRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    // WHY: The auth middleware already verified the Bearer token, but we need
+    // the raw access_token string to store it for the desktop app to retrieve later.
+    let access_token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| ApiError::unauthorized("Missing Bearer token in Authorization header"))?;
+
+    if req.code_challenge.len() != 43
+        || !req.code_challenge.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err(ApiError::bad_request(
+            "code_challenge must be a 43-character base64url-encoded S256 hash",
+        ));
+    }
+    if req.refresh_token.is_empty() {
+        return Err(ApiError::bad_request("refresh_token must not be empty"));
+    }
+
+    // Generate a cryptographically random 32-byte hex auth code.
+    let auth_code = hex::encode(rand::random::<[u8; 32]>());
+
+    let expires_at = chrono::Utc::now() + chrono::Duration::seconds(CODE_TTL_SECONDS);
+
+    sqlx::query(
+        "INSERT INTO desktop_auth_codes (auth_code, code_challenge, access_token, refresh_token, expires_at) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(&auth_code)
+    .bind(&req.code_challenge)
+    .bind(access_token)
+    .bind(&req.refresh_token)
+    .bind(expires_at)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to insert desktop auth code");
+        ApiError::internal("Failed to create auth code")
+    })?;
+
+    Ok((
+        StatusCode::OK,
+        Json(CreateDesktopAuthResponse { auth_code }),
+    ))
+}
+
+// ─── Redeem (public) ────────────────────────────────────────────────
+
+/// Request body for redeeming a desktop auth code.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct RedeemDesktopAuthRequest {
+    /// The one-time auth code received via deep link.
+    pub auth_code: String,
+    /// The PKCE code_verifier (plaintext; S256-hashed must match stored code_challenge).
+    pub code_verifier: String,
+}
+
+/// Response containing the session tokens.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RedeemDesktopAuthResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
+/// Row returned by the DELETE + RETURNING query.
+#[derive(Debug, sqlx::FromRow)]
+struct DesktopAuthCodeRow {
+    code_challenge: String,
+    access_token: String,
+    refresh_token: String,
+}
+
+/// Redeem a one-time desktop auth code for session tokens.
+///
+/// Verifies the PKCE code_verifier against the stored code_challenge (S256),
+/// then returns the access and refresh tokens. The auth code is consumed
+/// (deleted) in a single atomic query to guarantee single-use.
+///
+/// # Errors
+/// Returns `ApiError` on validation failure, expired/invalid code, or PKCE mismatch.
+#[utoipa::path(
+    post,
+    path = "/v1/auth/desktop-exchange/redeem",
+    tag = "Auth",
+    request_body = RedeemDesktopAuthRequest,
+    responses(
+        (status = 200, description = "Tokens returned", body = RedeemDesktopAuthResponse),
+        (status = 400, description = "Validation error", body = ProblemDetails),
+        (status = 401, description = "Invalid or expired auth code", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state, req))]
+pub async fn redeem_desktop_auth_code(
+    State(state): State<AppState>,
+    ApiJson(req): ApiJson<RedeemDesktopAuthRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    if req.auth_code.is_empty() {
+        return Err(ApiError::bad_request("auth_code must not be empty"));
+    }
+    if req.code_verifier.is_empty() {
+        return Err(ApiError::bad_request("code_verifier must not be empty"));
+    }
+
+    // WHY: Single DELETE + RETURNING query guarantees the code is single-use.
+    // If two requests race, only one will get the row back.
+    let row: Option<DesktopAuthCodeRow> = sqlx::query_as(
+        "DELETE FROM desktop_auth_codes \
+         WHERE auth_code = $1 AND expires_at > now() \
+         RETURNING code_challenge, access_token, refresh_token",
+    )
+    .bind(&req.auth_code)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to redeem desktop auth code");
+        ApiError::internal("Failed to redeem auth code")
+    })?;
+
+    let row = row.ok_or_else(|| ApiError::unauthorized("Invalid or expired auth code"))?;
+
+    // WHY: Verify PKCE — SHA256(code_verifier), base64url-encoded, must match
+    // the stored code_challenge. This proves the redeemer is the same party
+    // that initiated the flow (or has the code_verifier from that party).
+    let expected_challenge = s256(&req.code_verifier);
+    if expected_challenge.as_bytes().ct_eq(row.code_challenge.as_bytes()).unwrap_u8() == 0 {
+        return Err(ApiError::unauthorized("PKCE verification failed"));
+    }
+
+    Ok((
+        StatusCode::OK,
+        Json(RedeemDesktopAuthResponse {
+            access_token: row.access_token,
+            refresh_token: row.refresh_token,
+        }),
+    ))
+}
+
+/// SHA-256 hash, base64url-encoded without padding (S256 per RFC 7636).
+fn s256(plain: &str) -> String {
+    let hash = Sha256::digest(plain.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn s256_matches_known_vector() {
+        // RFC 7636 Appendix B example (code_verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+        let result = s256("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk");
+        assert_eq!(result, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+    }
+
+    #[test]
+    fn s256_deterministic() {
+        let a = s256("test-verifier");
+        let b = s256("test-verifier");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn s256_different_inputs_differ() {
+        let a = s256("verifier-a");
+        let b = s256("verifier-b");
+        assert_ne!(a, b);
+    }
+}

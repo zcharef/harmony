@@ -57,6 +57,7 @@ config = "0.15"
 secrecy = { version = "0.10", features = ["serde"] }
 hmac = "0.12"
 sha2 = "0.10"
+subtle = "2"
 hex = "0.4"
 base64 = "0.22"
 
@@ -72,7 +73,7 @@ http = "1"
 governor = "0.10"
 
 # Async Streams
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync", "time"] }
 
 # Sentry (Crash Reporting + Alerting) - 0.47+ required for axum 0.8 compatibility
 sentry = { version = "0.47", features = ["tower", "tower-axum-matched-path", "tracing", "rustls"] }

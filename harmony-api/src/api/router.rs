@@ -61,6 +61,8 @@ pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>) -> Router {
 
     // ── Authenticated v1 routes ───────────
     let v1_routes = Router::new()
+        // SSE event stream (must be before body-limited routes)
+        .route("/v1/events", get(handlers::events::sse_events))
         // Auth
         .route("/v1/auth/me", post(handlers::profiles::sync_profile))
         // Profiles
@@ -128,12 +130,19 @@ pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>) -> Router {
             "/v1/channels/{channel_id}/messages/{message_id}",
             patch(handlers::messages::edit_message).delete(handlers::messages::delete_message),
         )
+        // Typing indicators
+        .route(
+            "/v1/channels/{id}/typing",
+            post(handlers::typing::send_typing),
+        )
         // Direct Messages
         .route(
             "/v1/dms",
             post(handlers::dms::create_dm).get(handlers::dms::list_dms),
         )
         .route("/v1/dms/{server_id}", delete(handlers::dms::close_dm))
+        // Presence
+        .route("/v1/presence", post(handlers::presence::update_presence))
         // E2EE Key Distribution
         .route("/v1/keys/device", post(handlers::keys::register_device))
         .route(
@@ -153,6 +162,11 @@ pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>) -> Router {
             delete(handlers::keys::remove_device),
         )
         .route("/v1/keys/count", get(handlers::keys::get_key_count))
+        // Desktop auth (PKCE exchange — browser creates code, desktop redeems it)
+        .route(
+            "/v1/auth/desktop-exchange/create",
+            post(handlers::desktop_auth::create_desktop_auth_code),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             super::middleware::auth::require_auth,
@@ -164,6 +178,11 @@ pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>) -> Router {
         .route(
             "/v1/auth/check-username",
             get(handlers::profiles::check_username),
+        )
+        // Desktop auth redemption (public — the desktop app has no session yet)
+        .route(
+            "/v1/auth/desktop-exchange/redeem",
+            post(handlers::desktop_auth::redeem_desktop_auth_code),
         );
 
     let mut router = Router::new();

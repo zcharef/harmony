@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AnimatePresence } from 'motion/react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { UpdateNotification } from '@/components/shared/update-notification'
-import { AuthProvider, LoginPage, useAuthStore } from '@/features/auth'
+import { AuthProvider, DesktopAuthRedirect, LoginPage, useAuthStore } from '@/features/auth'
 import { CryptoProvider } from '@/features/crypto'
 import { useAppUpdater } from '@/hooks/use-app-updater'
 
@@ -34,6 +34,15 @@ function AppContent() {
 
   if (session === null) {
     return <LoginPage />
+  }
+
+  // WHY: When the browser is opened from Tauri with redirect_scheme=harmony
+  // and the user is already logged in, show a confirmation screen to redirect
+  // back to the desktop app instead of loading the full app.
+  const isDesktopRedirect =
+    new URLSearchParams(window.location.search).get('redirect_scheme') === 'harmony'
+  if (isDesktopRedirect) {
+    return <DesktopAuthRedirect />
   }
 
   const updateVersion = update.status === 'ready' && !update.dismissed ? update.version : null

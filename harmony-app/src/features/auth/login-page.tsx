@@ -1,12 +1,14 @@
 import { Button, Card, CardBody, CardHeader, Chip, Divider, Input, Spinner } from '@heroui/react'
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
-import { CircleCheck, CircleX } from 'lucide-react'
+import { CircleCheck, CircleX, ExternalLink } from 'lucide-react'
 import type { FormEvent } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '@/features/auth/stores/auth-store'
 import { checkUsername } from '@/lib/api'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
+import { isTauri } from '@/lib/platform'
 import { supabase } from '@/lib/supabase'
 
 type AuthMode = 'login' | 'signup'
@@ -150,6 +152,130 @@ function PasswordField({
   )
 }
 
+const DESKTOP_AUTH_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+
+type DesktopLoginStatus = 'idle' | 'waiting' | 'timeout' | 'error'
+
+// WHY extracted: Keeps LoginPage below Biome's cognitive complexity limit.
+// Renders the desktop-specific "Login via Browser" flow.
+function DesktopLoginView() {
+  const { t } = useTranslation('auth')
+  const [status, setStatus] = useState<DesktopLoginStatus>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>(null)
+  const desktopAuthError = useAuthStore((s) => s.desktopAuthError)
+  const setDesktopAuthError = useAuthStore((s) => s.setDesktopAuthError)
+
+  // WHY: Clear the pending timeout if the component unmounts (e.g. deep link
+  // fires and auth succeeds before the 5-minute timer). Prevents setState on
+  // an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current)
+      }
+    }
+  }, [])
+
+  // WHY: When handleDeepLinkCallback in AuthProvider encounters an error, it
+  // sets desktopAuthError in the store. We consume it here and clear it so it
+  // only fires once.
+  useEffect(() => {
+    if (desktopAuthError !== null && status === 'waiting') {
+      setError(desktopAuthError)
+      setStatus('error')
+      setDesktopAuthError(null)
+    }
+  }, [desktopAuthError, status, setDesktopAuthError])
+
+  const handleLogin = useCallback(async () => {
+    setStatus('waiting')
+    setError(null)
+    setDesktopAuthError(null)
+
+    try {
+      const { openDesktopLogin } = await import('@/lib/desktop-auth')
+      const { state, codeVerifier } = await openDesktopLogin()
+
+      // WHY: localStorage (not sessionStorage) so the AuthProvider deep link
+      // listener can access it. localStorage survives app restarts, which is
+      // needed for the cold-start recovery path (getCurrent() in desktop-auth.ts).
+      try {
+        localStorage.setItem('desktop_auth_state', state)
+        localStorage.setItem('desktop_auth_code_verifier', codeVerifier)
+      } catch {
+        throw new Error(t('desktopLoginError'))
+      }
+
+      // WHY: Timeout — if the user doesn't complete login within 5 minutes,
+      // show a retry button instead of spinning indefinitely.
+      timeoutRef.current = setTimeout(() => {
+        setStatus((prev) => (prev === 'waiting' ? 'timeout' : prev))
+      }, DESKTOP_AUTH_TIMEOUT_MS)
+    } catch (err: unknown) {
+      logger.error('desktop_auth_open_failed', {
+        error: err instanceof Error ? err.message : 'Unknown error',
+      })
+      setError(err instanceof Error ? err.message : t('desktopLoginError'))
+      setStatus('error')
+    }
+  }, [t])
+
+  return (
+    <div className="flex flex-col items-center gap-6">
+      {status === 'idle' && (
+        <>
+          <p className="text-center text-sm text-default-500">{t('desktopLoginDescription')}</p>
+          <Button
+            data-test="desktop-login-button"
+            color="primary"
+            size="lg"
+            startContent={<ExternalLink className="h-4 w-4" />}
+            onPress={handleLogin}
+            className="w-full"
+          >
+            {t('desktopLoginButton')}
+          </Button>
+        </>
+      )}
+
+      {status === 'waiting' && (
+        <div className="flex flex-col items-center gap-3">
+          <Spinner size="lg" color="primary" />
+          <p className="text-center text-sm text-default-500">{t('desktopLoginWaiting')}</p>
+        </div>
+      )}
+
+      {(status === 'timeout' || status === 'error') && (
+        <div className="flex flex-col items-center gap-3">
+          <p className="text-center text-sm text-danger">
+            {status === 'timeout' ? t('desktopLoginTimeout') : error}
+          </p>
+          <Button data-test="desktop-login-retry" variant="flat" onPress={() => setStatus('idle')}>
+            {t('desktopLoginRetry')}
+          </Button>
+        </div>
+      )}
+
+      <Divider />
+
+      <p className="text-center text-sm text-default-500">
+        {t('desktopNoAccount')}{' '}
+        <button
+          type="button"
+          className="font-medium text-primary hover:underline text-sm"
+          onClick={async () => {
+            const { openUrl } = await import('@tauri-apps/plugin-opener')
+            await openUrl('https://app.joinharmony.app')
+          }}
+        >
+          app.joinharmony.app
+        </button>
+      </p>
+    </div>
+  )
+}
+
 export function LoginPage() {
   const { t } = useTranslation('auth')
   const [mode, setMode] = useState<AuthMode>('login')
@@ -219,35 +345,68 @@ export function LoginPage() {
     setSuccessMessage(null)
     setIsSubmitting(true)
 
-    const result =
-      mode === 'login'
-        ? await supabase.auth.signInWithPassword({
-            email,
-            password,
-            options: { captchaToken },
-          })
-        : await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-              captchaToken,
-              data: { username },
-            },
-          })
+    try {
+      const result =
+        mode === 'login'
+          ? await supabase.auth.signInWithPassword({
+              email,
+              password,
+              options: { captchaToken },
+            })
+          : await supabase.auth.signUp({
+              email,
+              password,
+              options: {
+                captchaToken,
+                data: { username },
+              },
+            })
 
+      await handleAuthResult(result, mode)
+    } catch (err: unknown) {
+      logger.error('auth_submit_failed', {
+        error: err instanceof Error ? err.message : 'Unknown error',
+      })
+      setError(t('desktopLoginError'))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // WHY extracted: Handles the result of a Supabase auth call (login or signup).
+  // Separated from handleSubmit to keep cognitive complexity under Biome's limit of 15.
+  async function handleAuthResult(
+    result: {
+      error: { message: string } | null
+      data: { session: { access_token: string; refresh_token: string } | null }
+    },
+    authMode: AuthMode,
+  ) {
     if (result.error) {
       setError(result.error.message)
       // WHY: Turnstile tokens are single-use. After a failed attempt,
       // we must reset the widget to get a fresh token for the retry.
       turnstileRef.current?.reset()
       setCaptchaToken(null)
-    } else if (mode === 'signup' && result.data.session === null) {
-      // WHY: When email confirmation is enabled, signUp returns session=null.
-      // The user exists but must verify their email before they can log in.
-      setSuccessMessage(t('checkYourEmail'))
+      return
     }
 
-    setIsSubmitting(false)
+    if (authMode === 'signup' && result.data.session === null) {
+      // WHY: When email confirmation is enabled, signUp returns session=null.
+      setSuccessMessage(t('checkYourEmail'))
+      return
+    }
+
+    if (result.data.session === null) {
+      logger.warn('login_session_null_unexpected', { authMode })
+      setError(t('desktopLoginError'))
+      return
+    }
+
+    // WHY: If opened with redirect_scheme=harmony (from Tauri desktop),
+    // the auth success triggers onAuthStateChange → session !== null →
+    // AppContent renders DesktopAuthRedirect which handles the redirect.
+    // No action needed here — DesktopAuthRedirect takes over automatically.
   }
 
   function toggleMode() {
@@ -257,6 +416,37 @@ export function LoginPage() {
     setUsernameStatus('idle')
     setError(null)
     setSuccessMessage(null)
+  }
+
+  // WHY: Early return for desktop — completely separate UI avoids a deep
+  // ternary chain in the JSX and keeps cognitive complexity under 15.
+  if (isTauri()) {
+    return (
+      <div
+        data-test="login-page"
+        className="flex min-h-screen items-center justify-center bg-background p-4"
+      >
+        <Card className="w-full max-w-md">
+          <CardHeader className="flex flex-col items-center gap-2 pb-0 pt-6">
+            <img
+              src="/brand/logo_vertical_dark.png"
+              alt="Harmony"
+              data-test="login-heading"
+              className="h-24 w-auto"
+            />
+            <Chip color="secondary" size="sm" variant="dot">
+              {t('alphaLabel', { ns: 'common' })}
+            </Chip>
+            <p data-test="login-subtitle" className="text-sm text-default-500">
+              {t('desktopLoginTitle')}
+            </p>
+          </CardHeader>
+          <CardBody className="gap-4 px-6 pb-6">
+            <DesktopLoginView />
+          </CardBody>
+        </Card>
+      </div>
+    )
   }
 
   return (
