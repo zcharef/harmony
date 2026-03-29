@@ -87,7 +87,6 @@ export function useRealtimeMembers(serverId: string) {
         return {
           ...old,
           items: [...old.items, member],
-          total: old.total + 1,
         }
       })
     },
@@ -119,7 +118,6 @@ export function useRealtimeMembers(serverId: string) {
         return {
           ...old,
           items: filtered,
-          total: Math.max(0, old.total - 1),
         }
       })
     },

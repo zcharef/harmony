@@ -64,7 +64,7 @@ describe('useMyMemberRole', () => {
         buildMember({ userId: CURRENT_USER_ID, role: 'owner', username: 'me' }),
         buildMember({ userId: 'user-other', role: 'member' }),
       ],
-      total: 2,
+      nextCursor: null,
     }
     vi.mocked(listMembers).mockResolvedValueOnce({ data: members } as never)
 
@@ -82,7 +82,7 @@ describe('useMyMemberRole', () => {
   it('resolves admin role when current user is admin', async () => {
     const members: MemberListResponse = {
       items: [buildMember({ userId: CURRENT_USER_ID, role: 'admin', username: 'me' })],
-      total: 1,
+      nextCursor: null,
     }
     vi.mocked(listMembers).mockResolvedValueOnce({ data: members } as never)
 
@@ -99,7 +99,7 @@ describe('useMyMemberRole', () => {
   it('resolves moderator role when current user is moderator', async () => {
     const members: MemberListResponse = {
       items: [buildMember({ userId: CURRENT_USER_ID, role: 'moderator', username: 'me' })],
-      total: 1,
+      nextCursor: null,
     }
     vi.mocked(listMembers).mockResolvedValueOnce({ data: members } as never)
 
@@ -116,7 +116,7 @@ describe('useMyMemberRole', () => {
   it('defaults to "member" when current user is not in the members list', async () => {
     const members: MemberListResponse = {
       items: [buildMember({ userId: 'user-someone-else', role: 'owner' })],
-      total: 1,
+      nextCursor: null,
     }
     vi.mocked(listMembers).mockResolvedValueOnce({ data: members } as never)
 
@@ -135,7 +135,7 @@ describe('useMyMemberRole', () => {
     // The SDK types role as string, so the API could return a new role value.
     const members: MemberListResponse = {
       items: [buildMember({ userId: CURRENT_USER_ID, role: 'superadmin' })],
-      total: 1,
+      nextCursor: null,
     }
     vi.mocked(listMembers).mockResolvedValueOnce({ data: members } as never)
 

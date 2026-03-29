@@ -74,7 +74,6 @@ export function MemberList({ serverId, serverName, onNavigateDm }: MemberListPro
   const presenceMap = usePresenceStore((s) => s.presenceMap)
   const currentUserId = useAuthStore((s) => s.user?.id ?? '')
   const members = data?.items ?? []
-  const total = data?.total ?? 0
   const groups = useGroupedMembers(members)
 
   // WHY: Find the current user's role from the member list for permission checks.
@@ -134,7 +133,7 @@ export function MemberList({ serverId, serverName, onNavigateDm }: MemberListPro
     <div data-test="member-list" className="flex h-full flex-col bg-default-100">
       <div className="flex h-12 items-center border-b border-divider px-4">
         <span data-test="member-count" className="font-semibold text-foreground">
-          {t('membersWithCount', { total })}
+          {t('membersWithCount', { total: members.length })}
         </span>
       </div>
       <div className={`flex-1 overflow-y-auto px-2 py-2${isError ? ' opacity-70' : ''}`}>

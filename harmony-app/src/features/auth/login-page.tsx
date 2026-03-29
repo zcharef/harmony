@@ -8,6 +8,7 @@ import { useAuthStore } from '@/features/auth/stores/auth-store'
 import { checkUsername } from '@/lib/api'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
+import { EXTERNAL_LINKS } from '@/lib/external-links'
 import { isTauri, openExternalUrl } from '@/lib/platform'
 import { supabase } from '@/lib/supabase'
 
@@ -269,7 +270,7 @@ function DesktopLoginView() {
         <button
           type="button"
           className="font-medium text-primary hover:underline text-sm"
-          onClick={() => openExternalUrl('https://app.joinharmony.app')}
+          onClick={() => openExternalUrl(EXTERNAL_LINKS.WEB_APP)}
         >
           app.joinharmony.app
         </button>

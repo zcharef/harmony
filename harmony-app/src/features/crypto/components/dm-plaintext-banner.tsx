@@ -9,9 +9,8 @@
 import { Chip } from '@heroui/react'
 import { LockOpen, Monitor } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { EXTERNAL_LINKS } from '@/lib/external-links'
 import { openExternalUrl } from '@/lib/platform'
-
-const RELEASES_URL = 'https://github.com/zcharef/harmony/releases'
 
 export function DmPlaintextBanner() {
   const { t } = useTranslation('crypto')
@@ -32,7 +31,7 @@ export function DmPlaintextBanner() {
           color="primary"
           size="sm"
           className="cursor-pointer"
-          onClick={() => openExternalUrl(RELEASES_URL)}
+          onClick={() => openExternalUrl(EXTERNAL_LINKS.GITHUB_RELEASES)}
         >
           {t('downloadDesktop')}
         </Chip>
