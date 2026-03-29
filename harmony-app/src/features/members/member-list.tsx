@@ -8,6 +8,7 @@ import type { MemberResponse, UserStatus } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { BanDialog } from './ban-dialog'
 import { useMembers } from './hooks/use-members'
+import { useRealtimeMembers } from './hooks/use-realtime-members'
 import { KickDialog } from './kick-dialog'
 import { MemberContextMenu } from './member-context-menu'
 import type { MemberRole } from './moderation-types'
@@ -70,6 +71,7 @@ function useGroupedMembers(members: MemberResponse[]) {
 export function MemberList({ serverId, serverName, onNavigateDm }: MemberListProps) {
   const { t } = useTranslation('members')
   const { data, isPending, isError } = useMembers(serverId)
+  useRealtimeMembers(serverId ?? '')
   const presenceMap = usePresenceStore((s) => s.presenceMap)
   const currentUserId = useAuthStore((s) => s.user?.id ?? '')
   const members = data?.items ?? []

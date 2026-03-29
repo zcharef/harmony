@@ -1,6 +1,8 @@
 export { useChangeRole } from './hooks/use-change-role'
+export { useForceDisconnect } from './hooks/use-force-disconnect'
 export { useMembers } from './hooks/use-members'
 export { useMyMemberRole } from './hooks/use-my-member-role'
+export { useRealtimeMembers } from './hooks/use-realtime-members'
 export { MemberList } from './member-list'
 export type { MemberRole } from './moderation-types'
 export { getMemberRole, ROLE_HIERARCHY } from './moderation-types'

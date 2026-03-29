@@ -33,6 +33,7 @@ import { CreateChannelDialog } from './create-channel-dialog'
 import { EditChannelDialog } from './edit-channel-dialog'
 import { useChannels } from './hooks/use-channels'
 import { useDeleteChannel } from './hooks/use-delete-channel'
+import { useRealtimeChannels } from './hooks/use-realtime-channels'
 
 function ChannelButton({
   channel,
@@ -219,6 +220,7 @@ export function ChannelSidebar({
 }: ChannelSidebarProps) {
   const { t } = useTranslation('channels')
   const { data: channels, isPending, isError } = useChannels(serverId)
+  useRealtimeChannels(serverId ?? '')
   const [isInviteOpen, setIsInviteOpen] = useState(false)
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false)
   const [editChannel, setEditChannel] = useState<ChannelResponse | null>(null)

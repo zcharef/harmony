@@ -7,6 +7,7 @@ import { StatusIndicator, useUserStatus } from '@/features/presence'
 import type { DmListItem } from '@/lib/api'
 import { useCloseDm } from './hooks/use-close-dm'
 import { useDms } from './hooks/use-dms'
+import { useRealtimeDms } from './hooks/use-realtime-dms'
 import { UserSearchDialog } from './user-search-dialog'
 
 /**
@@ -115,6 +116,7 @@ interface DmSidebarProps {
 export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
   const { t } = useTranslation('dms')
   const { data: dms, isPending, isError } = useDms()
+  useRealtimeDms()
   const closeDmMutation = useCloseDm()
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const user = useAuthStore((s) => s.user)
