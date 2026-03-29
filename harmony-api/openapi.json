@@ -101,6 +101,115 @@
         }
       }
     },
+    "/v1/auth/desktop-exchange/create": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Create a one-time desktop auth code (browser side of the PKCE exchange).",
+        "description": "The authenticated user's access token is extracted from the Authorization header,\nand the refresh token + PKCE `code_challenge` are provided in the request body.\nReturns a short-lived auth code that the desktop app can redeem.\n\n# Errors\nReturns `ApiError` on missing Authorization header, validation failure, or DB error.",
+        "operationId": "create_desktop_auth_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDesktopAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Auth code created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDesktopAuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/auth/desktop-exchange/redeem": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Redeem a one-time desktop auth code for session tokens.",
+        "description": "Verifies the PKCE `code_verifier` against the stored `code_challenge` (S256),\nthen returns the access and refresh tokens. The auth code is consumed\n(deleted) in a single atomic query to guarantee single-use.\n\n# Errors\nReturns `ApiError` on validation failure, expired/invalid code, or PKCE mismatch.",
+        "operationId": "redeem_desktop_auth_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemDesktopAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Tokens returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedeemDesktopAuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or expired auth code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/me": {
       "post": {
         "tags": [
@@ -544,6 +653,67 @@
         ]
       }
     },
+    "/v1/channels/{id}/typing": {
+      "post": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Signal that the authenticated user is typing in a channel.",
+        "description": "Validates channel existence and server membership, then emits a\n`TypingStarted` event via the event bus. No database write — purely\nephemeral relay.\n\n# Errors\nReturns `ApiError` if the channel is not found, the user is not a\nmember, or the profile lookup fails.",
+        "operationId": "send_typing",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Typing event relayed"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a server member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/dms": {
       "get": {
         "tags": [
@@ -742,6 +912,39 @@
           },
           "404": {
             "description": "DM not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "SSE event stream — delivers real-time events to the authenticated user.",
+        "description": "The stream filters events based on:\n1. **Server scope**: only events for servers the user is a member of.\n2. **User scope**: user-targeted events (DMs, bans) only for this user.\n3. **Sender exclusion**: message events skip the sender (client has\n   optimistic UI).\n\nOn reconnect, the client invalidates all queries (ADR-SSE-006) — no\nevent buffering or `Last-Event-ID` replay needed.\n\n**Presence lifecycle**: On connect, the user is marked online in the\n`PresenceTracker` and a `PresenceChanged` event is emitted. A heartbeat\nstream calls `touch()` every 30s so the background sweep (in main.rs)\nknows the connection is still alive.\n\n# Errors\nReturns `ApiError` if the user's server list cannot be fetched.",
+        "operationId": "sse_events",
+        "responses": {
+          "200": {
+            "description": "SSE event stream (text/event-stream)",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -1123,6 +1326,66 @@
         ]
       }
     },
+    "/v1/presence": {
+      "post": {
+        "tags": [
+          "Presence"
+        ],
+        "summary": "Update the authenticated user's presence status.",
+        "description": "Validates that the requested status is user-settable (not `offline`),\nthen emits a `PresenceChanged` event via the event bus so other\nconnected users receive the update through SSE.\n\n# Errors\nReturns `ApiError` on invalid status value.",
+        "operationId": "update_presence",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePresenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Presence updated"
+          },
+          "400": {
+            "description": "Invalid status (e.g. 'offline' is system-managed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/profiles/me": {
       "get": {
         "tags": [
@@ -1411,8 +1674,8 @@
         "tags": [
           "Moderation"
         ],
-        "summary": "List all bans for a server. Requires admin+ role.",
-        "description": "# Errors\nReturns `ApiError` on authorization failure or repository error.",
+        "summary": "List bans for a server with cursor-based pagination. Requires admin+ role.",
+        "description": "Use `before` (ISO 8601) to paginate backward. Default limit is 50, max is 100.\n\n# Errors\nReturns `ApiError` if the cursor is invalid, authorization fails, or a repository error occurs.",
         "operationId": "list_bans",
         "parameters": [
           {
@@ -1423,6 +1686,25 @@
             "schema": {
               "$ref": "#/components/schemas/ServerId"
             }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "ISO 8601 timestamp cursor -- fetch bans created before this time.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of bans to return (1-100, default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
           }
         ],
         "responses": {
@@ -1432,6 +1714,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BanListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -2022,8 +2314,8 @@
         "tags": [
           "Members"
         ],
-        "summary": "List all members of a server.",
-        "description": "# Errors\nReturns `ApiError` on repository error.",
+        "summary": "List members of a server with cursor-based pagination.",
+        "description": "Use `before` (ISO 8601) to paginate backward. Default limit is 50, max is 100.\n\n# Errors\nReturns `ApiError` if the cursor is invalid or a repository error occurs.",
         "operationId": "list_members",
         "parameters": [
           {
@@ -2034,6 +2326,25 @@
             "schema": {
               "$ref": "#/components/schemas/ServerId"
             }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "ISO 8601 timestamp cursor -- fetch members who joined before this time.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of members to return (1-100, default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
           }
         ],
         "responses": {
@@ -2043,6 +2354,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MemberListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -2416,12 +2737,32 @@
         },
         "additionalProperties": false
       },
+      "BanListQuery": {
+        "type": "object",
+        "description": "Query parameters for listing bans (cursor-based pagination).",
+        "properties": {
+          "before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp cursor -- fetch bans created before this time."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Maximum number of bans to return (1-100, default 50)."
+          }
+        }
+      },
       "BanListResponse": {
         "type": "object",
-        "description": "Envelope for a list of server bans (ADR-036).",
+        "description": "Envelope for a list of server bans with cursor pagination (ADR-036).",
         "required": [
-          "items",
-          "total"
+          "items"
         ],
         "properties": {
           "items": {
@@ -2430,9 +2771,12 @@
               "$ref": "#/components/schemas/BanResponse"
             }
           },
-          "total": {
-            "type": "integer",
-            "format": "int64"
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor for the next page. `None` if this is the last page."
           }
         }
       },
@@ -2682,6 +3026,37 @@
           }
         },
         "additionalProperties": false
+      },
+      "CreateDesktopAuthRequest": {
+        "type": "object",
+        "description": "Request body for creating a desktop auth code.",
+        "required": [
+          "codeChallenge",
+          "refreshToken"
+        ],
+        "properties": {
+          "codeChallenge": {
+            "type": "string",
+            "description": "PKCE `code_challenge` (S256-hashed `code_verifier`, base64url-encoded)."
+          },
+          "refreshToken": {
+            "type": "string",
+            "description": "Supabase refresh token to store for the desktop app."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateDesktopAuthResponse": {
+        "type": "object",
+        "description": "Response containing the one-time auth code.",
+        "required": [
+          "authCode"
+        ],
+        "properties": {
+          "authCode": {
+            "type": "string"
+          }
+        }
       },
       "CreateDmRequest": {
         "type": "object",
@@ -3140,12 +3515,32 @@
           }
         }
       },
+      "MemberListQuery": {
+        "type": "object",
+        "description": "Query parameters for listing members (cursor-based pagination).",
+        "properties": {
+          "before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp cursor -- fetch members who joined before this time."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Maximum number of members to return (1-100, default 50)."
+          }
+        }
+      },
       "MemberListResponse": {
         "type": "object",
-        "description": "Envelope for a list of server members (ADR-036).",
+        "description": "Envelope for a list of server members with cursor pagination (ADR-036).",
         "required": [
-          "items",
-          "total"
+          "items"
         ],
         "properties": {
           "items": {
@@ -3154,9 +3549,12 @@
               "$ref": "#/components/schemas/MemberResponse"
             }
           },
-          "total": {
-            "type": "integer",
-            "format": "int64"
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor for the next page. `None` if this is the last page."
           }
         }
       },
@@ -3498,6 +3896,41 @@
           }
         }
       },
+      "RedeemDesktopAuthRequest": {
+        "type": "object",
+        "description": "Request body for redeeming a desktop auth code.",
+        "required": [
+          "authCode",
+          "codeVerifier"
+        ],
+        "properties": {
+          "authCode": {
+            "type": "string",
+            "description": "The one-time auth code received via deep link."
+          },
+          "codeVerifier": {
+            "type": "string",
+            "description": "The PKCE `code_verifier` (plaintext; S256-hashed must match stored `code_challenge`)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RedeemDesktopAuthResponse": {
+        "type": "object",
+        "description": "Response containing the session tokens.",
+        "required": [
+          "accessToken",
+          "refreshToken"
+        ],
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "refreshToken": {
+            "type": "string"
+          }
+        }
+      },
       "RegisterDeviceRequest": {
         "type": "object",
         "description": "Request body for registering a device with its identity keys.",
@@ -3684,6 +4117,20 @@
         },
         "additionalProperties": false
       },
+      "UpdatePresenceRequest": {
+        "type": "object",
+        "description": "Request body for updating presence status.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/UserStatus",
+            "description": "User-settable status. Must be one of: `online`, `idle`, `dnd`.\n`offline` is system-managed (set on disconnect) and cannot be set via this endpoint."
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateServerRequest": {
         "type": "object",
         "description": "Request body for updating a server.",
@@ -3790,6 +4237,14 @@
     {
       "name": "Keys",
       "description": "E2EE key distribution (device keys, pre-key bundles)"
+    },
+    {
+      "name": "Presence",
+      "description": "User presence status updates"
+    },
+    {
+      "name": "Events",
+      "description": "Server-Sent Events for real-time updates"
     }
   ]
 }
