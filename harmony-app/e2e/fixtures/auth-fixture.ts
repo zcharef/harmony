@@ -6,7 +6,7 @@
  * directly into localStorage. Only auth.spec.ts tests the actual login form.
  */
 
-import type { Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 import type { TestUser } from './user-factory'
 
 /**
@@ -64,6 +64,17 @@ export async function authenticatePage(
   // WHY: Confirm the authenticated UI rendered — catches regressions in the
   // auth flow without requiring every caller to duplicate this assertion.
   await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
+
+  // WHY: The SSE EventSource requires an HMAC session cookie set by POST /v1/auth/me.
+  // AuthProvider calls syncProfile on mount, which sets the cookie. Until the cookie is
+  // set and EventSource reconnects, the ConnectionBanner (fixed z-50 overlay at the top)
+  // is visible and can intercept clicks on UI elements. Wait for the syncProfile response
+  // and then for the banner to disappear to ensure a stable test environment.
+  await page.waitForResponse(
+    (response) => response.url().includes('/v1/auth/me') && response.status() === 200,
+    { timeout: 15_000 },
+  )
+  await expect(page.locator('[data-test="connection-banner"]')).not.toBeVisible({ timeout: 10_000 })
 }
 
 /**
