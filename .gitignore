@@ -42,7 +42,7 @@ harmony-app/src-tauri/gen/schemas
 # E2E test screenshots
 *.png
 !harmony-app/src-tauri/icons/*.png
-!harmony-app/public/*.png
+!harmony-app/public/**/*.png
 !mediakit/*.png
 !.github/*.png
 
