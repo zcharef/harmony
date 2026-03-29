@@ -12,6 +12,7 @@ use harmony_api::{api, config, domain, infra};
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
@@ -65,10 +66,13 @@ async fn main() {
         );
     }
 
-    // 6. Build router with middleware stack
+    // 6. Background task: sweep stale presence entries every 60s
+    spawn_presence_sweep(state.clone());
+
+    // 7. Build router with middleware stack
     let app = build_router(state, trusted_proxies);
 
-    // 7. Start server with graceful shutdown
+    // 8. Start server with graceful shutdown
     let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -178,6 +182,12 @@ async fn init_app_state(config: &Config) -> AppState {
     ));
     let key_service = Arc::new(domain::services::KeyService::new(key_repo));
 
+    // Initialize in-process event bus for SSE real-time delivery
+    let event_bus = Arc::new(infra::BroadcastEventBus::new());
+
+    // Initialize in-memory presence tracker
+    let presence_tracker = Arc::new(infra::PresenceTracker::new());
+
     tracing::info!("Domain services initialized");
 
     AppState::new(
@@ -197,7 +207,50 @@ async fn init_app_state(config: &Config) -> AppState {
         member_repo,
         ban_repo,
         plan_limit_checker,
+        event_bus,
+        presence_tracker,
     )
+}
+
+/// Spawn a background task that sweeps stale presence entries every 60s.
+///
+/// Entries with `last_heartbeat` older than 90s are removed and
+/// `PresenceChanged { status: offline }` is emitted for each.
+///
+/// WHY: The 90s `max_age` gives a 60s buffer after the last SSE heartbeat
+/// touch (30s interval). If a user's SSE connection drops, the sweep will
+/// detect the stale entry within ~60–90s and broadcast the offline event.
+fn spawn_presence_sweep(state: api::AppState) {
+    use domain::models::{ServerEvent, UserStatus};
+    use domain::ports::EventBus;
+
+    /// How often the sweep runs.
+    const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+    /// Entries older than this are considered stale (disconnected).
+    const STALE_MAX_AGE: Duration = Duration::from_secs(90);
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(SWEEP_INTERVAL);
+        loop {
+            interval.tick().await;
+
+            let stale_users = state.presence_tracker().sweep_stale(STALE_MAX_AGE);
+            if stale_users.is_empty() {
+                continue;
+            }
+
+            tracing::info!(count = stale_users.len(), "Swept stale presence entries");
+
+            for user_id in stale_users {
+                let event = ServerEvent::PresenceChanged {
+                    sender_id: user_id.clone(),
+                    user_id,
+                    status: UserStatus::Offline,
+                };
+                state.event_bus().publish(event);
+            }
+        }
+    });
 }
 
 /// Fetch the ES256 public key from the Supabase JWKS endpoint.
