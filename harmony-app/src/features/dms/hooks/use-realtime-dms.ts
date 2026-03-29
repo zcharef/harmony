@@ -13,9 +13,9 @@ import { queryKeys } from '@/lib/query-keys'
  * full DmLastMessageResponse). Invalidation is simpler and correct — the
  * DM list is a short list so the refetch cost is negligible.
  *
- * WHY no Zod: We only check that the event fired, then invalidate.
- * The payload content is not used for cache mutation, so validation
- * adds no safety benefit here.
+ * WHY no local Zod parse: payload is pre-validated by useEventSource/serverEventSchema
+ * before dispatch. This hook only invalidates the query cache (no direct cache mutation),
+ * so a second validation pass adds no additional safety.
  */
 export function useRealtimeDms() {
   const queryClient = useQueryClient()

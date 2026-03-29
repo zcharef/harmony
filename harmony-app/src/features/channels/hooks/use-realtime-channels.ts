@@ -7,8 +7,12 @@ import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 
 /**
- * WHY Zod: SSE payloads are external data from a WebSocket-like stream.
- * CLAUDE.md 1.2 mandates Zod validation for all external data.
+ * WHY local schema (not imported from event-types.ts): useEventSource already
+ * validates the full discriminated union via serverEventSchema. This local schema
+ * validates only the subset of fields needed for cache mutation (no `type`,
+ * `senderId`, etc.), and maps them to ChannelResponse via toChannelResponse().
+ * Keeping it local makes the handler self-contained and avoids coupling to the
+ * full event shape.
  */
 const channelPayloadSchema = z.object({
   id: z.string(),

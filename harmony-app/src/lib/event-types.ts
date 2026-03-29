@@ -14,7 +14,7 @@
  */
 
 import { z } from 'zod'
-import type { ChannelType, Role, UserStatus } from '@/lib/api'
+import type { ChannelType, UserStatus } from '@/lib/api'
 
 // ── SSE event names (dot-separated, as sent in the `event:` field) ───
 
@@ -60,7 +60,7 @@ const memberPayloadSchema = z.object({
   username: z.string(),
   avatarUrl: z.string().nullable(),
   nickname: z.string().nullable(),
-  role: z.enum(['member', 'moderator', 'admin', 'owner'] satisfies [Role, ...Role[]]),
+  role: z.string(),
   joinedAt: z.string(),
 })
 
@@ -73,7 +73,7 @@ const banPayloadSchema = z.object({
 const channelPayloadSchema = z.object({
   id: z.string(),
   name: z.string(),
-  topic: z.string().nullable(),
+  topic: z.string().nullable().optional(),
   channelType: z.enum(['text', 'voice'] satisfies [ChannelType, ...ChannelType[]]),
   position: z.number(),
   isPrivate: z.boolean(),
