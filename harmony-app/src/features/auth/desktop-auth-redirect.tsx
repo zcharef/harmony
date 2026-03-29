@@ -15,7 +15,7 @@ import { logger } from '@/lib/logger'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from './stores/auth-store'
 
-type RedirectStatus = 'confirm' | 'redirecting' | 'error'
+type RedirectStatus = 'confirm' | 'redirecting' | 'done' | 'error'
 
 export function DesktopAuthRedirect() {
   const { t } = useTranslation('auth')
@@ -63,6 +63,9 @@ export function DesktopAuthRedirect() {
         throw new Error('Server returned incomplete exchange response')
       }
       const data = body as { auth_code: string }
+      // WHY: Set status to 'done' BEFORE the redirect so the user sees
+      // "You can close this tab" instead of a spinner if the page remains visible.
+      setStatus('done')
       window.location.href = `harmony://auth/callback?code=${encodeURIComponent(data.auth_code)}&state=${encodeURIComponent(state)}`
     } catch (err: unknown) {
       logger.error('desktop_auth_redirect_failed', {
@@ -127,6 +130,12 @@ export function DesktopAuthRedirect() {
             <div className="flex flex-col items-center gap-3">
               <Spinner size="lg" color="primary" />
               <p className="text-center text-sm text-default-500">{t('desktopRedirectSuccess')}</p>
+            </div>
+          )}
+
+          {status === 'done' && (
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-center text-sm text-success">{t('desktopRedirectDone')}</p>
             </div>
           )}
 

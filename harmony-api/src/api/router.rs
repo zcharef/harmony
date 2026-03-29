@@ -45,6 +45,9 @@ pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>) -> Router {
             AllowOrigin::list([
                 HeaderValue::from_static("https://app.joinharmony.app"),
                 HeaderValue::from_static("https://joinharmony.app"),
+                // WHY: Tauri v2 production builds send Origin: tauri://localhost
+                // from the webview. Without this, desktop auth redeem calls fail CORS.
+                HeaderValue::from_static("tauri://localhost"),
             ])
         } else {
             AllowOrigin::mirror_request()
