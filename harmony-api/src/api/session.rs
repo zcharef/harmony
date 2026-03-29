@@ -142,12 +142,24 @@ pub fn extract_session_from_cookie(
 }
 
 /// Build a `Set-Cookie` header value for the session token.
+///
+/// WHY: `SameSite=None` in production allows the Tauri desktop webview
+/// (`tauri://localhost`) to send the cookie to the API — it is cross-site
+/// relative to `api.joinharmony.app`, so `SameSite=Lax` would silently
+/// drop the cookie on every EventSource request. `SameSite=None` requires
+/// `Secure`, which is already enforced in production (HTTPS). CSRF risk is
+/// mitigated by the CORS allowlist (`allow_credentials` + explicit origin
+/// list) and the HMAC-signed token itself.
 #[must_use]
 pub fn build_session_cookie(token: &str, is_production: bool) -> String {
-    let secure = if is_production { "; Secure" } else { "" };
+    let (same_site, secure) = if is_production {
+        ("None", "; Secure")
+    } else {
+        ("Lax", "")
+    };
     format!(
-        "{}={}; HttpOnly; SameSite=Lax; Path=/; Max-Age={}{}",
-        SESSION_COOKIE_NAME, token, SESSION_DURATION_SECS, secure
+        "{}={}; HttpOnly; SameSite={}; Path=/; Max-Age={}{}",
+        SESSION_COOKIE_NAME, token, same_site, SESSION_DURATION_SECS, secure
     )
 }
 
@@ -309,7 +321,11 @@ mod tests {
     #[test]
     fn build_cookie_prod() {
         let cookie = build_session_cookie("tok123", true);
+        // WHY: SameSite=None allows Tauri webview (cross-site) to send the
+        // cookie to the API. Requires Secure (enforced in production).
+        assert!(cookie.contains("SameSite=None"));
         assert!(cookie.contains("Secure"));
+        assert!(!cookie.contains("SameSite=Lax"));
     }
 
     #[test]

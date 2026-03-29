@@ -7,6 +7,7 @@ use axum::{
 use crate::api::dto::{CheckUsernameQuery, CheckUsernameResponse, ProfileResponse};
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::AuthUser;
+use crate::api::session;
 use crate::api::state::AppState;
 use crate::infra::auth::AuthenticatedUser;
 
@@ -90,10 +91,28 @@ pub async fn sync_profile(
 
     let profile = state
         .profile_service()
-        .upsert_from_auth(user_id, email, username)
+        .upsert_from_auth(user_id.clone(), email, username)
         .await?;
 
-    Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
+    // WHY: Set the HMAC session cookie so the browser EventSource can authenticate
+    // via cookie (`withCredentials: true`). EventSource cannot send custom headers
+    // like `Authorization`, so cookie auth is the only option (ADR-SSE-005).
+    // This is the first authenticated endpoint called after every login.
+    let token = session::create_session_token(
+        &user_id.to_string(),
+        auth_user.email_verified,
+        false, // phone_verified — Supabase phone auth is not used
+        &state.session_secret,
+    );
+    let cookie_value = session::build_session_cookie(&token, state.is_production);
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(
+        axum::http::header::SET_COOKIE,
+        axum::http::HeaderValue::from_str(&cookie_value)
+            .map_err(|_| ApiError::internal("Failed to build session cookie"))?,
+    );
+
+    Ok((StatusCode::OK, headers, Json(ProfileResponse::from(profile))))
 }
 
 /// Get the authenticated user's own profile.
