@@ -114,8 +114,9 @@ async fn init_app_state(config: &Config) -> AppState {
         if config.is_production() {
             panic!("SESSION_SECRET must be set in production");
         }
-        tracing::warn!("SESSION_SECRET not set — using insecure default for development");
-        SecretString::from("dev-only-insecure-session-secret-do-not-use-in-prod!!")
+        tracing::warn!("SESSION_SECRET not set — generating random ephemeral secret (sessions won't survive restart)");
+        let random_bytes: [u8; 32] = rand::random();
+        SecretString::from(hex::encode(random_bytes))
     });
 
     // Construct Postgres adapters (ports → adapters)
