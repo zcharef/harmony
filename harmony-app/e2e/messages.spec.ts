@@ -198,20 +198,14 @@ test.describe('Messaging', () => {
     const deleteResponse = await deletePromise
     expect(deleteResponse.status()).toBe(204)
 
-    // AFTER delete: Two possible outcomes depending on whether Realtime fires:
-    // 1. Realtime UPDATE -> tombstone text "[Message deleted]" replaces content
-    // 2. No Realtime -> query invalidation refetches list -> message disappears
-    //    (API excludes soft-deleted messages with `deleted_at IS NULL` filter)
-    // WHY: Supabase Realtime in CI is slow. We verify the API returned 204 (above)
-    // and then force a cache refresh by navigating away and back. This guarantees
-    // the refetch path runs regardless of Realtime latency.
-    await page.reload()
-    const chatArea = page.locator('[data-test="chat-area"]')
-    await chatArea.waitFor({ timeout: 15_000 })
-
-    // After reload, the soft-deleted message should not appear (API filters deleted_at)
-    const reloadedContent = page.locator(`[data-test="message-item"][data-message-id="${msg.id}"]`)
-    await expect(reloadedContent).toHaveCount(0, { timeout: 10_000 })
+    // WHY: SSE delivers message.deleted events in real-time. The hook
+    // (use-realtime-messages.ts:handleMessageDeleted) sets deletedBy on the
+    // message in the TanStack Query cache, causing message-item.tsx to render
+    // the deleted tombstone (data-test-deleted="true") without any reload.
+    const deletedContent = page.locator(
+      `[data-test="message-item"][data-message-id="${msg.id}"] [data-test="message-content"][data-test-deleted="true"]`,
+    )
+    await expect(deletedContent).toBeVisible({ timeout: 15_000 })
   })
 
   // ── Moderator deletes another's message ───────────────────────────
@@ -249,15 +243,14 @@ test.describe('Messaging', () => {
     const deleteResponse = await deletePromise
     expect(deleteResponse.status()).toBe(204)
 
-    // WHY: Same approach as self-delete test — force cache refresh via reload
-    // to guarantee the refetch path runs regardless of Realtime latency.
-    await page.reload()
-    const chatArea = page.locator('[data-test="chat-area"]')
-    await chatArea.waitFor({ timeout: 15_000 })
-
-    // After reload, the soft-deleted message should not appear (API filters deleted_at)
-    const reloadedContent = page.locator(`[data-test="message-item"][data-message-id="${msg.id}"]`)
-    await expect(reloadedContent).toHaveCount(0, { timeout: 10_000 })
+    // WHY: SSE delivers message.deleted events in real-time. The hook
+    // (use-realtime-messages.ts:handleMessageDeleted) sets deletedBy on the
+    // message in the TanStack Query cache, causing message-item.tsx to render
+    // the moderator-deleted tombstone (data-test-deleted="true") without reload.
+    const deletedContent = page.locator(
+      `[data-test="message-item"][data-message-id="${msg.id}"] [data-test="message-content"][data-test-deleted="true"]`,
+    )
+    await expect(deletedContent).toBeVisible({ timeout: 15_000 })
   })
 
   // ── Non-author cannot edit ────────────────────────────────────────

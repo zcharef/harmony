@@ -168,6 +168,41 @@ export async function sendMessageRaw(
   return { status: res.status, body }
 }
 
+/** DELETE /v1/channels/{id}/messages/{messageId} — soft-delete a message. */
+export async function deleteMessage(
+  token: string,
+  channelId: string,
+  messageId: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages/${messageId}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`deleteMessage failed: ${res.status} ${body}`)
+  }
+}
+
+/** PATCH /v1/channels/{id}/messages/{messageId} — edit a message's content. */
+export async function editMessage(
+  token: string,
+  channelId: string,
+  messageId: string,
+  content: string,
+): Promise<{ id: string; content: string; editedAt: string }> {
+  const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages/${messageId}`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+    body: JSON.stringify({ content }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`editMessage failed: ${res.status} ${body}`)
+  }
+  return (await res.json()) as { id: string; content: string; editedAt: string }
+}
+
 /** DELETE /v1/servers/{id}/members/{user_id} — kick a member from a server. */
 export async function kickMember(token: string, serverId: string, userId: string): Promise<void> {
   const res = await fetch(`${API_URL}/v1/servers/${serverId}/members/${userId}`, {
@@ -267,6 +302,23 @@ export async function assignRole(
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`assignRole failed: ${res.status} ${body}`)
+  }
+}
+
+/** POST /v1/servers/{id}/transfer-ownership — transfer server ownership. */
+export async function transferOwnership(
+  token: string,
+  serverId: string,
+  newOwnerId: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/v1/servers/${serverId}/transfer-ownership`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ newOwnerId }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`transferOwnership failed: ${res.status} ${body}`)
   }
 }
 

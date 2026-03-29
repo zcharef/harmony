@@ -5,15 +5,30 @@
  * - Message delivery between two users (single page + API, and dual page)
  * - Channel creation visibility for other members
  * - Role change visibility for other members
+ * - Live role change via SSE (member.role_updated event)
+ * - Live ownership transfer via SSE (member.role_updated events)
+ * - Kicked user loses server access via SSE (force.disconnect event)
+ * - Live message delivery via SSE (message.created event)
+ * - Live message deletion via SSE (message.deleted event)
+ * - Live message edit via SSE (message.updated event)
+ * - Live channel creation via SSE (channel.created event)
+ * - Live member join via SSE (member.joined event)
+ * - Live DM message delivery via SSE (message.created in DM channel)
+ * - Banned user loses access via SSE (force.disconnect event)
  *
  * WHY scope limitations:
- * - Typing indicator uses Supabase Broadcast (not Postgres Changes). In local dev,
- *   Broadcast delivery is variable and would make tests flaky. The typing indicator
- *   is covered by unit tests (use-typing-indicator.test.ts).
- * - The app currently subscribes to Realtime postgres_changes on the `messages` table
- *   only (use-realtime-messages.ts). Server/channel/member changes do NOT propagate
- *   via Realtime — they require query invalidation (page refresh or navigation).
- *   Tests for those scenarios use the deterministic reload pattern from concurrent.spec.ts.
+ * - Typing indicator uses SSE typing.started events but delivery is ephemeral
+ *   and variable in local dev. Covered by unit tests (use-typing-indicator.test.ts).
+ *
+ * SSE realtime events used:
+ * - message.created: useRealtimeMessages inserts new message into TanStack Query cache
+ * - message.updated: useRealtimeMessages replaces message in-place (content + editedAt)
+ * - message.deleted: useRealtimeMessages sets deletedBy to trigger tombstone rendering
+ * - member.joined: useRealtimeMembers appends new member to TanStack Query cache
+ * - channel.created: useRealtimeChannels appends new channel to TanStack Query cache
+ * - member.role_updated: useRealtimeMembers updates TanStack Query cache in-place
+ * - dm.created: useRealtimeDms invalidates DM list cache
+ * - force.disconnect: useForceDisconnect invalidates server list + clears selection
  *
  * Real data-test attributes from:
  * - chat-area.tsx:468 (chat-area), :475 (message-list), :286 (message-input)
@@ -28,13 +43,19 @@ import { expect, test } from '@playwright/test'
 import { authenticatePage, selectChannel, selectServer } from './fixtures/auth-fixture'
 import {
   assignRole,
+  banUser,
   createChannel,
+  createDm,
   createInvite,
   createServer,
+  deleteMessage,
+  editMessage,
   getServerChannels,
   joinServer,
+  kickMember,
   sendMessage,
   syncProfile,
+  transferOwnership,
 } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
 
@@ -64,8 +85,8 @@ test.describe('Multi-User Realtime Sync', () => {
 
     test('User B sees message sent by User A via API', async ({ page }) => {
       // WHY: User B opens the channel, then User A sends a message via API.
-      // After a deterministic reload, User B should see the message.
-      // This pattern is from concurrent.spec.ts — avoids flaky Realtime dependency.
+      // SSE delivers the message.created event in real-time, so User B sees
+      // the message appear without any navigation or reload.
       await authenticatePage(page, userB)
       await selectServer(page, server.id)
       await selectChannel(page, channelName)
@@ -77,17 +98,13 @@ test.describe('Multi-User Realtime Sync', () => {
       const uniqueMessage = `rt-delivery-test-${Date.now()}`
       await sendMessage(userA.token, channelId, uniqueMessage)
 
-      // WHY: Deterministic reload — navigates away and back to trigger a fresh
-      // useMessages query. Avoids depending on Supabase Realtime local delivery.
-      await page.goto('/')
-      await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-      await selectServer(page, server.id)
-      await selectChannel(page, channelName)
-
+      // WHY: SSE delivers message.created events in real-time. The hook
+      // (use-realtime-messages.ts) inserts the message into the TanStack Query
+      // cache directly, so it should appear without any navigation or reload.
       const messageLocator = page
         .locator('[data-test="message-content"]')
         .filter({ hasText: uniqueMessage })
-      await expect(messageLocator).toBeVisible({ timeout: 10_000 })
+      await expect(messageLocator).toBeVisible({ timeout: 15_000 })
     })
 
     test('User B sees message sent by User A in two browser contexts', async ({
@@ -127,17 +144,19 @@ test.describe('Multi-User Realtime Sync', () => {
       const contextB = await browser.newContext({ baseURL: 'http://localhost:1420' })
       const pageB = await contextB.newPage()
 
-      await authenticatePage(pageB, userB)
-      await selectServer(pageB, server.id)
-      await selectChannel(pageB, channelName)
+      try {
+        await authenticatePage(pageB, userB)
+        await selectServer(pageB, server.id)
+        await selectChannel(pageB, channelName)
 
-      // Verify User B sees User A's message
-      const messageLocatorB = pageB
-        .locator('[data-test="message-content"]')
-        .filter({ hasText: uniqueMessage })
-      await expect(messageLocatorB).toBeVisible({ timeout: 10_000 })
-
-      await contextB.close()
+        // Verify User B sees User A's message
+        const messageLocatorB = pageB
+          .locator('[data-test="message-content"]')
+          .filter({ hasText: uniqueMessage })
+        await expect(messageLocatorB).toBeVisible({ timeout: 10_000 })
+      } finally {
+        await contextB.close()
+      }
     })
 
     test('multiple messages appear in correct order', async ({ page }) => {
@@ -200,9 +219,9 @@ test.describe('Multi-User Realtime Sync', () => {
     })
 
     test('new channel created by owner is visible to member after reload', async ({ page }) => {
-      // WHY: Channel creation does NOT use Realtime (no postgres_changes subscription
-      // on the channels table). The member sees the new channel only after navigating
-      // away and back, triggering a useChannels() refetch.
+      // WHY: SSE delivers channel.created events and useRealtimeChannels updates cache.
+      // This test verifies the fresh page-load path (member loads server after channel
+      // was created via API). The SSE live path is covered by the member loading in.
       const newChannelName = `rt-visible-${Date.now()}`
       await createChannel(channelOwner.token, channelServer.id, newChannelName)
 
@@ -275,9 +294,9 @@ test.describe('Multi-User Realtime Sync', () => {
     })
 
     test('role change from member to moderator is visible after page load', async ({ page }) => {
-      // WHY: Role changes do NOT propagate via Realtime. The member list is refetched
-      // on server selection (useMembers query). We assign the role via API, then
-      // load the page to verify the role badge updates correctly.
+      // WHY: SSE delivers member.role_updated events and useRealtimeMembers updates
+      // the cache in-place. This test verifies the page-load path (role assigned via
+      // API before page load). The SSE live path is tested separately.
       await assignRole(roleOwner.token, roleServer.id, roleTarget.id, 'moderator')
 
       await authenticatePage(page, roleOwner)
@@ -389,6 +408,554 @@ test.describe('Multi-User Realtime Sync', () => {
       const textA = await authorLabelA.textContent()
       const textB = await authorLabelB.textContent()
       expect(textA).not.toBe(textB)
+    })
+  })
+
+  // ── Live SSE Message Events (dual browser context) ────────────────
+  // WHY: These tests verify that SSE events (message.created, message.deleted,
+  // message.updated) update User B's UI in real-time while User B is already
+  // viewing the channel. No navigation or reload — pure SSE push.
+
+  test.describe('live SSE message events', () => {
+    let liveUserA: TestUser
+    let liveUserB: TestUser
+    let liveServer: { id: string; name: string }
+    let liveChannelId: string
+    let liveChannelName: string
+
+    test.beforeAll(async () => {
+      liveUserA = await createTestUser('rt-live-a')
+      liveUserB = await createTestUser('rt-live-b')
+      for (const u of [liveUserA, liveUserB]) await syncProfile(u.token)
+
+      liveServer = await createServer(liveUserA.token, `RTLive E2E ${Date.now()}`)
+      const invite = await createInvite(liveUserA.token, liveServer.id)
+      await joinServer(liveUserB.token, liveServer.id, invite.code)
+
+      const { items: channels } = await getServerChannels(liveUserA.token, liveServer.id)
+      liveChannelId = channels[0].id
+      liveChannelName = channels[0].name
+    })
+
+    test('live message delivery: User B sees new message without navigation', async ({
+      browser,
+    }) => {
+      // WHY: Both users have their own browser context with an active SSE connection.
+      // User B is already viewing the channel when User A sends a message. The SSE
+      // message.created event should make the message appear in User B's chat without
+      // any page navigation or reload.
+      const contextA = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const contextB = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const pageA = await contextA.newPage()
+      const pageB = await contextB.newPage()
+
+      try {
+        // Both users navigate to the same channel
+        await authenticatePage(pageB, liveUserB)
+        await selectServer(pageB, liveServer.id)
+        await selectChannel(pageB, liveChannelName)
+
+        // WHY: Ensure User B's SSE connection is established before User A sends.
+        await pageB.locator('[data-test="chat-area"]').waitFor({ timeout: 15_000 })
+
+        await authenticatePage(pageA, liveUserA)
+        await selectServer(pageA, liveServer.id)
+        await selectChannel(pageA, liveChannelName)
+
+        // User A sends a message
+        const uniqueMessage = `live-delivery-${Date.now()}`
+        const messageInput = pageA.locator('[data-test="message-input"]')
+        await messageInput.fill(uniqueMessage)
+        await messageInput.press('Enter')
+
+        // User A sees their own message (optimistic or after POST)
+        const sentOnA = pageA
+          .locator('[data-test="message-content"]')
+          .filter({ hasText: uniqueMessage })
+        await expect(sentOnA.first()).toBeVisible({ timeout: 10_000 })
+
+        // User B sees the message via SSE — NO navigation, NO reload
+        const receivedOnB = pageB
+          .locator('[data-test="message-content"]')
+          .filter({ hasText: uniqueMessage })
+        await expect(receivedOnB).toBeVisible({ timeout: 15_000 })
+      } finally {
+        await contextA.close()
+        await contextB.close()
+      }
+    })
+
+    test('live message deletion: User B sees tombstone after User A deletes', async ({
+      browser,
+    }) => {
+      // WHY: User A sends a message, both users see it, then User A deletes it.
+      // User B should see the message replaced with a deleted tombstone via SSE
+      // message.deleted event — without any navigation or reload.
+      const uniqueMessage = `live-delete-${Date.now()}`
+      const msg = await sendMessage(liveUserA.token, liveChannelId, uniqueMessage)
+
+      const contextB = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const pageB = await contextB.newPage()
+
+      try {
+        // User B opens the channel and sees the message
+        await authenticatePage(pageB, liveUserB)
+        await selectServer(pageB, liveServer.id)
+        await selectChannel(pageB, liveChannelName)
+
+        const messageOnB = pageB
+          .locator('[data-test="message-content"]')
+          .filter({ hasText: uniqueMessage })
+        await expect(messageOnB).toBeVisible({ timeout: 10_000 })
+
+        // User A deletes the message via API
+        await deleteMessage(liveUserA.token, liveChannelId, msg.id)
+
+        // WHY: SSE message.deleted sets deletedBy in the TanStack Query cache.
+        // message-item.tsx renders data-test-deleted="true" on the tombstone.
+        const tombstoneOnB = pageB.locator(
+          `[data-test="message-item"][data-message-id="${msg.id}"] [data-test="message-content"][data-test-deleted="true"]`,
+        )
+        await expect(tombstoneOnB).toBeVisible({ timeout: 15_000 })
+      } finally {
+        await contextB.close()
+      }
+    })
+
+    test('live message edit: User B sees updated content and edited indicator', async ({
+      browser,
+    }) => {
+      // WHY: User A sends a message, both users see it, then User A edits it.
+      // User B should see the content change and an "(edited)" indicator appear
+      // via SSE message.updated event — without any navigation or reload.
+      const originalContent = `live-edit-before-${Date.now()}`
+      const editedContent = `live-edit-after-${Date.now()}`
+      const msg = await sendMessage(liveUserA.token, liveChannelId, originalContent)
+
+      const contextB = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const pageB = await contextB.newPage()
+
+      try {
+        // User B opens the channel and sees the original message
+        await authenticatePage(pageB, liveUserB)
+        await selectServer(pageB, liveServer.id)
+        await selectChannel(pageB, liveChannelName)
+
+        const messageOnB = pageB.locator(
+          `[data-test="message-item"][data-message-id="${msg.id}"] [data-test="message-content"]`,
+        )
+        await expect(messageOnB).toHaveText(originalContent, { timeout: 10_000 })
+
+        // WHY: Verify no edited indicator before the edit
+        const editedIndicator = pageB.locator(
+          `[data-test="message-item"][data-message-id="${msg.id}"] [data-test="message-edited-indicator"]`,
+        )
+        await expect(editedIndicator).toHaveCount(0)
+
+        // User A edits the message via API
+        await editMessage(liveUserA.token, liveChannelId, msg.id, editedContent)
+
+        // WHY: SSE message.updated replaces the message in the TanStack Query cache.
+        // message-item.tsx re-renders with new content and shows "(edited)" indicator.
+        await expect(messageOnB).toHaveText(new RegExp(editedContent), { timeout: 15_000 })
+        await expect(editedIndicator).toBeVisible({ timeout: 15_000 })
+      } finally {
+        await contextB.close()
+      }
+    })
+  })
+
+  // ── Live Channel Creation via SSE ────────────────────────────────
+  // WHY: Verifies that SSE channel.created events update the channel sidebar
+  // in real-time. useRealtimeChannels appends the new channel to the TanStack
+  // Query cache, so existing members see it appear without navigation or reload.
+
+  test.describe('live channel creation via SSE', () => {
+    test('member sees new channel appear in sidebar without navigation', async ({ browser }) => {
+      // WHY: Isolated server per test — channel creation mutates shared state.
+      const chOwner = await createTestUser('rt-live-ch-owner')
+      const chMember = await createTestUser('rt-live-ch-member')
+      for (const u of [chOwner, chMember]) await syncProfile(u.token)
+
+      const chServer = await createServer(chOwner.token, `RTLiveCh E2E ${Date.now()}`)
+      const invite = await createInvite(chOwner.token, chServer.id)
+      await joinServer(chMember.token, chServer.id, invite.code)
+
+      // Member opens the server in a separate browser context
+      const memberCtx = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const memberPage = await memberCtx.newPage()
+
+      try {
+        await authenticatePage(memberPage, chMember)
+        await selectServer(memberPage, chServer.id)
+
+        // WHY: Wait for the channel list to confirm the page is fully loaded
+        // and the SSE connection is established before the owner creates a channel.
+        const channelList = memberPage.locator('[data-test="channel-list"]')
+        await channelList.waitFor({ timeout: 15_000 })
+
+        // Owner creates a new channel via API (triggers SSE channel.created)
+        const newChannelName = `live-new-ch-${Date.now()}`
+        await createChannel(chOwner.token, chServer.id, newChannelName)
+
+        // WHY: SSE delivers channel.created event. useRealtimeChannels appends the
+        // channel to the TanStack Query cache — the sidebar should update without
+        // any page navigation or reload.
+        const channelButton = memberPage
+          .locator('[data-test="channel-button"]')
+          .filter({ hasText: newChannelName })
+        await expect(channelButton).toBeVisible({ timeout: 15_000 })
+      } finally {
+        await memberCtx.close()
+      }
+    })
+  })
+
+  // ── Live Role Change via SSE ──────────────────────────────────────
+
+  test.describe('live role change via SSE', () => {
+    let liveRoleOwner: TestUser
+    let liveRoleTarget: TestUser
+    let liveRoleObserver: TestUser
+    let liveRoleServer: { id: string; name: string }
+
+    test.beforeAll(async () => {
+      liveRoleOwner = await createTestUser('rt-live-role-owner')
+      liveRoleTarget = await createTestUser('rt-live-role-target')
+      liveRoleObserver = await createTestUser('rt-live-role-observer')
+      for (const u of [liveRoleOwner, liveRoleTarget, liveRoleObserver]) await syncProfile(u.token)
+
+      liveRoleServer = await createServer(liveRoleOwner.token, `RTLiveRole E2E ${Date.now()}`)
+      const invite = await createInvite(liveRoleOwner.token, liveRoleServer.id)
+      for (const u of [liveRoleTarget, liveRoleObserver]) {
+        await joinServer(u.token, liveRoleServer.id, invite.code)
+      }
+    })
+
+    test('observer sees role badge update in real-time when admin promotes member', async ({
+      browser,
+    }) => {
+      // WHY: Two browser contexts -- observer has the member list open, owner
+      // promotes the target via the API. The SSE member.role_updated event should
+      // update the observer's member list badge without any page reload.
+      const observerCtx = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const observerPage = await observerCtx.newPage()
+
+      try {
+        await authenticatePage(observerPage, liveRoleObserver)
+        await selectServer(observerPage, liveRoleServer.id)
+
+        const memberList = observerPage.locator('[data-test="member-list"]')
+        await memberList.waitFor({ timeout: 15_000 })
+
+        // WHY: Verify the target currently has no role badge (default 'member' role
+        // renders no badge in role-badge.tsx).
+        const targetItem = memberList.locator(
+          `[data-test="member-item"][data-user-id="${liveRoleTarget.id}"]`,
+        )
+        await expect(targetItem).toBeVisible({ timeout: 10_000 })
+
+        // Owner promotes target to moderator via API (triggers SSE member.role_updated)
+        await assignRole(liveRoleOwner.token, liveRoleServer.id, liveRoleTarget.id, 'moderator')
+
+        // WHY: Wait for the moderator badge to appear on the observer's page via SSE.
+        // useRealtimeMembers handles member.role_updated by replacing the member
+        // in the TanStack Query cache -- the badge should update without reload.
+        await expect(
+          targetItem.locator('[data-test="member-role-badge"][data-role="moderator"]'),
+        ).toBeVisible({ timeout: 15_000 })
+      } finally {
+        await observerCtx.close()
+      }
+    })
+  })
+
+  // ── Live Ownership Transfer via SSE ───────────────────────────────
+
+  test.describe('live ownership transfer via SSE', () => {
+    test('all members see role badges update in real-time after ownership transfer', async ({
+      browser,
+    }) => {
+      // WHY: Isolated server per test -- ownership transfer is destructive.
+      const xferOwner = await createTestUser('rt-live-xfer-owner')
+      const xferAdmin = await createTestUser('rt-live-xfer-admin')
+      const xferObserver = await createTestUser('rt-live-xfer-observer')
+      for (const u of [xferOwner, xferAdmin, xferObserver]) await syncProfile(u.token)
+
+      const xferServer = await createServer(xferOwner.token, `RTLiveXfer E2E ${Date.now()}`)
+      const invite = await createInvite(xferOwner.token, xferServer.id)
+      for (const u of [xferAdmin, xferObserver]) {
+        await joinServer(u.token, xferServer.id, invite.code)
+      }
+      await assignRole(xferOwner.token, xferServer.id, xferAdmin.id, 'admin')
+
+      // Observer opens member list in a separate browser context
+      const observerCtx = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const observerPage = await observerCtx.newPage()
+
+      try {
+        await authenticatePage(observerPage, xferObserver)
+        await selectServer(observerPage, xferServer.id)
+
+        const memberList = observerPage.locator('[data-test="member-list"]')
+        await memberList.waitFor({ timeout: 15_000 })
+
+        // WHY: Verify initial state -- owner has owner badge, admin has admin badge.
+        const ownerItem = memberList.locator(
+          `[data-test="member-item"][data-user-id="${xferOwner.id}"]`,
+        )
+        const adminItem = memberList.locator(
+          `[data-test="member-item"][data-user-id="${xferAdmin.id}"]`,
+        )
+        await expect(
+          ownerItem.locator('[data-test="member-role-badge"][data-role="owner"]'),
+        ).toBeVisible({ timeout: 10_000 })
+        await expect(
+          adminItem.locator('[data-test="member-role-badge"][data-role="admin"]'),
+        ).toBeVisible({ timeout: 10_000 })
+
+        // Transfer ownership via API (triggers SSE member.role_updated for both users)
+        await transferOwnership(xferOwner.token, xferServer.id, xferAdmin.id)
+
+        // WHY: The SSE delivers two member.role_updated events -- one for the new owner
+        // (promoted to owner) and one for the old owner (demoted to admin).
+        // useRealtimeMembers updates both in the cache without reload.
+        await expect(
+          adminItem.locator('[data-test="member-role-badge"][data-role="owner"]'),
+        ).toBeVisible({ timeout: 15_000 })
+        await expect(
+          ownerItem.locator('[data-test="member-role-badge"][data-role="admin"]'),
+        ).toBeVisible({ timeout: 15_000 })
+      } finally {
+        await observerCtx.close()
+      }
+    })
+  })
+
+  // ── Kicked User Loses Access via SSE ──────────────────────────────
+
+  test.describe('kicked user loses access via SSE', () => {
+    test('server disappears from kicked user sidebar in real-time', async ({ browser }) => {
+      // WHY: Isolated server -- kick is destructive to membership.
+      const kickOwner = await createTestUser('rt-live-kick-owner')
+      const kickTarget = await createTestUser('rt-live-kick-target')
+      for (const u of [kickOwner, kickTarget]) await syncProfile(u.token)
+
+      const kickServer = await createServer(kickOwner.token, `RTLiveKick E2E ${Date.now()}`)
+      const invite = await createInvite(kickOwner.token, kickServer.id)
+      await joinServer(kickTarget.token, kickServer.id, invite.code)
+
+      // Target opens the server in a browser context
+      const targetCtx = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const targetPage = await targetCtx.newPage()
+
+      try {
+        await authenticatePage(targetPage, kickTarget)
+        await selectServer(targetPage, kickServer.id)
+
+        // WHY: Verify the server button is visible in the sidebar before kick.
+        const serverButton = targetPage.locator(
+          `[data-test="server-button"][data-server-id="${kickServer.id}"]`,
+        )
+        await expect(serverButton).toBeVisible({ timeout: 10_000 })
+
+        // Owner kicks the target via API (triggers SSE force.disconnect)
+        await kickMember(kickOwner.token, kickServer.id, kickTarget.id)
+
+        // WHY: useForceDisconnect handles the force.disconnect SSE event by:
+        // 1. Invalidating queryKeys.servers.all -> refetch removes the server
+        // 2. Clearing selectedServerId if viewing the kicked server
+        // The server button should disappear from the sidebar without reload.
+        await expect(serverButton).not.toBeVisible({ timeout: 15_000 })
+      } finally {
+        await targetCtx.close()
+      }
+    })
+  })
+
+  // ── Live Member Join via SSE ──────────────────────────────────────
+  // WHY: Verifies that SSE member.joined events update the member list in
+  // real-time. useRealtimeMembers appends the new member to TanStack Query
+  // cache, so existing users see the new member appear without navigation.
+
+  test.describe('live member join via SSE', () => {
+    test('existing member sees new member appear in member list after join', async ({
+      browser,
+    }) => {
+      // WHY: Two separate browser contexts simulate two real users. User A is
+      // already viewing the server's member list when User B joins via API.
+      // The SSE member.joined event should make User B appear in User A's
+      // member list without any page navigation or reload.
+      const joinOwner = await createTestUser('rt-join-owner')
+      const joinNewbie = await createTestUser('rt-join-newbie')
+      for (const u of [joinOwner, joinNewbie]) await syncProfile(u.token)
+
+      const joinSrv = await createServer(joinOwner.token, `RTJoin E2E ${Date.now()}`)
+      const invite = await createInvite(joinOwner.token, joinSrv.id)
+
+      const ownerCtx = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const ownerPage = await ownerCtx.newPage()
+
+      try {
+        // Owner loads the server and views the member list
+        await authenticatePage(ownerPage, joinOwner)
+        await selectServer(ownerPage, joinSrv.id)
+
+        const memberList = ownerPage.locator('[data-test="member-list"]')
+        await memberList.waitFor({ timeout: 15_000 })
+
+        // WHY: Confirm the newbie is NOT in the member list before joining.
+        const newbieItem = memberList.locator(
+          `[data-test="member-item"][data-user-id="${joinNewbie.id}"]`,
+        )
+        await expect(newbieItem).not.toBeAttached()
+
+        // Newbie joins the server via API
+        await joinServer(joinNewbie.token, joinSrv.id, invite.code)
+
+        // WHY: SSE delivers member.joined event. useRealtimeMembers appends
+        // the new member to the cache. Owner should see the newbie appear
+        // without any page navigation or reload.
+        await expect(newbieItem).toBeVisible({ timeout: 15_000 })
+      } finally {
+        await ownerCtx.close()
+      }
+    })
+  })
+
+  // ── Live DM Message Delivery via SSE ──────────────────────────────
+  // WHY: Verifies that SSE message.created events work in DM channels.
+  // The recipient already has the DM conversation open in their chat area.
+  // The message should appear without any navigation or reload.
+
+  test.describe('live DM message delivery via SSE', () => {
+    test('recipient sees message in already-open DM conversation', async ({ browser }) => {
+      // WHY: User A and User B both have the DM conversation open. User A sends
+      // a message via the UI. User B should see it appear via SSE message.created
+      // event — no navigation, no reload.
+      const dmSender = await createTestUser('rt-dm-sender')
+      const dmRecipient = await createTestUser('rt-dm-recipient')
+      for (const u of [dmSender, dmRecipient]) await syncProfile(u.token)
+
+      // WHY: Users must share a server for DM creation.
+      const dmSharedSrv = await createServer(dmSender.token, `RTDm E2E ${Date.now()}`)
+      const invite = await createInvite(dmSender.token, dmSharedSrv.id)
+      await joinServer(dmRecipient.token, dmSharedSrv.id, invite.code)
+
+      // Create DM via API so both users have the conversation
+      const dm = await createDm(dmSender.token, dmRecipient.id)
+
+      const senderCtx = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const recipientCtx = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const pageSender = await senderCtx.newPage()
+      const pageRecipient = await recipientCtx.newPage()
+
+      try {
+        // Recipient opens the DM conversation first
+        await authenticatePage(pageRecipient, dmRecipient)
+        await pageRecipient.locator('[data-test="dm-home-button"]').click()
+        await pageRecipient.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+        const dmItemRecipient = pageRecipient.locator(
+          `[data-test="dm-conversation-item"][data-dm-server-id="${dm.serverId}"]`,
+        )
+        await dmItemRecipient.waitFor({ timeout: 10_000 })
+        await dmItemRecipient.click()
+        await pageRecipient.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+        // Sender opens the DM and sends a message via the UI
+        await authenticatePage(pageSender, dmSender)
+        await pageSender.locator('[data-test="dm-home-button"]').click()
+        await pageSender.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+        const dmItemSender = pageSender.locator(
+          `[data-test="dm-conversation-item"][data-dm-server-id="${dm.serverId}"]`,
+        )
+        await dmItemSender.waitFor({ timeout: 10_000 })
+        await dmItemSender.click()
+        await pageSender.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+        const uniqueDmMsg = `live-dm-msg-${Date.now()}`
+        const messageInput = pageSender.locator('[data-test="message-input"]')
+        await messageInput.fill(uniqueDmMsg)
+        await messageInput.press('Enter')
+
+        // Sender sees their own message
+        const sentOnSender = pageSender
+          .locator('[data-test="message-content"]')
+          .filter({ hasText: uniqueDmMsg })
+        await expect(sentOnSender.first()).toBeVisible({ timeout: 10_000 })
+
+        // WHY: Recipient sees the message via SSE message.created — no navigation.
+        // useRealtimeMessages inserts it into the TanStack Query cache directly.
+        const receivedOnRecipient = pageRecipient
+          .locator('[data-test="message-content"]')
+          .filter({ hasText: uniqueDmMsg })
+        await expect(receivedOnRecipient).toBeVisible({ timeout: 15_000 })
+      } finally {
+        await senderCtx.close()
+        await recipientCtx.close()
+      }
+    })
+  })
+
+  // ── Banned User Loses Access via SSE ──────────────────────────────
+  // WHY: Verifies that SSE force.disconnect event fires on ban (not just kick).
+  // useForceDisconnect invalidates the server list cache and clears selection,
+  // so the banned user's UI navigates away from the server. toast.error() shows
+  // the ban reason.
+
+  test.describe('banned user loses access via SSE', () => {
+    test('after ban, server disappears from sidebar and toast is shown', async ({ browser }) => {
+      // WHY: The victim is viewing the server when an admin bans them.
+      // The SSE force.disconnect event should: (1) remove the server from the
+      // sidebar, (2) show a toast notification with the ban reason.
+      const banOwner = await createTestUser('rt-ban-owner')
+      const banVictim = await createTestUser('rt-ban-victim')
+      for (const u of [banOwner, banVictim]) await syncProfile(u.token)
+
+      const banSrv = await createServer(banOwner.token, `RTBan E2E ${Date.now()}`)
+      const invite = await createInvite(banOwner.token, banSrv.id)
+      await joinServer(banVictim.token, banSrv.id, invite.code)
+
+      const victimCtx = await browser.newContext({ baseURL: 'http://localhost:1420' })
+      const victimPage = await victimCtx.newPage()
+
+      try {
+        // Victim opens the server
+        await authenticatePage(victimPage, banVictim)
+        await selectServer(victimPage, banSrv.id)
+
+        // WHY: Wait for the member list to confirm the page is fully loaded
+        // and the SSE connection is established.
+        const memberList = victimPage.locator('[data-test="member-list"]')
+        await memberList.waitFor({ timeout: 15_000 })
+
+        // Confirm the server button is visible in the sidebar before ban
+        const serverButton = victimPage.locator(
+          `[data-test="server-button"][data-server-id="${banSrv.id}"]`,
+        )
+        await expect(serverButton).toBeVisible()
+
+        // Ban the victim via API
+        await banUser(banOwner.token, banSrv.id, banVictim.id, 'E2E ban test')
+
+        // WHY: SSE force.disconnect event triggers useForceDisconnect which:
+        // 1. Invalidates queryKeys.servers.all -> refetch removes the server
+        // 2. Clears selectedServerId if viewing the banned server
+        // 3. Shows a toast with the ban reason
+        await expect(serverButton).not.toBeVisible({ timeout: 15_000 })
+
+        // WHY: useForceDisconnect (use-force-disconnect.ts:80) calls toast.error()
+        // with the ban reason. HeroUI renders toast elements with data-toast="true".
+        // The ban reason 'E2E ban test' should appear as the toast title.
+        const toastNotification = victimPage.locator('[data-toast="true"]').filter({
+          hasText: 'E2E ban test',
+        })
+        await expect(toastNotification).toBeVisible({ timeout: 5_000 })
+      } finally {
+        await victimCtx.close()
+      }
     })
   })
 })

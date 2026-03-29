@@ -90,10 +90,9 @@ test.describe('DM Lifecycle', () => {
       const newMsg = `reopen-msg-${Date.now()}`
       await sendMessage(userA.token, dm2.channelId, newMsg)
 
-      // WHY: Navigate to the new DM and verify only the new message is visible.
-      // The old message is in a different channel (dm1.channelId), so it should not appear.
-      await page.goto('/')
-      await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
+      // WHY: After close + reopen, SSE delivers a dm.created event which
+      // invalidates the DM list cache (use-realtime-dms.ts). Wait for the
+      // new DM item to appear in the sidebar — no page refresh needed.
       await page.locator('[data-test="dm-home-button"]').click()
       await page.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
 
@@ -273,21 +272,23 @@ test.describe('DM Lifecycle', () => {
       const contextF = await browser.newContext({ baseURL: 'http://localhost:1420' })
       const pageF = await contextF.newPage()
 
-      await authenticatePage(pageF, userF)
-      await pageF.locator('[data-test="dm-home-button"]').click()
-      await pageF.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+      try {
+        await authenticatePage(pageF, userF)
+        await pageF.locator('[data-test="dm-home-button"]').click()
+        await pageF.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
 
-      const dmItemF = pageF.locator(
-        `[data-test="dm-conversation-item"][data-dm-server-id="${dm.serverId}"]`,
-      )
-      await dmItemF.waitFor({ timeout: 10_000 })
-      await dmItemF.click()
-      await pageF.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+        const dmItemF = pageF.locator(
+          `[data-test="dm-conversation-item"][data-dm-server-id="${dm.serverId}"]`,
+        )
+        await dmItemF.waitFor({ timeout: 10_000 })
+        await dmItemF.click()
+        await pageF.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
 
-      const msgF = pageF.locator('[data-test="message-content"]').filter({ hasText: bidirMsg })
-      await expect(msgF.first()).toBeVisible({ timeout: 15_000 })
-
-      await contextF.close()
+        const msgF = pageF.locator('[data-test="message-content"]').filter({ hasText: bidirMsg })
+        await expect(msgF.first()).toBeVisible({ timeout: 15_000 })
+      } finally {
+        await contextF.close()
+      }
     })
 
     test('User F replies in DM and User E sees the reply', async ({ page, browser }) => {
@@ -335,26 +336,28 @@ test.describe('DM Lifecycle', () => {
       const contextF = await browser.newContext({ baseURL: 'http://localhost:1420' })
       const pageF = await contextF.newPage()
 
-      await authenticatePage(pageF, replyF)
-      await pageF.locator('[data-test="dm-home-button"]').click()
-      await pageF.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+      try {
+        await authenticatePage(pageF, replyF)
+        await pageF.locator('[data-test="dm-home-button"]').click()
+        await pageF.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
 
-      const dmItemF = pageF.locator(
-        `[data-test="dm-conversation-item"][data-dm-server-id="${dm.serverId}"]`,
-      )
-      await dmItemF.waitFor({ timeout: 10_000 })
-      await dmItemF.click()
-      await pageF.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+        const dmItemF = pageF.locator(
+          `[data-test="dm-conversation-item"][data-dm-server-id="${dm.serverId}"]`,
+        )
+        await dmItemF.waitFor({ timeout: 10_000 })
+        await dmItemF.click()
+        await pageF.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
 
-      const initialF = pageF
-        .locator('[data-test="message-content"]')
-        .filter({ hasText: initialMsg })
-      await expect(initialF.first()).toBeVisible({ timeout: 10_000 })
+        const initialF = pageF
+          .locator('[data-test="message-content"]')
+          .filter({ hasText: initialMsg })
+        await expect(initialF.first()).toBeVisible({ timeout: 10_000 })
 
-      const replyF2 = pageF.locator('[data-test="message-content"]').filter({ hasText: replyMsg })
-      await expect(replyF2.first()).toBeVisible({ timeout: 10_000 })
-
-      await contextF.close()
+        const replyF2 = pageF.locator('[data-test="message-content"]').filter({ hasText: replyMsg })
+        await expect(replyF2.first()).toBeVisible({ timeout: 10_000 })
+      } finally {
+        await contextF.close()
+      }
     })
   })
 })

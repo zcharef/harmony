@@ -248,18 +248,15 @@ test.describe('Role Assignment', () => {
       targetItem.locator('[data-test="member-role-badge"][data-role="moderator"]'),
     ).toBeVisible({ timeout: 5_000 })
 
-    // Now promote to admin via API and reload
+    // WHY: Promote via API while the page is open. The SSE system delivers a
+    // member.role_updated event which useRealtimeMembers handles by updating the
+    // TanStack Query cache in-place — no reload needed.
     await assignRole(owner.token, server.id, target.id, 'admin')
-    await page.reload()
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
-    await selectServer(page, server.id)
-    await memberList.waitFor({ timeout: 10_000 })
 
-    // Verify the admin badge replaces the moderator badge
-    const updatedItem = memberList.locator(`[data-test="member-item"][data-user-id="${target.id}"]`)
-    await updatedItem.waitFor({ timeout: 10_000 })
+    // WHY: Wait for the admin badge to appear via SSE, proving the realtime
+    // cache update replaced the moderator badge without a page reload.
     await expect(
-      updatedItem.locator('[data-test="member-role-badge"][data-role="admin"]'),
-    ).toBeVisible({ timeout: 5_000 })
+      targetItem.locator('[data-test="member-role-badge"][data-role="admin"]'),
+    ).toBeVisible({ timeout: 15_000 })
   })
 })
