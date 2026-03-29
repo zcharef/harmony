@@ -10,3 +10,18 @@
 export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
+
+/**
+ * Opens a URL in the system browser.
+ *
+ * WHY: Tauri blocks `<a target="_blank">` — links do nothing unless opened via
+ * the plugin-opener API. This helper unifies the pattern for both platforms.
+ */
+export async function openExternalUrl(url: string): Promise<void> {
+  if (isTauri()) {
+    const { openUrl } = await import('@tauri-apps/plugin-opener')
+    await openUrl(url)
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}

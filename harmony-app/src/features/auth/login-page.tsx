@@ -8,7 +8,7 @@ import { useAuthStore } from '@/features/auth/stores/auth-store'
 import { checkUsername } from '@/lib/api'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
-import { isTauri } from '@/lib/platform'
+import { isTauri, openExternalUrl } from '@/lib/platform'
 import { supabase } from '@/lib/supabase'
 
 type AuthMode = 'login' | 'signup'
@@ -264,10 +264,7 @@ function DesktopLoginView() {
         <button
           type="button"
           className="font-medium text-primary hover:underline text-sm"
-          onClick={async () => {
-            const { openUrl } = await import('@tauri-apps/plugin-opener')
-            await openUrl('https://app.joinharmony.app')
-          }}
+          onClick={() => openExternalUrl('https://app.joinharmony.app')}
         >
           app.joinharmony.app
         </button>

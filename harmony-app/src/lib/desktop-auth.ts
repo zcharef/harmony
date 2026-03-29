@@ -16,6 +16,7 @@
 
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
+import { openExternalUrl } from '@/lib/platform'
 
 // ─── PKCE helpers ────────────────────────────────────────────────────
 
@@ -81,9 +82,7 @@ export async function openDesktopLogin(): Promise<{
   url.searchParams.set('code_challenge', codeChallenge)
   url.searchParams.set('state', state)
 
-  // WHY: Dynamic import — @tauri-apps/plugin-opener crashes in the browser.
-  const { openUrl } = await import('@tauri-apps/plugin-opener')
-  await openUrl(url.toString())
+  await openExternalUrl(url.toString())
 
   return { state, codeVerifier }
 }
@@ -100,6 +99,7 @@ export async function listenForAuthCallback(
   const { onOpenUrl, getCurrent } = await import('@tauri-apps/plugin-deep-link')
 
   function handleUrls(urls: string[]) {
+    logger.info('desktop_auth_deep_link_received', { urls })
     for (const rawUrl of urls) {
       // WHY: `new URL('harmony://auth/callback')` parses differently across
       // browser engines — on older WebKitGTK (Linux) url.host is empty and
@@ -137,7 +137,9 @@ export async function listenForAuthCallback(
     handleUrls(currentUrls)
   }
 
+  logger.info('desktop_auth_registering_listener')
   const unlisten = await onOpenUrl(handleUrls)
+  logger.info('desktop_auth_listener_registered')
   return unlisten
 }
 

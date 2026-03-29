@@ -5,12 +5,13 @@
  * (main-layout.tsx:258-266). Accessible from the Info icon in the server sidebar.
  */
 
-import { Button, Card, CardBody, Chip, Divider, Link } from '@heroui/react'
-import { Bug, ExternalLink, Github, Heart, Star, X } from 'lucide-react'
+import { Button, Card, CardBody, Chip, Divider } from '@heroui/react'
+import { Bug, Download, ExternalLink, Github, Heart, Star, X } from 'lucide-react'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import { buildInfo } from '@/lib/build-info'
+import { isTauri, openExternalUrl } from '@/lib/platform'
 
 const GITHUB_URL = 'https://github.com/zcharef/harmony'
 const ISSUES_URL = 'https://github.com/zcharef/harmony/issues'
@@ -18,6 +19,7 @@ const CONTRIBUTING_URL = 'https://github.com/zcharef/harmony/blob/main/CONTRIBUT
 const SPONSOR_URL = 'https://github.com/sponsors/zcharef'
 const COMMIT_URL = `https://github.com/zcharef/harmony/commit/${buildInfo.commitSha}`
 const LICENSE_URL = 'https://github.com/zcharef/harmony/blob/main/LICENSE'
+const RELEASES_URL = 'https://github.com/zcharef/harmony/releases'
 
 const TECH_STACK = ['Rust', 'React', 'Tauri', 'Supabase', 'TypeScript', 'Tailwind CSS']
 
@@ -59,11 +61,14 @@ export function AboutPage() {
             <Chip color="primary" variant="flat" size="sm">
               {t('version')} {buildInfo.version}
             </Chip>
-            <Link href={COMMIT_URL} isExternal>
-              <Chip variant="flat" size="sm" className="cursor-pointer">
-                {buildInfo.commitSha}
-              </Chip>
-            </Link>
+            <Chip
+              variant="flat"
+              size="sm"
+              className="cursor-pointer"
+              onClick={() => openExternalUrl(COMMIT_URL)}
+            >
+              {buildInfo.commitSha}
+            </Chip>
           </div>
           <p className="text-center text-default-500">{t('tagline')}</p>
         </div>
@@ -75,30 +80,45 @@ export function AboutPage() {
           <h2 className="text-sm font-semibold text-foreground">{t('linksTitle')}</h2>
           <div className="flex gap-3">
             <Button
-              as={Link}
-              href={GITHUB_URL}
-              isExternal
               variant="flat"
               startContent={<Github className="h-4 w-4" />}
               endContent={<ExternalLink className="h-3 w-3" />}
               size="sm"
+              onPress={() => openExternalUrl(GITHUB_URL)}
             >
               {t('github')}
             </Button>
             <Button
-              as={Link}
-              href={ISSUES_URL}
-              isExternal
               variant="flat"
               color="warning"
               startContent={<Bug className="h-4 w-4" />}
               endContent={<ExternalLink className="h-3 w-3" />}
               size="sm"
+              onPress={() => openExternalUrl(ISSUES_URL)}
             >
               {t('reportBug')}
             </Button>
           </div>
         </div>
+
+        {/* Download Desktop — web only, desktop users already have the app */}
+        {!isTauri() && (
+          <>
+            <Divider />
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-center text-sm text-default-500">{t('downloadDescription')}</p>
+              <Button
+                color="primary"
+                variant="flat"
+                startContent={<Download className="h-4 w-4" />}
+                endContent={<ExternalLink className="h-3 w-3" />}
+                onPress={() => openExternalUrl(RELEASES_URL)}
+              >
+                {t('downloadDesktop')}
+              </Button>
+            </div>
+          </>
+        )}
 
         <Divider />
 
@@ -150,13 +170,13 @@ export function AboutPage() {
 
         {/* License + Footer */}
         <div className="flex flex-col items-center gap-2 pb-8">
-          <Link
-            href={LICENSE_URL}
-            isExternal
-            className="text-xs text-default-500 hover:text-foreground"
+          <button
+            type="button"
+            onClick={() => openExternalUrl(LICENSE_URL)}
+            className="text-xs text-default-500 hover:text-foreground hover:underline"
           >
             {t('license')}
-          </Link>
+          </button>
           <p className="text-xs text-default-400">{t('madeWith')}</p>
         </div>
       </div>
@@ -180,13 +200,11 @@ function SupportRow({
       <div className="shrink-0">{icon}</div>
       <p className="min-w-0 flex-1 text-sm text-default-500">{description}</p>
       <Button
-        as={Link}
-        href={href}
-        isExternal
         variant="flat"
         size="sm"
         className="shrink-0"
         endContent={<ExternalLink className="h-3 w-3" />}
+        onPress={() => openExternalUrl(href)}
       >
         {buttonLabel}
       </Button>

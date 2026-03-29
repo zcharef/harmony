@@ -12,6 +12,9 @@
 import { Chip } from '@heroui/react'
 import { Lock, Monitor } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { openExternalUrl } from '@/lib/platform'
+
+const RELEASES_URL = 'https://github.com/zcharef/harmony/releases'
 
 export function EncryptionRequiredBanner() {
   const { t } = useTranslation('crypto')
@@ -32,6 +35,8 @@ export function EncryptionRequiredBanner() {
           variant="flat"
           color="primary"
           size="sm"
+          className="cursor-pointer"
+          onClick={() => openExternalUrl(RELEASES_URL)}
         >
           {t('downloadDesktop')}
         </Chip>
