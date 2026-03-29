@@ -28,6 +28,11 @@ async function syncProfile(
   try {
     const response = await fetch(`${env.VITE_API_URL}/v1/auth/me`, {
       method: 'POST',
+      // WHY: `credentials: 'include'` is required for the browser to store the
+      // `Set-Cookie` header from a cross-origin response. Without it, the session
+      // cookie is returned by the server but silently discarded, so EventSource
+      // (which cannot send Authorization headers) can never authenticate (ADR-SSE-005).
+      credentials: 'include',
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
