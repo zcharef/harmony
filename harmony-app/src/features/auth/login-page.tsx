@@ -189,6 +189,11 @@ function DesktopLoginView() {
   }, [desktopAuthError, status, setDesktopAuthError])
 
   const handleLogin = useCallback(async () => {
+    // WHY: Clear stale timeout from a previous attempt to prevent
+    // premature timeout if the user retries after a failure.
+    if (timeoutRef.current !== null) {
+      clearTimeout(timeoutRef.current)
+    }
     setStatus('waiting')
     setError(null)
     setDesktopAuthError(null)
@@ -219,7 +224,7 @@ function DesktopLoginView() {
       setError(err instanceof Error ? err.message : t('desktopLoginError'))
       setStatus('error')
     }
-  }, [t])
+  }, [t, setDesktopAuthError])
 
   return (
     <div className="flex flex-col items-center gap-6">
