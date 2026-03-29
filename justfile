@@ -34,16 +34,56 @@ wall-app:
     cd harmony-app && just wall
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# DEVELOPMENT
+# DEVELOPMENT (local Supabase + local API)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# Run API dev server
-dev-api:
+# Run API dev server (cargo-watch, auto-reload)
+api-dev:
     cd harmony-api && just dev
 
-# Run App dev server (Vite, port 1420)
-dev-app:
+# Run web app dev server (Vite, port 1420)
+web-dev:
     cd harmony-app && just dev
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PRODUCTION (local server ↔ production Supabase + production API)
+# Create .env.production in each subproject — gitignored, never committed.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Run API against production Supabase (requires harmony-api/.env.production)
+api-prod:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f harmony-api/.env.production ]; then
+        echo "ERROR: harmony-api/.env.production not found" >&2
+        echo "" >&2
+        echo "Create it from .env.example with your production values:" >&2
+        echo "  cp harmony-api/.env.example harmony-api/.env.production" >&2
+        echo "  # Then fill in: DATABASE_URL, SUPABASE_JWT_SECRET, SUPABASE_URL, etc." >&2
+        exit 1
+    fi
+    # WHY set -a/source: dotenvy::dotenv() won't override existing env vars,
+    # so real env vars from .env.production take precedence over .env defaults.
+    set -a
+    source harmony-api/.env.production || { echo "ERROR: Failed to parse harmony-api/.env.production" >&2; exit 1; }
+    set +a
+    cd harmony-api && cargo watch -x run
+
+# Run web app against production API + Supabase (requires harmony-app/.env.production)
+web-prod:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f harmony-app/.env.production ]; then
+        echo "ERROR: harmony-app/.env.production not found" >&2
+        echo "" >&2
+        echo "Create it from .env.example with your production values:" >&2
+        echo "  cp harmony-app/.env.example harmony-app/.env.production" >&2
+        echo "  # Then fill in: VITE_API_URL, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, etc." >&2
+        exit 1
+    fi
+    # WHY --mode production: Vite natively loads .env.production with higher
+    # priority than .env — no shell hacks needed.
+    cd harmony-app && pnpm dev --mode production
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CODE GENERATION (OpenAPI SSoT Pipeline)
