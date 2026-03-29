@@ -23,6 +23,16 @@ pub struct MessageService {
 /// Per-plan enforcement uses `PlanLimits::max_message_chars`.
 const MAX_MESSAGE_LENGTH: usize = 8000;
 
+/// Format seconds into a human-readable duration for error messages.
+fn format_duration(seconds: u64) -> &'static str {
+    match seconds {
+        0..=900 => "15 minutes",
+        901..=86_400 => "24 hours",
+        86_401..=604_800 => "7 days",
+        _ => "unlimited",
+    }
+}
+
 impl MessageService {
     #[must_use]
     pub fn new(
@@ -237,9 +247,10 @@ impl MessageService {
             #[allow(clippy::cast_possible_wrap)] // WHY: guarded by < u64::MAX check above
             let window = chrono::Duration::seconds(limits.message_edit_window_secs as i64);
             if Utc::now() - message.created_at > window {
-                return Err(DomainError::Forbidden(
-                    "Edit window has expired for this message".to_string(),
-                ));
+                return Err(DomainError::Forbidden(format!(
+                    "Edit window expired. Your plan allows editing within {} of creation.",
+                    format_duration(limits.message_edit_window_secs)
+                )));
             }
         }
 
