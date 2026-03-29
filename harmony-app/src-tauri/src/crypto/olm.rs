@@ -16,9 +16,9 @@ use super::{
     IdentityKeysResponse, InboundSessionResult, InitResponse, OneTimeKeyInfo,
 };
 
-const KEYRING_SERVICE: &str = "com.harmony.crypto";
-const SESSIONS_SERVICE: &str = "com.harmony.sessions";
-const PICKLE_KEY_SERVICE: &str = "com.harmony.pickle-key";
+const KEYRING_SERVICE: &str = "app.joinharmony.crypto";
+const SESSIONS_SERVICE: &str = "app.joinharmony.sessions";
+const PICKLE_KEY_SERVICE: &str = "app.joinharmony.pickle-key";
 
 /// Retrieve the 32-byte pickle serialization key from the OS keychain,
 /// or generate and store a new random one on first use.

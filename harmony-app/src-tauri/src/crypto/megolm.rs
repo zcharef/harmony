@@ -10,8 +10,8 @@ use vodozemac::megolm::{
 use super::CryptoError;
 use super::olm::get_or_create_serialization_key;
 
-const MEGOLM_OUTBOUND_SERVICE: &str = "com.harmony.megolm.outbound";
-const MEGOLM_INBOUND_SERVICE: &str = "com.harmony.megolm.inbound";
+const MEGOLM_OUTBOUND_SERVICE: &str = "app.joinharmony.megolm.outbound";
+const MEGOLM_INBOUND_SERVICE: &str = "app.joinharmony.megolm.inbound";
 
 /// Manages Megolm outbound (sending) and inbound (receiving) group sessions.
 ///

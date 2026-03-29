@@ -15,7 +15,7 @@ fn validate_user_id(user_id: &str) -> Result<uuid::Uuid, CryptoError> {
         .map_err(|_| CryptoError::CacheError("user_id must be a valid UUID".to_string()))
 }
 
-const KEYRING_SERVICE: &str = "com.harmony.sqlcipher";
+const KEYRING_SERVICE: &str = "app.joinharmony.sqlcipher";
 
 pub struct MessageCache {
     conn: Option<Connection>,
