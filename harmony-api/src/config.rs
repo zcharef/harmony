@@ -46,6 +46,11 @@ pub struct Config {
     /// When false, `AlwaysAllowedChecker` is used (no limits).
     #[serde(default = "default_plan_enforcement")]
     pub plan_enforcement_enabled: bool,
+
+    /// Comma-separated CIDRs of trusted reverse proxies (e.g. `"172.16.0.0/12,10.0.0.0/8"`).
+    /// Only when the TCP peer IP matches a trusted proxy CIDR will `X-Forwarded-For` /
+    /// `X-Real-IP` headers be used for rate limiting. When unset, proxy headers are ignored.
+    pub trusted_proxies: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -112,6 +117,7 @@ impl std::fmt::Debug for Config {
             )
             .field("otel_service_name", &self.otel_service_name)
             .field("plan_enforcement_enabled", &self.plan_enforcement_enabled)
+            .field("trusted_proxies", &self.trusted_proxies)
             .finish()
     }
 }

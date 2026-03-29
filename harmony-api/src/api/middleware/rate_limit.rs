@@ -1,12 +1,17 @@
 //! Rate limiting middleware using Governor.
 //!
-//! Provides per-IP rate limiting for unauthenticated requests and
-//! per-user rate limiting for authenticated requests.
+//! Provides per-IP rate limiting for all requests. User-level rate limiting
+//! is handled in the service layer (e.g., `MessageService::create`), not here.
+//!
+//! WHY IP-only: This middleware runs BEFORE auth, so it cannot reliably identify
+//! users. Extracting JWT `sub` without signature verification would let attackers
+//! forge arbitrary user IDs to hijack rate-limit buckets or create unlimited ones.
 //!
 //! Uses in-memory state for single-instance deployments.
 //! Future: Migrate to Redis for multi-instance deployments.
 
 use std::{
+    net::IpAddr,
     num::NonZeroU32,
     sync::Arc,
     task::{Context, Poll},
@@ -18,79 +23,55 @@ use axum::{
     http::{HeaderValue, Request, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use governor::{
     Quota, RateLimiter, clock::DefaultClock, middleware::NoOpMiddleware, state::InMemoryState,
 };
+use ipnet::IpNet;
 use tower::{Layer, Service};
 
 use crate::api::errors::ProblemDetails;
 
-/// Session cookie name (must match the value in `extractors.rs`).
-const SESSION_COOKIE_NAME: &str = "session";
-
 /// Rate limiter state shared across requests.
 ///
-/// Contains separate limiters for IP-based (unauthenticated) and
-/// user-based (authenticated) rate limiting.
+/// Contains a single per-IP limiter. Per-user limiting lives in the service layer.
 #[derive(Debug, Clone)]
 pub struct RateLimiterState {
-    /// Per-IP limiter for unauthenticated requests.
+    /// Per-IP limiter for all requests.
     ip_limiter: Arc<
         RateLimiter<String, dashmap::DashMap<String, InMemoryState>, DefaultClock, NoOpMiddleware>,
     >,
-    /// Per-user limiter for authenticated requests.
-    user_limiter: Arc<
-        RateLimiter<String, dashmap::DashMap<String, InMemoryState>, DefaultClock, NoOpMiddleware>,
-    >,
+    /// Trusted proxy CIDRs. Proxy headers are only used when the peer IP matches.
+    trusted_proxies: Arc<Vec<IpNet>>,
 }
 
 impl RateLimiterState {
-    /// Creates a new rate limiter state with the specified quotas.
+    /// Creates a new rate limiter state with the specified quota.
     ///
     /// # Arguments
-    /// * `ip_quota` - Requests per minute for unauthenticated (IP-based) limiting.
-    /// * `user_quota` - Requests per minute for authenticated (user-based) limiting.
+    /// * `requests_per_minute` - Requests per minute per IP address.
+    /// * `trusted_proxies` - CIDRs of trusted reverse proxies.
+    ///
     /// # Panics
-    /// Panics if either rate is 0.
+    /// Panics if `requests_per_minute` is 0.
     #[must_use]
     #[allow(clippy::expect_used)]
-    pub fn new(ip_requests_per_minute: u32, user_requests_per_minute: u32) -> Self {
-        let ip_quota = Quota::per_minute(
-            NonZeroU32::new(ip_requests_per_minute).expect("ip_requests_per_minute must be > 0"),
-        );
-        let user_quota = Quota::per_minute(
-            NonZeroU32::new(user_requests_per_minute)
-                .expect("user_requests_per_minute must be > 0"),
+    pub fn new(requests_per_minute: u32, trusted_proxies: Vec<IpNet>) -> Self {
+        let quota = Quota::per_minute(
+            NonZeroU32::new(requests_per_minute).expect("requests_per_minute must be > 0"),
         );
 
         Self {
-            ip_limiter: Arc::new(RateLimiter::keyed(ip_quota)),
-            user_limiter: Arc::new(RateLimiter::keyed(user_quota)),
+            ip_limiter: Arc::new(RateLimiter::keyed(quota)),
+            trusted_proxies: Arc::new(trusted_proxies),
         }
     }
 
-    /// Check rate limit for an IP address (unauthenticated requests).
+    /// Check rate limit for an IP address.
     ///
     /// # Errors
     /// Returns `Err(retry_after_secs)` if the IP has exceeded its per-minute quota.
     pub fn check_ip(&self, ip: &str) -> Result<(), u64> {
         match self.ip_limiter.check_key(&ip.to_string()) {
-            Ok(_) => Ok(()),
-            Err(not_until) => {
-                let retry_after =
-                    not_until.wait_time_from(governor::clock::Clock::now(&DefaultClock::default()));
-                Err(retry_after.as_secs().saturating_add(1)) // Round up
-            }
-        }
-    }
-
-    /// Check rate limit for a user ID (authenticated requests).
-    ///
-    /// # Errors
-    /// Returns `Err(retry_after_secs)` if the user has exceeded their per-minute quota.
-    pub fn check_user(&self, user_id: &str) -> Result<(), u64> {
-        match self.user_limiter.check_key(&user_id.to_string()) {
             Ok(_) => Ok(()),
             Err(not_until) => {
                 let retry_after =
@@ -108,11 +89,11 @@ pub struct RateLimitLayer {
 }
 
 impl RateLimitLayer {
-    /// Creates a new rate limit layer with the specified quotas.
+    /// Creates a new rate limit layer with the specified quota and trusted proxy list.
     #[must_use]
-    pub fn new(ip_requests_per_minute: u32, user_requests_per_minute: u32) -> Self {
+    pub fn new(requests_per_minute: u32, trusted_proxies: Vec<IpNet>) -> Self {
         Self {
-            state: RateLimiterState::new(ip_requests_per_minute, user_requests_per_minute),
+            state: RateLimiterState::new(requests_per_minute, trusted_proxies),
         }
     }
 }
@@ -155,140 +136,62 @@ where
         let mut inner = self.inner.clone();
 
         Box::pin(async move {
-            // 1. Try to extract user ID from auth (cookie or bearer)
-            let user_id = extract_user_id_from_request(&req);
+            // Extract client IP (only trusts proxy headers when peer is a trusted proxy)
+            let client_ip = extract_client_ip(&req, &state.trusted_proxies);
 
-            // 2. Extract client IP (X-Forwarded-For or peer address)
-            let client_ip = extract_client_ip(&req);
-
-            // 3. Apply rate limit based on authentication status
-            let rate_limit_result = if let Some(ref uid) = user_id {
-                // Authenticated: use per-user limiter (higher quota)
-                state.check_user(uid)
-            } else {
-                // Unauthenticated: use per-IP limiter
-                state.check_ip(&client_ip)
-            };
-
-            // 4. If rate limited, return 429 with Retry-After
-            if let Err(retry_after) = rate_limit_result {
+            // Apply IP-based rate limit
+            if let Err(retry_after) = state.check_ip(&client_ip) {
                 tracing::warn!(
                     client_ip = %client_ip,
-                    user_id = ?user_id,
                     retry_after_secs = retry_after,
                     "Rate limit exceeded"
                 );
                 return Ok(rate_limit_response(retry_after));
             }
 
-            // 5. Proceed to handler
+            // Proceed to handler
             inner.call(req).await
         })
     }
 }
 
-/// Extract user ID from request headers (cookie or bearer token).
+/// Extract client IP from request, only trusting proxy headers when the TCP peer
+/// matches a configured trusted proxy CIDR.
 ///
-/// This mirrors the logic in `AuthUser` extractor but without async DB lookup.
-/// For rate limiting, we only need the claimed user ID, not full validation.
-fn extract_user_id_from_request(req: &Request<Body>) -> Option<String> {
-    // 1. Try cookie first (web clients)
-    if let Some(user_id) = extract_user_from_cookie(req) {
-        return Some(user_id);
-    }
+/// WHY: Blindly trusting `X-Forwarded-For` lets any client spoof their IP to bypass
+/// rate limits. We only read proxy headers when the direct connection comes from a
+/// known reverse proxy (e.g., Fly.io edge, Nginx, Cloudflare).
+fn extract_client_ip(req: &Request<Body>, trusted_proxies: &[IpNet]) -> String {
+    let peer_ip = req
+        .extensions()
+        .get::<ConnectInfo<std::net::SocketAddr>>()
+        .map(|ci| ci.0.ip());
 
-    // 2. Try Authorization Bearer header (mobile clients)
-    extract_user_from_bearer(req)
-}
-
-/// Extract user ID from session cookie.
-///
-/// WHY: The session token format is `{uid}.{flags}.{expiry}.{hmac}`.
-/// We extract the uid (first segment) as a stable rate limit key instead
-/// of using the full cookie value, which changes on every session refresh.
-fn extract_user_from_cookie(req: &Request<Body>) -> Option<String> {
-    let cookie_header = req.headers().get(header::COOKIE)?;
-    let cookie_str = cookie_header.to_str().ok()?;
-    let prefix = format!("{}=", SESSION_COOKIE_NAME);
-
-    for cookie in cookie_str.split(';') {
-        let cookie = cookie.trim();
-        if let Some(value) = cookie.strip_prefix(&prefix)
-            && !value.is_empty()
-        {
-            // Extract uid from the first dot-separated segment of the session token.
-            let uid = value.split('.').next()?;
-            if !uid.is_empty() {
-                return Some(uid.to_string());
+    // Only trust proxy headers when the peer IP is from a known proxy
+    if let Some(peer) = peer_ip {
+        if is_trusted_proxy(peer, trusted_proxies) {
+            // Peer is a trusted proxy — read forwarded headers
+            if let Some(ip) = extract_ip_from_xff(req) {
+                return ip;
+            }
+            if let Some(ip) = extract_ip_from_real_ip(req) {
+                return ip;
             }
         }
-    }
-    None
-}
-
-/// Extract user ID from Authorization Bearer header.
-///
-/// WHY: We extract the `sub` claim from the JWT payload without full verification
-/// (auth middleware handles that). This ensures users who rotate tokens still
-/// share a single rate limit bucket keyed by their stable user ID.
-fn extract_user_from_bearer(req: &Request<Body>) -> Option<String> {
-    let auth_header = req.headers().get(header::AUTHORIZATION)?;
-    let auth_str = auth_header.to_str().ok()?;
-    let token = auth_str.strip_prefix("Bearer ")?;
-
-    if token.is_empty() {
-        return None;
+        // Peer is not a trusted proxy, or no proxy headers — use peer address
+        return peer.to_string();
     }
 
-    extract_sub_from_jwt(token)
-}
-
-/// Extract the `sub` claim from a JWT payload without signature verification.
-///
-/// JWTs have three base64url-encoded segments: `header.payload.signature`.
-/// We decode only the payload (middle segment) and read the `sub` field.
-fn extract_sub_from_jwt(token: &str) -> Option<String> {
-    let segments: Vec<&str> = token.splitn(4, '.').collect();
-    if segments.len() < 3 {
-        return None;
-    }
-
-    let payload_bytes = URL_SAFE_NO_PAD.decode(segments[1]).ok()?;
-    let payload: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
-    let sub = payload.get("sub")?.as_str()?;
-
-    if sub.is_empty() {
-        return None;
-    }
-
-    Some(sub.to_string())
-}
-
-/// Extract client IP from X-Forwarded-For header or peer address.
-///
-/// When behind Nginx/load balancer, the real client IP is in X-Forwarded-For.
-/// Falls back to peer address if no proxy header present.
-fn extract_client_ip(req: &Request<Body>) -> String {
-    // 1. Check X-Forwarded-For (from reverse proxy)
-    if let Some(ip) = extract_ip_from_xff(req) {
-        return ip;
-    }
-
-    // 2. Check X-Real-IP (alternative proxy header)
-    if let Some(ip) = extract_ip_from_real_ip(req) {
-        return ip;
-    }
-
-    // 3. Fall back to peer address from extensions
-    if let Some(connect_info) = req.extensions().get::<ConnectInfo<std::net::SocketAddr>>() {
-        return connect_info.0.ip().to_string();
-    }
-
-    // 4. Ultimate fallback (should not happen in production)
+    // No ConnectInfo available (should not happen in production)
     "unknown".to_string()
 }
 
-/// Extract client IP from X-Forwarded-For header.
+/// Check whether the given IP matches any of the trusted proxy CIDRs.
+fn is_trusted_proxy(ip: IpAddr, trusted_proxies: &[IpNet]) -> bool {
+    trusted_proxies.iter().any(|cidr| cidr.contains(&ip))
+}
+
+/// Extract client IP from `X-Forwarded-For` header.
 fn extract_ip_from_xff(req: &Request<Body>) -> Option<String> {
     let xff = req.headers().get("x-forwarded-for")?;
     let xff_str = xff.to_str().ok()?;
@@ -300,7 +203,7 @@ fn extract_ip_from_xff(req: &Request<Body>) -> Option<String> {
     Some(client_ip.to_string())
 }
 
-/// Extract client IP from X-Real-IP header.
+/// Extract client IP from `X-Real-IP` header.
 fn extract_ip_from_real_ip(req: &Request<Body>) -> Option<String> {
     let real_ip = req.headers().get("x-real-ip")?;
     let ip = real_ip.to_str().ok()?.trim();
@@ -308,6 +211,32 @@ fn extract_ip_from_real_ip(req: &Request<Body>) -> Option<String> {
         return None;
     }
     Some(ip.to_string())
+}
+
+/// Parse a comma-separated list of CIDRs into a `Vec<IpNet>`.
+///
+/// Logs a warning and skips any entry that fails to parse.
+#[must_use]
+pub fn parse_trusted_proxies(raw: &str) -> Vec<IpNet> {
+    raw.split(',')
+        .filter_map(|entry| {
+            let trimmed = entry.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            match trimmed.parse::<IpNet>() {
+                Ok(net) => Some(net),
+                Err(e) => {
+                    tracing::warn!(
+                        entry = trimmed,
+                        error = %e,
+                        "Ignoring invalid CIDR in TRUSTED_PROXIES"
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
 }
 
 /// Build a 429 Too Many Requests response with RFC 9457 `ProblemDetails`.
@@ -347,16 +276,15 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_allows_under_quota() {
-        let state = RateLimiterState::new(10, 50);
+        let state = RateLimiterState::new(10, vec![]);
 
         // Should allow first request
         assert!(state.check_ip("192.168.1.1").is_ok());
-        assert!(state.check_user("user123").is_ok());
     }
 
     #[test]
     fn test_rate_limiter_blocks_over_quota() {
-        let state = RateLimiterState::new(2, 2);
+        let state = RateLimiterState::new(2, vec![]);
 
         // First two requests allowed
         assert!(state.check_ip("192.168.1.1").is_ok());
@@ -370,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_different_ips_have_separate_quotas() {
-        let state = RateLimiterState::new(1, 1);
+        let state = RateLimiterState::new(1, vec![]);
 
         // First IP exhausts quota
         assert!(state.check_ip("192.168.1.1").is_ok());
@@ -381,99 +309,9 @@ mod tests {
     }
 
     #[test]
-    fn test_different_users_have_separate_quotas() {
-        let state = RateLimiterState::new(1, 1);
-
-        // First user exhausts quota
-        assert!(state.check_user("user1").is_ok());
-        assert!(state.check_user("user1").is_err());
-
-        // Second user still has quota
-        assert!(state.check_user("user2").is_ok());
-    }
-
-    /// Build a minimal JWT with the given `sub` claim (no signature verification needed).
-    fn build_test_jwt(sub: &str) -> String {
-        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(br#"{"alg":"HS256","typ":"JWT"}"#);
-        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(format!(r#"{{"sub":"{sub}","role":"authenticated"}}"#).as_bytes());
-        let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"fake-sig");
-        format!("{header}.{payload}.{signature}")
-    }
-
-    #[test]
-    fn test_extract_user_id_from_bearer() {
-        let jwt = build_test_jwt("user-uuid-123");
-        let req = Request::builder()
-            .header(header::AUTHORIZATION, format!("Bearer {jwt}"))
-            .body(Body::empty())
-            .unwrap();
-
-        let user_id = extract_user_id_from_request(&req);
-        assert_eq!(user_id, Some("user-uuid-123".to_string()));
-    }
-
-    #[test]
-    fn test_extract_user_id_from_bearer_non_jwt_falls_back_to_none() {
-        let req = Request::builder()
-            .header(header::AUTHORIZATION, "Bearer not-a-jwt-token")
-            .body(Body::empty())
-            .unwrap();
-
-        let user_id = extract_user_id_from_request(&req);
-        assert!(user_id.is_none());
-    }
-
-    #[test]
-    fn test_extract_sub_from_jwt() {
-        let jwt = build_test_jwt("abc-def-123");
-        assert_eq!(extract_sub_from_jwt(&jwt), Some("abc-def-123".to_string()));
-    }
-
-    #[test]
-    fn test_extract_sub_from_jwt_missing_sub() {
-        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256"}"#);
-        let payload =
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"role":"authenticated"}"#);
-        let sig = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"sig");
-        let jwt = format!("{header}.{payload}.{sig}");
-        assert_eq!(extract_sub_from_jwt(&jwt), None);
-    }
-
-    #[test]
-    fn test_extract_sub_from_jwt_invalid_base64() {
-        assert_eq!(extract_sub_from_jwt("a.!!!invalid.c"), None);
-    }
-
-    #[test]
-    fn test_extract_user_id_from_cookie() {
-        // Session token format: {uid}.{flags}.{expiry}.{hmac}
-        let req = Request::builder()
-            .header(
-                header::COOKIE,
-                format!(
-                    "{}=cookie_user_456.0.9999999999.deadbeef; other=value",
-                    SESSION_COOKIE_NAME
-                ),
-            )
-            .body(Body::empty())
-            .unwrap();
-
-        let user_id = extract_user_id_from_request(&req);
-        assert_eq!(user_id, Some("cookie_user_456".to_string()));
-    }
-
-    #[test]
-    fn test_extract_user_id_no_auth() {
-        let req = Request::builder().body(Body::empty()).unwrap();
-
-        let user_id = extract_user_id_from_request(&req);
-        assert!(user_id.is_none());
-    }
-
-    #[test]
-    fn test_extract_client_ip_from_xff() {
+    fn test_extract_client_ip_ignores_xff_without_trusted_proxy() {
+        // WHY: Without trusted proxies configured, X-Forwarded-For must be ignored
+        // to prevent IP spoofing attacks.
         let req = Request::builder()
             .header(
                 "x-forwarded-for",
@@ -482,26 +320,140 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let ip = extract_client_ip(&req);
+        let ip = extract_client_ip(&req, &[]);
+        // No ConnectInfo and no trusted proxy => falls back to "unknown"
+        assert_eq!(ip, "unknown");
+    }
+
+    #[test]
+    fn test_extract_client_ip_uses_xff_with_trusted_proxy() {
+        let trusted: Vec<IpNet> = vec!["10.0.0.0/8".parse().unwrap()];
+
+        let mut req = Request::builder()
+            .header("x-forwarded-for", "203.0.113.195, 10.0.0.1")
+            .body(Body::empty())
+            .unwrap();
+
+        // Simulate ConnectInfo from a trusted proxy
+        req.extensions_mut()
+            .insert(ConnectInfo(std::net::SocketAddr::from((
+                [10, 0, 0, 1],
+                12345,
+            ))));
+
+        let ip = extract_client_ip(&req, &trusted);
         assert_eq!(ip, "203.0.113.195");
     }
 
     #[test]
-    fn test_extract_client_ip_from_real_ip() {
-        let req = Request::builder()
-            .header("x-real-ip", "10.0.0.1")
+    fn test_extract_client_ip_ignores_xff_from_untrusted_peer() {
+        let trusted: Vec<IpNet> = vec!["10.0.0.0/8".parse().unwrap()];
+
+        let mut req = Request::builder()
+            .header("x-forwarded-for", "203.0.113.195")
             .body(Body::empty())
             .unwrap();
 
-        let ip = extract_client_ip(&req);
-        assert_eq!(ip, "10.0.0.1");
+        // Simulate ConnectInfo from an untrusted IP (attacker)
+        req.extensions_mut()
+            .insert(ConnectInfo(std::net::SocketAddr::from((
+                [192, 168, 1, 100],
+                54321,
+            ))));
+
+        let ip = extract_client_ip(&req, &trusted);
+        // Must use peer address, NOT the spoofed X-Forwarded-For
+        assert_eq!(ip, "192.168.1.100");
     }
 
     #[test]
-    fn test_extract_client_ip_fallback() {
+    fn test_extract_client_ip_uses_real_ip_with_trusted_proxy() {
+        let trusted: Vec<IpNet> = vec!["172.16.0.0/12".parse().unwrap()];
+
+        let mut req = Request::builder()
+            .header("x-real-ip", "8.8.8.8")
+            .body(Body::empty())
+            .unwrap();
+
+        req.extensions_mut()
+            .insert(ConnectInfo(std::net::SocketAddr::from((
+                [172, 20, 0, 1],
+                12345,
+            ))));
+
+        let ip = extract_client_ip(&req, &trusted);
+        assert_eq!(ip, "8.8.8.8");
+    }
+
+    #[test]
+    fn test_extract_client_ip_peer_fallback() {
+        let mut req = Request::builder().body(Body::empty()).unwrap();
+
+        req.extensions_mut()
+            .insert(ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                12345,
+            ))));
+
+        let ip = extract_client_ip(&req, &[]);
+        assert_eq!(ip, "127.0.0.1");
+    }
+
+    #[test]
+    fn test_extract_client_ip_no_connect_info_fallback() {
         let req = Request::builder().body(Body::empty()).unwrap();
 
-        let ip = extract_client_ip(&req);
+        let ip = extract_client_ip(&req, &[]);
         assert_eq!(ip, "unknown");
+    }
+
+    #[test]
+    fn test_is_trusted_proxy_matches_cidr() {
+        let trusted: Vec<IpNet> = vec![
+            "10.0.0.0/8".parse().unwrap(),
+            "172.16.0.0/12".parse().unwrap(),
+        ];
+
+        assert!(is_trusted_proxy("10.0.0.1".parse().unwrap(), &trusted));
+        assert!(is_trusted_proxy(
+            "10.255.255.255".parse().unwrap(),
+            &trusted
+        ));
+        assert!(is_trusted_proxy("172.20.0.1".parse().unwrap(), &trusted));
+        assert!(!is_trusted_proxy("192.168.1.1".parse().unwrap(), &trusted));
+        assert!(!is_trusted_proxy("8.8.8.8".parse().unwrap(), &trusted));
+    }
+
+    #[test]
+    fn test_is_trusted_proxy_empty_list() {
+        assert!(!is_trusted_proxy("10.0.0.1".parse().unwrap(), &[]));
+    }
+
+    #[test]
+    fn test_parse_trusted_proxies_valid() {
+        let result = parse_trusted_proxies("10.0.0.0/8, 172.16.0.0/12");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "10.0.0.0/8".parse::<IpNet>().unwrap());
+        assert_eq!(result[1], "172.16.0.0/12".parse::<IpNet>().unwrap());
+    }
+
+    #[test]
+    fn test_parse_trusted_proxies_empty() {
+        let result = parse_trusted_proxies("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_trusted_proxies_skips_invalid() {
+        // "not-a-cidr" is invalid, should be skipped with a warning
+        let result = parse_trusted_proxies("10.0.0.0/8, not-a-cidr, 172.16.0.0/12");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_trusted_proxies_single_ip() {
+        // Single IPs without prefix length should parse as /32
+        let result = parse_trusted_proxies("10.0.0.1/32");
+        assert_eq!(result.len(), 1);
     }
 }

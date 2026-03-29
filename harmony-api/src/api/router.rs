@@ -21,6 +21,8 @@ use tower_http::{
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use ipnet::IpNet;
+
 use super::handlers;
 use super::middleware::rate_limit::RateLimitLayer;
 use super::openapi::ApiDoc;
@@ -34,7 +36,7 @@ use super::state::AppState;
 /// Response ← SecurityHeaders(X-Content-Type-Options, X-Frame-Options, HSTS, CSP, Referrer-Policy, Permissions-Policy) ← Compression ← RateLimit ← CORS ← Handler
 /// ```
 #[allow(deprecated)] // TimeoutLayer::new is deprecated; upgrade when tower-http 0.7 releases
-pub fn build_router(state: AppState) -> Router {
+pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>) -> Router {
     let is_production = state.is_production;
     let request_id_header = header::HeaderName::from_static("x-request-id");
 
@@ -215,7 +217,7 @@ pub fn build_router(state: AppState) -> Router {
             HeaderValue::from_static("interest-cohort=()"),
         ))
         .layer(CompressionLayer::new())
-        .layer(RateLimitLayer::new(60, 300))
+        .layer(RateLimitLayer::new(60, trusted_proxies))
         // WHY: CORS must be OUTSIDE the rate limiter. When the rate limiter
         // short-circuits with 429, inner layers (like CORS) never run. The
         // browser then sees the 429 as a CORS error (missing
