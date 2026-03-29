@@ -149,6 +149,8 @@ impl DmService {
             ));
         }
 
+        self.plan_checker.check_dm_limit(caller_id).await?;
+
         // Create new DM
         let (server_id, channel_id) = self.dm_repo.create_dm(caller_id, recipient_id).await?;
 
