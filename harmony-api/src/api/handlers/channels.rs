@@ -12,7 +12,6 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::ChannelPayload;
 use crate::domain::models::{ChannelId, Role, ServerEvent, ServerId};
-use crate::domain::ports::EventBus;
 
 /// List all channels in a server.
 ///

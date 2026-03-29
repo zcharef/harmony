@@ -6,12 +6,12 @@ use jsonwebtoken::DecodingKey;
 use secrecy::SecretString;
 use sqlx::PgPool;
 
-use crate::domain::ports::{BanRepository, MemberRepository, PlanLimitChecker};
+use crate::domain::ports::{BanRepository, EventBus, MemberRepository, PlanLimitChecker};
 use crate::domain::services::{
     ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
     ProfileService, ServerService,
 };
-use crate::infra::{BroadcastEventBus, PresenceTracker};
+use crate::infra::PresenceTracker;
 
 /// Application state shared across all handlers.
 ///
@@ -51,7 +51,7 @@ pub struct AppState {
     /// Plan limit checker (self-hosted: always allowed, hosted: Postgres-backed).
     plan_limit_checker: Arc<dyn PlanLimitChecker>,
     /// In-process event bus for SSE real-time delivery.
-    event_bus: Arc<BroadcastEventBus>,
+    event_bus: Arc<dyn EventBus>,
     /// In-memory presence tracker (online/idle/dnd per user).
     presence_tracker: Arc<PresenceTracker>,
 }
@@ -100,7 +100,7 @@ impl AppState {
         member_repository: Arc<dyn MemberRepository>,
         ban_repository: Arc<dyn BanRepository>,
         plan_limit_checker: Arc<dyn PlanLimitChecker>,
-        event_bus: Arc<BroadcastEventBus>,
+        event_bus: Arc<dyn EventBus>,
         presence_tracker: Arc<PresenceTracker>,
     ) -> Self {
         Self {
@@ -193,8 +193,8 @@ impl AppState {
 
     /// Access the event bus for publishing real-time events.
     #[must_use]
-    pub fn event_bus(&self) -> &BroadcastEventBus {
-        &self.event_bus
+    pub fn event_bus(&self) -> &dyn EventBus {
+        &*self.event_bus
     }
 
     /// Access the in-memory presence tracker.

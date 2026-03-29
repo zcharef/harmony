@@ -10,7 +10,6 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ChannelId, ServerEvent};
-use crate::domain::ports::EventBus;
 
 /// Signal that the authenticated user is typing in a channel.
 ///

@@ -11,7 +11,6 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::MemberPayload;
 use crate::domain::models::{InviteCode, ServerEvent, ServerId};
-use crate::domain::ports::EventBus;
 
 /// Create a new invite for a server.
 ///

@@ -183,7 +183,7 @@ async fn init_app_state(config: &Config) -> AppState {
     let key_service = Arc::new(domain::services::KeyService::new(key_repo));
 
     // Initialize in-process event bus for SSE real-time delivery
-    let event_bus = Arc::new(infra::BroadcastEventBus::new());
+    let event_bus: Arc<dyn domain::ports::EventBus> = Arc::new(infra::BroadcastEventBus::new());
 
     // Initialize in-memory presence tracker
     let presence_tracker = Arc::new(infra::PresenceTracker::new());
@@ -222,7 +222,6 @@ async fn init_app_state(config: &Config) -> AppState {
 /// detect the stale entry within ~60–90s and broadcast the offline event.
 fn spawn_presence_sweep(state: api::AppState) {
     use domain::models::{ServerEvent, UserStatus};
-    use domain::ports::EventBus;
 
     /// How often the sweep runs.
     const SWEEP_INTERVAL: Duration = Duration::from_secs(60);

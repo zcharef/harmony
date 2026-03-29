@@ -10,7 +10,6 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::ServerPayload;
 use crate::domain::models::{Role, ServerEvent, ServerId};
-use crate::domain::ports::EventBus;
 
 /// Create a new server.
 ///

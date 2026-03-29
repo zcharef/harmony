@@ -30,14 +30,6 @@ impl BroadcastEventBus {
         let (sender, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self { sender }
     }
-
-    /// Get a new receiver for the broadcast channel.
-    ///
-    /// Each SSE connection calls this once to get its own `Receiver`.
-    #[must_use]
-    pub fn subscribe(&self) -> broadcast::Receiver<ServerEvent> {
-        self.sender.subscribe()
-    }
 }
 
 impl Default for BroadcastEventBus {
@@ -51,5 +43,9 @@ impl EventBus for BroadcastEventBus {
         // WHY: send() returns Err only when there are zero active receivers.
         // This is normal (no SSE clients connected) — not an error condition.
         self.sender.send(event).unwrap_or(0)
+    }
+
+    fn subscribe(&self) -> broadcast::Receiver<ServerEvent> {
+        self.sender.subscribe()
     }
 }

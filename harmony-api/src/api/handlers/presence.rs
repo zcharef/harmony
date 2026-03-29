@@ -8,7 +8,6 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ServerEvent, UserStatus};
-use crate::domain::ports::EventBus;
 
 /// Request body for updating presence status.
 #[derive(Debug, Deserialize, ToSchema)]

@@ -9,7 +9,6 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::DmPayload;
 use crate::domain::models::{ServerEvent, ServerId};
-use crate::domain::ports::EventBus;
 
 /// Default DM list page size.
 const DEFAULT_DM_LIMIT: i64 = 50;
