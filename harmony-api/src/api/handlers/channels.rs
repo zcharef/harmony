@@ -10,7 +10,9 @@ use crate::api::dto::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::{ChannelId, Role, ServerId};
+use crate::domain::models::server_event::ChannelPayload;
+use crate::domain::models::{ChannelId, Role, ServerEvent, ServerId};
+use crate::domain::ports::EventBus;
 
 /// List all channels in a server.
 ///
@@ -85,13 +87,36 @@ pub async fn create_channel(
     let channel = state
         .channel_service()
         .create_channel(
-            server_id,
+            server_id.clone(),
             req.name,
             req.channel_type,
             req.is_private,
             req.is_read_only,
         )
         .await?;
+
+    let receivers = state.event_bus().publish(ServerEvent::ChannelCreated {
+        sender_id: user_id,
+        server_id: server_id.clone(),
+        channel: ChannelPayload {
+            id: channel.id.clone(),
+            name: channel.name.clone(),
+            topic: channel.topic.clone(),
+            channel_type: channel.channel_type.clone(),
+            position: channel.position,
+            is_private: channel.is_private,
+            is_read_only: channel.is_read_only,
+            encrypted: channel.encrypted,
+            created_at: channel.created_at,
+            updated_at: channel.updated_at,
+        },
+    });
+    tracing::debug!(
+        server_id = %server_id,
+        channel_id = %channel.id,
+        receivers,
+        "emitted channel.created"
+    );
 
     Ok((StatusCode::CREATED, Json(ChannelResponse::from(channel))))
 }
@@ -159,6 +184,29 @@ pub async fn update_channel(
         )
         .await?;
 
+    let receivers = state.event_bus().publish(ServerEvent::ChannelUpdated {
+        sender_id: user_id,
+        server_id: params.id.clone(),
+        channel: ChannelPayload {
+            id: channel.id.clone(),
+            name: channel.name.clone(),
+            topic: channel.topic.clone(),
+            channel_type: channel.channel_type.clone(),
+            position: channel.position,
+            is_private: channel.is_private,
+            is_read_only: channel.is_read_only,
+            encrypted: channel.encrypted,
+            created_at: channel.created_at,
+            updated_at: channel.updated_at,
+        },
+    });
+    tracing::debug!(
+        server_id = %params.id,
+        channel_id = %channel.id,
+        receivers,
+        "emitted channel.updated"
+    );
+
     Ok((StatusCode::OK, Json(ChannelResponse::from(channel))))
 }
 
@@ -198,6 +246,18 @@ pub async fn delete_channel(
         .channel_service()
         .delete_channel(&params.id, &params.channel_id)
         .await?;
+
+    let receivers = state.event_bus().publish(ServerEvent::ChannelDeleted {
+        sender_id: user_id,
+        server_id: params.id.clone(),
+        channel_id: params.channel_id.clone(),
+    });
+    tracing::debug!(
+        server_id = %params.id,
+        channel_id = %params.channel_id,
+        receivers,
+        "emitted channel.deleted"
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }

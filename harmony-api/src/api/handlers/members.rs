@@ -11,7 +11,9 @@ use crate::api::dto::{MemberResponse, ServerResponse};
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::{ServerId, UserId};
+use crate::domain::models::server_event::{MemberPayload, ServerPayload};
+use crate::domain::models::{ServerEvent, ServerId, UserId};
+use crate::domain::ports::EventBus;
 
 /// Default member page size.
 const DEFAULT_MEMBER_LIMIT: i64 = 50;
@@ -127,6 +129,25 @@ pub async fn kick_member(
         .kick_member(&path.id, &path.user_id, &caller_id)
         .await?;
 
+    // WHY: Notify connected clients that a member was removed.
+    tracing::debug!(
+        server_id = %path.id,
+        kicked_user_id = %path.user_id,
+        caller_id = %caller_id,
+        "Emitting MemberRemoved + ForceDisconnect events"
+    );
+    state.event_bus().publish(ServerEvent::MemberRemoved {
+        sender_id: caller_id.clone(),
+        server_id: path.id.clone(),
+        user_id: path.user_id.clone(),
+    });
+    state.event_bus().publish(ServerEvent::ForceDisconnect {
+        sender_id: caller_id,
+        server_id: path.id,
+        target_user_id: path.user_id,
+        reason: "kicked".to_string(),
+    });
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -176,6 +197,26 @@ pub async fn assign_role(
             ))
         })?;
 
+    // WHY: Notify connected clients that a member's role changed.
+    tracing::debug!(
+        server_id = %path.id,
+        target_user_id = %path.user_id,
+        new_role = ?member.role,
+        "Emitting MemberRoleUpdated event"
+    );
+    state.event_bus().publish(ServerEvent::MemberRoleUpdated {
+        sender_id: caller_id,
+        server_id: path.id,
+        member: MemberPayload {
+            user_id: member.user_id.clone(),
+            username: member.username.clone(),
+            avatar_url: member.avatar_url.clone(),
+            nickname: member.nickname.clone(),
+            role: member.role,
+            joined_at: member.joined_at,
+        },
+    });
+
     Ok((StatusCode::OK, Json(MemberResponse::from(member))))
 }
 
@@ -209,6 +250,94 @@ pub async fn transfer_ownership(
         .moderation_service()
         .transfer_ownership(&server_id, &caller_id, &req.new_owner_id)
         .await?;
+
+    // WHY: Ownership transfer is a compound operation (server.owner_id + 2 role
+    // changes). Emit three events so all connected members see the full update.
+    state.event_bus().publish(ServerEvent::ServerUpdated {
+        sender_id: caller_id.clone(),
+        server_id: server_id.clone(),
+        server: ServerPayload {
+            id: server.id.clone(),
+            name: server.name.clone(),
+            icon_url: server.icon_url.clone(),
+            owner_id: server.owner_id.clone(),
+        },
+    });
+
+    // Fetch updated members for role-change payloads.
+    // WHY: The transfer already committed — if these reads fail, the transfer
+    // succeeded but clients miss the role events and will resync on reconnect.
+    match state
+        .member_repository()
+        .get_member(&server_id, &caller_id)
+        .await
+    {
+        Ok(Some(old_owner)) => {
+            state.event_bus().publish(ServerEvent::MemberRoleUpdated {
+                sender_id: caller_id.clone(),
+                server_id: server_id.clone(),
+                member: MemberPayload {
+                    user_id: old_owner.user_id,
+                    username: old_owner.username,
+                    avatar_url: old_owner.avatar_url,
+                    nickname: old_owner.nickname,
+                    role: old_owner.role,
+                    joined_at: old_owner.joined_at,
+                },
+            });
+        }
+        Ok(None) => {
+            tracing::warn!(
+                server_id = %server_id,
+                user_id = %caller_id,
+                "Old owner member not found after transfer — skipping MemberRoleUpdated event"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                server_id = %server_id,
+                user_id = %caller_id,
+                error = ?e,
+                "Failed to fetch old owner for MemberRoleUpdated event"
+            );
+        }
+    }
+
+    match state
+        .member_repository()
+        .get_member(&server_id, &req.new_owner_id)
+        .await
+    {
+        Ok(Some(new_owner)) => {
+            state.event_bus().publish(ServerEvent::MemberRoleUpdated {
+                sender_id: caller_id.clone(),
+                server_id: server_id.clone(),
+                member: MemberPayload {
+                    user_id: new_owner.user_id,
+                    username: new_owner.username,
+                    avatar_url: new_owner.avatar_url,
+                    nickname: new_owner.nickname,
+                    role: new_owner.role,
+                    joined_at: new_owner.joined_at,
+                },
+            });
+        }
+        Ok(None) => {
+            tracing::warn!(
+                server_id = %server_id,
+                user_id = %req.new_owner_id,
+                "New owner member not found after transfer — skipping MemberRoleUpdated event"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                server_id = %server_id,
+                user_id = %req.new_owner_id,
+                error = ?e,
+                "Failed to fetch new owner for MemberRoleUpdated event"
+            );
+        }
+    }
 
     Ok((StatusCode::OK, Json(ServerResponse::from(server))))
 }

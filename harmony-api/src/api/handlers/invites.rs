@@ -9,7 +9,9 @@ use crate::api::dto::invites::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::{InviteCode, ServerId};
+use crate::domain::models::server_event::MemberPayload;
+use crate::domain::models::{InviteCode, ServerEvent, ServerId};
+use crate::domain::ports::EventBus;
 
 /// Create a new invite for a server.
 ///
@@ -158,6 +160,50 @@ pub async fn join_server(
             error = ?e,
             "Failed to post join announcement (best-effort)"
         );
+    }
+
+    // WHY: Emit MemberJoined so connected SSE clients update their member lists.
+    // Best-effort — the join already succeeded, so event emission failure is logged, not propagated.
+    match state
+        .member_repository()
+        .get_member(&server_id, &user_id)
+        .await
+    {
+        Ok(Some(member)) => {
+            let event = ServerEvent::MemberJoined {
+                sender_id: user_id.clone(),
+                server_id: server_id.clone(),
+                member: MemberPayload {
+                    user_id: member.user_id,
+                    username: member.username,
+                    avatar_url: member.avatar_url,
+                    nickname: member.nickname,
+                    role: member.role,
+                    joined_at: member.joined_at,
+                },
+            };
+            tracing::debug!(
+                server_id = %server_id,
+                user_id = %user_id,
+                "Emitting MemberJoined event"
+            );
+            state.event_bus().publish(event);
+        }
+        Ok(None) => {
+            tracing::warn!(
+                server_id = %server_id,
+                user_id = %user_id,
+                "Member not found after join — skipping MemberJoined event"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                server_id = %server_id,
+                user_id = %user_id,
+                error = ?e,
+                "Failed to fetch member for MemberJoined event"
+            );
+        }
     }
 
     Ok(StatusCode::NO_CONTENT)

@@ -7,7 +7,9 @@ use crate::api::dto::dms::{CreateDmRequest, DmListQuery, DmListResponse, DmRespo
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::ServerId;
+use crate::domain::models::server_event::DmPayload;
+use crate::domain::models::{ServerEvent, ServerId};
+use crate::domain::ports::EventBus;
 
 /// Default DM list page size.
 const DEFAULT_DM_LIMIT: i64 = 50;
@@ -52,6 +54,24 @@ pub async fn create_dm(
     } else {
         StatusCode::OK
     };
+
+    // WHY: Only notify the recipient on new DM creation. Idempotent returns
+    // (already-existing DM) don't need an event -- the recipient already has it.
+    if created {
+        let event = ServerEvent::DmCreated {
+            sender_id: user_id,
+            target_user_id: conversation.recipient_id.clone(),
+            dm: DmPayload {
+                server_id: conversation.server_id.clone(),
+                channel_id: conversation.channel_id.clone(),
+                other_user_id: conversation.recipient_id.clone(),
+                other_username: conversation.recipient_username.clone(),
+                other_display_name: conversation.recipient_display_name.clone(),
+                other_avatar_url: conversation.recipient_avatar_url.clone(),
+            },
+        };
+        state.event_bus().publish(event);
+    }
 
     Ok((status, Json(DmResponse::from(conversation))))
 }
@@ -141,6 +161,9 @@ pub async fn close_dm(
     ApiPath(server_id): ApiPath<ServerId>,
 ) -> Result<impl IntoResponse, ApiError> {
     state.dm_service().close_dm(&user_id, &server_id).await?;
+
+    // WHY: No SSE event emitted. Closing a DM is a private action that only
+    // affects the closer's sidebar. The other participant's view is unchanged.
 
     Ok(StatusCode::NO_CONTENT)
 }

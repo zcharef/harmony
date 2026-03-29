@@ -11,7 +11,9 @@ use crate::api::dto::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::{ChannelId, MessageId};
+use crate::domain::models::server_event::MessagePayload;
+use crate::domain::models::{ChannelId, MessageId, ServerEvent};
+use crate::domain::ports::EventBus;
 
 /// Default message page size.
 const DEFAULT_MESSAGE_LIMIT: i64 = 50;
@@ -46,6 +48,39 @@ pub async fn send_message(
         .message_service()
         .create(&channel_id, &user_id, req.content)
         .await?;
+
+    // WHY: Look up channel to get server_id for the SSE event envelope.
+    // Best-effort — the message already committed, so channel lookup failure is logged, not propagated.
+    match state.channel_service().get_by_id(&channel_id).await {
+        Ok(channel) => {
+            let event = ServerEvent::MessageCreated {
+                sender_id: user_id.clone(),
+                server_id: channel.server_id,
+                channel_id: channel_id.clone(),
+                message: MessagePayload {
+                    id: message.message.id.clone(),
+                    channel_id: channel_id.clone(),
+                    content: message.message.content.clone(),
+                    author_id: message.message.author_id.clone(),
+                    author_username: message.author_username.clone(),
+                    author_avatar_url: message.author_avatar_url.clone(),
+                    encrypted: message.message.encrypted,
+                    sender_device_id: message.message.sender_device_id.clone(),
+                    edited_at: message.message.edited_at,
+                    created_at: message.message.created_at,
+                },
+            };
+            let receivers = state.event_bus().publish(event);
+            tracing::debug!(channel_id = %channel_id, receivers, "emitted message.created");
+        }
+        Err(e) => {
+            tracing::warn!(
+                channel_id = %channel_id,
+                error = ?e,
+                "Failed to fetch channel for MessageCreated event — skipping event emission"
+            );
+        }
+    }
 
     Ok((StatusCode::CREATED, Json(MessageResponse::from(message))))
 }
@@ -151,6 +186,45 @@ pub async fn edit_message(
         .edit_message(&path.message_id, &user_id, req.content)
         .await?;
 
+    // WHY: Look up channel to get server_id for the SSE event envelope.
+    // Best-effort — the edit already committed, so channel lookup failure is logged, not propagated.
+    match state.channel_service().get_by_id(&path.channel_id).await {
+        Ok(channel) => {
+            let event = ServerEvent::MessageUpdated {
+                sender_id: user_id.clone(),
+                server_id: channel.server_id,
+                channel_id: path.channel_id.clone(),
+                message: MessagePayload {
+                    id: message.message.id.clone(),
+                    channel_id: path.channel_id.clone(),
+                    content: message.message.content.clone(),
+                    author_id: message.message.author_id.clone(),
+                    author_username: message.author_username.clone(),
+                    author_avatar_url: message.author_avatar_url.clone(),
+                    encrypted: message.message.encrypted,
+                    sender_device_id: message.message.sender_device_id.clone(),
+                    edited_at: message.message.edited_at,
+                    created_at: message.message.created_at,
+                },
+            };
+            let receivers = state.event_bus().publish(event);
+            tracing::debug!(
+                channel_id = %path.channel_id,
+                message_id = %path.message_id,
+                receivers,
+                "emitted message.updated"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                channel_id = %path.channel_id,
+                message_id = %path.message_id,
+                error = ?e,
+                "Failed to fetch channel for MessageUpdated event — skipping event emission"
+            );
+        }
+    }
+
     Ok((StatusCode::OK, Json(MessageResponse::from(message))))
 }
 
@@ -184,6 +258,34 @@ pub async fn delete_message(
         .message_service()
         .delete_message(&path.message_id, &user_id)
         .await?;
+
+    // WHY: Look up channel to get server_id for the SSE event envelope.
+    // Best-effort — the delete already committed, so channel lookup failure is logged, not propagated.
+    match state.channel_service().get_by_id(&path.channel_id).await {
+        Ok(channel) => {
+            let event = ServerEvent::MessageDeleted {
+                sender_id: user_id.clone(),
+                server_id: channel.server_id,
+                channel_id: path.channel_id.clone(),
+                message_id: path.message_id.clone(),
+            };
+            let receivers = state.event_bus().publish(event);
+            tracing::debug!(
+                channel_id = %path.channel_id,
+                message_id = %path.message_id,
+                receivers,
+                "emitted message.deleted"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                channel_id = %path.channel_id,
+                message_id = %path.message_id,
+                error = ?e,
+                "Failed to fetch channel for MessageDeleted event — skipping event emission"
+            );
+        }
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

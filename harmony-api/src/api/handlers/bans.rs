@@ -8,7 +8,9 @@ use crate::api::dto::bans::{BanListQuery, BanListResponse, BanResponse, BanUserR
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
+use crate::domain::models::server_event::{BanPayload, ServerEvent};
 use crate::domain::models::{ServerId, UserId};
+use crate::domain::ports::EventBus;
 
 /// Default ban page size.
 const DEFAULT_BAN_LIMIT: i64 = 50;
@@ -109,6 +111,37 @@ pub async fn ban_member(
         .ban_user(&server_id, &req.user_id, &caller_id, req.reason)
         .await?;
 
+    // WHY: Ban is a compound operation (INSERT ban + DELETE member). Emit three
+    // events after the transaction commits:
+    // 1. MemberBanned — targeted to the banned user so their client knows why
+    // 2. MemberRemoved — broadcast to remaining server members to update lists
+    // 3. ForceDisconnect — targeted to the banned user to drop their SSE stream
+    let banned_user_id = ban.user_id.clone();
+
+    state.event_bus().publish(ServerEvent::MemberBanned {
+        sender_id: caller_id.clone(),
+        server_id: server_id.clone(),
+        target_user_id: banned_user_id.clone(),
+        ban: BanPayload {
+            reason: ban.reason.clone(),
+            banned_by: ban.banned_by.clone(),
+            created_at: ban.created_at,
+        },
+    });
+
+    state.event_bus().publish(ServerEvent::MemberRemoved {
+        sender_id: caller_id.clone(),
+        server_id: server_id.clone(),
+        user_id: banned_user_id.clone(),
+    });
+
+    state.event_bus().publish(ServerEvent::ForceDisconnect {
+        sender_id: caller_id,
+        server_id,
+        target_user_id: banned_user_id,
+        reason: "banned".to_string(),
+    });
+
     Ok((StatusCode::CREATED, Json(BanResponse::from(ban))))
 }
 
@@ -149,6 +182,9 @@ pub async fn unban_member(
         .moderation_service()
         .unban_user(&path.id, &path.user_id, &caller_id)
         .await?;
+
+    // WHY: No SSE event emitted — the unbanned user is not a server member and
+    // therefore has no active SSE subscription to receive server-scoped events.
 
     Ok(StatusCode::NO_CONTENT)
 }

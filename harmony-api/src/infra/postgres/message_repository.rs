@@ -160,18 +160,18 @@ impl MessageRepository for PgMessageRepository {
                     created_at
             )
             SELECT
-                i.id,
-                i.channel_id,
-                i.author_id,
+                i.id as "id!",
+                i.channel_id as "channel_id!",
+                i.author_id as "author_id!",
                 i.content,
                 i.edited_at,
                 i.deleted_at,
                 i.deleted_by,
-                i.encrypted,
+                i.encrypted as "encrypted!",
                 i.sender_device_id,
                 i.message_type as "message_type!: String",
                 i.system_event_key,
-                i.created_at,
+                i.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?"
             FROM inserted i
@@ -348,18 +348,18 @@ impl MessageRepository for PgMessageRepository {
                     created_at
             )
             SELECT
-                u.id,
-                u.channel_id,
-                u.author_id,
+                u.id as "id!",
+                u.channel_id as "channel_id!",
+                u.author_id as "author_id!",
                 u.content,
                 u.edited_at,
                 u.deleted_at,
                 u.deleted_by,
-                u.encrypted,
+                u.encrypted as "encrypted!",
                 u.sender_device_id,
                 u.message_type as "message_type!: String",
                 u.system_event_key,
-                u.created_at,
+                u.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?"
             FROM updated u
@@ -485,18 +485,18 @@ impl MessageRepository for PgMessageRepository {
                     created_at
             )
             SELECT
-                i.id,
-                i.channel_id,
-                i.author_id,
+                i.id as "id!",
+                i.channel_id as "channel_id!",
+                i.author_id as "author_id!",
                 i.content,
                 i.edited_at,
                 i.deleted_at,
                 i.deleted_by,
-                i.encrypted,
+                i.encrypted as "encrypted!",
                 i.sender_device_id,
                 i.message_type as "message_type!: String",
                 i.system_event_key,
-                i.created_at,
+                i.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?"
             FROM inserted i

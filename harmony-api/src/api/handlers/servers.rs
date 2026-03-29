@@ -8,7 +8,9 @@ use crate::api::dto::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::{Role, ServerId};
+use crate::domain::models::server_event::ServerPayload;
+use crate::domain::models::{Role, ServerEvent, ServerId};
+use crate::domain::ports::EventBus;
 
 /// Create a new server.
 ///
@@ -133,6 +135,22 @@ pub async fn update_server(
         .await?;
 
     let server = state.server_service().update_server(&id, req.name).await?;
+
+    let receivers = state.event_bus().publish(ServerEvent::ServerUpdated {
+        sender_id: user_id,
+        server_id: server.id.clone(),
+        server: ServerPayload {
+            id: server.id.clone(),
+            name: server.name.clone(),
+            icon_url: server.icon_url.clone(),
+            owner_id: server.owner_id.clone(),
+        },
+    });
+    tracing::debug!(
+        server_id = %server.id,
+        receivers,
+        "emitted server.updated"
+    );
 
     Ok((StatusCode::OK, Json(ServerResponse::from(server))))
 }
