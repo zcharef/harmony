@@ -444,6 +444,63 @@ export async function joinServerRaw(
   return { status: res.status, body }
 }
 
+/** POST /v1/channels/{id}/messages — send an encrypted message to a channel. */
+export async function sendEncryptedMessage(
+  token: string,
+  channelId: string,
+  content: string,
+  senderDeviceId?: string,
+): Promise<{
+  id: string
+  content: string
+  createdAt: string
+  encrypted: boolean
+  senderDeviceId: string | null
+}> {
+  const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({
+      content,
+      encrypted: true,
+      senderDeviceId: senderDeviceId ?? 'test-device-1',
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`sendEncryptedMessage failed: ${res.status} ${body}`)
+  }
+  return (await res.json()) as {
+    id: string
+    content: string
+    createdAt: string
+    encrypted: boolean
+    senderDeviceId: string | null
+  }
+}
+
+/** GET /v1/channels/{id}/messages — fetch messages for a channel. */
+export async function getMessages(
+  token: string,
+  channelId: string,
+): Promise<{
+  items: Array<{ id: string; content: string; encrypted: boolean; senderDeviceId: string | null }>
+  nextCursor: string | null
+}> {
+  const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`getMessages failed: ${res.status} ${body}`)
+  }
+  return (await res.json()) as {
+    items: Array<{ id: string; content: string; encrypted: boolean; senderDeviceId: string | null }>
+    nextCursor: string | null
+  }
+}
+
 /** DELETE /v1/dms/{server_id} — close (leave) a DM conversation. */
 export async function closeDm(token: string, serverId: string): Promise<void> {
   const res = await fetch(`${API_URL}/v1/dms/${serverId}`, {

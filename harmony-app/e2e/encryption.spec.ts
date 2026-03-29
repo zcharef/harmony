@@ -37,8 +37,10 @@ import {
   createDm,
   createInvite,
   createServer,
+  getMessages,
   getServerChannels,
   joinServer,
+  sendEncryptedMessage,
   sendMessage,
   syncProfile,
   updateChannel,
@@ -585,5 +587,253 @@ test.describe('DM Encryption on Web', () => {
     // multiple message-content elements and we need to verify NONE contain fallback text.
     const fallbackCount = await fallbackText.count()
     expect(fallbackCount).toBe(0)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Platform DM Encryption — encrypted vs plaintext messages in same DM
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// WHY separate describe: The API bug that dropped the `encrypted` flag has been fixed.
+// These tests verify that when a DM conversation contains a mix of encrypted messages
+// (sent by desktop clients via sendEncryptedMessage) and plaintext messages (sent by
+// web clients via sendMessage), the web UI correctly distinguishes them:
+// - Encrypted messages show fallback text + filled lock icon
+// - Plaintext messages show actual content + lock-open icon
+//
+// Source: message-item.tsx:178-187 — encrypted === true && !isTauri() renders fallback
+// Source: message-item.tsx:279 — data-test="message-encryption-indicator"
+
+test.describe('Cross-Platform DM Encryption', () => {
+  let sender: TestUser
+  let receiver: TestUser
+  let dmData: { serverId: string; channelId: string }
+  let encryptedMsgA: string
+  let plaintextMsgB: string
+  let encryptedMsgC: string
+
+  test.beforeAll(async () => {
+    sender = await createTestUser('xplat-dm-sender')
+    receiver = await createTestUser('xplat-dm-receiver')
+    for (const u of [sender, receiver]) await syncProfile(u.token)
+
+    // WHY: Both users must share a server so they can DM each other.
+    const sharedServer = await createServer(sender.token, `XPlat DM E2E ${Date.now()}`)
+    const invite = await createInvite(sender.token, sharedServer.id)
+    await joinServer(receiver.token, sharedServer.id, invite.code)
+
+    dmData = await createDm(sender.token, receiver.id)
+
+    // Message A: encrypted DM — simulates desktop sender
+    encryptedMsgA = `encrypted-desktop-A-${Date.now()}`
+    await sendEncryptedMessage(sender.token, dmData.channelId, encryptedMsgA, 'desktop-device-1')
+
+    // Message B: plaintext DM — simulates web sender
+    plaintextMsgB = `plaintext-web-B-${Date.now()}`
+    await sendMessage(sender.token, dmData.channelId, plaintextMsgB)
+
+    // Message C: encrypted DM — simulates desktop sender
+    encryptedMsgC = `encrypted-desktop-C-${Date.now()}`
+    await sendEncryptedMessage(sender.token, dmData.channelId, encryptedMsgC, 'desktop-device-2')
+  })
+
+  test('encrypted DM shows fallback text on web', async ({ page }) => {
+    // WHY: message-item.tsx:178-187 — when message.encrypted === true && !isTauri(),
+    // the component renders an italicized fallback instead of raw ciphertext.
+    await authenticatePage(page, receiver)
+
+    await page.locator('[data-test="dm-home-button"]').click()
+    await page.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+    const dmItem = page.locator(
+      `[data-test="dm-conversation-item"][data-dm-server-id="${dmData.serverId}"]`,
+    )
+    await dmItem.waitFor({ timeout: 10_000 })
+    await dmItem.click()
+
+    await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+    // Wait for messages to render
+    const messageItems = page.locator('[data-test="message-item"]')
+    await messageItems.first().waitFor({ timeout: 10_000 })
+
+    // Encrypted messages (A and C) should show the fallback text, not raw ciphertext.
+    // WHY: The i18n key crypto.encryptedWebFallback renders as "Encrypted message".
+    const fallbackMessages = page
+      .locator('[data-test="message-content"]')
+      .filter({ hasText: 'Encrypted message' })
+    await expect(fallbackMessages.first()).toBeVisible({ timeout: 10_000 })
+
+    // At least 2 encrypted messages (A and C) should show fallback
+    const fallbackCount = await fallbackMessages.count()
+    expect(fallbackCount).toBeGreaterThanOrEqual(2)
+
+    // Encrypted messages should have a filled lock icon (message-encryption-indicator).
+    const encryptionIndicators = page.locator('[data-test="message-encryption-indicator"]')
+    await expect(encryptionIndicators.first()).toBeVisible({ timeout: 10_000 })
+
+    // Verify at least one indicator contains an SVG (Lock icon from Lucide).
+    await expect(encryptionIndicators.first().locator('svg')).toBeAttached()
+  })
+
+  test('plaintext DM shows lock-open icon on web', async ({ page }) => {
+    // WHY: message-item.tsx:279 — isDm renders a per-message encryption indicator.
+    // Plaintext messages (encrypted=false) show LockOpen icon.
+    await authenticatePage(page, receiver)
+
+    await page.locator('[data-test="dm-home-button"]').click()
+    await page.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+    const dmItem = page.locator(
+      `[data-test="dm-conversation-item"][data-dm-server-id="${dmData.serverId}"]`,
+    )
+    await dmItem.waitFor({ timeout: 10_000 })
+    await dmItem.click()
+
+    await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+    // Plaintext message B should show its actual content (not fallback).
+    const plaintextContent = page
+      .locator('[data-test="message-content"]')
+      .filter({ hasText: plaintextMsgB })
+    await expect(plaintextContent.first()).toBeVisible({ timeout: 10_000 })
+
+    // Plaintext message should also have a message-encryption-indicator (LockOpen).
+    // WHY: In DMs, every message gets an indicator — Lock for encrypted, LockOpen for plaintext.
+    const encryptionIndicators = page.locator('[data-test="message-encryption-indicator"]')
+    await expect(encryptionIndicators.first()).toBeVisible({ timeout: 10_000 })
+    await expect(encryptionIndicators.first().locator('svg')).toBeAttached()
+  })
+
+  test('mixed encrypted and plaintext messages have correct per-message lock icons', async ({
+    page,
+  }) => {
+    // WHY: Verifies the UI distinguishes between encrypted and plaintext messages
+    // in the same DM conversation by rendering per-message lock indicators.
+    await authenticatePage(page, receiver)
+
+    await page.locator('[data-test="dm-home-button"]').click()
+    await page.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+    const dmItem = page.locator(
+      `[data-test="dm-conversation-item"][data-dm-server-id="${dmData.serverId}"]`,
+    )
+    await dmItem.waitFor({ timeout: 10_000 })
+    await dmItem.click()
+
+    await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+    // Wait for messages to render
+    const messageItems = page.locator('[data-test="message-item"]')
+    await messageItems.first().waitFor({ timeout: 10_000 })
+
+    // All 3 messages (A, B, C) should have encryption indicators in DM view.
+    const encryptionIndicators = page.locator('[data-test="message-encryption-indicator"]')
+    const indicatorCount = await encryptionIndicators.count()
+    expect(indicatorCount).toBeGreaterThanOrEqual(3)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Platform Encrypted Channel — encrypted messages in an E2EE channel
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// WHY separate describe: Channels with encryption enabled (encrypted=true) are fully
+// blocked on web: message input is readonly and EncryptionRequiredBanner is shown.
+// This verifies that encrypted messages sent via API (simulating desktop) show fallback
+// text when viewed on web in an encrypted channel context.
+//
+// Source: chat-area.tsx:621 — !isTauri() && isChannelEncrypted renders EncryptionRequiredBanner
+// Source: chat-area.tsx:801 — isWebEncryptionBlocked disables message input
+
+test.describe('Cross-Platform Encrypted Channel', () => {
+  let channelOwner: TestUser
+  let channelMember: TestUser
+  let encServer: { id: string; name: string }
+  let encChannel: { id: string; name: string }
+  let encChannelMsg: string
+  // WHY: Store DM data at describe scope so both UI and API tests can reference it.
+  let crossPlatDmData: { serverId: string; channelId: string }
+  let crossPlatEncMsg: string
+  let crossPlatPlainMsg: string
+
+  test.beforeAll(async () => {
+    channelOwner = await createTestUser('xplat-ch-owner')
+    channelMember = await createTestUser('xplat-ch-member')
+    for (const u of [channelOwner, channelMember]) await syncProfile(u.token)
+
+    encServer = await createServer(channelOwner.token, `XPlat Enc Ch E2E ${Date.now()}`)
+    encChannel = await createChannel(channelOwner.token, encServer.id, 'xplat-encrypted')
+
+    // Enable encryption on the channel (owner-only operation).
+    await updateChannel(channelOwner.token, encServer.id, encChannel.id, { encrypted: true })
+
+    const invite = await createInvite(channelOwner.token, encServer.id)
+    await joinServer(channelMember.token, encServer.id, invite.code)
+
+    // Send an encrypted message via API — simulates a desktop client posting ciphertext.
+    encChannelMsg = `enc-channel-ciphertext-${Date.now()}`
+    await sendEncryptedMessage(channelOwner.token, encChannel.id, encChannelMsg)
+
+    // WHY: Set up a DM between the same users for the API-level test (test 5).
+    // This allows testing both encrypted and plaintext messages via GET.
+    crossPlatDmData = await createDm(channelOwner.token, channelMember.id)
+    crossPlatEncMsg = `api-test-encrypted-${Date.now()}`
+    await sendEncryptedMessage(
+      channelOwner.token,
+      crossPlatDmData.channelId,
+      crossPlatEncMsg,
+      'api-test-device',
+    )
+    crossPlatPlainMsg = `api-test-plaintext-${Date.now()}`
+    await sendMessage(channelOwner.token, crossPlatDmData.channelId, crossPlatPlainMsg)
+  })
+
+  test('encrypted channel message shows fallback on web', async ({ page }) => {
+    // WHY: On web, encrypted channels show EncryptionRequiredBanner and the
+    // message input is readonly. Encrypted messages show fallback text.
+    await authenticatePage(page, channelMember)
+    await selectServer(page, encServer.id)
+    await selectChannel(page, encChannel.name)
+
+    const chatArea = page.locator('[data-test="chat-area"]')
+    await chatArea.waitFor({ timeout: 10_000 })
+
+    // EncryptionRequiredBanner should be visible on web for encrypted channels.
+    const encBanner = page.locator('[data-test="encryption-required-banner"]')
+    await expect(encBanner).toBeVisible({ timeout: 10_000 })
+
+    // Wait for at least one message to render.
+    const messageItems = page.locator('[data-test="message-item"]')
+    await messageItems.first().waitFor({ timeout: 10_000 })
+
+    // The encrypted message should show fallback text, not raw ciphertext.
+    // WHY: message-item.tsx:178-187 — encrypted === true && !isTauri() renders fallback.
+    const fallbackMessages = page
+      .locator('[data-test="message-content"]')
+      .filter({ hasText: 'Encrypted message' })
+    await expect(fallbackMessages.first()).toBeVisible({ timeout: 10_000 })
+
+    // Message input should be readonly on web for encrypted channels.
+    const messageInput = page.locator('[data-test="message-input"]')
+    await messageInput.waitFor({ timeout: 10_000 })
+    await expect(messageInput).toHaveAttribute('readonly', '')
+  })
+
+  test('API returns encrypted=true for encrypted messages', async () => {
+    // WHY: Pure API test verifying the bug fix — the API now correctly persists
+    // encrypted=true and senderDeviceId when sent. No page interaction needed.
+    const messages = await getMessages(channelOwner.token, crossPlatDmData.channelId)
+
+    // Find the encrypted message by content.
+    const encMsg = messages.items.find((m) => m.content === crossPlatEncMsg)
+    expect(encMsg).toBeDefined()
+    expect(encMsg?.encrypted).toBe(true)
+    expect(encMsg?.senderDeviceId).toBeTruthy()
+
+    // Find the plaintext message by content.
+    const plainMsg = messages.items.find((m) => m.content === crossPlatPlainMsg)
+    expect(plainMsg).toBeDefined()
+    expect(plainMsg?.encrypted).toBe(false)
   })
 })

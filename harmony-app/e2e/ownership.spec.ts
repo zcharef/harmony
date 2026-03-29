@@ -26,6 +26,9 @@ import {
 } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
 
+// WHY: Configurable for CI (deployed API) while defaulting to local dev.
+const API_URL = process.env.VITE_API_URL ?? 'http://localhost:3000'
+
 test.describe('Ownership Transfer', () => {
   let owner: TestUser
   let admin: TestUser
@@ -171,7 +174,7 @@ test.describe('Ownership Transfer', () => {
     const nonMember = await createTestUser('own-non-member')
     await syncProfile(nonMember.token)
 
-    const res = await fetch(`http://localhost:3000/v1/servers/${server.id}/transfer-ownership`, {
+    const res = await fetch(`${API_URL}/v1/servers/${server.id}/transfer-ownership`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${owner.token}`,
