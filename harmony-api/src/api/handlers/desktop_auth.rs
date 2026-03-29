@@ -4,16 +4,18 @@
 //! to the system browser, which redirects back via `harmony://` deep link.
 //! Passing raw tokens in the deep link URL is unsafe (scheme hijacking).
 //! Instead, the browser creates a one-time auth code here, and the desktop
-//! app redeems it by proving possession of the PKCE code_verifier.
+//! app redeems it by proving possession of the PKCE `code_verifier`.
 
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use axum::http::HeaderMap;
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use base64::Engine;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
-use utoipa::ToSchema;
 
+use crate::api::dto::desktop_auth::{
+    CreateDesktopAuthRequest, CreateDesktopAuthResponse, RedeemDesktopAuthRequest,
+    RedeemDesktopAuthResponse,
+};
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, AuthUser};
 use crate::api::state::AppState;
@@ -21,27 +23,10 @@ use crate::api::state::AppState;
 /// TTL for desktop auth codes (seconds).
 const CODE_TTL_SECONDS: i64 = 60;
 
-// ─── Create (authenticated) ─────────────────────────────────────────
-
-/// Request body for creating a desktop auth code.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct CreateDesktopAuthRequest {
-    /// PKCE code_challenge (S256-hashed code_verifier, base64url-encoded).
-    pub code_challenge: String,
-    /// Supabase refresh token to store for the desktop app.
-    pub refresh_token: String,
-}
-
-/// Response containing the one-time auth code.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct CreateDesktopAuthResponse {
-    pub auth_code: String,
-}
-
 /// Create a one-time desktop auth code (browser side of the PKCE exchange).
 ///
 /// The authenticated user's access token is extracted from the Authorization header,
-/// and the refresh token + PKCE code_challenge are provided in the request body.
+/// and the refresh token + PKCE `code_challenge` are provided in the request body.
 /// Returns a short-lived auth code that the desktop app can redeem.
 ///
 /// # Errors
@@ -75,7 +60,10 @@ pub async fn create_desktop_auth_code(
         .ok_or_else(|| ApiError::unauthorized("Missing Bearer token in Authorization header"))?;
 
     if req.code_challenge.len() != 43
-        || !req.code_challenge.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        || !req
+            .code_challenge
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
     {
         return Err(ApiError::bad_request(
             "code_challenge must be a 43-character base64url-encoded S256 hash",
@@ -114,22 +102,6 @@ pub async fn create_desktop_auth_code(
 
 // ─── Redeem (public) ────────────────────────────────────────────────
 
-/// Request body for redeeming a desktop auth code.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct RedeemDesktopAuthRequest {
-    /// The one-time auth code received via deep link.
-    pub auth_code: String,
-    /// The PKCE code_verifier (plaintext; S256-hashed must match stored code_challenge).
-    pub code_verifier: String,
-}
-
-/// Response containing the session tokens.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct RedeemDesktopAuthResponse {
-    pub access_token: String,
-    pub refresh_token: String,
-}
-
 /// Row returned by the DELETE + RETURNING query.
 #[derive(Debug, sqlx::FromRow)]
 struct DesktopAuthCodeRow {
@@ -140,7 +112,7 @@ struct DesktopAuthCodeRow {
 
 /// Redeem a one-time desktop auth code for session tokens.
 ///
-/// Verifies the PKCE code_verifier against the stored code_challenge (S256),
+/// Verifies the PKCE `code_verifier` against the stored `code_challenge` (S256),
 /// then returns the access and refresh tokens. The auth code is consumed
 /// (deleted) in a single atomic query to guarantee single-use.
 ///
@@ -190,7 +162,12 @@ pub async fn redeem_desktop_auth_code(
     // the stored code_challenge. This proves the redeemer is the same party
     // that initiated the flow (or has the code_verifier from that party).
     let expected_challenge = s256(&req.code_verifier);
-    if expected_challenge.as_bytes().ct_eq(row.code_challenge.as_bytes()).unwrap_u8() == 0 {
+    if expected_challenge
+        .as_bytes()
+        .ct_eq(row.code_challenge.as_bytes())
+        .unwrap_u8()
+        == 0
+    {
         return Err(ApiError::unauthorized("PKCE verification failed"));
     }
 

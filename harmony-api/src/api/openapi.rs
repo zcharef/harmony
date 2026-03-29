@@ -7,14 +7,16 @@ use utoipa::OpenApi;
 use super::dto::{
     AssignRoleRequest, BanListQuery, BanListResponse, BanResponse, BanUserRequest,
     ChannelListResponse, ChannelResponse, CheckUsernameQuery, CheckUsernameResponse,
-    ClaimedKeyResponse, CreateChannelRequest, CreateDmRequest, CreateInviteRequest,
-    CreateMegolmSessionRequest, CreateServerRequest, DeviceListResponse, DeviceResponse,
-    DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse, DmRecipientResponse,
-    DmResponse, EditMessageRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest,
-    KeyCountResponse, MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
-    MessageListQuery, MessageListResponse, MessageResponse, OneTimeKeyDto, PreKeyBundleResponse,
-    ProfileResponse, RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
-    TransferOwnershipRequest, UpdateChannelRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
+    ClaimedKeyResponse, CreateChannelRequest, CreateDesktopAuthRequest, CreateDesktopAuthResponse,
+    CreateDmRequest, CreateInviteRequest, CreateMegolmSessionRequest, CreateServerRequest,
+    DeviceListResponse, DeviceResponse, DmLastMessageResponse, DmListItem, DmListQuery,
+    DmListResponse, DmRecipientResponse, DmResponse, EditMessageRequest, InvitePreviewResponse,
+    InviteResponse, JoinServerRequest, KeyCountResponse, MegolmSessionResponse, MemberListQuery,
+    MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse, MessageResponse,
+    OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse, RedeemDesktopAuthRequest,
+    RedeemDesktopAuthResponse, RegisterDeviceRequest, SendMessageRequest, ServerListResponse,
+    ServerResponse, TransferOwnershipRequest, UpdateChannelRequest, UpdateServerRequest,
+    UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
@@ -73,6 +75,8 @@ use crate::domain::models::{
         handlers::messages::list_messages,
         handlers::messages::edit_message,
         handlers::messages::delete_message,
+        // Typing indicators
+        handlers::typing::send_typing,
         // Direct Messages
         handlers::dms::create_dm,
         handlers::dms::list_dms,
@@ -84,6 +88,13 @@ use crate::domain::models::{
         handlers::keys::list_devices,
         handlers::keys::remove_device,
         handlers::keys::get_key_count,
+        // Presence
+        handlers::presence::update_presence,
+        // Desktop Auth (PKCE exchange)
+        handlers::desktop_auth::create_desktop_auth_code,
+        handlers::desktop_auth::redeem_desktop_auth_code,
+        // Events (SSE)
+        handlers::events::sse_events,
     ),
     components(
         schemas(
@@ -152,6 +163,13 @@ use crate::domain::models::{
             DmLastMessageResponse,
             DmListResponse,
             DmListQuery,
+            // Desktop Auth DTOs
+            CreateDesktopAuthRequest,
+            CreateDesktopAuthResponse,
+            RedeemDesktopAuthRequest,
+            RedeemDesktopAuthResponse,
+            // Presence DTOs
+            super::handlers::presence::UpdatePresenceRequest,
             // Key Distribution DTOs
             RegisterDeviceRequest,
             UploadOneTimeKeysRequest,
@@ -175,6 +193,8 @@ use crate::domain::models::{
         (name = "Messages", description = "Messaging within channels"),
         (name = "DirectMessages", description = "Direct message conversations"),
         (name = "Keys", description = "E2EE key distribution (device keys, pre-key bundles)"),
+        (name = "Presence", description = "User presence status updates"),
+        (name = "Events", description = "Server-Sent Events for real-time updates"),
     ),
     modifiers(&SecurityAddon)
 )]

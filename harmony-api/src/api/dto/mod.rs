@@ -2,6 +2,7 @@
 
 pub mod bans;
 pub mod channels;
+pub mod desktop_auth;
 pub mod dms;
 pub mod invites;
 pub mod keys;
@@ -12,6 +13,10 @@ pub mod profiles;
 pub mod servers;
 
 pub use bans::{BanListQuery, BanListResponse, BanResponse, BanUserRequest};
+pub use desktop_auth::{
+    CreateDesktopAuthRequest, CreateDesktopAuthResponse, RedeemDesktopAuthRequest,
+    RedeemDesktopAuthResponse,
+};
 pub use channels::{
     ChannelListResponse, ChannelResponse, CreateChannelRequest, CreateMegolmSessionRequest,
     MegolmSessionResponse, UpdateChannelRequest,
