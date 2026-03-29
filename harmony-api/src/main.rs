@@ -70,7 +70,7 @@ async fn main() {
     spawn_presence_sweep(state.clone());
 
     // 7. Build router with middleware stack
-    let app = build_router(state, trusted_proxies);
+    let app = build_router(state, trusted_proxies, config.rate_limit_per_minute);
 
     // 8. Start server with graceful shutdown
     let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));

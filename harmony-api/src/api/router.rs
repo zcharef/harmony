@@ -36,7 +36,7 @@ use super::state::AppState;
 /// Response ← SecurityHeaders(X-Content-Type-Options, X-Frame-Options, HSTS, CSP, Referrer-Policy, Permissions-Policy) ← Compression ← RateLimit ← CORS ← Handler
 /// ```
 #[allow(deprecated)] // TimeoutLayer::new is deprecated; upgrade when tower-http 0.7 releases
-pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>) -> Router {
+pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>, rate_limit_per_minute: u32) -> Router {
     let is_production = state.is_production;
     let request_id_header = header::HeaderName::from_static("x-request-id");
 
@@ -229,7 +229,7 @@ pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>) -> Router {
         ));
     }
 
-    router
+    let mut router = router
         .layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("referrer-policy"),
             HeaderValue::from_static("no-referrer"),
@@ -238,12 +238,21 @@ pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>) -> Router {
             header::HeaderName::from_static("permissions-policy"),
             HeaderValue::from_static("interest-cohort=()"),
         ))
-        .layer(CompressionLayer::new())
-        .layer(RateLimitLayer::new(60, trusted_proxies))
-        // WHY: CORS must be OUTSIDE the rate limiter. When the rate limiter
-        // short-circuits with 429, inner layers (like CORS) never run. The
-        // browser then sees the 429 as a CORS error (missing
-        // Access-Control-Allow-Origin header) instead of a rate limit.
+        .layer(CompressionLayer::new());
+
+    // WHY: rate_limit_per_minute == 0 disables rate limiting for dev/CI environments
+    // where E2E tests create many users from 127.0.0.1, exhausting the per-IP bucket.
+    if rate_limit_per_minute > 0 {
+        router = router.layer(RateLimitLayer::new(rate_limit_per_minute, trusted_proxies));
+    } else {
+        tracing::warn!("Rate limiting is DISABLED (RATE_LIMIT_PER_MINUTE=0)");
+    }
+
+    // WHY: CORS must be OUTSIDE the rate limiter. When the rate limiter
+    // short-circuits with 429, inner layers (like CORS) never run. The
+    // browser then sees the 429 as a CORS error (missing
+    // Access-Control-Allow-Origin header) instead of a rate limit.
+    router
         .layer(cors)
         .layer(RequestBodyLimitLayer::new(2 * 1024 * 1024))
         .layer(TimeoutLayer::new(Duration::from_secs(30)))

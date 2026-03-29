@@ -51,6 +51,11 @@ pub struct Config {
     /// Only when the TCP peer IP matches a trusted proxy CIDR will `X-Forwarded-For` /
     /// `X-Real-IP` headers be used for rate limiting. When unset, proxy headers are ignored.
     pub trusted_proxies: Option<String>,
+
+    /// Per-IP rate limit in requests per minute (default: 60).
+    /// Set to 0 to disable rate limiting (dev/CI environments).
+    #[serde(default = "default_rate_limit_per_minute")]
+    pub rate_limit_per_minute: u32,
 }
 
 fn default_port() -> u16 {
@@ -71,6 +76,10 @@ fn default_otel_service_name() -> Option<String> {
 
 fn default_plan_enforcement() -> bool {
     true
+}
+
+fn default_rate_limit_per_minute() -> u32 {
+    60
 }
 
 impl Config {
@@ -118,6 +127,7 @@ impl std::fmt::Debug for Config {
             .field("otel_service_name", &self.otel_service_name)
             .field("plan_enforcement_enabled", &self.plan_enforcement_enabled)
             .field("trusted_proxies", &self.trusted_proxies)
+            .field("rate_limit_per_minute", &self.rate_limit_per_minute)
             .finish()
     }
 }
