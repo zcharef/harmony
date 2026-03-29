@@ -13,7 +13,6 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::{MemberPayload, ServerPayload};
 use crate::domain::models::{ServerEvent, ServerId, UserId};
-use crate::domain::ports::EventBus;
 
 /// Default member page size.
 const DEFAULT_MEMBER_LIMIT: i64 = 50;
@@ -136,17 +135,20 @@ pub async fn kick_member(
         caller_id = %caller_id,
         "Emitting MemberRemoved + ForceDisconnect events"
     );
-    state.event_bus().publish(ServerEvent::MemberRemoved {
+    let receivers = state.event_bus().publish(ServerEvent::MemberRemoved {
         sender_id: caller_id.clone(),
         server_id: path.id.clone(),
         user_id: path.user_id.clone(),
     });
-    state.event_bus().publish(ServerEvent::ForceDisconnect {
+    tracing::debug!(server_id = %path.id, user_id = %path.user_id, receivers, "emitted member.removed");
+
+    let receivers = state.event_bus().publish(ServerEvent::ForceDisconnect {
         sender_id: caller_id,
-        server_id: path.id,
-        target_user_id: path.user_id,
+        server_id: path.id.clone(),
+        target_user_id: path.user_id.clone(),
         reason: "kicked".to_string(),
     });
+    tracing::debug!(server_id = %path.id, target_user_id = %path.user_id, receivers, "emitted force.disconnect");
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -20,7 +20,6 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::AuthUser;
 use crate::api::state::AppState;
 use crate::domain::models::{ServerEvent, ServerId, UserStatus};
-use crate::domain::ports::EventBus;
 
 /// SSE event stream — delivers real-time events to the authenticated user.
 ///
@@ -104,24 +103,26 @@ pub async fn sse_events(
             }
         };
 
-        // ── Filter: server-scoped events ──────────────────────────
-        if let Some(event_server_id) = event.server_id()
-            && !server_ids.contains(event_server_id)
-        {
-            return None;
-        }
-
-        // ── Filter: user-targeted events ──────────────────────────
-        // Events with a `target_user_id` are delivered only to that user.
-        if let Some(target) = event.target_user_id()
-            && *target != user_id
-        {
-            return None;
+        // ── Filter: target_user_id BEFORE server scope ────────────
+        // WHY: Events like ForceDisconnect and MemberBanned have BOTH
+        // server_id and target_user_id. If the server-scope filter ran
+        // first, it would pass the event through to all server members.
+        // But these are directed — only the target should receive them.
+        // Checking target_user_id first also handles the race where
+        // a kicked/banned user's server_ids snapshot no longer contains
+        // the server (the event would be dropped before reaching them).
+        if let Some(target) = event.target_user_id() {
+            if *target != user_id {
+                return None; // Not for this user
+            }
+            // IS for this user — bypass server_ids check
+        } else if let Some(event_server_id) = event.server_id() {
+            if !server_ids.contains(event_server_id) {
+                return None; // User not in this server
+            }
         }
 
         // ── Filter: user-scoped events without server_id ──────────
-        // DmCreated and PresenceChanged have no server_id. If they also
-        // have no target_user_id match, they were not meant for this user.
         // DmCreated always has target_user_id (handled above).
         // PresenceChanged has no target — it broadcasts to all. For now,
         // let it through (presence is global). The client filters by

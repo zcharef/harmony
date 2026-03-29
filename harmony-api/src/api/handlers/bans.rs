@@ -10,7 +10,6 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::{BanPayload, ServerEvent};
 use crate::domain::models::{ServerId, UserId};
-use crate::domain::ports::EventBus;
 
 /// Default ban page size.
 const DEFAULT_BAN_LIMIT: i64 = 50;
@@ -118,7 +117,7 @@ pub async fn ban_member(
     // 3. ForceDisconnect — targeted to the banned user to drop their SSE stream
     let banned_user_id = ban.user_id.clone();
 
-    state.event_bus().publish(ServerEvent::MemberBanned {
+    let receivers = state.event_bus().publish(ServerEvent::MemberBanned {
         sender_id: caller_id.clone(),
         server_id: server_id.clone(),
         target_user_id: banned_user_id.clone(),
@@ -128,19 +127,22 @@ pub async fn ban_member(
             created_at: ban.created_at,
         },
     });
+    tracing::debug!(server_id = %server_id, target_user_id = %banned_user_id, receivers, "emitted member.banned");
 
-    state.event_bus().publish(ServerEvent::MemberRemoved {
+    let receivers = state.event_bus().publish(ServerEvent::MemberRemoved {
         sender_id: caller_id.clone(),
         server_id: server_id.clone(),
         user_id: banned_user_id.clone(),
     });
+    tracing::debug!(server_id = %server_id, user_id = %banned_user_id, receivers, "emitted member.removed");
 
-    state.event_bus().publish(ServerEvent::ForceDisconnect {
+    let receivers = state.event_bus().publish(ServerEvent::ForceDisconnect {
         sender_id: caller_id,
-        server_id,
-        target_user_id: banned_user_id,
+        server_id: server_id.clone(),
+        target_user_id: banned_user_id.clone(),
         reason: "banned".to_string(),
     });
+    tracing::debug!(server_id = %server_id, target_user_id = %banned_user_id, receivers, "emitted force.disconnect");
 
     Ok((StatusCode::CREATED, Json(BanResponse::from(ban))))
 }
