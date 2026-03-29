@@ -1,84 +1,94 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { z } from 'zod'
 
+import { useServerEvent } from '@/hooks/use-server-event'
 import type { UserStatus } from '@/lib/api'
+import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
 import { supabase } from '@/lib/supabase'
 import { usePresenceStore } from '../stores/presence-store'
-
-type Channel = ReturnType<typeof supabase.channel>
 
 const IDLE_TIMEOUT_MS = 300_000
 const IDLE_CHECK_INTERVAL_MS = 30_000
 const ACTIVITY_EVENTS = ['mousemove', 'keydown', 'pointerdown'] as const
 
-const presencePayloadSchema = z.object({
+// WHY Zod: SSE event payloads are external data (CLAUDE.md §1.2).
+const presenceEventSchema = z.object({
   userId: z.string(),
   status: z.enum(['online', 'idle', 'dnd', 'offline'] satisfies [UserStatus, ...UserStatus[]]),
 })
 
 /**
- * WHY: Extract parsing into a function shared by the sync handler and the
- * immediate-read on server switch (Effect 3).
+ * WHY: Centralize auth-header retrieval for fire-and-forget fetches that
+ * bypass the generated API client (endpoints not yet in the OpenAPI spec).
+ * Matches the pattern in api-client.ts:21-23.
  */
-function parsePresenceState(channel: Channel, serverId: string): Map<string, UserStatus> {
-  const state = channel.presenceState()
-  const users = new Map<string, UserStatus>()
-
-  for (const [, presences] of Object.entries(state)) {
-    for (const p of presences) {
-      const parsed = presencePayloadSchema.safeParse(p)
-      if (!parsed.success) {
-        logger.warn('Malformed presence payload, skipping entry', {
-          serverId,
-          error: parsed.error.message,
-        })
-        continue
-      }
-      users.set(parsed.data.userId, parsed.data.status)
-    }
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  if (token === undefined) return {}
+  return {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
   }
-
-  return users
 }
 
 /**
- * Tracks the current user's online/idle status across ALL servers and
- * subscribes to Supabase Presence for member list display.
+ * WHY fire-and-forget: Status changes are background operations. The server
+ * is authoritative — if the POST fails, the next heartbeat or SSE reconnect
+ * will correct state. No user-facing feedback needed (ADR-028).
+ */
+function postPresenceStatus(status: UserStatus): void {
+  getAuthHeaders()
+    .then((headers) =>
+      fetch(`${env.VITE_API_URL}/v1/presence`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ status }),
+      }),
+    )
+    .catch((error: unknown) => {
+      logger.warn('presence_post_failed', {
+        status,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+}
+
+/**
+ * Tracks the current user's online/idle status and subscribes to
+ * presence changes from other users via SSE.
  *
- * WHY three effects:
- * - Effect 1: Own-user activity tracking — always runs when logged in, even
- *   with no server selected, so the sidebar status dot is never "Offline".
- * - Effect 2: Server channels — subscribes to ALL servers so friends see the
- *   user online everywhere, not just on the currently viewed server.
- * - Effect 3: On selected server change — immediately populates the member
- *   list store from the channel's current state without waiting for the next
- *   sync event.
+ * WHY simplified from 3 effects to 2: The server now handles connect/disconnect
+ * lifecycle. The client only needs to:
+ * 1. Track local activity and POST status changes (online/idle)
+ * 2. Receive PresenceChanged SSE events and update the Zustand store
+ *
+ * Parameters `_serverIds` and `_selectedServerId` are retained for call-site
+ * compatibility (main-layout.tsx:179) but unused — the server manages
+ * per-server presence broadcasting internally.
  */
 export function usePresence(
-  serverIds: string[],
-  selectedServerId: string | null,
+  _serverIds: string[],
+  _selectedServerId: string | null,
   userId: string | null,
 ): void {
   const lastActivityRef = useRef(Date.now())
   const isIdleRef = useRef(false)
-  const channelMapRef = useRef(new Map<string, Channel>())
-  const selectedServerRef = useRef(selectedServerId)
-  selectedServerRef.current = selectedServerId
 
-  // Effect 1: Own-user activity tracking (always active when logged in)
+  // Effect 1: Own-user activity tracking (always active when logged in).
+  // Detects idle/active transitions and POSTs status changes to the API.
   useEffect(() => {
     if (userId === null) return
     const uid = userId
 
     const { setUserStatus, removeUser } = usePresenceStore.getState()
     setUserStatus(uid, 'online')
+    postPresenceStatus('online')
 
     function updateStatus(status: UserStatus) {
       setUserStatus(uid, status)
-      for (const ch of channelMapRef.current.values()) {
-        ch.track({ userId: uid, status })
-      }
+      postPresenceStatus(status)
     }
 
     function onActivity() {
@@ -121,82 +131,31 @@ export function usePresence(
     }
   }, [userId])
 
-  // Effect 2: Subscribe to presence channels for ALL servers.
-  // WHY all servers: user must appear online to friends across every shared
-  // server, not just the one they're currently viewing.
-  const serverIdsKey = serverIds.join(',')
+  // SSE listener: Receive presence.changed events and update the store.
+  // WHY useServerEvent: Matches the pattern used by all other feature hooks
+  // (e.g., use-realtime-members.ts). useServerEvent listens on the correct
+  // dot-separated SSE event name ('sse:presence.changed').
+  const handlePresenceEvent = useCallback(
+    (payload: unknown) => {
+      if (userId === null) return
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: serverIdsKey is a stable string serialization of serverIds — using the array directly would cause infinite re-subscribe loops since serverIds is a new reference each render
-  useEffect(() => {
-    if (userId === null || serverIds.length === 0) return
-    const uid = userId
-
-    const { syncPresenceState } = usePresenceStore.getState()
-    const channels = new Map<string, Channel>()
-
-    for (const sid of serverIds) {
-      const ch = supabase.channel(`presence:${sid}`)
-
-      // WHY ref check: sync handler fires on ALL channels, but we only
-      // populate the member list store for the currently selected server.
-      ch.on('presence', { event: 'sync' }, () => {
-        if (sid !== selectedServerRef.current) return
-        const users = parsePresenceState(ch, sid)
-        // WHY: Own status is authoritative from local activity tracking.
-        // ch.track() propagation is async — the channel may still report
-        // 'idle' after the user has returned. Without this override,
-        // syncPresenceState replaces the entire map with stale status.
-        const localStatus: UserStatus = isIdleRef.current ? 'idle' : 'online'
-        users.set(uid, localStatus)
-        syncPresenceState(users)
-      })
-
-      ch.subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          const currentStatus: UserStatus = isIdleRef.current ? 'idle' : 'online'
-          await ch.track({ userId: uid, status: currentStatus })
-        }
-      })
-
-      channels.set(sid, ch)
-    }
-
-    channelMapRef.current = channels
-
-    return () => {
-      channels.forEach((ch) => {
-        supabase.removeChannel(ch)
-      })
-      channelMapRef.current = new Map()
-
-      // WHY: Preserve own status across teardowns so the sidebar panel
-      // doesn't flash to "Offline" during server list changes.
-      const { presenceMap } = usePresenceStore.getState()
-      const ownStatus = presenceMap.get(uid)
-      const ownOnly = new Map<string, UserStatus>()
-      if (ownStatus !== undefined) {
-        ownOnly.set(uid, ownStatus)
+      const parsed = presenceEventSchema.safeParse(payload)
+      if (!parsed.success) {
+        logger.warn('malformed_presence_sse_event', { error: parsed.error.message })
+        return
       }
-      syncPresenceState(ownOnly)
-    }
-  }, [serverIdsKey, userId])
 
-  // Effect 3: When selected server changes, immediately populate the store
-  // from that channel's current presence state instead of waiting for the
-  // next sync event (which may take seconds).
-  useEffect(() => {
-    if (selectedServerId === null) return
+      const { userId: eventUserId, status } = parsed.data
+      const { setUserStatus, removeUser } = usePresenceStore.getState()
 
-    const ch = channelMapRef.current.get(selectedServerId)
-    if (ch === undefined) return
+      if (status === 'offline') {
+        removeUser(eventUserId)
+      } else {
+        setUserStatus(eventUserId, status)
+      }
+    },
+    [userId],
+  )
 
-    const users = parsePresenceState(ch, selectedServerId)
-    if (userId !== null) {
-      const localStatus: UserStatus = isIdleRef.current ? 'idle' : 'online'
-      users.set(userId, localStatus)
-    }
-    if (users.size > 0) {
-      usePresenceStore.getState().syncPresenceState(users)
-    }
-  }, [selectedServerId, userId])
+  useServerEvent(userId !== null ? 'presence.changed' : null, handlePresenceEvent)
 }

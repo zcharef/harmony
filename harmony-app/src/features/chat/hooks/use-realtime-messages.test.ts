@@ -1,23 +1,17 @@
 import type { InfiniteData } from '@tanstack/react-query'
 import { renderHook } from '@testing-library/react'
+import { act } from 'react'
 import { vi } from 'vitest'
+import { SSE_EVENT_PREFIX } from '@/hooks/use-server-event'
 import type { MessageListResponse, MessageResponse } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 import { useRealtimeMessages } from './use-realtime-messages'
 
-vi.mock('@/lib/supabase', () => ({
-  supabase: {
-    channel: vi.fn(),
-    removeChannel: vi.fn(),
-  },
-}))
-
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }))
 
-const { supabase } = await import('@/lib/supabase')
 const { logger } = await import('@/lib/logger')
 
 const CHANNEL_ID = 'channel-1'
@@ -30,6 +24,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     channelId: CHANNEL_ID,
     authorId: 'user-99',
     authorUsername: 'testuser',
+    authorAvatarUrl: null,
     content: 'existing message',
     createdAt: '2026-03-16T00:00:00.000Z',
     encrypted: false,
@@ -46,123 +41,52 @@ function buildCacheData(messages: MessageResponse[]): InfiniteData<MessageListRe
 }
 
 /**
- * Creates a mock Supabase Realtime channel that captures `.on()` callbacks
- * so tests can invoke them directly without a real WebSocket.
+ * Dispatches a CustomEvent on window to simulate an SSE event arriving.
+ * This is the real integration path — useServerEvent listens on window.
  */
-function createMockChannel() {
-  const handlers: Record<string, (payload: unknown) => void> = {}
-  const channel = {
-    on: vi.fn((type: string, filter: { event: string }, callback: (payload: unknown) => void) => {
-      const key = `${type}:${filter.event}`
-      handlers[key] = callback
-      return channel
-    }),
-    subscribe: vi.fn(() => channel),
-  }
-  return { channel, handlers }
+function fireSSEEvent(eventName: string, payload: unknown) {
+  const event = new CustomEvent(`${SSE_EVENT_PREFIX}${eventName}`, {
+    detail: payload,
+  })
+  window.dispatchEvent(event)
 }
 
-/** Fires the captured INSERT handler with a given payload.new */
-function fireInsert(handlers: Record<string, (payload: unknown) => void>, row: unknown) {
-  const handler = handlers['postgres_changes:INSERT']
-  if (!handler) throw new Error('INSERT handler not registered')
-  handler({ new: row })
-}
-
-/** Fires the captured UPDATE handler with a given payload.new */
-function fireUpdate(handlers: Record<string, (payload: unknown) => void>, row: unknown) {
-  const handler = handlers['postgres_changes:UPDATE']
-  if (!handler) throw new Error('UPDATE handler not registered')
-  handler({ new: row })
-}
-
-/** Valid snake_case row as Supabase Realtime delivers it */
-function buildRealtimeRow(overrides: Record<string, unknown> = {}) {
+/** Valid camelCase SSE message payload as the Rust API delivers it */
+function buildMessagePayload(overrides: Record<string, unknown> = {}) {
   return {
     id: 'msg-new',
-    channel_id: CHANNEL_ID,
-    author_id: 'user-42',
+    channelId: CHANNEL_ID,
     content: 'hello world',
-    created_at: '2026-03-16T01:00:00.000Z',
-    edited_at: null,
-    deleted_at: null,
-    deleted_by: null,
+    authorId: 'user-42',
+    authorUsername: 'alice',
+    authorAvatarUrl: null,
+    encrypted: false,
+    senderDeviceId: null,
+    editedAt: null,
+    createdAt: '2026-03-16T01:00:00.000Z',
     ...overrides,
+  }
+}
+
+/** Wraps an SSE message payload in the event envelope (channelId + message) */
+function buildMessageEvent(messageOverrides: Record<string, unknown> = {}) {
+  const message = buildMessagePayload(messageOverrides)
+  return {
+    channelId: message.channelId,
+    message,
   }
 }
 
 // -- Tests --------------------------------------------------------------------
 
 describe('useRealtimeMessages', () => {
-  let mockChannel: ReturnType<typeof createMockChannel>
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mockChannel = createMockChannel()
-    vi.mocked(supabase.channel).mockReturnValue(mockChannel.channel as never)
   })
 
-  // -- Schema validation (INSERT) -------------------------------------------
+  // -- message.created: valid payload prepends to first page ------------------
 
-  it('logs error and does not update cache when INSERT payload is malformed', () => {
-    const queryClient = createTestQueryClient()
-    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
-    const initialData = buildCacheData([buildMessage()])
-    queryClient.setQueryData(messageKey, initialData)
-
-    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
-      wrapper: createQueryWrapper(queryClient),
-    })
-
-    // Fire an INSERT with missing required fields
-    fireInsert(mockChannel.handlers, { id: 'bad', content: 123 })
-
-    expect(logger.error).toHaveBeenCalledOnce()
-    expect(logger.error).toHaveBeenCalledWith(
-      'Malformed realtime message payload',
-      expect.objectContaining({ channelId: CHANNEL_ID }),
-    )
-
-    // Cache must be unchanged
-    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
-    expect(cacheData?.pages[0]?.items).toHaveLength(1)
-    expect(cacheData?.pages[0]?.items[0]?.id).toBe('msg-1')
-  })
-
-  // -- INSERT: valid payload prepends to first page --------------------------
-
-  it('subscribes to the correct table, schema, and channel filter', () => {
-    const queryClient = createTestQueryClient()
-    queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
-
-    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
-      wrapper: createQueryWrapper(queryClient),
-    })
-
-    expect(supabase.channel).toHaveBeenCalledWith(`messages:${CHANNEL_ID}`)
-    expect(mockChannel.channel.on).toHaveBeenCalledWith(
-      'postgres_changes',
-      expect.objectContaining({
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `channel_id=eq.${CHANNEL_ID}`,
-      }),
-      expect.any(Function),
-    )
-    expect(mockChannel.channel.on).toHaveBeenCalledWith(
-      'postgres_changes',
-      expect.objectContaining({
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'messages',
-        filter: `channel_id=eq.${CHANNEL_ID}`,
-      }),
-      expect.any(Function),
-    )
-  })
-
-  it('prepends a new message to page 0 on valid INSERT', () => {
+  it('prepends a new message to page 0 on message.created', () => {
     const queryClient = createTestQueryClient()
     const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
     const existingMsg = buildMessage({ id: 'existing-1' })
@@ -172,7 +96,9 @@ describe('useRealtimeMessages', () => {
       wrapper: createQueryWrapper(queryClient),
     })
 
-    fireInsert(mockChannel.handlers, buildRealtimeRow({ id: 'msg-new' }))
+    act(() => {
+      fireSSEEvent('message.created', buildMessageEvent({ id: 'msg-new' }))
+    })
 
     const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
     const items = cacheData?.pages[0]?.items ?? []
@@ -181,14 +107,15 @@ describe('useRealtimeMessages', () => {
       id: 'msg-new',
       channelId: CHANNEL_ID,
       authorId: 'user-42',
+      authorUsername: 'alice',
       content: 'hello world',
     })
     expect(items[1]?.id).toBe('existing-1')
   })
 
-  // -- INSERT dedup: duplicate ID is not inserted again ----------------------
+  // -- message.created dedup: duplicate ID is not inserted --------------------
 
-  it('does not insert a duplicate message on INSERT with existing ID', () => {
+  it('does not insert a duplicate message on message.created with existing ID', () => {
     const queryClient = createTestQueryClient()
     const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
     const existingMsg = buildMessage({ id: 'msg-dup' })
@@ -198,7 +125,9 @@ describe('useRealtimeMessages', () => {
       wrapper: createQueryWrapper(queryClient),
     })
 
-    fireInsert(mockChannel.handlers, buildRealtimeRow({ id: 'msg-dup' }))
+    act(() => {
+      fireSSEEvent('message.created', buildMessageEvent({ id: 'msg-dup' }))
+    })
 
     const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
     const items = cacheData?.pages[0]?.items ?? []
@@ -206,9 +135,58 @@ describe('useRealtimeMessages', () => {
     expect(items[0]?.id).toBe('msg-dup')
   })
 
-  // -- UPDATE (edit): replaces message content in cache ----------------------
+  // -- message.created: filters by channelId ----------------------------------
 
-  it('replaces message content in cache on UPDATE', () => {
+  it('ignores message.created events for a different channel', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    queryClient.setQueryData(messageKey, buildCacheData([]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('message.created', {
+        channelId: 'other-channel',
+        message: buildMessagePayload({ channelId: 'other-channel' }),
+      })
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    expect(cacheData?.pages[0]?.items).toHaveLength(0)
+  })
+
+  // -- message.created: malformed payload logs error --------------------------
+
+  it('logs error and does not update cache when message.created payload is malformed', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const initialData = buildCacheData([buildMessage()])
+    queryClient.setQueryData(messageKey, initialData)
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('message.created', { channelId: CHANNEL_ID, message: { id: 'bad' } })
+    })
+
+    expect(logger.error).toHaveBeenCalledOnce()
+    expect(logger.error).toHaveBeenCalledWith(
+      'Malformed message.created SSE payload',
+      expect.objectContaining({ channelId: CHANNEL_ID }),
+    )
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    expect(cacheData?.pages[0]?.items).toHaveLength(1)
+    expect(cacheData?.pages[0]?.items[0]?.id).toBe('msg-1')
+  })
+
+  // -- message.updated: replaces message content in cache ---------------------
+
+  it('replaces message content in cache on message.updated', () => {
     const queryClient = createTestQueryClient()
     const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
     const existingMsg = buildMessage({ id: 'msg-edit', content: 'original' })
@@ -218,15 +196,16 @@ describe('useRealtimeMessages', () => {
       wrapper: createQueryWrapper(queryClient),
     })
 
-    fireUpdate(
-      mockChannel.handlers,
-      buildRealtimeRow({
-        id: 'msg-edit',
-        content: 'edited content',
-        edited_at: '2026-03-16T02:00:00.000Z',
-        deleted_at: null,
-      }),
-    )
+    act(() => {
+      fireSSEEvent(
+        'message.updated',
+        buildMessageEvent({
+          id: 'msg-edit',
+          content: 'edited content',
+          editedAt: '2026-03-16T02:00:00.000Z',
+        }),
+      )
+    })
 
     const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
     const items = cacheData?.pages[0]?.items ?? []
@@ -238,9 +217,35 @@ describe('useRealtimeMessages', () => {
     })
   })
 
-  // -- UPDATE (soft delete): keeps tombstone in cache with deletedBy ---------
+  // -- message.updated: malformed payload logs error --------------------------
 
-  it('keeps message as tombstone with deletedBy on self-delete', () => {
+  it('logs error and does not update cache when message.updated payload is malformed', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const existingMsg = buildMessage({ id: 'msg-1' })
+    queryClient.setQueryData(messageKey, buildCacheData([existingMsg]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('message.updated', { channelId: CHANNEL_ID, message: { id: 42 } })
+    })
+
+    expect(logger.error).toHaveBeenCalledOnce()
+    expect(logger.error).toHaveBeenCalledWith(
+      'Malformed message.updated SSE payload',
+      expect.objectContaining({ channelId: CHANNEL_ID }),
+    )
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    expect(cacheData?.pages[0]?.items).toHaveLength(1)
+  })
+
+  // -- message.deleted: soft-delete sets deletedBy ----------------------------
+
+  it('sets deletedBy on the message on message.deleted', () => {
     const queryClient = createTestQueryClient()
     const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
     const existingMsg = buildMessage({ id: 'msg-del', authorId: 'user-42' })
@@ -250,15 +255,12 @@ describe('useRealtimeMessages', () => {
       wrapper: createQueryWrapper(queryClient),
     })
 
-    fireUpdate(
-      mockChannel.handlers,
-      buildRealtimeRow({
-        id: 'msg-del',
-        author_id: 'user-42',
-        deleted_at: '2026-03-16T03:00:00.000Z',
-        deleted_by: 'user-42',
-      }),
-    )
+    act(() => {
+      fireSSEEvent('message.deleted', {
+        channelId: CHANNEL_ID,
+        messageId: 'msg-del',
+      })
+    })
 
     const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
     const items = cacheData?.pages[0]?.items ?? []
@@ -269,39 +271,9 @@ describe('useRealtimeMessages', () => {
     })
   })
 
-  it('keeps message as tombstone with deletedBy on moderator-delete', () => {
-    const queryClient = createTestQueryClient()
-    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
-    const existingMsg = buildMessage({ id: 'msg-mod-del', authorId: 'user-42' })
-    queryClient.setQueryData(messageKey, buildCacheData([existingMsg]))
+  // -- message.deleted: malformed payload logs error --------------------------
 
-    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
-      wrapper: createQueryWrapper(queryClient),
-    })
-
-    fireUpdate(
-      mockChannel.handlers,
-      buildRealtimeRow({
-        id: 'msg-mod-del',
-        author_id: 'user-42',
-        deleted_at: '2026-03-16T03:00:00.000Z',
-        deleted_by: 'moderator-1',
-      }),
-    )
-
-    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
-    const items = cacheData?.pages[0]?.items ?? []
-    expect(items).toHaveLength(1)
-    expect(items[0]).toMatchObject({
-      id: 'msg-mod-del',
-      authorId: 'user-42',
-      deletedBy: 'moderator-1',
-    })
-  })
-
-  // -- UPDATE (malformed): logs error and does not crash ---------------------
-
-  it('logs error and does not update cache when UPDATE payload is malformed', () => {
+  it('logs error and does not update cache when message.deleted payload is malformed', () => {
     const queryClient = createTestQueryClient()
     const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
     const existingMsg = buildMessage({ id: 'msg-1' })
@@ -311,11 +283,13 @@ describe('useRealtimeMessages', () => {
       wrapper: createQueryWrapper(queryClient),
     })
 
-    fireUpdate(mockChannel.handlers, { id: 42 })
+    act(() => {
+      fireSSEEvent('message.deleted', { bad: 'data' })
+    })
 
     expect(logger.error).toHaveBeenCalledOnce()
     expect(logger.error).toHaveBeenCalledWith(
-      'Malformed realtime message update payload',
+      'Malformed message.deleted SSE payload',
       expect.objectContaining({ channelId: CHANNEL_ID }),
     )
 
@@ -323,40 +297,26 @@ describe('useRealtimeMessages', () => {
     expect(cacheData?.pages[0]?.items).toHaveLength(1)
   })
 
-  // -- Empty channelId: no subscription --------------------------------------
+  // -- Empty channelId: no subscription ---------------------------------------
 
-  it('does not subscribe when channelId is empty', () => {
+  it('does not process events when channelId is empty', () => {
     const queryClient = createTestQueryClient()
 
     renderHook(() => useRealtimeMessages(''), {
       wrapper: createQueryWrapper(queryClient),
     })
 
-    expect(supabase.channel).not.toHaveBeenCalled()
-  })
-
-  // -- Cleanup: removeChannel on unmount -------------------------------------
-
-  it('calls supabase.removeChannel on unmount', () => {
-    const queryClient = createTestQueryClient()
-    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
-    queryClient.setQueryData(messageKey, buildCacheData([]))
-
-    const { unmount } = renderHook(() => useRealtimeMessages(CHANNEL_ID), {
-      wrapper: createQueryWrapper(queryClient),
+    act(() => {
+      fireSSEEvent('message.created', buildMessageEvent())
     })
 
-    expect(supabase.removeChannel).not.toHaveBeenCalled()
-
-    unmount()
-
-    expect(supabase.removeChannel).toHaveBeenCalledOnce()
-    expect(supabase.removeChannel).toHaveBeenCalledWith(mockChannel.channel)
+    // No cache key exists, and no errors should have been logged
+    expect(logger.error).not.toHaveBeenCalled()
   })
 
-  // -- No-op when cache is empty (undefined) ---------------------------------
+  // -- No-op when cache is empty (undefined) ----------------------------------
 
-  it('does not crash on INSERT when cache has no data', () => {
+  it('does not crash on message.created when cache has no data', () => {
     const queryClient = createTestQueryClient()
     // Intentionally do NOT seed the cache
 
@@ -364,8 +324,9 @@ describe('useRealtimeMessages', () => {
       wrapper: createQueryWrapper(queryClient),
     })
 
-    // Should not throw
-    fireInsert(mockChannel.handlers, buildRealtimeRow())
+    act(() => {
+      fireSSEEvent('message.created', buildMessageEvent())
+    })
 
     const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
     const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)

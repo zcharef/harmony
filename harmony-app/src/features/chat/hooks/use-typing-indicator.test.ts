@@ -4,59 +4,47 @@ import { useTypingIndicator } from './use-typing-indicator'
 
 vi.mock('@/lib/supabase', () => ({
   supabase: {
-    channel: vi.fn(),
-    removeChannel: vi.fn(),
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: { access_token: 'test-token' } },
+      }),
+    },
   },
 }))
 
-const { supabase } = await import('@/lib/supabase')
+vi.mock('@/lib/env', () => ({
+  env: {
+    VITE_API_URL: 'http://localhost:3000',
+    VITE_SUPABASE_URL: 'http://localhost:54321',
+    VITE_SUPABASE_ANON_KEY: 'test-anon-key',
+  },
+}))
+
+vi.mock('@/lib/logger', () => ({
+  logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+}))
 
 const CHANNEL_ID = 'channel-1'
 const CURRENT_USER_ID = 'user-me'
 
 // -- Helpers ------------------------------------------------------------------
 
-/**
- * Creates a mock Supabase Broadcast channel that captures the typing handler
- * and exposes `.send()` as a spy for outgoing broadcast assertions.
- */
-function createMockChannel() {
-  let broadcastHandler: ((arg: unknown) => void) | null = null
-  const channel = {
-    on: vi.fn((type: string, filter: { event: string }, callback: (arg: unknown) => void) => {
-      if (type === 'broadcast' && filter.event === 'typing') {
-        broadcastHandler = callback
-      }
-      return channel
-    }),
-    subscribe: vi.fn(() => channel),
-    send: vi.fn(),
-  }
-  return {
-    channel,
-    /** Simulates an incoming broadcast event with the given inner payload */
-    fireTyping: (payload: unknown) => {
-      expect(broadcastHandler).not.toBeNull()
-      broadcastHandler?.({ payload })
-    },
-  }
+/** Dispatches an sse:typing.started CustomEvent on window, mimicking useEventSource. */
+function fireTypingSSE(detail: unknown) {
+  window.dispatchEvent(new CustomEvent('sse:typing.started', { detail }))
 }
 
 // -- Tests --------------------------------------------------------------------
 
 describe('useTypingIndicator', () => {
-  let mockChannel: ReturnType<typeof createMockChannel>
-
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
-    mockChannel = createMockChannel()
-    vi.mocked(supabase.channel).mockReturnValue(mockChannel.channel as never)
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
   })
 
   afterEach(() => {
-    // Drain any pending setTimeout callbacks to prevent cross-test bleed.
-    // Wrapped in act() because timer callbacks may trigger React state updates.
+    // Drain pending setTimeout callbacks to prevent cross-test bleed.
     act(() => {
       vi.runOnlyPendingTimers()
     })
@@ -65,23 +53,48 @@ describe('useTypingIndicator', () => {
 
   // -- Empty params: no subscription -----------------------------------------
 
-  it('does not subscribe when channelId is empty', () => {
-    renderHook(() => useTypingIndicator('', CURRENT_USER_ID))
-    expect(supabase.channel).not.toHaveBeenCalled()
+  it('does not add typing users when channelId is empty', () => {
+    const { result } = renderHook(() => useTypingIndicator('', CURRENT_USER_ID))
+
+    act(() => {
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: '',
+      })
+    })
+
+    expect(result.current.typingUsers).toEqual([])
   })
 
-  it('does not subscribe when currentUserId is empty', () => {
-    renderHook(() => useTypingIndicator(CHANNEL_ID, ''))
-    expect(supabase.channel).not.toHaveBeenCalled()
+  it('does not add typing users when currentUserId is empty', () => {
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, ''))
+
+    act(() => {
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: CHANNEL_ID,
+      })
+    })
+
+    expect(result.current.typingUsers).toEqual([])
   })
 
   // -- Typing event from other user adds to typingUsers ----------------------
 
-  it('adds a remote user to typingUsers on valid typing event', () => {
+  it('adds a remote user to typingUsers on valid SSE event', () => {
     const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
-      mockChannel.fireTyping({ userId: 'user-other', username: 'Alice' })
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: CHANNEL_ID,
+      })
     })
 
     expect(result.current.typingUsers).toEqual([{ userId: 'user-other', username: 'Alice' }])
@@ -93,7 +106,29 @@ describe('useTypingIndicator', () => {
     const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
-      mockChannel.fireTyping({ userId: CURRENT_USER_ID, username: 'Me' })
+      fireTypingSSE({
+        senderId: CURRENT_USER_ID,
+        serverId: 'server-1',
+        username: 'Me',
+        channelId: CHANNEL_ID,
+      })
+    })
+
+    expect(result.current.typingUsers).toEqual([])
+  })
+
+  // -- Channel filtering: events for other channels are ignored --------------
+
+  it('ignores typing events for a different channel', () => {
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
+
+    act(() => {
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: 'other-channel',
+      })
     })
 
     expect(result.current.typingUsers).toEqual([])
@@ -105,15 +140,15 @@ describe('useTypingIndicator', () => {
     const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
-      mockChannel.fireTyping({ bad: 'data' })
+      fireTypingSSE({ bad: 'data' })
     })
 
     act(() => {
-      mockChannel.fireTyping(null)
+      fireTypingSSE(null)
     })
 
     act(() => {
-      mockChannel.fireTyping(42)
+      fireTypingSSE(42)
     })
 
     expect(result.current.typingUsers).toEqual([])
@@ -125,10 +160,20 @@ describe('useTypingIndicator', () => {
     const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
-      mockChannel.fireTyping({ userId: 'user-other', username: 'Alice' })
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: CHANNEL_ID,
+      })
     })
     act(() => {
-      mockChannel.fireTyping({ userId: 'user-other', username: 'Alice' })
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: CHANNEL_ID,
+      })
     })
 
     expect(result.current.typingUsers).toHaveLength(1)
@@ -141,7 +186,12 @@ describe('useTypingIndicator', () => {
     const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
-      mockChannel.fireTyping({ userId: 'user-other', username: 'Alice' })
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: CHANNEL_ID,
+      })
     })
 
     expect(result.current.typingUsers).toHaveLength(1)
@@ -161,14 +211,19 @@ describe('useTypingIndicator', () => {
 
   // -- 3-second throttle: sendTyping ignores rapid calls ---------------------
 
-  it('throttles sendTyping to once per 3 seconds', () => {
+  it('throttles sendTyping to once per 3 seconds', async () => {
     const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     // First call goes through
     act(() => {
       result.current.sendTyping('Me')
     })
-    expect(mockChannel.channel.send).toHaveBeenCalledOnce()
+
+    // WHY: getAuthHeaders is async, so we must flush microtasks for fetch to be called.
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
+    expect(globalThis.fetch).toHaveBeenCalledOnce()
 
     // Call within 3 seconds is throttled
     act(() => {
@@ -177,7 +232,10 @@ describe('useTypingIndicator', () => {
     act(() => {
       result.current.sendTyping('Me')
     })
-    expect(mockChannel.channel.send).toHaveBeenCalledOnce()
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
+    expect(globalThis.fetch).toHaveBeenCalledOnce()
 
     // After 3 seconds, the next call goes through
     act(() => {
@@ -186,35 +244,46 @@ describe('useTypingIndicator', () => {
     act(() => {
       result.current.sendTyping('Me')
     })
-    expect(mockChannel.channel.send).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
   })
 
-  // -- sendTyping broadcasts correct payload structure -----------------------
+  // -- sendTyping POSTs to correct endpoint ----------------------------------
 
-  it('sends correct broadcast payload structure', () => {
+  it('sends POST to correct typing endpoint', async () => {
     const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
       result.current.sendTyping('MyUsername')
     })
 
-    expect(mockChannel.channel.send).toHaveBeenCalledWith({
-      type: 'broadcast',
-      event: 'typing',
-      payload: { userId: CURRENT_USER_ID, username: 'MyUsername' },
+    await act(async () => {
+      await vi.runAllTimersAsync()
     })
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      `http://localhost:3000/v1/channels/${CHANNEL_ID}/typing`,
+      expect.objectContaining({
+        method: 'POST',
+        headers: { Authorization: 'Bearer test-token' },
+      }),
+    )
   })
 
-  // -- Cleanup: removeChannel on unmount -------------------------------------
+  // -- Cleanup: event listener removed on unmount ----------------------------
 
-  it('calls supabase.removeChannel on unmount', () => {
+  it('removes SSE event listener on unmount', () => {
+    const removeListenerSpy = vi.spyOn(window, 'removeEventListener')
+
     const { unmount } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
-
-    expect(supabase.removeChannel).not.toHaveBeenCalled()
 
     unmount()
 
-    expect(supabase.removeChannel).toHaveBeenCalledOnce()
-    expect(supabase.removeChannel).toHaveBeenCalledWith(mockChannel.channel)
+    // WHY 'sse:typing.started': useServerEvent('typing.started', ...) prefixes
+    // with SSE_EVENT_PREFIX ('sse:') → full event name is 'sse:typing.started'.
+    expect(removeListenerSpy).toHaveBeenCalledWith('sse:typing.started', expect.any(Function))
+    removeListenerSpy.mockRestore()
   })
 })
