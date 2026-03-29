@@ -51,6 +51,9 @@ pub trait MemberRepository: Send + Sync + std::fmt::Debug {
         new_role: Role,
     ) -> Result<(), DomainError>;
 
+    /// Count members in a server (uses denormalized column for performance).
+    async fn count_by_server(&self, server_id: &ServerId) -> Result<i64, DomainError>;
+
     /// Transfer ownership atomically: set `new_owner` role='owner',
     /// old owner role='admin', update `servers.owner_id`.
     async fn transfer_ownership(

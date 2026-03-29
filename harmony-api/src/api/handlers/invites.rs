@@ -93,12 +93,11 @@ pub async fn preview_invite(
 
     let server = state.server_service().get_by_id(&invite.server_id).await?;
 
-    let members = state
+    let member_count = state
         .member_repository()
-        .list_by_server(&invite.server_id)
+        .count_by_server(&invite.server_id)
         .await?;
 
-    let member_count = i64::try_from(members.len()).unwrap_or(0);
     let preview = InvitePreviewResponse::new(&invite, server.name, member_count);
 
     Ok((StatusCode::OK, Json(preview)))
