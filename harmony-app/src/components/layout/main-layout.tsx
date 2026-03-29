@@ -8,10 +8,11 @@ import { useAuthStore } from '@/features/auth'
 import { ChannelSidebar, useChannels } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
 import { DmSidebar, useDms } from '@/features/dms'
-import { MemberList, useMyMemberRole } from '@/features/members'
+import { MemberList, useForceDisconnect, useMyMemberRole } from '@/features/members'
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, useSettingsUiStore } from '@/features/settings'
+import { useEventSource } from '@/hooks/use-event-source'
 
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import { env } from '@/lib/env'
@@ -177,6 +178,8 @@ export function MainLayout() {
   const userId = useAuthStore((s) => s.user?.id ?? null)
   const serverIds = useMemo(() => servers?.map((s) => s.id) ?? [], [servers])
   usePresence(serverIds, selectedServerId, userId)
+  useEventSource({}, userId)
+  useForceDisconnect(userId, selectedServerId, setSelectedServerId, setSelectedChannelId)
   const { data: channels } = useChannels(selectedServerId)
 
   // WHY: DM list needed to derive chat header info (recipient name) when in DM view
