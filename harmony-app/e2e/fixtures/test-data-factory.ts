@@ -20,7 +20,7 @@ function authHeaders(token: string): Record<string, string> {
 export async function syncProfile(token: string): Promise<void> {
   const res = await fetch(`${API_URL}/v1/auth/me`, {
     method: 'POST',
-    headers: authHeaders(token),
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {
     const body = await res.text()
@@ -53,7 +53,7 @@ export async function getServerChannels(
 ): Promise<{ items: Array<{ id: string; name: string; encrypted: boolean }> }> {
   const res = await fetch(`${API_URL}/v1/servers/${serverId}/channels`, {
     method: 'GET',
-    headers: authHeaders(token),
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {
     const body = await res.text()
@@ -123,7 +123,6 @@ export async function previewInvite(
 ): Promise<{ serverId: string; serverName: string; memberCount: number }> {
   const res = await fetch(`${API_URL}/v1/invites/${code}`, {
     method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
   })
   if (!res.ok) {
     const body = await res.text()
@@ -176,7 +175,7 @@ export async function deleteMessage(
 ): Promise<void> {
   const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages/${messageId}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {
     const body = await res.text()
@@ -207,7 +206,7 @@ export async function editMessage(
 export async function kickMember(token: string, serverId: string, userId: string): Promise<void> {
   const res = await fetch(`${API_URL}/v1/servers/${serverId}/members/${userId}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {
     const body = await res.text()
@@ -223,7 +222,7 @@ export async function deleteChannel(
 ): Promise<void> {
   const res = await fetch(`${API_URL}/v1/servers/${serverId}/channels/${channelId}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {
     const body = await res.text()
@@ -344,7 +343,7 @@ export async function banUser(
 export async function unbanUser(token: string, serverId: string, userId: string): Promise<void> {
   const res = await fetch(`${API_URL}/v1/servers/${serverId}/bans/${userId}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {
     const body = await res.text()
@@ -449,7 +448,7 @@ export async function joinServerRaw(
 export async function closeDm(token: string, serverId: string): Promise<void> {
   const res = await fetch(`${API_URL}/v1/dms/${serverId}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {
     const body = await res.text()
