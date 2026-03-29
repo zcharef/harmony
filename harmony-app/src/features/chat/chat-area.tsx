@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import {
   DmPlaintextBanner,
@@ -651,6 +652,8 @@ function MessageListStatus({
   isPending,
   isError,
   messageCount,
+  onRetry,
+  isRetrying,
 }: {
   isDm: boolean
   isChannelEncrypted: boolean
@@ -662,6 +665,8 @@ function MessageListStatus({
   isPending: boolean
   isError: boolean
   messageCount: number
+  onRetry?: () => void
+  isRetrying?: boolean
 }) {
   const { t } = useTranslation('chat')
 
@@ -694,7 +699,14 @@ function MessageListStatus({
         </div>
       )}
 
-      {isError && <p className="px-4 text-sm text-danger">{t('failedToLoadMessages')}</p>}
+      {isError && messageCount === 0 && (
+        <ErrorState
+          icon={<Hash className="h-10 w-10" />}
+          message={t('failedToLoadMessages')}
+          onRetry={onRetry}
+          isRetrying={isRetrying}
+        />
+      )}
 
       {messageCount === 0 && isPending === false && isError === false && (
         <div data-test="empty-state" className="px-4 pt-4">
@@ -780,8 +792,16 @@ export function ChatArea({
     getCachedPlaintext: getChannelCachedPlaintext,
   } = useChannelEncryption()
 
-  const { data, isPending, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
-    useMessages(channelId)
+  const {
+    data,
+    isPending,
+    isError,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    refetch,
+    isRefetching,
+  } = useMessages(channelId)
   const {
     sendMessage,
     editingMessageId,
@@ -881,11 +901,16 @@ export function ChatArea({
           isPending={isPending}
           isError={isError}
           messageCount={messages.length}
+          onRetry={() => refetch()}
+          isRetrying={isRefetching}
         />
 
         {/* WHY: Virtualizer container is separate — only absolute-positioned items inside.
             getTotalSize() is accurate because it only accounts for measured message rows. */}
-        <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+        <div
+          className={isError && messages.length > 0 ? 'opacity-70' : undefined}
+          style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}
+        >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const message = messages[virtualRow.index]
             if (!message) return null

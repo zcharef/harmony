@@ -2,6 +2,7 @@ import { Avatar, Button, Spinner } from '@heroui/react'
 import { Headphones, MessageSquarePlus, Mic, Settings, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import type { DmListItem } from '@/lib/api'
@@ -115,7 +116,7 @@ interface DmSidebarProps {
 
 export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
   const { t } = useTranslation('dms')
-  const { data: dms, isPending, isError } = useDms()
+  const { data: dms, isPending, isError, refetch, isRefetching } = useDms()
   useRealtimeDms()
   const closeDmMutation = useCloseDm()
   const [isSearchOpen, setIsSearchOpen] = useState(false)
@@ -161,7 +162,14 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
             </div>
           )}
 
-          {isError && <p className="px-2 text-xs text-danger">{t('failedToLoadDms')}</p>}
+          {isError && dms === undefined && (
+            <ErrorState
+              icon={<MessageSquarePlus className="h-10 w-10" />}
+              message={t('failedToLoadDms')}
+              onRetry={() => refetch()}
+              isRetrying={isRefetching}
+            />
+          )}
 
           {dms !== undefined && dms.length === 0 && (
             <div className="flex flex-col items-center gap-2 px-2 py-8 text-center">
@@ -171,15 +179,19 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
             </div>
           )}
 
-          {dms?.map((dm) => (
-            <DmConversationItem
-              key={dm.serverId}
-              dm={dm}
-              isActive={dm.serverId === selectedServerId}
-              onSelect={() => onSelectDm(dm.serverId, dm.channelId)}
-              onClose={() => closeDmMutation.mutate(dm.serverId)}
-            />
-          ))}
+          {dms !== undefined && dms.length > 0 && (
+            <div className={isError ? 'opacity-70' : undefined}>
+              {dms.map((dm) => (
+                <DmConversationItem
+                  key={dm.serverId}
+                  dm={dm}
+                  isActive={dm.serverId === selectedServerId}
+                  onSelect={() => onSelectDm(dm.serverId, dm.channelId)}
+                  onClose={() => closeDmMutation.mutate(dm.serverId)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

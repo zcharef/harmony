@@ -1,23 +1,24 @@
 import { Chip, Tooltip } from '@heroui/react'
-import { GripVertical } from 'lucide-react'
+import { GripVertical, WifiOff } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 
+import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
-import { ChannelSidebar, useChannels } from '@/features/channels'
+import { ChannelSidebar, useChannels, useRealtimeChannels } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
 import { DmSidebar, useDms } from '@/features/dms'
-import { MemberList, useForceDisconnect, useMyMemberRole } from '@/features/members'
+import { MemberList, useForceDisconnect, useMyMemberRole, useRealtimeMembers } from '@/features/members'
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, useSettingsUiStore } from '@/features/settings'
 import { useEventSource } from '@/hooks/use-event-source'
-
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
 import { AboutPage } from './about-page'
+import { ConnectionBanner } from './connection-banner'
 import { WelcomeScreen } from './welcome-screen'
 
 // WHY: Persist last-used server/channel to localStorage so the user returns
@@ -160,6 +161,36 @@ function useChannelAutoSelect(
   }, [view, selectedServerId, selectedChannelId, channels, setSelectedChannelId])
 }
 
+// WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
+function ServersErrorView({
+  onSelectServer,
+  onSelectDmView,
+  selectedServerId,
+  view,
+}: {
+  onSelectServer: (serverId: string) => void
+  onSelectDmView: () => void
+  selectedServerId: string | null
+  view: ViewMode
+}) {
+  const { t } = useTranslation('common')
+  return (
+    <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+      <ConnectionBanner />
+      <ServerList
+        selectedServerId={selectedServerId}
+        view={view}
+        onSelectServer={onSelectServer}
+        onSelectDmView={onSelectDmView}
+      />
+      <div className="flex flex-1 items-center justify-center bg-background">
+        <ErrorState icon={<WifiOff className="h-12 w-12" />} message={t('somethingWentWrong')} />
+      </div>
+      <AlphaBadge />
+    </div>
+  )
+}
+
 export function MainLayout() {
   const [view, setView] = useState<ViewMode>('servers')
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null)
@@ -167,7 +198,7 @@ export function MainLayout() {
 
   // WHY: Derive server/channel names from query cache to display in headers.
   // This avoids passing full objects between features (CLAUDE.md 4.5: pass IDs, not objects).
-  const { data: servers } = useServers()
+  const { data: servers, isError: isServersError } = useServers()
 
   // WHY: Filter DM servers so we can check if user has real servers.
   // Same filter applied inside ServerList (server-list.tsx:106).
@@ -180,6 +211,11 @@ export function MainLayout() {
   usePresence(serverIds, selectedServerId, userId)
   useEventSource({}, userId)
   useForceDisconnect(userId, selectedServerId, setSelectedServerId, setSelectedChannelId)
+  // WHY: Realtime hooks MUST live here (not inside collapsible sidebar/member-list
+  // panels). When a panel collapses, its component unmounts and SSE listeners are
+  // torn down — events would be silently missed until the panel re-opens.
+  useRealtimeChannels(selectedServerId ?? '')
+  useRealtimeMembers(selectedServerId ?? '')
   const { data: channels } = useChannels(selectedServerId)
 
   // WHY: DM list needed to derive chat header info (recipient name) when in DM view
@@ -274,6 +310,7 @@ export function MainLayout() {
   if (showServerSettings && selectedServerId !== null) {
     return (
       <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+        <ConnectionBanner />
         <ServerSettings serverId={selectedServerId} />
         <AlphaBadge />
       </div>
@@ -286,6 +323,7 @@ export function MainLayout() {
   if (hasNoServers && !isDmView) {
     return (
       <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+        <ConnectionBanner />
         <ServerList
           selectedServerId={selectedServerId}
           view={view}
@@ -298,8 +336,22 @@ export function MainLayout() {
     )
   }
 
+  /** WHY: Servers query failed with no cache — show error instead of blank app.
+   *  The ConnectionBanner handles SSE-level errors; this covers REST query failures. */
+  if (isServersError && servers === undefined && !isDmView) {
+    return (
+      <ServersErrorView
+        selectedServerId={selectedServerId}
+        view={view}
+        onSelectServer={handleSelectServer}
+        onSelectDmView={handleSelectDmView}
+      />
+    )
+  }
+
   return (
     <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+      <ConnectionBanner />
       {/* Server nav - fixed width, outside resizable group */}
       <ServerList
         selectedServerId={selectedServerId}

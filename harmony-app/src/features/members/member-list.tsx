@@ -2,13 +2,13 @@ import { Avatar, Spinner } from '@heroui/react'
 import { Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
 import { StatusIndicator, usePresenceStore } from '@/features/presence'
 import type { MemberResponse, UserStatus } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { BanDialog } from './ban-dialog'
 import { useMembers } from './hooks/use-members'
-import { useRealtimeMembers } from './hooks/use-realtime-members'
 import { KickDialog } from './kick-dialog'
 import { MemberContextMenu } from './member-context-menu'
 import type { MemberRole } from './moderation-types'
@@ -70,8 +70,7 @@ function useGroupedMembers(members: MemberResponse[]) {
  */
 export function MemberList({ serverId, serverName, onNavigateDm }: MemberListProps) {
   const { t } = useTranslation('members')
-  const { data, isPending, isError } = useMembers(serverId)
-  useRealtimeMembers(serverId ?? '')
+  const { data, isPending, isError, refetch, isRefetching } = useMembers(serverId)
   const presenceMap = usePresenceStore((s) => s.presenceMap)
   const currentUserId = useAuthStore((s) => s.user?.id ?? '')
   const members = data?.items ?? []
@@ -113,15 +112,19 @@ export function MemberList({ serverId, serverName, onNavigateDm }: MemberListPro
     )
   }
 
-  if (isError) {
+  if (isError && data === undefined) {
     return (
       <div className="flex h-full flex-col bg-default-100">
         <div className="flex h-12 items-center border-b border-divider px-4">
           <span className="font-semibold text-foreground">{t('members')}</span>
         </div>
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4">
-          <Users className="h-10 w-10 text-default-300" />
-          <p className="text-center text-sm text-danger">{t('failedToLoadMembers')}</p>
+        <div className="flex flex-1 items-center justify-center">
+          <ErrorState
+            icon={<Users className="h-10 w-10" />}
+            message={t('failedToLoadMembers')}
+            onRetry={() => refetch()}
+            isRetrying={isRefetching}
+          />
         </div>
       </div>
     )
@@ -134,7 +137,7 @@ export function MemberList({ serverId, serverName, onNavigateDm }: MemberListPro
           {t('membersWithCount', { total })}
         </span>
       </div>
-      <div className="flex-1 overflow-y-auto px-2 py-2">
+      <div className={`flex-1 overflow-y-auto px-2 py-2${isError ? ' opacity-70' : ''}`}>
         {ROLE_SECTIONS.map((role) => {
           const sectionMembers = groups[role]
           if (sectionMembers.length === 0) return null

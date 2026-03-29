@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { EncryptedChannelBadge } from '@/features/crypto'
 import { ROLE_HIERARCHY, useMyMemberRole } from '@/features/members'
@@ -33,7 +34,6 @@ import { CreateChannelDialog } from './create-channel-dialog'
 import { EditChannelDialog } from './edit-channel-dialog'
 import { useChannels } from './hooks/use-channels'
 import { useDeleteChannel } from './hooks/use-delete-channel'
-import { useRealtimeChannels } from './hooks/use-realtime-channels'
 
 function ChannelButton({
   channel,
@@ -219,8 +219,7 @@ export function ChannelSidebar({
   onSelectChannel,
 }: ChannelSidebarProps) {
   const { t } = useTranslation('channels')
-  const { data: channels, isPending, isError } = useChannels(serverId)
-  useRealtimeChannels(serverId ?? '')
+  const { data: channels, isPending, isError, refetch, isRefetching } = useChannels(serverId)
   const [isInviteOpen, setIsInviteOpen] = useState(false)
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false)
   const [editChannel, setEditChannel] = useState<ChannelResponse | null>(null)
@@ -264,7 +263,14 @@ export function ChannelSidebar({
             </div>
           )}
 
-          {isError && <p className="px-2 text-xs text-danger">{t('failedToLoadChannels')}</p>}
+          {isError && channels === undefined && (
+            <ErrorState
+              icon={<Hash className="h-8 w-8" />}
+              message={t('failedToLoadChannels')}
+              onRetry={() => refetch()}
+              isRetrying={isRefetching}
+            />
+          )}
 
           {serverId === null && (
             <div className="flex flex-col items-center gap-2 px-4 py-8">
@@ -277,21 +283,25 @@ export function ChannelSidebar({
             <p className="px-2 text-xs text-default-500">{t('noChannelsYet')}</p>
           )}
 
-          {channels?.map((channel) => (
-            <ChannelButton
-              key={channel.id}
-              channel={channel}
-              isActive={channel.id === selectedChannelId}
-              canManageChannels={canAccessSettings}
-              onSelect={() => onSelectChannel(channel.id)}
-              onEdit={() => setEditChannel(channel)}
-              onDelete={() => {
-                if (window.confirm(t('deleteConfirm', { channelName: channel.name }))) {
-                  deleteChannelMutation.mutate(channel.id)
-                }
-              }}
-            />
-          ))}
+          {channels !== undefined && channels.length > 0 && (
+            <div className={isError ? 'opacity-70' : undefined}>
+              {channels.map((channel) => (
+                <ChannelButton
+                  key={channel.id}
+                  channel={channel}
+                  isActive={channel.id === selectedChannelId}
+                  canManageChannels={canAccessSettings}
+                  onSelect={() => onSelectChannel(channel.id)}
+                  onEdit={() => setEditChannel(channel)}
+                  onDelete={() => {
+                    if (window.confirm(t('deleteConfirm', { channelName: channel.name }))) {
+                      deleteChannelMutation.mutate(channel.id)
+                    }
+                  }}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

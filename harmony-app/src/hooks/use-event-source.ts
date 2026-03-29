@@ -15,6 +15,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 
+import { useConnectionStore } from '@/lib/connection-store'
 import { env } from '@/lib/env'
 import {
   type ServerEventHandlers,
@@ -37,6 +38,9 @@ import { logger } from '@/lib/logger'
  */
 export function useEventSource(handlers: ServerEventHandlers, userId: string | null): void {
   const queryClient = useQueryClient()
+  // WHY: When requestReconnect() increments reconnectKey, this effect re-runs,
+  // tearing down the old EventSource and creating a fresh one.
+  const reconnectKey = useConnectionStore((s) => s.reconnectKey)
   // WHY: Ref avoids re-creating the EventSource when handlers change.
   // Handlers are typically new objects each render (inline object literal),
   // but the actual function references are stable via useCallback in features.
@@ -49,13 +53,35 @@ export function useEventSource(handlers: ServerEventHandlers, userId: string | n
   // invalidate to catch up on missed events.
   const hasConnectedRef = useRef(false)
 
+  // WHY: After 30s of continuous errors without a successful reconnect, we
+  // transition from 'reconnecting' to 'disconnected' so the banner shows
+  // the more severe "connection lost" state with a manual retry button.
+  const disconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
     if (userId === null) return
 
     const url = `${env.VITE_API_URL}/v1/events`
 
     // WHY: withCredentials sends the session cookie for auth (ADR-SSE-005).
-    const es = new EventSource(url, { withCredentials: true })
+    let es: EventSource
+    try {
+      es = new EventSource(url, { withCredentials: true })
+    } catch (err) {
+      logger.error('sse_constructor_failed', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      useConnectionStore.getState().setStatus('disconnected')
+      return
+    }
+
+    // WHY: If the server never responds (no onopen, no onerror), escalate to
+    // 'disconnected' after 10s so the user gets a retry button.
+    disconnectTimeoutRef.current = setTimeout(() => {
+      useConnectionStore.getState().setStatus('disconnected')
+      disconnectTimeoutRef.current = null
+    }, 10_000)
 
     es.onopen = () => {
       if (hasConnectedRef.current) {
@@ -67,6 +93,14 @@ export function useEventSource(handlers: ServerEventHandlers, userId: string | n
         logger.info('sse_connected', { userId })
         hasConnectedRef.current = true
       }
+
+      // WHY: Connection recovered — clear the disconnect escalation timer
+      // and update the global connection status for the ConnectionBanner.
+      if (disconnectTimeoutRef.current !== null) {
+        clearTimeout(disconnectTimeoutRef.current)
+        disconnectTimeoutRef.current = null
+      }
+      useConnectionStore.getState().setStatus('connected')
     }
 
     es.onerror = () => {
@@ -75,6 +109,18 @@ export function useEventSource(handlers: ServerEventHandlers, userId: string | n
       // We log at warn level because this is a background operation — no user
       // feedback needed (ADR-045: background ops fail silently).
       logger.warn('sse_connection_error', { userId })
+
+      useConnectionStore.getState().setStatus('reconnecting')
+
+      // WHY: If we haven't reconnected within 30s, escalate to 'disconnected'
+      // so the banner shows the more severe state with a manual retry button.
+      // Only start one timer — subsequent onerror calls before recovery are no-ops.
+      if (disconnectTimeoutRef.current === null) {
+        disconnectTimeoutRef.current = setTimeout(() => {
+          useConnectionStore.getState().setStatus('disconnected')
+          disconnectTimeoutRef.current = null
+        }, 30_000)
+      }
     }
 
     // ── Register a listener for each SSE event name ──────────────
@@ -137,11 +183,25 @@ export function useEventSource(handlers: ServerEventHandlers, userId: string | n
       for (const { eventName, listener } of listeners) {
         es.removeEventListener(eventName, listener)
       }
+      // WHY: Null out handlers before close to prevent any callback from firing
+      // during or after the close() call (review issue #10).
+      es.onopen = null
+      es.onerror = null
       es.close()
       // WHY: Reset so the next connection (re-login) treats its first
       // onopen as a fresh connect, not a reconnect that triggers invalidation.
       hasConnectedRef.current = false
+      // WHY: Prevent the disconnect timeout from firing after cleanup (e.g., logout).
+      if (disconnectTimeoutRef.current !== null) {
+        clearTimeout(disconnectTimeoutRef.current)
+        disconnectTimeoutRef.current = null
+      }
+      // WHY: Don't set status here. Cleanup runs on logout (userId → null) or
+      // reconnect (reconnectKey change). On logout, the login page doesn't render
+      // ConnectionBanner, so status is irrelevant. On reconnect, the new effect
+      // sets status via onopen/onerror. Setting 'connected' here was a bug: it
+      // falsely reported a healthy connection when none existed (e.g., on logout).
       logger.info('sse_disconnected', { userId })
     }
-  }, [userId, queryClient])
+  }, [userId, queryClient, reconnectKey])
 }

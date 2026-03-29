@@ -11,7 +11,11 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60 * 5, // 5 minutes
-      retry: 1,
+      // WHY: 3 retries with exponential backoff (1s, 2s, 4s ≈ 7s total) before
+      // queries enter error state. Balances "invisible retries" UX (ADR-045:
+      // background ops fail silently) with time-to-error-feedback.
+      retry: 3,
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 30000),
       refetchOnWindowFocus: false,
     },
   },
