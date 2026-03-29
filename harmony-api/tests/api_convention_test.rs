@@ -192,24 +192,20 @@ fn handlers_dont_construct_dtos_inline() {
 
 // ─── Test c) ────────────────────────────────────────────────────────────────
 
-/// Test: No WebSocket or SSE imports.
+/// Test: No WebSocket imports.
 ///
-/// WHY: Supabase Realtime handles all push notifications. The API has NO
-/// SSE/WebSocket endpoints. Writes go through REST; Supabase pushes changes
-/// to clients automatically.
+/// WHY: Real-time push uses server-owned SSE (`GET /v1/events`), not `WebSockets`.
+/// `WebSocket` crates must not be added — SSE is simpler and sufficient.
 #[test]
-fn no_websocket_or_sse_imports() {
+fn no_websocket_imports() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let src_dir = Path::new(manifest_dir).join("src");
 
     let rust_files = collect_rust_files(&src_dir);
     assert!(!rust_files.is_empty(), "No Rust files found in src/");
 
-    let forbidden = &[
-        "axum::extract::ws",
-        "axum::response::sse",
-        "tokio_tungstenite",
-    ];
+    // SSE is intentional (ADR-SSE-001). Only WebSockets are forbidden.
+    let forbidden = &["axum::extract::ws", "tokio_tungstenite"];
 
     let mut violations: Vec<String> = Vec::new();
 
@@ -229,7 +225,7 @@ fn no_websocket_or_sse_imports() {
             for pattern in forbidden {
                 if line.contains(pattern) {
                     violations.push(format!(
-                        "  {}:{} - forbidden realtime import '{}'\n    > {}",
+                        "  {}:{} - forbidden WebSocket import '{}'\n    > {}",
                         file.display(),
                         line_num + 1,
                         pattern,
@@ -242,12 +238,11 @@ fn no_websocket_or_sse_imports() {
 
     if !violations.is_empty() {
         panic!(
-            "\n\nArchitecture Violation: WebSocket/SSE imports found!\n\n\
-            Supabase Realtime handles all push notifications.\n\
-            The API must NOT have SSE or WebSocket endpoints.\n\
-            Writes go through REST; Supabase pushes changes to clients automatically.\n\n\
+            "\n\nArchitecture Violation: WebSocket imports found!\n\n\
+            Real-time push uses SSE (GET /v1/events), not WebSockets.\n\
+            See ADR-SSE-001 through ADR-SSE-007.\n\n\
             Violations found ({}):\n{}\n\n\
-            Fix: Remove WebSocket/SSE code. Use Supabase Realtime for push notifications.\n",
+            Fix: Remove WebSocket code. Use the existing SSE infrastructure.\n",
             violations.len(),
             violations.join("\n")
         );

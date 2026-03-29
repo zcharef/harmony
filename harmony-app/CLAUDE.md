@@ -300,13 +300,64 @@ function MyFormContent({ data }: { data: Data | undefined }) {
 }
 ```
 
-### 4.5 Cross-Feature Communication
+### 4.5 Real-Time Events via SSE (MANDATORY)
+
+All push notifications use Server-Sent Events from the Rust API. Supabase Realtime is NOT used.
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  MainLayout (src/components/layout/main-layout.tsx)         │
+│  └─ useEventSource({}, userId)  — single SSE connection     │
+│       ↓ EventSource → GET /v1/events (cookie auth)          │
+│       ↓ parse JSON → validate with Zod (event-types.ts)     │
+│       ↓ window.dispatchEvent(CustomEvent("sse:<name>"))     │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ CustomEvent bus
+        ┌──────────────────────┼──────────────────────┐
+        ▼                      ▼                      ▼
+ use-realtime-         use-realtime-          use-realtime-
+ messages.ts           members.ts             channels.ts
+ (chat feature)        (members feature)      (channels feature)
+ useServerEvent(       useServerEvent(        useServerEvent(
+  "message.created",    "member.joined",       "channel.created",
+  handler)              handler)               handler)
+```
+
+#### Key Files
+
+| File | Role |
+|------|------|
+| `src/hooks/use-event-source.ts` | Single SSE connection, mounted once in MainLayout. Cookie auth (`withCredentials: true`). Auto-reconnect with full cache invalidation on reconnect (ADR-SSE-006). |
+| `src/hooks/use-server-event.ts` | Bridge hook: subscribes to `window` CustomEvents keyed by SSE event name. Feature hooks use this instead of touching the EventSource directly. |
+| `src/lib/event-types.ts` | SSoT for event types. Zod discriminated union validates all payloads. Mirrors Rust `ServerEvent` enum. Exports `ServerEvent`, `ServerEventOf<T>`, payload types. |
+| `src/features/*/hooks/use-realtime-*.ts` | Feature-specific handlers. Each subscribes to relevant SSE events via `useServerEvent()` and updates TanStack Query cache directly (no refetch). |
+
+#### Rules
+
+| Rule | Enforcement |
+|------|-------------|
+| `import ... from 'supabase-js/realtime'` or Supabase channel subscriptions | **FORBIDDEN** |
+| Direct cache mutation in SSE handlers (no `invalidateQueries` per event) | **REQUIRED** (instant UI) |
+| Zod validation on every SSE payload before cache insertion | **REQUIRED** (CLAUDE.md 1.2) |
+| One `useEventSource` call per app (in MainLayout only) | **REQUIRED** (single connection) |
+| Feature hooks use `useServerEvent()`, never `addEventListener` directly | **REQUIRED** |
+
+#### Adding a New SSE Event
+
+1. **Rust API:** Add variant to `ServerEvent` enum, implement `event_name()` and payload struct
+2. **`src/lib/event-types.ts`:** Add event name to `SSE_EVENT_NAMES`, Zod variant to `serverEventSchema`, mapping to `SSE_EVENT_NAME_TO_TYPE`
+3. **Feature hook:** Create `use-realtime-<feature>.ts` using `useServerEvent("<event.name>", handler)` pattern
+4. **Cache update:** Use `queryClient.setQueryData()` for instant UI, matching the pattern in `use-realtime-messages.ts`
+
+### 4.6 Cross-Feature Communication
 
 - Import via barrel exports only: `import { X } from '@/features/y'`
 - Pass IDs between features, NOT full objects
 - Side effects handled by API (not cross-feature function calls)
 
-### 4.6 Query Key Factory (MANDATORY) (ADR-029)
+### 4.7 Query Key Factory (MANDATORY) (ADR-029)
 
 ```typescript
 // FORBIDDEN: inline query keys
@@ -317,11 +368,11 @@ import { queryKeys } from '@/lib/query-keys'
 queryKey: queryKeys.messages.byChannel(channelId)
 ```
 
-### 4.7 Error Boundaries (MANDATORY) (ADR-034)
+### 4.8 Error Boundaries (MANDATORY) (ADR-034)
 
 Every feature route wrapped in `<FeatureErrorBoundary>` from `@/components/shared/error-boundary`.
 
-### 4.8 Styling (MANDATORY) (ADR-044)
+### 4.9 Styling (MANDATORY) (ADR-044)
 
 - **HeroUI prop-based styling first**: Use component props (`color="primary"`, `variant="flat"`, `size="sm"`) over Tailwind classes.
 - **`className`/`classNames` for layout only**: Flexbox, margins, positioning that HeroUI props cannot express.
@@ -329,7 +380,7 @@ Every feature route wrapped in `<FeatureErrorBoundary>` from `@/components/share
 - **No inline `style={{}}`** in application code — Tailwind via `className` only.
 - **No `dark:` color overrides** — HeroUI handles dark mode color switching automatically.
 
-### 4.9 Type Assertions (MANDATORY) (ADR-035)
+### 4.10 Type Assertions (MANDATORY) (ADR-035)
 
 - Never use `as Type` (lies to compiler). Use `satisfies Type` or fix the actual type.
 - Allowed: `as const`, `as unknown`, `as never` (exhaustive switches).
@@ -512,6 +563,12 @@ createDm.mutate(userId, {
 ### Forms
 - [ ] Async forms use load-then-render pattern
 - [ ] No `useEffect(() => reset(data), [data])`
+
+### Real-Time (SSE)
+- [ ] No Supabase Realtime imports or channel subscriptions
+- [ ] New SSE events have Zod schema in `event-types.ts` and entry in `SSE_EVENT_NAME_TO_TYPE`
+- [ ] Feature realtime hooks use `useServerEvent()`, not direct `addEventListener`
+- [ ] SSE handlers update cache via `setQueryData()`, not `invalidateQueries()`
 
 ### Enforcement Rules
 - [ ] No inline `style={{}}` in feature code -- Tailwind `className` only

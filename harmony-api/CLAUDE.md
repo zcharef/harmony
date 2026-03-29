@@ -113,7 +113,7 @@ src/
 2. **No `unwrap()`/`expect()` in production code** — propagate with `?`.
 3. **Domain purity:** Domain layer must have zero infra imports.
 4. **No Split-Brain:** All business logic must reside in Rust API.
-5. **Real-Time:** Supabase Realtime handles push notifications. The API has NO SSE/WebSocket endpoints. Writes go through REST; Supabase pushes changes to clients automatically.
+5. **Real-Time:** `GET /v1/events` SSE endpoint streams events to connected clients. Mutation handlers publish events via the EventBus after DB commits. Supabase Realtime is no longer used. See ADR-SSE-001 through ADR-SSE-007 in `dev/active/sse-realtime-migration/`.
 6. **Exhaustive error mapping:** `From<DomainError> for ApiError` uses exhaustive match, no `_ =>` wildcard (ADR-021).
 7. **No mocks:** Tests use real DB (testcontainers) and real HTTP. `mockall`/`mock_derive` are banned. External HTTP only via `wiremock` (ADR-018).
 8. **Cursor pagination only:** No SQL `OFFSET`. Use `WHERE created_at < $cursor` (ADR-036).
