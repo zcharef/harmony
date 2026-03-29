@@ -11,6 +11,7 @@ use crate::domain::services::{
     ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
     ProfileService, ServerService,
 };
+use crate::infra::{BroadcastEventBus, PresenceTracker};
 
 /// Application state shared across all handlers.
 ///
@@ -49,6 +50,10 @@ pub struct AppState {
     ban_repository: Arc<dyn BanRepository>,
     /// Plan limit checker (self-hosted: always allowed, hosted: Postgres-backed).
     plan_limit_checker: Arc<dyn PlanLimitChecker>,
+    /// In-process event bus for SSE real-time delivery.
+    event_bus: Arc<BroadcastEventBus>,
+    /// In-memory presence tracker (online/idle/dnd per user).
+    presence_tracker: Arc<PresenceTracker>,
 }
 
 // WHY: Manual Debug because `dyn MemberRepository` needs explicit impl through Arc.
@@ -68,6 +73,8 @@ impl std::fmt::Debug for AppState {
             .field("member_repository", &self.member_repository)
             .field("ban_repository", &self.ban_repository)
             .field("plan_limit_checker", &self.plan_limit_checker)
+            .field("event_bus", &self.event_bus)
+            .field("presence_tracker", &self.presence_tracker)
             .finish()
     }
 }
@@ -93,6 +100,8 @@ impl AppState {
         member_repository: Arc<dyn MemberRepository>,
         ban_repository: Arc<dyn BanRepository>,
         plan_limit_checker: Arc<dyn PlanLimitChecker>,
+        event_bus: Arc<BroadcastEventBus>,
+        presence_tracker: Arc<PresenceTracker>,
     ) -> Self {
         Self {
             pool,
@@ -111,6 +120,8 @@ impl AppState {
             member_repository,
             ban_repository,
             plan_limit_checker,
+            event_bus,
+            presence_tracker,
         }
     }
 
@@ -178,5 +189,17 @@ impl AppState {
     #[must_use]
     pub fn plan_limit_checker(&self) -> &dyn PlanLimitChecker {
         &*self.plan_limit_checker
+    }
+
+    /// Access the event bus for publishing real-time events.
+    #[must_use]
+    pub fn event_bus(&self) -> &BroadcastEventBus {
+        &self.event_bus
+    }
+
+    /// Access the in-memory presence tracker.
+    #[must_use]
+    pub fn presence_tracker(&self) -> &PresenceTracker {
+        &self.presence_tracker
     }
 }

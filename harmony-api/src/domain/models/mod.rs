@@ -14,6 +14,7 @@ mod plan;
 mod profile;
 pub mod role;
 mod server;
+pub mod server_event;
 
 pub use ban::ServerBan;
 pub use channel::{Channel, ChannelType};
@@ -30,3 +31,4 @@ pub use plan::{Plan, PlanLimits, ResourceKind};
 pub use profile::{Profile, UserStatus};
 pub use role::Role;
 pub use server::Server;
+pub use server_event::ServerEvent;

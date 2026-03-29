@@ -5,6 +5,7 @@
 mod ban_repository;
 mod channel_repository;
 pub mod dm_repository;
+mod event_bus;
 mod invite_repository;
 mod key_repository;
 mod member_repository;
@@ -16,6 +17,7 @@ mod server_repository;
 pub use ban_repository::BanRepository;
 pub use channel_repository::ChannelRepository;
 pub use dm_repository::DmRepository;
+pub use event_bus::EventBus;
 pub use invite_repository::InviteRepository;
 pub use key_repository::KeyRepository;
 pub use member_repository::MemberRepository;
