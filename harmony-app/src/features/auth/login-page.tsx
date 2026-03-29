@@ -283,7 +283,11 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  // WHY: In Tauri dev, Turnstile is skipped. The local Supabase test secret
+  // accepts any captcha token, so we pre-fill a dummy value to enable the submit button.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(
+    isTauri() ? 'TAURI_DEV_BYPASS' : null,
+  )
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle')
   const turnstileRef = useRef<TurnstileInstance>(null)
 
@@ -415,9 +419,11 @@ export function LoginPage() {
     setSuccessMessage(null)
   }
 
-  // WHY: Early return for desktop — completely separate UI avoids a deep
-  // ternary chain in the JSX and keeps cognitive complexity under 15.
-  if (isTauri()) {
+  // WHY: Production Tauri builds use the deep link flow (Turnstile doesn't
+  // work in webviews with real keys). Dev Tauri builds fall through to the
+  // normal form — the test captcha secret accepts any token, so we skip the
+  // Turnstile widget and use a dummy token instead.
+  if (isTauri() && import.meta.env.PROD) {
     return (
       <div
         data-test="login-page"
@@ -524,19 +530,24 @@ export function LoginPage() {
                   className="absolute -left-[9999px] h-0 w-0 opacity-0"
                 />
 
-                <div data-test="login-captcha-wrapper">
-                  <Turnstile
-                    ref={turnstileRef}
-                    siteKey={env.VITE_TURNSTILE_SITE_KEY}
-                    onSuccess={setCaptchaToken}
-                    onExpire={() => setCaptchaToken(null)}
-                    onError={() => {
-                      setCaptchaToken(null)
-                      setError(t('captchaError'))
-                    }}
-                    options={{ theme: 'auto', size: 'flexible' }}
-                  />
-                </div>
+                {/* WHY: In Tauri dev, Turnstile can't validate the webview environment.
+                    The local Supabase test secret accepts any token, so we skip the widget
+                    and auto-set a dummy token. Production web builds always show Turnstile. */}
+                {isTauri() ? null : (
+                  <div data-test="login-captcha-wrapper">
+                    <Turnstile
+                      ref={turnstileRef}
+                      siteKey={env.VITE_TURNSTILE_SITE_KEY}
+                      onSuccess={setCaptchaToken}
+                      onExpire={() => setCaptchaToken(null)}
+                      onError={() => {
+                        setCaptchaToken(null)
+                        setError(t('captchaError'))
+                      }}
+                      options={{ theme: 'auto', size: 'flexible' }}
+                    />
+                  </div>
+                )}
 
                 {error !== null && (
                   <p data-test="login-error-message" className="text-sm text-danger">
