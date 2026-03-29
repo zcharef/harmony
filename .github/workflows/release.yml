@@ -14,7 +14,28 @@ on:
       - 'v*'
 
 jobs:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Version Guard — fail fast if tag doesn't match tauri.conf.json
+  # WHY: Prevents releasing with wrong version in binary filenames.
+  # Use `just release X.Y.Z` to keep all version sources in sync.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  validate-version:
+    name: Validate tag matches app version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare tag version with tauri.conf.json
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CONF=$(jq -r '.version' harmony-app/src-tauri/tauri.conf.json)
+          if [ "$TAG" != "$CONF" ]; then
+            echo "::error::Tag version ($TAG) != tauri.conf.json version ($CONF). Use 'just release $TAG' to bump."
+            exit 1
+          fi
+          echo "Version match: $TAG"
+
   release:
+    needs: [validate-version]
     permissions:
       contents: write
     environment: production

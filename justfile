@@ -58,6 +58,36 @@ openapi:
     cd harmony-api && just export-openapi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# RELEASE
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Bump version in all manifests, commit, tag, and push — triggers Release CI
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Guard: must be on main to avoid silent push failures
+    BRANCH=$(git branch --show-current)
+    if [ "$BRANCH" != "main" ]; then
+      echo "ERROR: Must be on main branch (currently on '$BRANCH')" >&2
+      exit 1
+    fi
+    echo "Bumping to v{{version}}..."
+    cd harmony-app && npm pkg set version={{version}}
+    cd ..
+    # WHY .bak + rm: sed -i '' is macOS-only; -i.bak works on both BSD and GNU sed
+    sed -i.bak 's/"version": "[^"]*"/"version": "{{version}}"/' harmony-app/src-tauri/tauri.conf.json && rm harmony-app/src-tauri/tauri.conf.json.bak
+    sed -i.bak 's/^version = "[^"]*"/version = "{{version}}"/' harmony-app/src-tauri/Cargo.toml && rm harmony-app/src-tauri/Cargo.toml.bak
+    # WHY cargo check: cargo generate-lockfile re-resolves ALL transitive deps,
+    # risking untested upgrades. cargo check only updates the changed crate version.
+    cd harmony-app/src-tauri && cargo check --quiet 2>/dev/null
+    cd ../..
+    git add harmony-app/package.json harmony-app/src-tauri/tauri.conf.json harmony-app/src-tauri/Cargo.toml harmony-app/src-tauri/Cargo.lock
+    git commit -m "release: v{{version}}"
+    git tag -a "v{{version}}" -m "Release v{{version}}"
+    git push origin main --follow-tags
+    echo "Tag v{{version}} pushed — Release CI triggered."
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # SETUP
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
