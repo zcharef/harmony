@@ -45,15 +45,35 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 export function useTypingIndicator(channelId: string, currentUserId: string) {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([])
 
+  // WHY: Track expiry timers by userId to prevent timer leaks. Without this,
+  // each typing event spawns a setTimeout that is never cleared — timers
+  // accumulate when the same user keeps typing, and leak on channel change/unmount.
+  const expiryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
   // WHY: Reset typing users when channel changes to avoid stale indicators
   // from the previous channel bleeding into the new one.
   const prevChannelRef = useRef(channelId)
   useEffect(() => {
     if (prevChannelRef.current !== channelId) {
       setTypingUsers([])
+      // WHY: Clear all pending expiry timers — they belong to the old channel.
+      for (const timer of expiryTimersRef.current.values()) {
+        clearTimeout(timer)
+      }
+      expiryTimersRef.current.clear()
       prevChannelRef.current = channelId
     }
   }, [channelId])
+
+  // WHY: Clear all timers on unmount to prevent setState calls on an unmounted component.
+  useEffect(() => {
+    return () => {
+      for (const timer of expiryTimersRef.current.values()) {
+        clearTimeout(timer)
+      }
+      expiryTimersRef.current.clear()
+    }
+  }, [])
 
   // WHY useServerEvent: Matches the pattern used by all other feature hooks
   // (e.g. use-realtime-members.ts:156-158). useServerEvent handles the
@@ -82,9 +102,17 @@ export function useTypingIndicator(channelId: string, currentUserId: string) {
 
       // WHY: 5-second expiry — if we don't receive another typing event
       // from this user within 5s, they likely stopped typing.
-      setTimeout(() => {
+      // Clear any existing timer for this user before starting a new one
+      // to prevent multiple timers accumulating for the same user.
+      const existingTimer = expiryTimersRef.current.get(senderId)
+      if (existingTimer !== undefined) {
+        clearTimeout(existingTimer)
+      }
+      const timer = setTimeout(() => {
         setTypingUsers((prev) => prev.filter((u) => u.userId !== senderId))
+        expiryTimersRef.current.delete(senderId)
       }, 5000)
+      expiryTimersRef.current.set(senderId, timer)
     },
     [channelId, currentUserId],
   )

@@ -209,6 +209,47 @@ describe('useTypingIndicator', () => {
     expect(result.current.typingUsers).toHaveLength(0)
   })
 
+  // -- Timer reset: repeated events extend the expiry window ----------------
+
+  it('resets the 5s expiry timer when the same user sends another typing event', () => {
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
+
+    act(() => {
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: CHANNEL_ID,
+      })
+    })
+
+    // Advance 3s, then send another typing event (timer should restart)
+    act(() => {
+      vi.advanceTimersByTime(3000)
+    })
+    act(() => {
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: CHANNEL_ID,
+      })
+    })
+
+    // 4s after the second event — the old timer (5s from first event) would
+    // have fired at 5s total, but the reset timer keeps the user alive.
+    act(() => {
+      vi.advanceTimersByTime(4000)
+    })
+    expect(result.current.typingUsers).toHaveLength(1)
+
+    // 5s after the second event — now the user expires
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current.typingUsers).toHaveLength(0)
+  })
+
   // -- 3-second throttle: sendTyping ignores rapid calls ---------------------
 
   it('throttles sendTyping to once per 3 seconds', async () => {
