@@ -154,27 +154,20 @@ test.describe('Authentication', () => {
     await expect(errorMessage).not.toHaveText('')
   })
 
-  test('should return 401 on protected endpoint without auth', async ({ page }) => {
+  test('should return 401 on protected endpoint without auth', async ({ request }) => {
     // WHY: Validates that the Rust API's JWT middleware is correctly wired up
     // and rejects unauthenticated requests with 401 (not 500 or 403).
-    const status = await page.evaluate(async () => {
-      const res = await fetch('http://localhost:3000/v1/servers')
-      return res.status
-    })
-
-    expect(status).toBe(401)
+    // Uses Playwright's request fixture (Node-level HTTP) to bypass browser CORS.
+    const response = await request.get('http://localhost:3000/v1/servers')
+    expect(response.status()).toBe(401)
   })
 
-  test('should return 401 on protected endpoint with invalid token', async ({ page }) => {
+  test('should return 401 on protected endpoint with invalid token', async ({ request }) => {
     // WHY: Ensures the API rejects garbage Bearer tokens, not just missing ones.
-    const status = await page.evaluate(async () => {
-      const res = await fetch('http://localhost:3000/v1/servers', {
-        headers: { Authorization: 'Bearer invalid-token-garbage' },
-      })
-      return res.status
+    const response = await request.get('http://localhost:3000/v1/servers', {
+      headers: { Authorization: 'Bearer invalid-token-garbage' },
     })
-
-    expect(status).toBe(401)
+    expect(response.status()).toBe(401)
   })
 
   test('should login successfully with valid credentials', async ({ page }) => {
