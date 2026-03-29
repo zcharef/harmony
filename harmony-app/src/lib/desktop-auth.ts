@@ -14,6 +14,7 @@
  * 4. redeemAuthCode() → exchanges code + code_verifier for tokens via Rust API
  */
 
+import { redeemDesktopAuthCode } from '@/lib/api'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
 import { openExternalUrl } from '@/lib/platform'
@@ -108,9 +109,10 @@ export async function listenForAuthCallback(
       if (!rawUrl.startsWith('harmony://auth/callback')) continue
 
       try {
-        // WHY: Replace custom scheme with https:// so URL parsing of query
-        // params works reliably across all engines.
-        const url = new URL(rawUrl.replace('harmony://', 'https://'))
+        // WHY: Replace custom scheme with https so URL parsing of query
+        // params works reliably across all engines. Only the scheme name
+        // is swapped; the '://' separator is preserved from the original URL.
+        const url = new URL(rawUrl.replace('harmony:', 'https:'))
         const code = url.searchParams.get('code')
         const state = url.searchParams.get('state')
 
@@ -158,35 +160,9 @@ export async function redeemAuthCode(
   authCode: string,
   codeVerifier: string,
 ): Promise<RedeemResult> {
-  const response = await fetch(`${env.VITE_API_URL}/v1/auth/desktop-exchange/redeem`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      auth_code: authCode,
-      code_verifier: codeVerifier,
-    }),
+  const { data } = await redeemDesktopAuthCode({
+    body: { authCode, codeVerifier },
+    throwOnError: true,
   })
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    const detail =
-      typeof body === 'object' && body !== null && 'detail' in body
-        ? (body as { detail: string }).detail
-        : 'Token exchange failed'
-    throw new Error(detail)
-  }
-
-  const data: unknown = await response.json()
-  if (
-    typeof data !== 'object' ||
-    data === null ||
-    !('access_token' in data) ||
-    typeof (data as Record<string, unknown>).access_token !== 'string' ||
-    !('refresh_token' in data) ||
-    typeof (data as Record<string, unknown>).refresh_token !== 'string'
-  ) {
-    throw new Error('Server returned incomplete token response')
-  }
-  const typed = data as { access_token: string; refresh_token: string }
-  return { accessToken: typed.access_token, refreshToken: typed.refresh_token }
+  return { accessToken: data.accessToken, refreshToken: data.refreshToken }
 }

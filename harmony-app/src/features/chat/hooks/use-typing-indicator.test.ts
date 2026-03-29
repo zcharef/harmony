@@ -1,23 +1,10 @@
 import { act, renderHook } from '@testing-library/react'
 import { vi } from 'vitest'
+import { sendTyping as sendTypingApi } from '@/lib/api'
 import { useTypingIndicator } from './use-typing-indicator'
 
-vi.mock('@/lib/supabase', () => ({
-  supabase: {
-    auth: {
-      getSession: vi.fn().mockResolvedValue({
-        data: { session: { access_token: 'test-token' } },
-      }),
-    },
-  },
-}))
-
-vi.mock('@/lib/env', () => ({
-  env: {
-    VITE_API_URL: 'http://localhost:3000',
-    VITE_SUPABASE_URL: 'http://localhost:54321',
-    VITE_SUPABASE_ANON_KEY: 'test-anon-key',
-  },
+vi.mock('@/lib/api', () => ({
+  sendTyping: vi.fn().mockResolvedValue({ data: undefined }),
 }))
 
 vi.mock('@/lib/logger', () => ({
@@ -40,7 +27,6 @@ describe('useTypingIndicator', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
   })
 
   afterEach(() => {
@@ -260,11 +246,10 @@ describe('useTypingIndicator', () => {
       result.current.sendTyping('Me')
     })
 
-    // WHY: getAuthHeaders is async, so we must flush microtasks for fetch to be called.
     await act(async () => {
       await vi.runAllTimersAsync()
     })
-    expect(globalThis.fetch).toHaveBeenCalledOnce()
+    expect(sendTypingApi).toHaveBeenCalledOnce()
 
     // Call within 3 seconds is throttled
     act(() => {
@@ -276,7 +261,7 @@ describe('useTypingIndicator', () => {
     await act(async () => {
       await vi.runAllTimersAsync()
     })
-    expect(globalThis.fetch).toHaveBeenCalledOnce()
+    expect(sendTypingApi).toHaveBeenCalledOnce()
 
     // After 3 seconds, the next call goes through
     act(() => {
@@ -288,12 +273,12 @@ describe('useTypingIndicator', () => {
     await act(async () => {
       await vi.runAllTimersAsync()
     })
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
+    expect(sendTypingApi).toHaveBeenCalledTimes(2)
   })
 
-  // -- sendTyping POSTs to correct endpoint ----------------------------------
+  // -- sendTyping calls SDK with correct params --------------------------------
 
-  it('sends POST to correct typing endpoint', async () => {
+  it('calls SDK sendTyping with correct channel ID', async () => {
     const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
 
     act(() => {
@@ -304,13 +289,10 @@ describe('useTypingIndicator', () => {
       await vi.runAllTimersAsync()
     })
 
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `http://localhost:3000/v1/channels/${CHANNEL_ID}/typing`,
-      expect.objectContaining({
-        method: 'POST',
-        headers: { Authorization: 'Bearer test-token' },
-      }),
-    )
+    expect(sendTypingApi).toHaveBeenCalledWith({
+      path: { id: CHANNEL_ID },
+      throwOnError: true,
+    })
   })
 
   // -- Cleanup: event listener removed on unmount ----------------------------

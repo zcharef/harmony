@@ -2,10 +2,8 @@ import { useCallback, useEffect, useRef } from 'react'
 import { z } from 'zod'
 
 import { useServerEvent } from '@/hooks/use-server-event'
-import type { UserStatus } from '@/lib/api'
-import { env } from '@/lib/env'
+import { updatePresence, type UserStatus } from '@/lib/api'
 import { logger } from '@/lib/logger'
-import { supabase } from '@/lib/supabase'
 import { usePresenceStore } from '../stores/presence-store'
 
 const IDLE_TIMEOUT_MS = 300_000
@@ -19,40 +17,19 @@ const presenceEventSchema = z.object({
 })
 
 /**
- * WHY: Centralize auth-header retrieval for fire-and-forget fetches that
- * bypass the generated API client (endpoints not yet in the OpenAPI spec).
- * Matches the pattern in api-client.ts:21-23.
- */
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession()
-  const token = data.session?.access_token
-  if (token === undefined) return {}
-  return {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  }
-}
-
-/**
  * WHY fire-and-forget: Status changes are background operations. The server
  * is authoritative — if the POST fails, the next heartbeat or SSE reconnect
  * will correct state. No user-facing feedback needed (ADR-028).
  */
 function postPresenceStatus(status: UserStatus): void {
-  getAuthHeaders()
-    .then((headers) =>
-      fetch(`${env.VITE_API_URL}/v1/presence`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ status }),
-      }),
-    )
-    .catch((error: unknown) => {
+  updatePresence({ body: { status }, throwOnError: true }).catch(
+    (error: unknown) => {
       logger.warn('presence_post_failed', {
         status,
         error: error instanceof Error ? error.message : String(error),
       })
-    })
+    },
+  )
 }
 
 /**

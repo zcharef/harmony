@@ -10,7 +10,7 @@
 import { Button, Card, CardBody, CardHeader, Chip, Spinner } from '@heroui/react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { env } from '@/lib/env'
+import { createDesktopAuthCode } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from './stores/auth-store'
@@ -37,36 +37,18 @@ export function DesktopAuthRedirect() {
         throw new Error('Missing session or PKCE params')
       }
 
-      const response = await fetch(`${env.VITE_API_URL}/v1/auth/desktop-exchange/create`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
+      const { data } = await createDesktopAuthCode({
+        body: {
+          codeChallenge,
+          refreshToken: session.refresh_token,
         },
-        body: JSON.stringify({
-          code_challenge: codeChallenge,
-          refresh_token: session.refresh_token,
-        }),
+        throwOnError: true,
       })
 
-      if (!response.ok) {
-        throw new Error('Failed to create auth code')
-      }
-
-      const body: unknown = await response.json()
-      if (
-        typeof body !== 'object' ||
-        body === null ||
-        !('auth_code' in body) ||
-        typeof (body as Record<string, unknown>).auth_code !== 'string'
-      ) {
-        throw new Error('Server returned incomplete exchange response')
-      }
-      const data = body as { auth_code: string }
       // WHY: Set status to 'done' BEFORE the redirect so the user sees
       // "You can close this tab" instead of a spinner if the page remains visible.
       setStatus('done')
-      window.location.href = `harmony://auth/callback?code=${encodeURIComponent(data.auth_code)}&state=${encodeURIComponent(state)}`
+      window.location.href = `harmony://auth/callback?code=${encodeURIComponent(data.authCode)}&state=${encodeURIComponent(state)}`
     } catch (err: unknown) {
       logger.error('desktop_auth_redirect_failed', {
         error: err instanceof Error ? err.message : 'Unknown error',

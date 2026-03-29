@@ -2,9 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { z } from 'zod'
 
 import { useServerEvent } from '@/hooks/use-server-event'
-import { env } from '@/lib/env'
+import { sendTyping as sendTypingApi } from '@/lib/api'
 import { logger } from '@/lib/logger'
-import { supabase } from '@/lib/supabase'
 
 // WHY Zod: SSE event payloads are external data (CLAUDE.md §1.2).
 // WHY senderId: Matches the Rust ServerEvent::TypingStarted shape
@@ -22,21 +21,9 @@ export interface TypingUser {
 }
 
 /**
- * WHY: Centralize auth-header retrieval for fire-and-forget fetches that
- * bypass the generated API client (endpoints not yet in the OpenAPI spec).
- * Matches the pattern in api-client.ts:21-23.
- */
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession()
-  const token = data.session?.access_token
-  if (token === undefined) return {}
-  return { Authorization: `Bearer ${token}` }
-}
-
-/**
  * Tracks typing indicators for a channel.
  *
- * Sending: POST to /v1/channels/{channelId}/typing (fire-and-forget, 3s throttle).
+ * Sending: POST to /v1/channels/{channelId}/typing via generated SDK (fire-and-forget, 3s throttle).
  * Receiving: Listens for `typing.started` SSE events via useServerEvent.
  *
  * WHY fire-and-forget POST: Typing is ephemeral and cosmetic. A failed POST
@@ -134,19 +121,14 @@ export function useTypingIndicator(channelId: string, currentUserId: string) {
 
       // WHY fire-and-forget: Background operation — no user-facing feedback needed
       // on failure (ADR-028). The POST just signals "user is typing" to the server.
-      getAuthHeaders()
-        .then((headers) =>
-          fetch(`${env.VITE_API_URL}/v1/channels/${channelId}/typing`, {
-            method: 'POST',
-            headers,
-          }),
-        )
-        .catch((error: unknown) => {
+      sendTypingApi({ path: { id: channelId }, throwOnError: true }).catch(
+        (error: unknown) => {
           logger.warn('typing_post_failed', {
             channelId,
             error: error instanceof Error ? error.message : String(error),
           })
-        })
+        },
+      )
     },
     [channelId],
   )

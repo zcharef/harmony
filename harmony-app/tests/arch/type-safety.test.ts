@@ -92,10 +92,7 @@ describe('Type Safety', () => {
 
   describe('no_raw_fetch_in_features', () => {
     it('should not use raw fetch() calls in features', () => {
-      // WHY allowlist: auth-provider syncs the Supabase session with the Rust API
-      // before the generated SDK is configured. This raw fetch is the bootstrap call.
-      const ALLOWLIST = [join(FEATURES_DIR, 'auth/auth-provider.tsx')]
-      const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx']).filter((f) => !ALLOWLIST.includes(f))
+      const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx'])
 
       const violations = scanFilesForViolations(files, (line, i, filePath) => {
         if (isCommentLine(line)) return null
@@ -117,6 +114,8 @@ describe('Type Safety', () => {
         join(SRC_DIR, 'lib/api-client.ts'),
         // WHY: About page has static GitHub project links (not API URLs that vary by env).
         join(SRC_DIR, 'components/layout/about-page.tsx'),
+        // WHY: SSoT for all static external URLs (GitHub releases, web app link, etc.).
+        join(SRC_DIR, 'lib/external-links.ts'),
       ]
       const files = getAllFiles(SRC_DIR, ['.ts', '.tsx']).filter((f) => {
         if (ALLOWLIST.includes(f)) return false

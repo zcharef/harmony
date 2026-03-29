@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useEffect, useRef } from 'react'
-import { env } from '@/lib/env'
+import { syncProfile as syncProfileApi } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
 import { supabase } from '@/lib/supabase'
@@ -11,12 +11,8 @@ import { useAuthStore } from './stores/auth-store'
  * (display_name, avatar_url, etc.) from the Supabase auth metadata.
  *
  * Returns the error detail string on failure, or null on success.
- *
- * TODO: Replace this raw fetch with the generated API client once the
- * POST /v1/auth/me endpoint is added to the OpenAPI spec and `just gen-api` is run.
  */
 async function syncProfile(
-  accessToken: string,
   isSyncing: React.RefObject<boolean>,
 ): Promise<string | null> {
   // WHY: Guard against duplicate sync calls from rapid auth events
@@ -26,48 +22,24 @@ async function syncProfile(
   isSyncing.current = true
 
   try {
-    const response = await fetch(`${env.VITE_API_URL}/v1/auth/me`, {
-      method: 'POST',
+    await syncProfileApi({
       // WHY: `credentials: 'include'` is required for the browser to store the
       // `Set-Cookie` header from a cross-origin response. Without it, the session
       // cookie is returned by the server but silently discarded, so EventSource
       // (which cannot send Authorization headers) can never authenticate (ADR-SSE-005).
       credentials: 'include',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      throwOnError: true,
     })
-
-    if (!response.ok) {
-      // WHY: Parse RFC 9457 ProblemDetails body for actionable error detail.
-      let detail = 'Profile sync failed'
-      try {
-        const body: unknown = await response.json()
-        if (
-          typeof body === 'object' &&
-          body !== null &&
-          'detail' in body &&
-          typeof body.detail === 'string'
-        ) {
-          detail = body.detail
-        }
-      } catch {
-        // WHY: Response may not be JSON (e.g., 502 from proxy). Use generic message.
-      }
-
-      logger.error('profile_sync_failed', {
-        status: response.status,
-        detail,
-      })
-
-      return detail
-    }
-
     return null
   } catch (error: unknown) {
-    // WHY: Network failures (DNS, CORS, offline) throw instead of returning a response.
-    const message = error instanceof Error ? error.message : 'Network error'
-    logger.error('profile_sync_network_error', { error: message })
+    // WHY: SDK throws ProblemDetails (RFC 9457) for 4xx/5xx, or Error for network failures.
+    let message = 'Profile sync failed'
+    if (error instanceof Error) {
+      message = error.message
+    } else if (typeof error === 'object' && error !== null && 'detail' in error && typeof error.detail === 'string') {
+      message = error.detail
+    }
+    logger.error('profile_sync_failed', { error: message })
     return message
   } finally {
     isSyncing.current = false
@@ -136,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false)
 
         if (session !== null) {
-          syncProfile(session.access_token, isSyncing).then((error) => {
+          syncProfile(isSyncing).then((error) => {
             if (error !== null) {
               setProfileSyncError(error)
             }
@@ -158,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfileSyncError(null)
 
       if (session !== null) {
-        syncProfile(session.access_token, isSyncing).then((error) => {
+        syncProfile(isSyncing).then((error) => {
           if (error !== null) {
             setProfileSyncError(error)
           }
