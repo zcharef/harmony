@@ -78,15 +78,15 @@ pub async fn create_desktop_auth_code(
 
     let expires_at = chrono::Utc::now() + chrono::Duration::seconds(CODE_TTL_SECONDS);
 
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO desktop_auth_codes (auth_code, code_challenge, access_token, refresh_token, expires_at) \
          VALUES ($1, $2, $3, $4, $5)",
+        &auth_code,
+        &req.code_challenge,
+        access_token,
+        &req.refresh_token,
+        expires_at,
     )
-    .bind(&auth_code)
-    .bind(&req.code_challenge)
-    .bind(access_token)
-    .bind(&req.refresh_token)
-    .bind(expires_at)
     .execute(&state.pool)
     .await
     .map_err(|e| {
@@ -96,7 +96,7 @@ pub async fn create_desktop_auth_code(
 
     Ok((
         StatusCode::OK,
-        Json(CreateDesktopAuthResponse { auth_code }),
+        Json(CreateDesktopAuthResponse::new(auth_code)),
     ))
 }
 
@@ -143,12 +143,13 @@ pub async fn redeem_desktop_auth_code(
 
     // WHY: Single DELETE + RETURNING query guarantees the code is single-use.
     // If two requests race, only one will get the row back.
-    let row: Option<DesktopAuthCodeRow> = sqlx::query_as(
+    let row: Option<DesktopAuthCodeRow> = sqlx::query_as!(
+        DesktopAuthCodeRow,
         "DELETE FROM desktop_auth_codes \
          WHERE auth_code = $1 AND expires_at > now() \
          RETURNING code_challenge, access_token, refresh_token",
+        &req.auth_code,
     )
-    .bind(&req.auth_code)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| {
@@ -173,10 +174,7 @@ pub async fn redeem_desktop_auth_code(
 
     Ok((
         StatusCode::OK,
-        Json(RedeemDesktopAuthResponse {
-            access_token: row.access_token,
-            refresh_token: row.refresh_token,
-        }),
+        Json(RedeemDesktopAuthResponse::new(row.access_token, row.refresh_token)),
     ))
 }
 
