@@ -96,7 +96,7 @@ pub async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
         Ok(()) => "connected".to_string(),
         Err(e) => {
             tracing::warn!(error = %e, "Database ping failed");
-            format!("disconnected: {}", e)
+            "disconnected".to_string()
         }
     };
 
