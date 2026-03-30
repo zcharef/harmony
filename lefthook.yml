@@ -28,6 +28,14 @@ pre-commit:
       run: $HOME/.cargo/bin/cargo clippy --all-targets -- -D warnings
       fail_text: "Fix clippy warnings before committing"
 
+    # WHY: Catch stale openapi.json early when Rust source changes.
+    # Only triggers when .rs files are staged (skipped for frontend-only commits).
+    openapi-freshness:
+      root: harmony-api/
+      glob: "src/**/*.rs"
+      run: $HOME/.cargo/bin/cargo run --bin export_openapi | diff openapi.json - >/dev/null
+      fail_text: "openapi.json is stale. Run 'just export-openapi' and stage the result."
+
 # ============================================================================
 # COMMIT-MSG: Conventional Commits enforcement
 # ============================================================================
@@ -44,10 +52,20 @@ pre-push:
   parallel: true
   commands:
     # --- Tauri App (harmony-app) ---
+    # WHY: Pre-commit runs biome on staged files only. If pre-commit was
+    # bypassed (LEFTHOOK=0) or complexity grew in already-committed code,
+    # this full-repo check catches it before CI does (~50ms).
+    biome-lint:
+      root: harmony-app/
+      run: pnpm biome check .
+      fail_text: "Biome lint failed. Run 'pnpm biome check --write .' to auto-fix formatting, then fix remaining lint errors."
+
+    # WHY: Regenerate SDK before typecheck to catch spec↔client drift.
+    # SDK files are gitignored, so regeneration has no git side effects.
     typecheck:
       root: harmony-app/
-      run: pnpm tsc --noEmit
-      fail_text: "TypeScript errors found. Fix before pushing."
+      run: pnpm openapi-ts && pnpm tsc --noEmit
+      fail_text: "TypeScript errors found. Run 'just gen-api' and fix type errors before pushing."
 
     boundaries:
       root: harmony-app/
@@ -90,6 +108,15 @@ pre-push:
       root: harmony-api/
       run: $HOME/.cargo/bin/cargo test
       fail_text: "Rust tests failed. Run 'just wall' for details."
+
+    # WHY: Developers compile against a real Supabase DB, so sqlx::query!
+    # macros always resolve. CI uses SQLX_OFFLINE=true with .sqlx/ cache.
+    # New/changed queries without 'cargo sqlx prepare' compile locally but
+    # break CI. This replicates CI's offline build to catch stale cache.
+    sqlx-cache:
+      root: harmony-api/
+      run: SQLX_OFFLINE=true $HOME/.cargo/bin/cargo check
+      fail_text: "SQLX offline cache is stale. Run 'cargo sqlx prepare' and commit .sqlx/ files."
 
     # --- Monorepo-wide ---
     lint-migrations:
