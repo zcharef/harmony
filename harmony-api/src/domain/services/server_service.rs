@@ -80,12 +80,27 @@ impl ServerService {
             .await
     }
 
-    /// List all servers the user is a member of.
+    /// List all non-DM servers the user is a member of (for the server list UI).
     ///
     /// # Errors
     /// Returns a repository error on failure.
     pub async fn list_for_user(&self, user_id: &UserId) -> Result<Vec<Server>, DomainError> {
         self.repo.list_for_user(user_id).await
+    }
+
+    /// List ALL server IDs the user is a member of, including DMs.
+    ///
+    /// WHY: The SSE handler needs the full membership set to filter events.
+    /// `list_for_user` excludes DMs (correct for the sidebar), but the SSE
+    /// event stream must include DM server events.
+    ///
+    /// # Errors
+    /// Returns a repository error on failure.
+    pub async fn list_all_memberships(
+        &self,
+        user_id: &UserId,
+    ) -> Result<Vec<ServerId>, DomainError> {
+        self.repo.list_all_memberships(user_id).await
     }
 
     /// Get a server by ID.

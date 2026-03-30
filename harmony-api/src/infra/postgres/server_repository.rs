@@ -167,6 +167,24 @@ impl ServerRepository for PgServerRepository {
         Ok(servers)
     }
 
+    async fn list_all_memberships(&self, user_id: &UserId) -> Result<Vec<ServerId>, DomainError> {
+        let uid = user_id.0;
+
+        let rows = sqlx::query_scalar!(
+            r#"
+            SELECT sm.server_id
+            FROM server_members sm
+            WHERE sm.user_id = $1
+            "#,
+            uid,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(rows.into_iter().map(ServerId).collect())
+    }
+
     async fn get_by_id(&self, server_id: &ServerId) -> Result<Option<Server>, DomainError> {
         let sid = server_id.0;
 

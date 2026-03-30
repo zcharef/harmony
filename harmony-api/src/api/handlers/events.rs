@@ -58,8 +58,14 @@ pub async fn sse_events(
     // WHY: Snapshot at connect time. If the user joins/leaves a server,
     // they must reconnect (EventSource auto-reconnects). This avoids
     // per-event DB lookups.
-    let servers = state.server_service().list_for_user(&user_id).await?;
-    let server_ids: HashSet<ServerId> = servers.into_iter().map(|s| s.id).collect();
+    // WHY list_all_memberships (not list_for_user): list_for_user excludes DMs
+    // (correct for the sidebar API), but the SSE stream must include DM events.
+    let server_ids: HashSet<ServerId> = state
+        .server_service()
+        .list_all_memberships(&user_id)
+        .await?
+        .into_iter()
+        .collect();
 
     // ── Presence: mark user online ──────────────────────────────
     let server_id_vec: Vec<ServerId> = server_ids.iter().cloned().collect();

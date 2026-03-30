@@ -17,8 +17,15 @@ pub trait ServerRepository: Send + Sync + std::fmt::Debug {
         owner_id: UserId,
     ) -> Result<Server, DomainError>;
 
-    /// List all servers the user is a member of.
+    /// List all non-DM servers the user is a member of (for the server list UI).
     async fn list_for_user(&self, user_id: &UserId) -> Result<Vec<Server>, DomainError>;
+
+    /// List ALL servers the user is a member of, including DMs.
+    ///
+    /// WHY: The SSE handler needs the full membership set to filter events.
+    /// `list_for_user` excludes DMs (correct for the sidebar), but the SSE
+    /// event stream must include DM events.
+    async fn list_all_memberships(&self, user_id: &UserId) -> Result<Vec<ServerId>, DomainError>;
 
     /// Get a server by ID. Returns `None` if not found.
     async fn get_by_id(&self, server_id: &ServerId) -> Result<Option<Server>, DomainError>;
