@@ -13,13 +13,13 @@ pub mod profiles;
 pub mod servers;
 
 pub use bans::{BanListQuery, BanListResponse, BanResponse, BanUserRequest};
-pub use desktop_auth::{
-    CreateDesktopAuthRequest, CreateDesktopAuthResponse, RedeemDesktopAuthRequest,
-    RedeemDesktopAuthResponse,
-};
 pub use channels::{
     ChannelListResponse, ChannelResponse, CreateChannelRequest, CreateMegolmSessionRequest,
     MegolmSessionResponse, UpdateChannelRequest,
+};
+pub use desktop_auth::{
+    CreateDesktopAuthRequest, CreateDesktopAuthResponse, RedeemDesktopAuthRequest,
+    RedeemDesktopAuthResponse,
 };
 pub use dms::{
     CreateDmRequest, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,

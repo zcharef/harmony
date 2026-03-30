@@ -146,7 +146,7 @@ pub fn extract_session_from_cookie(
 /// WHY: `SameSite=None` in production allows the Tauri desktop webview
 /// (`tauri://localhost`) to send the cookie to the API — it is cross-site
 /// relative to `api.joinharmony.app`, so `SameSite=Lax` would silently
-/// drop the cookie on every EventSource request. `SameSite=None` requires
+/// drop the cookie on every `EventSource` request. `SameSite=None` requires
 /// `Secure`, which is already enforced in production (HTTPS). CSRF risk is
 /// mitigated by the CORS allowlist (`allow_credentials` + explicit origin
 /// list) and the HMAC-signed token itself.

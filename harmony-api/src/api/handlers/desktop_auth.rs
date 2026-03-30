@@ -174,7 +174,10 @@ pub async fn redeem_desktop_auth_code(
 
     Ok((
         StatusCode::OK,
-        Json(RedeemDesktopAuthResponse::new(row.access_token, row.refresh_token)),
+        Json(RedeemDesktopAuthResponse::new(
+            row.access_token,
+            row.refresh_token,
+        )),
     ))
 }
 

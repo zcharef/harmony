@@ -116,10 +116,10 @@ pub async fn sse_events(
                 return None; // Not for this user
             }
             // IS for this user — bypass server_ids check
-        } else if let Some(event_server_id) = event.server_id() {
-            if !server_ids.contains(event_server_id) {
-                return None; // User not in this server
-            }
+        } else if let Some(event_server_id) = event.server_id()
+            && !server_ids.contains(event_server_id)
+        {
+            return None; // User not in this server
         }
 
         // ── Filter: user-scoped events without server_id ──────────

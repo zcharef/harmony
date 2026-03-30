@@ -112,7 +112,11 @@ pub async fn sync_profile(
             .map_err(|_| ApiError::internal("Failed to build session cookie"))?,
     );
 
-    Ok((StatusCode::OK, headers, Json(ProfileResponse::from(profile))))
+    Ok((
+        StatusCode::OK,
+        headers,
+        Json(ProfileResponse::from(profile)),
+    ))
 }
 
 /// Get the authenticated user's own profile.

@@ -36,7 +36,11 @@ use super::state::AppState;
 /// Response ← SecurityHeaders(X-Content-Type-Options, X-Frame-Options, HSTS, CSP, Referrer-Policy, Permissions-Policy) ← Compression ← RateLimit ← CORS ← Handler
 /// ```
 #[allow(deprecated)] // TimeoutLayer::new is deprecated; upgrade when tower-http 0.7 releases
-pub fn build_router(state: AppState, trusted_proxies: Vec<IpNet>, rate_limit_per_minute: u32) -> Router {
+pub fn build_router(
+    state: AppState,
+    trusted_proxies: Vec<IpNet>,
+    rate_limit_per_minute: u32,
+) -> Router {
     let is_production = state.is_production;
     let request_id_header = header::HeaderName::from_static("x-request-id");
 
