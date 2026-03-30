@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO channel_notification_settings (channel_id, user_id, level, updated_at)\n            VALUES ($1, $2, $3, now())\n            ON CONFLICT (channel_id, user_id) DO UPDATE SET level = $3, updated_at = now()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4e69acc4eb146d6edf1a086c1e552470a4ba87bae259635fe15ef5425756322e"
+}

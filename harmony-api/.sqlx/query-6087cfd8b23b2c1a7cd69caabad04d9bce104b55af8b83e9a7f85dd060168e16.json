@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                channel_id,\n                author_id,\n                content,\n                edited_at,\n                deleted_at,\n                deleted_by,\n                encrypted,\n                sender_device_id,\n                message_type as \"message_type!: String\",\n                system_event_key,\n                created_at\n            FROM messages\n            WHERE id = $1 AND deleted_at IS NULL\n            ",
+  "query": "\n            SELECT\n                id,\n                channel_id,\n                author_id,\n                content,\n                edited_at,\n                deleted_at,\n                deleted_by,\n                encrypted,\n                sender_device_id,\n                message_type as \"message_type!: String\",\n                system_event_key,\n                parent_message_id,\n                created_at\n            FROM messages\n            WHERE id = $1 AND deleted_at IS NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -70,6 +70,11 @@
       },
       {
         "ordinal": 11,
+        "name": "parent_message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -91,8 +96,9 @@
       true,
       false,
       true,
+      true,
       false
     ]
   },
-  "hash": "d600570154f4379a5f4c9459eee8fdd71d553af6fb4bd0a66c6c5c1f638110ad"
+  "hash": "6087cfd8b23b2c1a7cd69caabad04d9bce104b55af8b83e9a7f85dd060168e16"
 }
