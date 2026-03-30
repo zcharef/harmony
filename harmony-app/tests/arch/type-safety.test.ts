@@ -229,6 +229,60 @@ describe('Type Safety', () => {
       ).toEqual([])
     })
   })
+
+  describe('throw_on_error_enforcement', () => {
+    it('should have throwOnError: true on every SDK call in queryFn/mutationFn', () => {
+      // WHY: Without throwOnError: true, hey-api client-fetch returns { error }
+      // on non-2xx instead of throwing. TanStack Query never sees the error
+      // (isError stays false, catch blocks never trigger).
+      //
+      // Only checks named function imports from @/lib/api. Hooks using the raw
+      // client (client.get/post/delete from client.gen) use if (error) throw error
+      // instead, which is an acceptable alternative.
+      const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx']).filter((f) => {
+        if (f.includes('.test.') || f.includes('.spec.')) return false
+        const content = readFileSync(f, 'utf-8')
+        return /(?:queryFn|mutationFn)/.test(content)
+      })
+
+      const violations: string[] = []
+
+      for (const filePath of files) {
+        const content = readFileSync(filePath, 'utf-8')
+        const sdkFunctions = extractSdkImports(content)
+        if (sdkFunctions.length === 0) continue
+        violations.push(...findMissingThrowOnError(filePath, content, sdkFunctions))
+      }
+
+      expect(
+        violations,
+        `SDK calls in queryFn/mutationFn must include throwOnError: true.\nViolations:\n${violations.join('\n')}`,
+      ).toEqual([])
+    })
+  })
+
+  describe('no_manual_api_type_definitions', () => {
+    it('should not define types named *Response/*Request/*Dto in features', () => {
+      // WHY: API types must come from the generated SDK (@/lib/api), never be
+      // defined manually. Manual definitions drift silently from the OpenAPI spec.
+      const files = getAllFiles(FEATURES_DIR, ['.ts', '.tsx']).filter(
+        (f) => !f.includes('.test.') && !f.includes('.spec.'),
+      )
+
+      const violations = scanFilesForViolations(files, (line, i, filePath) => {
+        if (isCommentLine(line)) return null
+        if (/^\s*(?:export\s+)?(?:interface|type)\s+\w+(?:Response|Request|Dto)\b/.test(line)) {
+          return `${relative(SRC_DIR, filePath)}:${i + 1}`
+        }
+        return null
+      })
+
+      expect(
+        violations,
+        `Manual API type definitions found in features. Import from @/lib/api instead.\nViolations:\n${violations.join('\n')}`,
+      ).toEqual([])
+    })
+  })
 })
 
 function matchAnyPattern(
@@ -273,4 +327,69 @@ function matchHardcodedColor(line: string, lineIndex: number, filePath: string):
   if (line.includes('// heroui-color-override')) return null
   if (HARDCODED_COLOR_PATTERN.test(line)) return `${relative(SRC_DIR, filePath)}:${lineIndex + 1}`
   return null
+}
+
+/** WHY: Extracts non-type named imports from `import { ... } from '@/lib/api'` statements. */
+function extractSdkImports(content: string): string[] {
+  const importPattern = /import\s+\{([^}]+)\}\s+from\s+['"]@\/lib\/api['"]/g
+  const sdkFunctions: string[] = []
+  for (const importMatch of content.matchAll(importPattern)) {
+    const tokens = importMatch[1].split(',').map((s) => s.trim())
+    for (const token of tokens) {
+      if (token.startsWith('type ')) continue
+      const parts = token.split(/\s+as\s+/)
+      sdkFunctions.push((parts.length > 1 ? parts[1] : parts[0]).trim())
+    }
+  }
+  return sdkFunctions
+}
+
+/** WHY: Two-pass scan — inline calls must have throwOnError, indirect calls are always flagged. */
+function findMissingThrowOnError(
+  filePath: string,
+  content: string,
+  sdkFunctions: string[],
+): string[] {
+  const violations: string[] = []
+  for (const fnName of sdkFunctions) {
+    collectInlineCallViolations(filePath, content, fnName, violations)
+    collectIndirectCallViolations(filePath, content, fnName, violations)
+  }
+  return violations
+}
+
+/** WHY: Pass 1 — inline `fnName({...})` must contain throwOnError: true in a 500-char window. */
+function collectInlineCallViolations(
+  filePath: string,
+  content: string,
+  fnName: string,
+  violations: string[],
+): void {
+  const pattern = new RegExp(`\\b${fnName}\\(\\{`, 'g')
+  for (const callMatch of content.matchAll(pattern)) {
+    const matchIndex = callMatch.index ?? 0
+    const searchWindow = content.slice(matchIndex, matchIndex + 500)
+    if (searchWindow.includes('throwOnError: true')) continue
+    const lineNum = content.slice(0, matchIndex).split('\n').length
+    violations.push(
+      `${relative(SRC_DIR, filePath)}:${lineNum} — ${fnName}() missing throwOnError: true`,
+    )
+  }
+}
+
+/** WHY: Pass 2 — `fnName(variable)` bypasses inline check, always flagged as unverifiable. */
+function collectIndirectCallViolations(
+  filePath: string,
+  content: string,
+  fnName: string,
+  violations: string[],
+): void {
+  const pattern = new RegExp(`\\b${fnName}\\((?!\\{)\\w`, 'g')
+  for (const indirectMatch of content.matchAll(pattern)) {
+    const matchIndex = indirectMatch.index ?? 0
+    const lineNum = content.slice(0, matchIndex).split('\n').length
+    violations.push(
+      `${relative(SRC_DIR, filePath)}:${lineNum} — ${fnName}() called with variable args (cannot verify throwOnError)`,
+    )
+  }
 }
