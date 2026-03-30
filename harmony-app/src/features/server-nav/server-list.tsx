@@ -212,12 +212,12 @@ export function ServerList({
       <Divider className="mx-auto my-2 w-8 bg-divider" />
 
       {/* About button */}
-      <Tooltip content={t('common:about', { defaultValue: 'About' })} placement="right" offset={8}>
+      <Tooltip content={t('common:about')} placement="right" offset={8}>
         <button
           type="button"
           data-test="about-button"
           onClick={() => useAboutUiStore.getState().openAboutPage()}
-          aria-label={t('common:about', { defaultValue: 'About' })}
+          aria-label={t('common:about')}
           className="mb-2 flex items-center justify-center"
         >
           <Avatar

@@ -33,5 +33,7 @@
   "banAction": "Ban",
   "banFailed": "Failed to ban member. Please try again.",
 
-  "sendMessage": "Message {{username}}"
+  "sendMessage": "Message {{username}}",
+  "couldNotOpenDm": "Could not open DM",
+  "removedFromServer": "You have been removed from this server"
 }

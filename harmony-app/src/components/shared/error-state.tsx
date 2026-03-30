@@ -8,6 +8,7 @@
  */
 
 import { Button } from '@heroui/react'
+import { useTranslation } from 'react-i18next'
 
 interface ErrorStateProps {
   icon: React.ReactNode
@@ -22,9 +23,11 @@ export function ErrorState({
   icon,
   message,
   onRetry,
-  retryLabel = 'Try again',
+  retryLabel,
   isRetrying = false,
 }: ErrorStateProps) {
+  const { t } = useTranslation('common')
+  const label = retryLabel ?? t('tryAgain')
   return (
     <div className="flex flex-col items-center gap-3 px-4 py-8">
       <div className="text-default-300">{icon}</div>
@@ -37,7 +40,7 @@ export function ErrorState({
           isLoading={isRetrying}
           isDisabled={isRetrying}
         >
-          {retryLabel}
+          {label}
         </Button>
       )}
     </div>

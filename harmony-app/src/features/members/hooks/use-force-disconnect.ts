@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import { useCallback } from 'react'
 import { z } from 'zod'
 import { useServerEvent } from '@/hooks/use-server-event'
@@ -77,7 +78,7 @@ export function useForceDisconnect(
 
       // WHY toast: This is an explicit system action affecting the user — they
       // need to know they were removed (ADR-045: user-facing actions get feedback).
-      toast.error(reason.length > 0 ? reason : 'You have been removed from this server')
+      toast.error(reason.length > 0 ? reason : i18n.t('members:removedFromServer'))
     },
     [currentUserId, selectedServerId, queryClient, setSelectedServerId, setSelectedChannelId],
   )

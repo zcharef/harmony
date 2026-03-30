@@ -23,5 +23,6 @@
   "statusOnline": "Online",
   "statusIdle": "Idle",
   "statusDnd": "Do Not Disturb",
-  "statusOffline": "Offline"
+  "statusOffline": "Offline",
+  "you": "You"
 }

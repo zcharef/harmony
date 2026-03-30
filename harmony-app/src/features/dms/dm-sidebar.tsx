@@ -123,7 +123,7 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
   const user = useAuthStore((s) => s.user)
   const { data: profile } = useCurrentProfile()
   const status = useUserStatus(user?.id ?? '')
-  const username = profile?.username ?? 'You'
+  const username = profile?.username ?? t('you')
 
   const statusLabels = {
     online: t('statusOnline'),

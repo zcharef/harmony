@@ -1,3 +1,4 @@
+import i18n from 'i18next'
 import type { ReactNode } from 'react'
 import { useEffect, useRef } from 'react'
 import { syncProfile as syncProfileApi } from '@/lib/api'
@@ -73,7 +74,7 @@ async function handleDeepLinkCallback({ code, state }: { code: string; state: st
     })
     useAuthStore
       .getState()
-      .setDesktopAuthError('Authentication failed: security validation error. Please try again.')
+      .setDesktopAuthError(i18n.t('auth:securityValidationError'))
     return
   }
 

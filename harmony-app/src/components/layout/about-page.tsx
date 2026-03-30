@@ -158,7 +158,7 @@ export function AboutPage() {
               <img
                 height={36}
                 src="https://storage.ko-fi.com/cdn/kofi2.png?v=6"
-                alt="Buy Me a Coffee at ko-fi.com"
+                alt={t('kofiAlt')}
                 className="h-9 border-0"
               />
             </button>
