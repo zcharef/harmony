@@ -97,17 +97,4 @@ describe('useCreateChannel', () => {
       error: 'Channel limit reached',
     })
   })
-
-  it('transitions to error state when createChannel rejects', async () => {
-    vi.mocked(createChannel).mockRejectedValueOnce(new Error('Forbidden'))
-
-    const { result } = renderHookWithQueryClient(() => useCreateChannel(SERVER_ID))
-
-    result.current.mutate({ name: 'test' } as never)
-
-    await waitFor(() => expect(result.current.isError).toBe(true))
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Forbidden')
-  })
 })

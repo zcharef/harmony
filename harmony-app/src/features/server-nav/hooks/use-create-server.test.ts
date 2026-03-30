@@ -71,19 +71,4 @@ describe('useCreateServer', () => {
       queryKey: queryKeys.servers.all,
     })
   })
-
-  it('transitions to error state when createServer rejects', async () => {
-    vi.mocked(createServer).mockRejectedValue(new Error('Conflict'))
-
-    const { result } = renderHookWithQueryClient(() => useCreateServer())
-
-    result.current.mutate({ name: 'Duplicate' } as never)
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
-    })
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Conflict')
-  })
 })

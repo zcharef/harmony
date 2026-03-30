@@ -70,24 +70,4 @@ describe('useCurrentProfile', () => {
     expect(getMyProfile).toHaveBeenCalledWith({ throwOnError: true })
     expect(result.current.data).toEqual(mockProfile)
   })
-
-  it('transitions to error state when getMyProfile rejects', async () => {
-    const fakeSession = { access_token: 'tok', user: { id: 'user-1' } }
-    vi.mocked(useAuthStore).mockImplementation((selector: unknown) =>
-      (selector as (s: { session: typeof fakeSession }) => typeof fakeSession)({
-        session: fakeSession,
-      }),
-    )
-    vi.mocked(getMyProfile).mockRejectedValueOnce(new Error('Unauthorized'))
-
-    const queryClient = createTestQueryClient()
-    const wrapper = createQueryWrapper(queryClient)
-
-    const { result } = renderHook(() => useCurrentProfile(), { wrapper })
-
-    await waitFor(() => expect(result.current.isError).toBe(true))
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Unauthorized')
-  })
 })

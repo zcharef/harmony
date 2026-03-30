@@ -17,7 +17,21 @@
  */
 import crypto from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { syncProfile } from './fixtures/test-data-factory'
+import {
+  assignRole,
+  createChannel,
+  createDm,
+  createInvite,
+  createServer,
+  getMessages,
+  getServerChannels,
+  joinServer,
+  sendEncryptedMessage,
+  sendMessage,
+  syncProfile,
+  updateChannel,
+  updateChannelRaw,
+} from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
 
 // WHY: Configurable for CI (deployed API) while defaulting to local dev.
@@ -296,5 +310,117 @@ test.describe('Key Exchange API', () => {
     const afterRes = await listDevices(user.token, user.id)
     const afterItems = (afterRes.body.items as Array<Record<string, unknown>>) ?? []
     expect(afterItems.some((d) => d.deviceId === deviceId)).toBe(false)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Channel Encryption API — pure HTTP assertions (no browser/page fixture)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// WHY separate describe: These tests verify encryption enforcement at the API level
+// (one-way toggle, owner-only, persistence, message flags). They were extracted from
+// encryption.spec.ts because they use no Playwright page fixture — pure HTTP only.
+
+test.describe('Channel Encryption API', () => {
+  let owner: TestUser
+  let admin: TestUser
+  let server: { id: string; name: string }
+  let encryptedChannel: { id: string; name: string }
+  let plainChannel: { id: string; name: string }
+
+  // DM-related state for the encrypted-messages test
+  let dmSender: TestUser
+  let dmReceiver: TestUser
+  let dmData: { serverId: string; channelId: string }
+  let encryptedMsgContent: string
+  let plaintextMsgContent: string
+
+  test.beforeAll(async () => {
+    // ── Server + channel setup ──────────────────────────────────────
+    owner = await createTestUser('kx-enc-owner')
+    admin = await createTestUser('kx-enc-admin')
+    for (const u of [owner, admin]) await syncProfile(u.token)
+
+    server = await createServer(owner.token, `KX Encryption API ${Date.now()}`)
+
+    encryptedChannel = await createChannel(owner.token, server.id, 'kx-secret-channel')
+    plainChannel = await createChannel(owner.token, server.id, 'kx-plain-channel')
+
+    // Enable encryption on one channel (owner-only operation).
+    await updateChannel(owner.token, server.id, encryptedChannel.id, { encrypted: true })
+
+    const invite = await createInvite(owner.token, server.id)
+    await joinServer(admin.token, server.id, invite.code)
+    await assignRole(owner.token, server.id, admin.id, 'admin')
+
+    // ── DM setup for encrypted-messages test ────────────────────────
+    dmSender = await createTestUser('kx-dm-sender')
+    dmReceiver = await createTestUser('kx-dm-receiver')
+    for (const u of [dmSender, dmReceiver]) await syncProfile(u.token)
+
+    // WHY: Both users must share a server so they can DM each other.
+    const dmServer = await createServer(dmSender.token, `KX DM API ${Date.now()}`)
+    const dmInvite = await createInvite(dmSender.token, dmServer.id)
+    await joinServer(dmReceiver.token, dmServer.id, dmInvite.code)
+
+    dmData = await createDm(dmSender.token, dmReceiver.id)
+
+    // Encrypted message — simulates desktop sender
+    encryptedMsgContent = `kx-encrypted-${Date.now()}`
+    await sendEncryptedMessage(dmSender.token, dmData.channelId, encryptedMsgContent, 'kx-device-1')
+
+    // Plaintext message — simulates web sender
+    plaintextMsgContent = `kx-plaintext-${Date.now()}`
+    await sendMessage(dmSender.token, dmData.channelId, plaintextMsgContent)
+  })
+
+  test('API rejects disabling encryption on an already-encrypted channel (one-way toggle)', async () => {
+    // WHY: UpdateChannelRequest doc says "one-way toggle: once true, cannot be set back to false".
+    // This verifies the API enforces that constraint.
+    const result = await updateChannelRaw(owner.token, server.id, encryptedChannel.id, {
+      encrypted: false,
+    })
+
+    // The API should reject the attempt to disable encryption (4xx).
+    expect(result.status).toBeGreaterThanOrEqual(400)
+  })
+
+  test('API rejects non-owner enabling encryption', async () => {
+    // WHY: Only the server owner should be able to enable encryption.
+    const result = await updateChannelRaw(admin.token, server.id, plainChannel.id, {
+      encrypted: true,
+    })
+
+    expect(result.status).toBeGreaterThanOrEqual(400)
+  })
+
+  test('API returns encrypted=true for the encrypted channel', async () => {
+    // WHY: Verifies data persistence, not just UI visibility.
+    const channels = await getServerChannels(owner.token, server.id)
+
+    const enc = channels.items.find((c) => c.id === encryptedChannel.id)
+    expect(enc).toBeDefined()
+    expect(enc?.encrypted).toBe(true)
+
+    const plain = channels.items.find((c) => c.id === plainChannel.id)
+    expect(plain).toBeDefined()
+    expect(plain?.encrypted).toBe(false)
+  })
+
+  test('API returns encrypted=true for encrypted messages and false for plaintext', async () => {
+    // WHY: Pure API test verifying the bug fix — the API now correctly persists
+    // encrypted=true and senderDeviceId when sent. No page interaction needed.
+    const messages = await getMessages(dmSender.token, dmData.channelId)
+
+    // Find the encrypted message by content.
+    const encMsg = messages.items.find((m) => m.content === encryptedMsgContent)
+    expect(encMsg).toBeDefined()
+    expect(encMsg?.encrypted).toBe(true)
+    expect(encMsg?.senderDeviceId).toBeTruthy()
+
+    // Find the plaintext message by content.
+    const plainMsg = messages.items.find((m) => m.content === plaintextMsgContent)
+    expect(plainMsg).toBeDefined()
+    expect(plainMsg?.encrypted).toBe(false)
   })
 })

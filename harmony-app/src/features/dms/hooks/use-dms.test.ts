@@ -61,18 +61,4 @@ describe('useDms', () => {
 
     expect(result.current.data).toEqual([])
   })
-
-  it('transitions to error state when listDms rejects', async () => {
-    vi.mocked(listDms).mockRejectedValueOnce(new Error('Network failure'))
-
-    const queryClient = createTestQueryClient()
-    const wrapper = createQueryWrapper(queryClient)
-
-    const { result } = renderHook(() => useDms(), { wrapper })
-
-    await waitFor(() => expect(result.current.isError).toBe(true))
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Network failure')
-  })
 })

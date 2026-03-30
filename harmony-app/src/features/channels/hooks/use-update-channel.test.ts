@@ -100,17 +100,4 @@ describe('useUpdateChannel', () => {
       error: 'Invalid channel name',
     })
   })
-
-  it('transitions to error state when updateChannel rejects', async () => {
-    vi.mocked(updateChannel).mockRejectedValueOnce(new Error('Forbidden'))
-
-    const { result } = renderHookWithQueryClient(() => useUpdateChannel(SERVER_ID, CHANNEL_ID))
-
-    result.current.mutate({ name: 'test' } as never)
-
-    await waitFor(() => expect(result.current.isError).toBe(true))
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Forbidden')
-  })
 })

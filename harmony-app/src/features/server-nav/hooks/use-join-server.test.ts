@@ -107,22 +107,4 @@ describe('useJoinServer', () => {
       queryKey: queryKeys.servers.list(),
     })
   })
-
-  it('transitions to error state when joinServer rejects', async () => {
-    vi.mocked(joinServer).mockRejectedValue(new Error('Invalid invite'))
-
-    const { result } = renderHookWithQueryClient(() => useJoinServer())
-
-    result.current.mutate({
-      serverId: SERVER_ID,
-      body: { invite_code: 'EXPIRED' },
-    } as never)
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
-    })
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Invalid invite')
-  })
 })

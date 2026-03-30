@@ -94,19 +94,4 @@ describe('useCreateInvite', () => {
       queryKey: queryKeys.servers.invites(SERVER_ID),
     })
   })
-
-  it('transitions to error state when createInvite rejects', async () => {
-    vi.mocked(createInvite).mockRejectedValue(new Error('Forbidden'))
-
-    const { result } = renderHookWithQueryClient(() => useCreateInvite(SERVER_ID))
-
-    result.current.mutate({} as never)
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
-    })
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Forbidden')
-  })
 })

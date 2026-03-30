@@ -368,4 +368,124 @@ test.describe('Direct Messages', () => {
       expect(result.status).toBe(400)
     })
   })
+
+  test.describe('cross-server DM', () => {
+    test('users who share a server can DM even if they also belong to other servers', async ({
+      page,
+    }) => {
+      // WHY: DM creation requires users to share at least one server
+      // (user-search-dialog.tsx aggregates members from all servers).
+      // This test creates two servers where each user is in a different extra server,
+      // but they share one common server — DM should work.
+      const userC = await createTestUser('dml-xsrv-c')
+      const userD = await createTestUser('dml-xsrv-d')
+      for (const u of [userC, userD]) await syncProfile(u.token)
+
+      // Shared server (both users are members)
+      const sharedServer = await createServer(userC.token, `DMLShared ${Date.now()}`)
+      const invite = await createInvite(userC.token, sharedServer.id)
+      await joinServer(userD.token, sharedServer.id, invite.code)
+
+      // User C's extra server (userD is NOT a member)
+      await createServer(userC.token, `DMLExtraC ${Date.now()}`)
+
+      // User D's extra server (userC is NOT a member)
+      await createServer(userD.token, `DMLExtraD ${Date.now()}`)
+
+      // Create DM between them (should work because they share sharedServer)
+      const dm = await createDm(userC.token, userD.id)
+
+      const uniqueMsg = `cross-server-dm-${Date.now()}`
+      await sendMessage(userC.token, dm.channelId, uniqueMsg)
+
+      // Verify the message is visible for User C
+      await authenticatePage(page, userC)
+      await page.locator('[data-test="dm-home-button"]').click()
+      await page.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+      const dmItem = page.locator(
+        `[data-test="dm-conversation-item"][data-dm-server-id="${dm.serverId}"]`,
+      )
+      await dmItem.waitFor({ timeout: 10_000 })
+      await dmItem.click()
+
+      await page.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+      const messageContent = page
+        .locator('[data-test="message-content"]')
+        .filter({ hasText: uniqueMsg })
+      await expect(messageContent.first()).toBeVisible({ timeout: 10_000 })
+    })
+  })
+
+  test.describe('sidebar ordering', () => {
+    test('most recently active DM appears first in sidebar', async ({ page }) => {
+      // WHY: dm-sidebar.tsx renders DMs in the order returned by GET /v1/dms.
+      // The backend sorts by last_message.created_at DESC (most recent first).
+      // We create two DMs, send a message in the second one last, and verify
+      // it appears before the first one in the sidebar.
+      const orderUser = await createTestUser('dml-order-main')
+      const targetA = await createTestUser('dml-order-a')
+      const targetB = await createTestUser('dml-order-b')
+      for (const u of [orderUser, targetA, targetB]) await syncProfile(u.token)
+
+      // All must share a server for DM creation
+      const orderServer = await createServer(orderUser.token, `DMLOrder ${Date.now()}`)
+      const invite = await createInvite(orderUser.token, orderServer.id)
+      await joinServer(targetA.token, orderServer.id, invite.code)
+      await joinServer(targetB.token, orderServer.id, invite.code)
+
+      // Create DM with targetA first, send a message
+      const dmA = await createDm(orderUser.token, targetA.id)
+      const msgA = await sendMessage(orderUser.token, dmA.channelId, `Msg to A ${Date.now()}`)
+
+      // Create DM with targetB second, send a message (this should appear first)
+      const dmB = await createDm(orderUser.token, targetB.id)
+      const msgB = await sendMessage(orderUser.token, dmB.channelId, `Msg to B ${Date.now()}`)
+
+      // WHY: Verify the API assigned distinct, ordered timestamps. If the messages
+      // have the same created_at (sub-millisecond), ordering is non-deterministic.
+      // This assertion replaces an arbitrary setTimeout(1000) by confirming the
+      // precondition the test relies on: msgB was created after msgA.
+      expect(msgB.createdAt > msgA.createdAt).toBe(true)
+
+      // Load DM sidebar
+      await authenticatePage(page, orderUser)
+      await page.locator('[data-test="dm-home-button"]').click()
+      await page.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+      // Wait for both DM items to appear
+      const dmItemA = page.locator(
+        `[data-test="dm-conversation-item"][data-dm-server-id="${dmA.serverId}"]`,
+      )
+      const dmItemB = page.locator(
+        `[data-test="dm-conversation-item"][data-dm-server-id="${dmB.serverId}"]`,
+      )
+      await dmItemA.waitFor({ timeout: 10_000 })
+      await dmItemB.waitFor({ timeout: 10_000 })
+
+      // WHY: Verify ordering by checking the DOM position of the two conversation items.
+      // The DM list renders items in order from the API response.
+      const allDmItems = page.locator('[data-test="dm-conversation-item"]')
+      const allServerIds: string[] = []
+      const count = await allDmItems.count()
+      for (let i = 0; i < count; i++) {
+        const sid = await allDmItems.nth(i).getAttribute('data-dm-server-id')
+        // WHY: Every dm-conversation-item MUST have a data-dm-server-id attribute.
+        // If it doesn't, the component is broken and the test should fail loudly.
+        expect(sid).not.toBeNull()
+        allServerIds.push(sid as string)
+      }
+
+      const idxA = allServerIds.indexOf(dmA.serverId)
+      const idxB = allServerIds.indexOf(dmB.serverId)
+
+      // Both should be present
+      expect(idxA).toBeGreaterThanOrEqual(0)
+      expect(idxB).toBeGreaterThanOrEqual(0)
+
+      // DM B (most recent message) should appear BEFORE DM A
+      expect(idxB).toBeLessThan(idxA)
+    })
+  })
 })

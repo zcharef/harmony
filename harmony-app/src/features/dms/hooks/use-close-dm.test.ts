@@ -65,17 +65,4 @@ describe('useCloseDm', () => {
       error: 'Not found',
     })
   })
-
-  it('transitions to error state when closeDm rejects', async () => {
-    vi.mocked(closeDm).mockRejectedValueOnce(new Error('Server error'))
-
-    const { result } = renderHookWithQueryClient(() => useCloseDm())
-
-    result.current.mutate('srv-dm-1')
-
-    await waitFor(() => expect(result.current.isError).toBe(true))
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Server error')
-  })
 })

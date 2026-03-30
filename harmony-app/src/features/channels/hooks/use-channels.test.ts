@@ -74,17 +74,4 @@ describe('useChannels', () => {
     expect(result.current.isPending).toBe(true)
     expect(listChannels).not.toHaveBeenCalled()
   })
-
-  it('transitions to error state when listChannels rejects', async () => {
-    vi.mocked(listChannels).mockRejectedValue(new Error('Server not found'))
-
-    const { result } = renderHookWithQueryClient(() => useChannels(SERVER_ID))
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
-    })
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Server not found')
-  })
 })

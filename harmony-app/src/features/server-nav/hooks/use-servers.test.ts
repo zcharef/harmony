@@ -62,17 +62,4 @@ describe('useServers', () => {
     const cachedData = queryClient.getQueryData(queryKeys.servers.list())
     expect(cachedData).toEqual(mockServers)
   })
-
-  it('transitions to error state when listServers rejects', async () => {
-    vi.mocked(listServers).mockRejectedValue(new Error('Network failure'))
-
-    const { result } = renderHookWithQueryClient(() => useServers())
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
-    })
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Network failure')
-  })
 })

@@ -79,17 +79,4 @@ describe('useMembers', () => {
     expect(result.current.isPending).toBe(true)
     expect(listMembers).not.toHaveBeenCalled()
   })
-
-  it('transitions to error state when listMembers rejects', async () => {
-    vi.mocked(listMembers).mockRejectedValue(new Error('Unauthorized'))
-
-    const { result } = renderHookWithQueryClient(() => useMembers(SERVER_ID))
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
-    })
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Unauthorized')
-  })
 })

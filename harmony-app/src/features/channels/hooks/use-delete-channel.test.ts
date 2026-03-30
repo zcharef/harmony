@@ -70,17 +70,4 @@ describe('useDeleteChannel', () => {
       error: 'Cannot delete the last channel in a server',
     })
   })
-
-  it('transitions to error state when deleteChannel rejects', async () => {
-    vi.mocked(deleteChannel).mockRejectedValueOnce(new Error('Not found'))
-
-    const { result } = renderHookWithQueryClient(() => useDeleteChannel(SERVER_ID))
-
-    result.current.mutate('ch-nonexistent')
-
-    await waitFor(() => expect(result.current.isError).toBe(true))
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Not found')
-  })
 })

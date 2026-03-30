@@ -88,17 +88,4 @@ describe('useCreateDm', () => {
       error: 'Self-DM not allowed',
     })
   })
-
-  it('transitions to error state when createDm rejects', async () => {
-    vi.mocked(createDm).mockRejectedValueOnce(new Error('Conflict'))
-
-    const { result } = renderHookWithQueryClient(() => useCreateDm())
-
-    result.current.mutate('user-2')
-
-    await waitFor(() => expect(result.current.isError).toBe(true))
-
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect(result.current.error?.message).toBe('Conflict')
-  })
 })

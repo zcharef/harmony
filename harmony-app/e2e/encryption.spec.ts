@@ -37,14 +37,11 @@ import {
   createDm,
   createInvite,
   createServer,
-  getMessages,
-  getServerChannels,
   joinServer,
   sendEncryptedMessage,
   sendMessage,
   syncProfile,
   updateChannel,
-  updateChannelRaw,
 } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
 
@@ -307,28 +304,6 @@ test.describe('Encryption UI', () => {
     await expect(notice).not.toBeAttached()
   })
 
-  // ── API-level encryption enforcement ──────────────────────────────
-
-  test('API rejects disabling encryption on an already-encrypted channel (one-way toggle)', async () => {
-    // WHY: UpdateChannelRequest doc says "one-way toggle: once true, cannot be set back to false".
-    // This verifies the API enforces that constraint.
-    const result = await updateChannelRaw(owner.token, server.id, encryptedChannel.id, {
-      encrypted: false,
-    })
-
-    // The API should reject the attempt to disable encryption (4xx).
-    expect(result.status).toBeGreaterThanOrEqual(400)
-  })
-
-  test('API rejects non-owner enabling encryption', async () => {
-    // WHY: Only the server owner should be able to enable encryption.
-    const result = await updateChannelRaw(admin.token, server.id, plainChannel.id, {
-      encrypted: true,
-    })
-
-    expect(result.status).toBeGreaterThanOrEqual(400)
-  })
-
   // ── Encryption state persisted and visible to other roles ─────────
 
   test('member sees encrypted channel badge in sidebar', async ({ page }) => {
@@ -398,21 +373,6 @@ test.describe('Encryption UI', () => {
     const switchInput = disabledToggle.locator('input[type="checkbox"]')
     await expect(switchInput).toBeChecked()
     await expect(switchInput).toBeDisabled()
-  })
-
-  // ── Verify encryption is persisted via API ────────────────────────
-
-  test('API returns encrypted=true for the encrypted channel', async () => {
-    // WHY: Verifies data persistence, not just UI visibility.
-    const channels = await getServerChannels(owner.token, server.id)
-
-    const enc = channels.items.find((c) => c.id === encryptedChannel.id)
-    expect(enc).toBeDefined()
-    expect(enc?.encrypted).toBe(true)
-
-    const plain = channels.items.find((c) => c.id === plainChannel.id)
-    expect(plain).toBeDefined()
-    expect(plain?.encrypted).toBe(false)
   })
 })
 
@@ -677,22 +637,5 @@ test.describe('Cross-Platform DM Encryption', () => {
     const encryptionIndicators = page.locator('[data-test="message-encryption-indicator"]')
     const indicatorCount = await encryptionIndicators.count()
     expect(indicatorCount).toBeGreaterThanOrEqual(3)
-  })
-
-  test('API returns encrypted=true for encrypted messages and false for plaintext', async () => {
-    // WHY: Pure API test verifying the bug fix — the API now correctly persists
-    // encrypted=true and senderDeviceId when sent. No page interaction needed.
-    const messages = await getMessages(sender.token, dmData.channelId)
-
-    // Find the encrypted message by content.
-    const encMsg = messages.items.find((m) => m.content === encryptedMsgA)
-    expect(encMsg).toBeDefined()
-    expect(encMsg?.encrypted).toBe(true)
-    expect(encMsg?.senderDeviceId).toBeTruthy()
-
-    // Find the plaintext message by content.
-    const plainMsg = messages.items.find((m) => m.content === plaintextMsgB)
-    expect(plainMsg).toBeDefined()
-    expect(plainMsg?.encrypted).toBe(false)
   })
 })
