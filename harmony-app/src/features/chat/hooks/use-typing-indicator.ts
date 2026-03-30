@@ -121,14 +121,12 @@ export function useTypingIndicator(channelId: string, currentUserId: string) {
 
       // WHY fire-and-forget: Background operation — no user-facing feedback needed
       // on failure (ADR-028). The POST just signals "user is typing" to the server.
-      sendTypingApi({ path: { id: channelId }, throwOnError: true }).catch(
-        (error: unknown) => {
-          logger.warn('typing_post_failed', {
-            channelId,
-            error: error instanceof Error ? error.message : String(error),
-          })
-        },
-      )
+      sendTypingApi({ path: { id: channelId }, throwOnError: true }).catch((error: unknown) => {
+        logger.warn('typing_post_failed', {
+          channelId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
     },
     [channelId],
   )

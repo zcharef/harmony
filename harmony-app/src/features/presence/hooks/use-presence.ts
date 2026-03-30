@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { z } from 'zod'
 
 import { useServerEvent } from '@/hooks/use-server-event'
-import { updatePresence, type UserStatus } from '@/lib/api'
+import { type UserStatus, updatePresence } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { usePresenceStore } from '../stores/presence-store'
 
@@ -22,14 +22,12 @@ const presenceEventSchema = z.object({
  * will correct state. No user-facing feedback needed (ADR-028).
  */
 function postPresenceStatus(status: UserStatus): void {
-  updatePresence({ body: { status }, throwOnError: true }).catch(
-    (error: unknown) => {
-      logger.warn('presence_post_failed', {
-        status,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    },
-  )
+  updatePresence({ body: { status }, throwOnError: true }).catch((error: unknown) => {
+    logger.warn('presence_post_failed', {
+      status,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  })
 }
 
 /**

@@ -12,9 +12,7 @@ import { useAuthStore } from './stores/auth-store'
  *
  * Returns the error detail string on failure, or null on success.
  */
-async function syncProfile(
-  isSyncing: React.RefObject<boolean>,
-): Promise<string | null> {
+async function syncProfile(isSyncing: React.RefObject<boolean>): Promise<string | null> {
   // WHY: Guard against duplicate sync calls from rapid auth events
   if (isSyncing.current) {
     return null
@@ -36,7 +34,12 @@ async function syncProfile(
     let message = 'Profile sync failed'
     if (error instanceof Error) {
       message = error.message
-    } else if (typeof error === 'object' && error !== null && 'detail' in error && typeof error.detail === 'string') {
+    } else if (
+      typeof error === 'object' &&
+      error !== null &&
+      'detail' in error &&
+      typeof error.detail === 'string'
+    ) {
       message = error.detail
     }
     logger.error('profile_sync_failed', { error: message })

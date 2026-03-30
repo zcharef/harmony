@@ -25,10 +25,7 @@ export const SSE_EVENT_PREFIX = 'sse:' as const
  *   generic `<T>` was removed because `e.detail` is always `any` from CustomEvent —
  *   the generic provided no runtime guarantee and every caller already validates.
  */
-export function useServerEvent(
-  eventType: string | null,
-  handler: (payload: unknown) => void,
-) {
+export function useServerEvent(eventType: string | null, handler: (payload: unknown) => void) {
   // WHY: Ref avoids re-subscribing when handler changes. Follows the same
   // pattern as handlersRef in use-event-source.ts:47-48. Without this, every
   // render that produces a new handler reference tears down and re-adds the
