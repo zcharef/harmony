@@ -35,8 +35,15 @@ import { logger } from '@/lib/logger'
  * @param userId - Current authenticated user ID. When null, the connection is
  *   not opened. When it changes (logout → login), the connection is torn down
  *   and re-established.
+ * @param accessToken - Supabase JWT for Tauri query-param auth. Null in web
+ *   (cookie auth used instead). Passed from MainLayout to keep this hook
+ *   layer-clean (no feature imports).
  */
-export function useEventSource(handlers: ServerEventHandlers, userId: string | null): void {
+export function useEventSource(
+  handlers: ServerEventHandlers,
+  userId: string | null,
+  accessToken?: string | null,
+): void {
   const queryClient = useQueryClient()
   // WHY: When requestReconnect() increments reconnectKey, this effect re-runs,
   // tearing down the old EventSource and creating a fresh one.
@@ -46,6 +53,11 @@ export function useEventSource(handlers: ServerEventHandlers, userId: string | n
   // but the actual function references are stable via useCallback in features.
   const handlersRef = useRef(handlers)
   handlersRef.current = handlers
+  // WHY: Ref ensures reconnects always use the latest Supabase JWT. Without
+  // this, the token captured in the effect closure becomes stale after ~1h
+  // (Supabase refresh cycle), and any reconnect attempt would fail with 401.
+  const accessTokenRef = useRef(accessToken)
+  accessTokenRef.current = accessToken
 
   // WHY: Track whether we have had a successful connection at least once.
   // On the *first* open we do NOT invalidate queries (data is already fresh
@@ -58,16 +70,25 @@ export function useEventSource(handlers: ServerEventHandlers, userId: string | n
   // the more severe "connection lost" state with a manual retry button.
   const disconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reconnectKey is an intentional trigger dependency — incrementing it via requestReconnect() forces this effect to re-run, tearing down the old EventSource and creating a fresh SSE connection.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reconnectKey is an intentional trigger dependency — incrementing it via requestReconnect() forces this effect to re-run, tearing down the old EventSource and creating a fresh SSE connection. accessToken is read via accessTokenRef (same pattern as handlersRef) so reconnects always get the latest token without causing effect re-runs on hourly Supabase refreshes.
   useEffect(() => {
     if (userId === null) return
 
-    const url = `${env.VITE_API_URL}/v1/events`
+    // WHY: Tauri's webview origin (tauri://localhost) is a non-HTTP custom
+    // scheme. WKWebView's ITP silently drops Set-Cookie from cross-origin HTTPS
+    // responses, so the session cookie from POST /v1/auth/me never persists.
+    // Since EventSource cannot set custom headers, we pass the Supabase JWT as
+    // a query parameter. Web browsers are unaffected — they store the cookie
+    // and send it via withCredentials (ADR-SSE-005).
+    const token = accessTokenRef.current
+    const usesQueryAuth = token !== undefined && token !== null
+    const url = usesQueryAuth
+      ? `${env.VITE_API_URL}/v1/events?access_token=${encodeURIComponent(token)}`
+      : `${env.VITE_API_URL}/v1/events`
 
-    // WHY: withCredentials sends the session cookie for auth (ADR-SSE-005).
     let es: EventSource
     try {
-      es = new EventSource(url, { withCredentials: true })
+      es = new EventSource(url, { withCredentials: !usesQueryAuth })
     } catch (err) {
       logger.error('sse_constructor_failed', {
         userId,

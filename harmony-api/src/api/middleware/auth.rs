@@ -1,7 +1,8 @@
 //! Authentication middleware (defense-in-depth).
 //!
-//! Verifies Supabase JWT from Authorization header or session cookie,
-//! then injects `AuthenticatedUser` into request extensions for downstream handlers.
+//! Verifies Supabase JWT from Authorization header, session cookie, or query
+//! parameter, then injects `AuthenticatedUser` into request extensions for
+//! downstream handlers.
 
 use axum::{extract::State, middleware::Next, response::Response};
 
@@ -21,11 +22,12 @@ const EMAIL_EXEMPT_PATHS: &[&str] = &["/v1/auth/me"];
 /// Checks (in order):
 /// 1. Session cookie (HMAC-signed, web clients)
 /// 2. Authorization Bearer JWT (Supabase token, mobile/API clients)
+/// 3. `access_token` query parameter (Supabase JWT, Tauri SSE fallback)
 ///
 /// On success, injects `AuthenticatedUser` into request extensions.
 ///
 /// # Errors
-/// Returns `ApiError::unauthorized` if no valid session cookie or Bearer JWT is present,
+/// Returns `ApiError::unauthorized` if no valid credential is present,
 /// or if the provided token fails verification.
 pub async fn require_auth(
     State(state): State<AppState>,
@@ -73,17 +75,39 @@ pub async fn require_auth(
     }
 
     // 2. Try Authorization Bearer header (Supabase JWT)
-    let token = parts
+    // 3. Try `access_token` query parameter (Tauri SSE fallback)
+    // WHY: EventSource cannot set custom headers. Tauri's webview origin
+    // (tauri://localhost) is a non-HTTP custom scheme — WKWebView's ITP
+    // silently drops Set-Cookie from cross-origin HTTPS responses, so the
+    // session cookie never persists. The query parameter is the only viable
+    // auth path for SSE in Tauri (ADR-SSE-005).
+    let bearer_token = parts
         .headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
-        .filter(|t| !t.is_empty())
-        .ok_or_else(|| {
-            ApiError::unauthorized(
-                "Missing or invalid authentication. Provide session cookie or Bearer token.",
-            )
-        })?;
+        .filter(|t| !t.is_empty());
+
+    // WHY: Scoped to /v1/events only — placing JWTs in URLs exposes them in
+    // server/proxy logs. Acceptable for the long-lived SSE stream (no other
+    // option), but not for mutation endpoints like DELETE /members.
+    let query_token = if parts.uri.path() == "/v1/events" {
+        parts
+            .uri
+            .query()
+            .into_iter()
+            .flat_map(|q| q.split('&'))
+            .find_map(|pair| pair.strip_prefix("access_token="))
+            .filter(|t| !t.is_empty())
+    } else {
+        None
+    };
+
+    let token = bearer_token.or(query_token).ok_or_else(|| {
+        ApiError::unauthorized(
+            "Missing or invalid authentication. Provide session cookie or Bearer token.",
+        )
+    })?;
 
     let user = auth::verify_supabase_jwt(token, &state.jwt_secret, state.es256_key.as_ref())
         .map_err(|e| {

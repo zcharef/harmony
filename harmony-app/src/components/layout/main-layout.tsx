@@ -22,6 +22,7 @@ import { useEventSource } from '@/hooks/use-event-source'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
+import { isTauri } from '@/lib/platform'
 import { AboutPage } from './about-page'
 import { ConnectionBanner } from './connection-banner'
 import { WelcomeScreen } from './welcome-screen'
@@ -251,9 +252,14 @@ export function MainLayout() {
   // before the first SSE request. Without this, EventSource races ahead of
   // POST /v1/auth/me and gets 401 (cookie not yet stored).
   const isProfileSynced = useAuthStore((s) => s.isProfileSynced)
+  // WHY: In Tauri, WKWebView's ITP silently drops cross-origin cookies, so
+  // EventSource can't use cookie auth. We pass the Supabase JWT as a query
+  // parameter instead. Web browsers use cookie auth (accessToken stays null).
+  const isTauriApp = isTauri()
+  const accessToken = useAuthStore((s) => (isTauriApp ? (s.session?.access_token ?? null) : null))
   const serverIds = useMemo(() => servers?.map((s) => s.id) ?? [], [servers])
   usePresence(serverIds, selectedServerId, userId)
-  useEventSource({}, isProfileSynced ? userId : null)
+  useEventSource({}, isProfileSynced ? userId : null, accessToken)
   useForceDisconnect(userId, selectedServerId, setSelectedServerId, setSelectedChannelId)
   // WHY: Realtime hooks MUST live here (not inside collapsible sidebar/member-list
   // panels). When a panel collapses, its component unmounts and SSE listeners are
