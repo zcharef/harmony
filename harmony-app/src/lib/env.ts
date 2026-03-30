@@ -13,7 +13,9 @@ const envSchema = z.object({
   VITE_API_URL: z.string().url(),
   VITE_SUPABASE_URL: z.string().url(),
   VITE_SUPABASE_ANON_KEY: z.string().min(1),
-  VITE_TURNSTILE_SITE_KEY: z.string().min(1),
+  // WHY: Optional — self-hosted instances may omit Turnstile entirely.
+  // When unset, the login form skips the widget and pre-fills a bypass token.
+  VITE_TURNSTILE_SITE_KEY: z.string().min(1).optional(),
   // WHY: Desktop auth opens the web login page in the system browser.
   // In production: https://app.joinharmony.app — in dev: http://localhost:1420
   VITE_WEB_APP_URL: z.string().url().optional(),

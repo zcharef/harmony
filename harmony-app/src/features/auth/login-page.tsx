@@ -315,10 +315,12 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  // WHY: In Tauri dev, Turnstile is skipped. The local Supabase test secret
-  // accepts any captcha token, so we pre-fill a dummy value to enable the submit button.
+  // WHY: Turnstile is skipped in two cases:
+  //  1. Tauri desktop (webview can't validate) — local Supabase accepts any token.
+  //  2. Self-hosted instances with no VITE_TURNSTILE_SITE_KEY configured.
+  // In both cases we pre-fill a dummy token so isSubmitDisabled doesn't block the form.
   const [captchaToken, setCaptchaToken] = useState<string | null>(
-    isTauri() ? 'TAURI_DEV_BYPASS' : null,
+    isTauri() || env.VITE_TURNSTILE_SITE_KEY === undefined ? 'SELF_HOSTED_BYPASS' : null,
   )
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle')
   const turnstileRef = useRef<TurnstileInstance>(null)
@@ -451,6 +453,10 @@ export function LoginPage() {
     setSuccessMessage(null)
   }
 
+  // WHY: Extracted for TypeScript narrowing — env.VITE_TURNSTILE_SITE_KEY is
+  // string | undefined; assigning to a const lets TS narrow to string inside the guard.
+  const turnstileKey = env.VITE_TURNSTILE_SITE_KEY
+
   // WHY: Production Tauri builds use the deep link flow (Turnstile doesn't
   // work in webviews with real keys). Dev Tauri builds fall through to the
   // normal form — the test captcha secret accepts any token, so we skip the
@@ -556,14 +562,15 @@ export function LoginPage() {
                   className="absolute -left-[9999px] h-0 w-0 opacity-0"
                 />
 
-                {/* WHY: In Tauri dev, Turnstile can't validate the webview environment.
-                    The local Supabase test secret accepts any token, so we skip the widget
-                    and auto-set a dummy token. Production web builds always show Turnstile. */}
-                {isTauri() ? null : (
+                {/* WHY: Turnstile widget is shown only when:
+                    - Not running inside Tauri (webview can't validate), AND
+                    - VITE_TURNSTILE_SITE_KEY is configured (self-hosted may omit it).
+                    Both cases pre-fill a bypass token so the form remains submittable. */}
+                {!isTauri() && turnstileKey !== undefined ? (
                   <div data-test="login-captcha-wrapper">
                     <Turnstile
                       ref={turnstileRef}
-                      siteKey={env.VITE_TURNSTILE_SITE_KEY}
+                      siteKey={turnstileKey}
                       onSuccess={setCaptchaToken}
                       onExpire={() => setCaptchaToken(null)}
                       onError={() => {
@@ -573,7 +580,7 @@ export function LoginPage() {
                       options={{ theme: 'auto', size: 'flexible' }}
                     />
                   </div>
-                )}
+                ) : null}
 
                 {error !== null && (
                   <p data-test="login-error-message" className="text-sm text-danger">
