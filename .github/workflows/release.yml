@@ -167,7 +167,7 @@ jobs:
           releaseName: 'Harmony ${{ github.ref_name }}'
           releaseBody: 'See assets below to download and install.'
           releaseDraft: true
-          prerelease: true
+          prerelease: false
           projectPath: harmony-app
           tauriScript: pnpm tauri
           args: ${{ matrix.args }}
