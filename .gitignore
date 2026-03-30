@@ -55,7 +55,7 @@ harmony-app/playwright/.cache/
 tsc-cache/
 
 dev/
-docs/
+# docs/ is tracked — contains self-hosting guide, ADRs, architecture docs
 
 # Playwright MCP
 .playwright-mcp/

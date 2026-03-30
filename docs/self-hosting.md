@@ -296,7 +296,32 @@ pnpm tauri build
 # Output: src-tauri/target/release/bundle/
 ```
 
-> The Tauri auto-updater in self-built binaries points at the official GitHub releases by default. Disable it or replace the `updater.endpoints` and `updater.pubkey` in `src-tauri/tauri.conf.json` with your own release infrastructure.
+### Auto-updater for self-built binaries
+
+Self-built Tauri binaries point at the official Harmony GitHub releases by default. This means:
+
+- **Updates will fail** — the official release bundles are signed with Harmony's private key. Your binary is signed with a different key (or no key), so the updater will reject official updates.
+- **Option A — Disable the updater** (simplest): remove the `plugins.updater` block from `src-tauri/tauri.conf.json`.
+- **Option B — Use your own update server**: generate a keypair, sign your builds, and host a `latest.json` manifest.
+
+**To use your own update infrastructure:**
+
+```bash
+# 1. Generate a signing keypair (keep the private key secret)
+pnpm tauri signer generate -w ~/.tauri/my-harmony.key
+
+# 2. Replace pubkey in src-tauri/tauri.conf.json → plugins.updater.pubkey
+#    with the public key printed by the command above
+
+# 3. Point the updater at your release server
+#    plugins.updater.endpoints → ["https://releases.example.com/harmony/latest.json"]
+
+# 4. Build and sign
+TAURI_SIGNING_PRIVATE_KEY=~/.tauri/my-harmony.key pnpm tauri build
+
+# 5. Host src-tauri/target/release/bundle/ and a latest.json manifest
+#    See: https://tauri.app/plugin/updater/#update-server
+```
 
 ---
 
