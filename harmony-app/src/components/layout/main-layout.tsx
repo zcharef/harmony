@@ -9,7 +9,12 @@ import { useAuthStore } from '@/features/auth'
 import { ChannelSidebar, useChannels, useRealtimeChannels } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
 import { DmSidebar, useDms } from '@/features/dms'
-import { MemberList, useForceDisconnect, useMyMemberRole, useRealtimeMembers } from '@/features/members'
+import {
+  MemberList,
+  useForceDisconnect,
+  useMyMemberRole,
+  useRealtimeMembers,
+} from '@/features/members'
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, useSettingsUiStore } from '@/features/settings'
@@ -98,6 +103,20 @@ function deriveChatHeader<
 }
 
 // WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
+function deriveChatProps<R>(
+  isDmView: boolean,
+  selectedChannelId: string | null,
+  dmRecipientRaw: R | undefined,
+  selectedChannel: { isReadOnly: boolean; encrypted: boolean } | undefined,
+) {
+  const isDm = isDmView && selectedChannelId !== null
+  const dmRecipient: R | null = dmRecipientRaw ?? null
+  const isReadOnly = selectedChannel !== undefined ? selectedChannel.isReadOnly : false
+  const isChannelEncrypted = selectedChannel !== undefined ? selectedChannel.encrypted : false
+  return { isDm, dmRecipient, isReadOnly, isChannelEncrypted }
+}
+
+// WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
 function useServerAutoSelect(
   view: ViewMode,
   selectedServerId: string | null,
@@ -159,6 +178,27 @@ function useChannelAutoSelect(
       setSelectedChannelId(target.id)
     }
   }, [view, selectedServerId, selectedChannelId, channels, setSelectedChannelId])
+}
+
+// WHY: Persist selection to localStorage so the user returns to their last
+// position on page reload. Only persists in server view to avoid overwriting
+// with DM server/channel IDs.
+function useSelectionPersistence(
+  view: ViewMode,
+  selectedServerId: string | null,
+  selectedChannelId: string | null,
+) {
+  useEffect(() => {
+    if (view === 'servers' && selectedServerId !== null) {
+      writeStorage(STORAGE_KEYS.lastServerId, selectedServerId)
+    }
+  }, [view, selectedServerId])
+
+  useEffect(() => {
+    if (view === 'servers' && selectedServerId !== null && selectedChannelId !== null) {
+      writeStorage(STORAGE_KEYS.lastChannelId(selectedServerId), selectedChannelId)
+    }
+  }, [view, selectedServerId, selectedChannelId])
 }
 
 // WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
@@ -269,21 +309,7 @@ export function MainLayout() {
   )
 
   useChannelAutoSelect(view, selectedServerId, selectedChannelId, channels, setSelectedChannelId)
-
-  // WHY: Persist selection to localStorage so the user returns to their last
-  // position on page reload. Only persists in server view to avoid overwriting
-  // with DM server/channel IDs.
-  useEffect(() => {
-    if (view === 'servers' && selectedServerId !== null) {
-      writeStorage(STORAGE_KEYS.lastServerId, selectedServerId)
-    }
-  }, [view, selectedServerId])
-
-  useEffect(() => {
-    if (view === 'servers' && selectedServerId !== null && selectedChannelId !== null) {
-      writeStorage(STORAGE_KEYS.lastChannelId(selectedServerId), selectedChannelId)
-    }
-  }, [view, selectedServerId, selectedChannelId])
+  useSelectionPersistence(view, selectedServerId, selectedChannelId)
 
   const isDmView = view === 'dms'
   const showAboutPage = useAboutUiStore((s) => s.showAboutPage)
@@ -296,6 +322,16 @@ export function MainLayout() {
     [regularServers],
   )
   const hasNoServers = servers !== undefined && userServers.length === 0
+
+  // WHY: Pre-compute props to move ternary/logical complexity out of MainLayout,
+  // reducing Biome cognitive complexity below the limit of 15.
+  const chatProps = deriveChatProps(
+    isDmView,
+    selectedChannelId,
+    activeDm?.recipient,
+    selectedChannel,
+  )
+  const serverName = selectedServer?.name ?? null
 
   /** WHY: About page renders before server settings so it's accessible from any state. */
   if (showAboutPage) {
@@ -368,7 +404,7 @@ export function MainLayout() {
           ) : (
             <ChannelSidebar
               serverId={selectedServerId}
-              serverName={selectedServer?.name ?? null}
+              serverName={serverName}
               selectedChannelId={selectedChannelId}
               onSelectChannel={setSelectedChannelId}
             />
@@ -382,10 +418,10 @@ export function MainLayout() {
             channelId={selectedChannelId}
             channelName={chatHeaderName}
             currentUserRole={currentUserRole}
-            isDm={isDmView && selectedChannelId !== null}
-            dmRecipient={activeDm?.recipient ?? null}
-            isReadOnly={selectedChannel !== undefined ? selectedChannel.isReadOnly : false}
-            isChannelEncrypted={selectedChannel !== undefined ? selectedChannel.encrypted : false}
+            isDm={chatProps.isDm}
+            dmRecipient={chatProps.dmRecipient}
+            isReadOnly={chatProps.isReadOnly}
+            isChannelEncrypted={chatProps.isChannelEncrypted}
           />
         </Panel>
 
@@ -396,7 +432,7 @@ export function MainLayout() {
             <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">
               <MemberList
                 serverId={selectedServerId}
-                serverName={selectedServer?.name ?? null}
+                serverName={serverName}
                 onNavigateDm={handleNavigateDm}
               />
             </Panel>

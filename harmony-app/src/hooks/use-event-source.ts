@@ -58,6 +58,7 @@ export function useEventSource(handlers: ServerEventHandlers, userId: string | n
   // the more severe "connection lost" state with a manual retry button.
   const disconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reconnectKey is an intentional trigger dependency — incrementing it via requestReconnect() forces this effect to re-run, tearing down the old EventSource and creating a fresh SSE connection.
   useEffect(() => {
     if (userId === null) return
 

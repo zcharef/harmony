@@ -7,8 +7,8 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/features/auth/stores/auth-store'
 import { checkUsername } from '@/lib/api'
 import { env } from '@/lib/env'
-import { logger } from '@/lib/logger'
 import { EXTERNAL_LINKS } from '@/lib/external-links'
+import { logger } from '@/lib/logger'
 import { isTauri, openExternalUrl } from '@/lib/platform'
 import { supabase } from '@/lib/supabase'
 
@@ -83,6 +83,18 @@ function isPasswordValid(pw: string): boolean {
   )
 }
 
+function isSubmitDisabled(
+  captchaToken: string | null,
+  mode: AuthMode,
+  isUsernameValid: boolean,
+  usernameStatus: UsernameStatus,
+  password: string,
+): boolean {
+  if (captchaToken === null) return true
+  if (mode !== 'signup') return false
+  return !isUsernameValid || usernameStatus === 'taken' || !isPasswordValid(password)
+}
+
 function PasswordRequirement({
   met,
   label,
@@ -149,6 +161,20 @@ function PasswordField({
           />
         </div>
       )}
+    </div>
+  )
+}
+
+// WHY extracted: Keeps LoginPage below Biome's cognitive complexity limit of 15.
+function SuccessView({ message, onBackToSignIn }: { message: string; onBackToSignIn: () => void }) {
+  const { t } = useTranslation('auth')
+
+  return (
+    <div data-test="login-success-message" className="flex flex-col items-center gap-4">
+      <p className="text-center text-sm text-success">{message}</p>
+      <Button data-test="login-back-to-signin" variant="flat" onPress={onBackToSignIn}>
+        {t('switchToSignIn')}
+      </Button>
     </div>
   )
 }
@@ -481,19 +507,13 @@ export function LoginPage() {
 
         <CardBody className="gap-4 px-6 pb-6">
           {successMessage !== null ? (
-            <div data-test="login-success-message" className="flex flex-col items-center gap-4">
-              <p className="text-center text-sm text-success">{successMessage}</p>
-              <Button
-                data-test="login-back-to-signin"
-                variant="flat"
-                onPress={() => {
-                  setMode('login')
-                  setSuccessMessage(null)
-                }}
-              >
-                {t('switchToSignIn')}
-              </Button>
-            </div>
+            <SuccessView
+              message={successMessage}
+              onBackToSignIn={() => {
+                setMode('login')
+                setSuccessMessage(null)
+              }}
+            />
           ) : (
             <>
               <form data-test="login-form" onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -566,13 +586,13 @@ export function LoginPage() {
                   type="submit"
                   color="primary"
                   isLoading={isSubmitting}
-                  isDisabled={
-                    captchaToken === null ||
-                    (mode === 'signup' &&
-                      (!isUsernameValid ||
-                        usernameStatus === 'taken' ||
-                        !isPasswordValid(password)))
-                  }
+                  isDisabled={isSubmitDisabled(
+                    captchaToken,
+                    mode,
+                    isUsernameValid,
+                    usernameStatus,
+                    password,
+                  )}
                   className="mt-2"
                 >
                   {mode === 'login' ? t('signIn') : t('signUp')}
