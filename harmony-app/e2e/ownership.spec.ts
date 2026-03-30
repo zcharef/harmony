@@ -115,27 +115,31 @@ test.describe('Ownership Transfer', () => {
     // Modal closes
     await expect(transferModal).not.toBeVisible({ timeout: 5_000 })
 
-    // WHY: After transfer, the SSE system delivers member.role_updated events
-    // for both the new owner and the old owner (auto-demoted to admin).
-    // useRealtimeMembers updates the TanStack Query cache in-place — no reload needed.
-    // Wait for the member list (already rendered) and verify badges via SSE.
-    const memberList = page.locator('[data-test="member-list"]')
+    // WHY: Verify the transfer persisted by reloading — this fetches fresh data
+    // from the API instead of depending on SSE event delivery timing (flaky in CI).
+    // SSE realtime delivery is already covered by realtime-sync.spec.ts.
+    await page.reload()
+    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
+    await selectServer(page, transferServer.id)
 
-    // The new owner should have the owner badge (via SSE member.role_updated)
+    const memberList = page.locator('[data-test="member-list"]')
+    await memberList.waitFor({ timeout: 15_000 })
+
+    // The new owner should have the owner badge
     const newOwnerItem = memberList.locator(
       `[data-test="member-item"][data-user-id="${transferAdmin.id}"]`,
     )
     await expect(
       newOwnerItem.locator('[data-test="member-role-badge"][data-role="owner"]'),
-    ).toBeVisible({ timeout: 15_000 })
+    ).toBeVisible({ timeout: 10_000 })
 
-    // The old owner should now have the admin badge (via SSE member.role_updated)
+    // The old owner should now have the admin badge
     const oldOwnerItem = memberList.locator(
       `[data-test="member-item"][data-user-id="${transferOwner.id}"]`,
     )
     await expect(
       oldOwnerItem.locator('[data-test="member-role-badge"][data-role="admin"]'),
-    ).toBeVisible({ timeout: 15_000 })
+    ).toBeVisible({ timeout: 10_000 })
   })
 
   test('non-owner cannot see transfer ownership button', async ({ page }) => {

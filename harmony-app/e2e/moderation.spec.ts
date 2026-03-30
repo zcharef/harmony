@@ -414,26 +414,16 @@ test.describe('Kick & Ban Moderation', () => {
 
     // Verify the user does NOT appear in the member list
     await authenticatePage(page, owner)
-
-    // WHY: Set up the response listener BEFORE selectServer triggers the GET /members
-    // request. This ensures we capture the response even if it arrives fast.
-    const membersResponsePromise = page.waitForResponse(
-      (response) =>
-        response.url().includes(`/v1/servers/${server.id}/members`) &&
-        response.request().method() === 'GET' &&
-        response.status() === 200,
-    )
-
     await selectServer(page, server.id)
-
-    // WHY: Wait for the members API response to fully resolve before asserting absence.
-    // The member-list div appears after useMembers() resolves, but asserting immediately
-    // can race against React's render cycle. Waiting for the GET /members response ensures
-    // the data is committed to TanStack Query cache before the assertion runs.
-    await membersResponsePromise
 
     const memberList = page.locator('[data-test="member-list"]')
     await memberList.waitFor({ timeout: 15_000 })
+
+    // WHY: Wait for at least one member-item to render — this proves the
+    // GET /members data has loaded and React has committed the render.
+    // Without this, asserting not.toBeVisible could false-positive on an
+    // empty list that hasn't populated yet.
+    await memberList.locator('[data-test="member-item"]').first().waitFor({ timeout: 10_000 })
 
     const bannedItem = memberList.locator(
       `[data-test="member-item"][data-user-id="${bannedTarget.id}"]`,

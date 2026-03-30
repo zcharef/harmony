@@ -862,6 +862,10 @@ test.describe('Multi-User Realtime Sync', () => {
         await dmItemRecipient.waitFor({ timeout: 10_000 })
         await dmItemRecipient.click()
         await pageRecipient.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+        // WHY: message-list renders inside chat-area after useMessages resolves.
+        // Waiting for it ensures useRealtimeMessages's useEffect has mounted and
+        // subscribed to SSE events before the sender acts.
+        await pageRecipient.locator('[data-test="message-list"]').waitFor({ timeout: 10_000 })
 
         // Sender opens the DM and sends a message via the UI
         await authenticatePage(pageSender, dmSender)
@@ -944,15 +948,18 @@ test.describe('Multi-User Realtime Sync', () => {
         // 1. Invalidates queryKeys.servers.all -> refetch removes the server
         // 2. Clears selectedServerId if viewing the banned server
         // 3. Shows a toast with the ban reason
-        await expect(serverButton).not.toBeVisible({ timeout: 15_000 })
-
-        // WHY: useForceDisconnect (use-force-disconnect.ts:80) calls toast.error()
-        // with the ban reason. HeroUI renders toast elements with data-toast="true".
-        // The ban reason 'E2E ban test' should appear as the toast title.
+        //
+        // WHY Promise.all: The toast auto-dismisses after 5s (toast.ts:19).
+        // If we wait sequentially — server disappears first (up to 15s), then
+        // check the toast — the toast has already auto-dismissed. Checking both
+        // in parallel ensures we catch the toast while it's still visible.
         const toastNotification = victimPage.locator('[data-toast="true"]').filter({
           hasText: 'E2E ban test',
         })
-        await expect(toastNotification).toBeVisible({ timeout: 5_000 })
+        await Promise.all([
+          expect(serverButton).not.toBeVisible({ timeout: 15_000 }),
+          expect(toastNotification).toBeVisible({ timeout: 15_000 }),
+        ])
       } finally {
         await victimCtx.close()
       }
