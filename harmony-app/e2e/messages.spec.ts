@@ -84,7 +84,11 @@ test.describe('Messaging', () => {
   // ── Message shows author name and timestamp ───────────────────────
 
   test('message shows author name and timestamp', async ({ page }) => {
-    // Send a message via API to ensure it exists
+    // WHY: Send from owner first to break any message grouping from prior tests,
+    // then send the target message from member. This guarantees member's message
+    // starts a new group (different author) and renders the full header with
+    // author name and timestamp.
+    await sendMessage(owner.token, channelId, 'grouping-breaker')
     const msg = await sendMessage(member.token, channelId, 'Author timestamp test')
 
     await authenticatePage(page, member)
@@ -95,9 +99,9 @@ test.describe('Messaging', () => {
     const messageItem = page.locator(`[data-test="message-item"][data-message-id="${msg.id}"]`)
     await expect(messageItem).toBeVisible({ timeout: 10_000 })
 
-    // Verify author is shown (authorLabel = first 8 chars of authorId)
+    // Verify author is shown
     const authorEl = messageItem.locator('[data-test="message-author"]')
-    await expect(authorEl).toBeVisible()
+    await expect(authorEl).toBeVisible({ timeout: 5_000 })
     await expect(authorEl).toContainText(/.+/)
 
     // Verify timestamp is shown (format: "HH:MM" or locale date string)
@@ -288,11 +292,13 @@ test.describe('Messaging', () => {
     const messageItem = page.locator(`[data-test="message-item"][data-message-id="${msg.id}"]`)
     await expect(messageItem).toBeVisible({ timeout: 10_000 })
 
-    // Hover — member should NOT see any action buttons (not own message + not moderator)
+    // Hover — member should NOT see edit or delete buttons (not own message + not moderator).
+    // WHY: The actions bar IS visible because it contains the reply button (available to all).
+    // We specifically assert that destructive actions (edit, delete) are absent.
     await messageItem.hover()
 
-    const actionsBar = messageItem.locator('[data-test="message-actions"]')
-    await expect(actionsBar).toHaveCount(0)
+    const editButton = messageItem.locator('[data-test="message-edit-button"]')
+    await expect(editButton).toHaveCount(0)
 
     const deleteButton = messageItem.locator('[data-test="message-delete-button"]')
     await expect(deleteButton).toHaveCount(0)

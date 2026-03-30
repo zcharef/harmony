@@ -59,6 +59,17 @@ export async function authenticatePage(
     { key: storageKey, value: sessionPayload },
   )
 
+  // WHY: Register the response listener BEFORE navigation so we never miss the
+  // syncProfile POST that fires on mount. If page.goto() triggers the POST before
+  // waitForResponse is registered, the response is missed and the test times out.
+  const syncProfilePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes('/v1/auth/me') &&
+      response.status() === 200 &&
+      response.request().method() === 'POST',
+    { timeout: 15_000 },
+  )
+
   await page.goto('/')
 
   // WHY: Confirm the authenticated UI rendered — catches regressions in the
@@ -70,14 +81,7 @@ export async function authenticatePage(
   // set and EventSource reconnects, the ConnectionBanner (fixed z-50 overlay at the top)
   // is visible and can intercept clicks on UI elements. Wait for the syncProfile response
   // and then for the banner to disappear to ensure a stable test environment.
-  // WHY: Match the actual POST (not OPTIONS preflight which also returns 200).
-  await page.waitForResponse(
-    (response) =>
-      response.url().includes('/v1/auth/me') &&
-      response.status() === 200 &&
-      response.request().method() === 'POST',
-    { timeout: 15_000 },
-  )
+  await syncProfilePromise
   await expect(page.locator('[data-test="connection-banner"]')).not.toBeVisible({ timeout: 15_000 })
 }
 
