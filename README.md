@@ -170,7 +170,7 @@ harmony/
 | State | TanStack Query (server), Zustand (client) |
 | Backend | Rust, Axum, SQLx |
 | Database | PostgreSQL (via Supabase) |
-| Real-time | Supabase Realtime |
+| Real-time | Rust SSE (Server-Sent Events) |
 | API contract | Code-first OpenAPI (Rust types → TypeScript client) |
 | Testing | Playwright (E2E), Vitest (unit), cargo test |
 | CI | GitHub Actions |
@@ -188,6 +188,22 @@ harmony/
 | **4** | Voice/video (LiveKit), file uploads | Planned |
 | **5** | Server discovery, push notifications | Planned |
 | **6** | Mobile app, web E2EE (WASM), bot API | Planned |
+
+---
+
+## Self-Hosting
+
+Run the full Harmony stack on your own infrastructure — no Supabase Cloud account required.
+
+```bash
+git clone https://github.com/zcharef/harmony.git && cd harmony
+cp .env.example .env   # fill in the 5 required values (see docs)
+docker compose up -d --build
+# Web app: http://your-server:8080
+# Supabase Studio: http://your-server:3001
+```
+
+For full instructions — env vars, key generation, TLS, upgrading, troubleshooting — see **[docs/self-hosting.md](docs/self-hosting.md)**.
 
 ---
 
