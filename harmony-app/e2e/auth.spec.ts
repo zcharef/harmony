@@ -141,10 +141,12 @@ test.describe('Authentication', () => {
     // WHY: Submit button is disabled until Turnstile widget resolves.
     // With test site key (1x00000000000000000000AA), it auto-passes.
     const submitButton = page.locator('[data-test="login-submit-button"]')
-    await expect(submitButton).toBeEnabled({ timeout: 10000 })
+    await expect(submitButton).toBeEnabled({ timeout: 15_000 })
 
-    const responsePromise = page.waitForResponse((response) =>
-      response.url().includes('/auth/v1/token'),
+    // WHY: Filter to POST to avoid matching OPTIONS preflight.
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes('/auth/v1/token') && response.request().method() === 'POST',
     )
 
     await submitButton.click()
@@ -180,7 +182,12 @@ test.describe('Authentication', () => {
 
     await page.goto('/')
 
+    // WHY: Wait for the login form to fully render (React hydration) before
+    // filling inputs. The login-page container confirms the form is in the DOM.
+    await page.locator('[data-test="login-page"]').waitFor({ timeout: 10_000 })
+
     const emailInput = page.locator('[data-test="login-email-input"]')
+    await emailInput.waitFor({ timeout: 5_000 })
     await emailInput.fill(user.email)
     await expect(emailInput).toHaveValue(user.email)
 
@@ -188,12 +195,16 @@ test.describe('Authentication', () => {
     await passwordInput.fill(user.password)
     await expect(passwordInput).toHaveValue(user.password)
 
-    // WHY: Wait for Turnstile to resolve before submitting
+    // WHY: Wait for Turnstile to resolve before submitting. The test site key
+    // auto-passes but still needs time to load the widget. 15s for slow CI.
     const submitButton = page.locator('[data-test="login-submit-button"]')
-    await expect(submitButton).toBeEnabled({ timeout: 10000 })
+    await expect(submitButton).toBeEnabled({ timeout: 15_000 })
 
-    const responsePromise = page.waitForResponse((response) =>
-      response.url().includes('/auth/v1/token'),
+    // WHY: Filter to POST to avoid matching the CORS OPTIONS preflight request
+    // which also returns 200 and contains /auth/v1/token in the URL.
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes('/auth/v1/token') && response.request().method() === 'POST',
     )
 
     await submitButton.click()
@@ -201,7 +212,10 @@ test.describe('Authentication', () => {
     const response = await responsePromise
     expect(response.status()).toBeLessThan(400)
 
-    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15000 })
+    // WHY: After successful auth, the app navigates from login to main layout.
+    // This involves syncProfile (POST /v1/auth/me) and SSE connection setup.
+    // 15s timeout accounts for CI latency.
+    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
 
     await expect(page.locator('[data-test="main-layout"]')).toBeAttached()
     await expect(page.locator('[data-test="login-page"]')).not.toBeVisible()

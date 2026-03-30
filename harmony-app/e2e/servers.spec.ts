@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { authenticatePage } from './fixtures/auth-fixture'
+import { authenticatePage, selectServer } from './fixtures/auth-fixture'
 import { createInvite, createServer, joinServer, syncProfile } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
 
@@ -108,15 +108,11 @@ test.describe('Server CRUD', () => {
 
     await authenticatePage(page, owner)
 
-    // Navigate to the server
-    const serverButton = page.locator(
-      `[data-test="server-button"][data-server-id="${renameServer.id}"]`,
-    )
-    await expect(serverButton).toBeVisible({ timeout: 10000 })
-    await serverButton.click()
-
-    const channelSidebar = page.locator('[data-test="channel-sidebar"]')
-    await expect(channelSidebar).toBeVisible({ timeout: 10000 })
+    // WHY: selectServer waits for both the server button and a channel-button
+    // to render, which confirms useServers() and useChannels() have resolved.
+    // This also means useMembers() has had time to load the owner's role,
+    // preventing the race where useMyMemberRole defaults to 'member'.
+    await selectServer(page, renameServer.id)
 
     // Open server settings via server header dropdown
     await page.locator('[data-test="server-header-button"]').click()
@@ -173,13 +169,11 @@ test.describe('Server CRUD', () => {
   test('member cannot access server settings to update name', async ({ page }) => {
     await authenticatePage(page, member)
 
-    // Navigate to the server as member
-    const serverButton = page.locator(`[data-test="server-button"][data-server-id="${server.id}"]`)
-    await expect(serverButton).toBeVisible({ timeout: 10000 })
-    await serverButton.click()
-
-    const channelSidebar = page.locator('[data-test="channel-sidebar"]')
-    await expect(channelSidebar).toBeVisible({ timeout: 10000 })
+    // WHY: selectServer waits for channel-button to render, confirming the server
+    // data is fully loaded. This gives useMembers() time to resolve, so
+    // useMyMemberRole has the real 'member' role (not the default 'member' from
+    // the loading state — same value here, but ensures the query has settled).
+    await selectServer(page, server.id)
 
     // Open server header dropdown
     await page.locator('[data-test="server-header-button"]').click()

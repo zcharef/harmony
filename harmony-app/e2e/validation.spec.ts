@@ -36,7 +36,11 @@ test.describe('Input Validation', () => {
     test('rejects empty server name', async ({ page }) => {
       await authenticatePage(page, owner)
 
-      await page.locator('[data-test="add-server-button"]').click()
+      // WHY: ServerList shows a Spinner (no add-server-button) while useServers()
+      // is pending. Wait for the button to appear before clicking.
+      const addServerBtn = page.locator('[data-test="add-server-button"]')
+      await addServerBtn.waitFor({ timeout: 10_000 })
+      await addServerBtn.click()
       await page.locator('[data-test="create-server-dialog"]').waitFor({ timeout: 10000 })
 
       // Leave name empty, submit
@@ -57,7 +61,11 @@ test.describe('Input Validation', () => {
     test('rejects server name exceeding 100 characters', async ({ page }) => {
       await authenticatePage(page, owner)
 
-      await page.locator('[data-test="add-server-button"]').click()
+      // WHY: ServerList shows a Spinner (no add-server-button) while useServers()
+      // is pending. Wait for the button to appear before clicking.
+      const addServerBtn = page.locator('[data-test="add-server-button"]')
+      await addServerBtn.waitFor({ timeout: 10_000 })
+      await addServerBtn.click()
       await page.locator('[data-test="create-server-dialog"]').waitFor({ timeout: 10000 })
 
       const longName = 'a'.repeat(101)
@@ -79,7 +87,11 @@ test.describe('Input Validation', () => {
     test('rejects server name with control characters via API', async ({ page }) => {
       await authenticatePage(page, owner)
 
-      await page.locator('[data-test="add-server-button"]').click()
+      // WHY: ServerList shows a Spinner (no add-server-button) while useServers()
+      // is pending. Wait for the button to appear before clicking.
+      const addServerBtn = page.locator('[data-test="add-server-button"]')
+      await addServerBtn.waitFor({ timeout: 10_000 })
+      await addServerBtn.click()
       await page.locator('[data-test="create-server-dialog"]').waitFor({ timeout: 10000 })
 
       // Control char U+0009 (tab) — client form accepts it (no regex), but API rejects it

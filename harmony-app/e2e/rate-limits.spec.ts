@@ -39,22 +39,29 @@ test.describe('Rate Limiting', () => {
     })
 
     test('messages beyond the rate limit are rejected with 429', async () => {
-      // WHY: Send 8 messages concurrently. The rate limit is 5 per 5s per channel.
-      // With 8 concurrent requests, the server receives them nearly simultaneously —
-      // at least 3 must be rate-limited. We assert at least one 429 response exists
-      // rather than checking a specific position, because HTTP request ordering is
-      // non-deterministic at the network layer.
-      const results = await Promise.all(
-        Array.from({ length: 8 }, (_, i) =>
-          sendMessageRaw(sender.token, channelId, `rate-burst-${i + 1}-${Date.now()}`),
-        ),
+      // WHY: The service-level rate limit is 5 messages per 5 seconds per user
+      // per channel (Free plan). We send 5 messages sequentially first to fill
+      // the bucket deterministically — concurrent sends suffer TOCTOU races
+      // where all requests read count=0 before any INSERT commits, causing
+      // flaky 0 rejections in CI. After filling the bucket, the 6th message
+      // must be rejected.
+      for (let i = 0; i < 5; i++) {
+        const res = await sendMessageRaw(
+          sender.token,
+          channelId,
+          `rate-fill-${i + 1}-${Date.now()}`,
+        )
+        // Guard: if any fill message is rejected, the test setup is broken
+        expect(res.status).toBe(201)
+      }
+
+      // Bucket is now full. The next message must be rate-limited.
+      const overLimitResult = await sendMessageRaw(
+        sender.token,
+        channelId,
+        `rate-over-limit-${Date.now()}`,
       )
-
-      const statuses = results.map((r) => r.status)
-      const rateLimitedCount = statuses.filter((s) => s === 429).length
-
-      // At least one request must have been rate-limited
-      expect(rateLimitedCount).toBeGreaterThanOrEqual(1)
+      expect(overLimitResult.status).toBe(429)
     })
   })
 

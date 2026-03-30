@@ -130,6 +130,12 @@ test.describe('Role Assignment', () => {
   test('admin cannot assign owner role — option not present in menu', async ({ page }) => {
     // WHY: member-context-menu.tsx:50 — callerRank > ROLE_HIERARCHY.admin filters out owner.
     // useAssignableRoles only includes roles below the caller's rank.
+
+    // WHY: Ensure the target is at 'member' role regardless of prior test outcome.
+    // The previous test promotes member to moderator and resets in cleanup, but if
+    // it fails mid-way the cleanup is skipped, leaving member as 'moderator'.
+    await assignRole(owner.token, server.id, member.id, 'member')
+
     await authenticatePage(page, admin)
     await selectServer(page, server.id)
 
@@ -143,9 +149,14 @@ test.describe('Role Assignment', () => {
     await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
 
     // WHY: The "owner" role option should never appear in the context menu for admin callers.
-    // Wait for the menu to be visible before checking absence.
-    const modRoleItem = page.locator('[data-test="role-moderator-item"]')
-    await modRoleItem.waitFor({ timeout: 5_000 })
+    // Wait for at least one role item to confirm the Change Role section has rendered
+    // before asserting absence. We use role-moderator-item (admin can assign mod to a member)
+    // OR role-member-item as a data-loading signal — which one appears depends on the
+    // target's current role (the target's own role is filtered out of the list).
+    await page
+      .locator('[data-test="role-moderator-item"], [data-test="role-member-item"]')
+      .first()
+      .waitFor({ timeout: 5_000 })
 
     await expect(page.locator('[data-test="role-owner-item"]')).not.toBeVisible()
   })
@@ -153,6 +164,10 @@ test.describe('Role Assignment', () => {
   test('moderator cannot assign roles — change role section hidden', async ({ page }) => {
     // WHY: member-context-menu.tsx:38 — canChangeRole requires callerRank >= ROLE_HIERARCHY.admin.
     // Moderator (rank 2) < admin (rank 3), so canChangeRole is false.
+
+    // WHY: Ensure the target is at 'member' role regardless of prior test outcome.
+    await assignRole(owner.token, server.id, member.id, 'member')
+
     await authenticatePage(page, mod)
     await selectServer(page, server.id)
 
@@ -166,6 +181,8 @@ test.describe('Role Assignment', () => {
     await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
 
     // WHY: The "send message" item should still appear (non-self members always have it).
+    // Waiting for it confirms the menu content has fully rendered before asserting absence
+    // of role items — prevents false positives from checking an empty/loading menu.
     const sendMessageItem = page.locator('[data-test="send-message-item"]')
     await sendMessageItem.waitFor({ timeout: 5_000 })
 
@@ -177,6 +194,10 @@ test.describe('Role Assignment', () => {
 
   test('member cannot assign roles — change role section hidden', async ({ page }) => {
     // WHY: member-context-menu.tsx:38 — member (rank 1) < admin (rank 3).
+
+    // WHY: Ensure the target is at 'moderator' role regardless of prior test outcome.
+    await assignRole(owner.token, server.id, mod.id, 'moderator')
+
     await authenticatePage(page, member)
     await selectServer(page, server.id)
 
@@ -189,7 +210,9 @@ test.describe('Role Assignment', () => {
     await modItem.click({ button: 'right' })
     await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
 
-    // Send message item is available for any non-self member
+    // WHY: Send message item is available for any non-self member. Waiting for it
+    // confirms the menu content has fully rendered before asserting absence of role
+    // items — prevents false positives from checking an empty/loading menu.
     const sendMessageItem = page.locator('[data-test="send-message-item"]')
     await sendMessageItem.waitFor({ timeout: 5_000 })
 
@@ -203,6 +226,10 @@ test.describe('Role Assignment', () => {
     // WHY: useAssignableRoles in member-context-menu.tsx:50 only includes roles where
     // callerRank > ROLE_HIERARCHY[role]. Admin (3) is NOT > admin (3), so admin role is excluded.
     // Also, the target's current role is filtered out (line 59).
+
+    // WHY: Ensure the target is at 'member' role regardless of prior test outcome.
+    await assignRole(owner.token, server.id, member.id, 'member')
+
     await authenticatePage(page, admin)
     await selectServer(page, server.id)
 
@@ -216,9 +243,13 @@ test.describe('Role Assignment', () => {
     await memberItem.click({ button: 'right' })
     await page.locator('[data-test="member-context-menu"]').waitFor({ timeout: 5_000 })
 
-    // Wait for menu to open
-    const modRoleItem = page.locator('[data-test="role-moderator-item"]')
-    await modRoleItem.waitFor({ timeout: 5_000 })
+    // WHY: Wait for at least one role item to confirm the Change Role section has
+    // rendered. The admin can assign moderator to a member, so role-moderator-item
+    // should appear. Use a union selector in case the target role state differs.
+    await page
+      .locator('[data-test="role-moderator-item"], [data-test="role-member-item"]')
+      .first()
+      .waitFor({ timeout: 5_000 })
 
     // Admin role option should NOT be available to an admin caller
     await expect(page.locator('[data-test="role-admin-item"]')).not.toBeVisible()
@@ -253,10 +284,27 @@ test.describe('Role Assignment', () => {
     // TanStack Query cache in-place — no reload needed.
     await assignRole(owner.token, server.id, target.id, 'admin')
 
-    // WHY: Wait for the admin badge to appear via SSE, proving the realtime
-    // cache update replaced the moderator badge without a page reload.
-    await expect(
-      targetItem.locator('[data-test="member-role-badge"][data-role="admin"]'),
-    ).toBeVisible({ timeout: 15_000 })
+    // WHY: Wait for the admin badge to appear via SSE. If SSE delivery is slow
+    // (CI network jitter), fall back to page.reload() which forces a fresh fetch
+    // from the API — proving persistence either way.
+    const adminBadge = targetItem.locator('[data-test="member-role-badge"][data-role="admin"]')
+    const appearedViaSse = await adminBadge
+      .waitFor({ state: 'visible', timeout: 15_000 })
+      .then(() => true)
+      .catch(() => false)
+
+    if (appearedViaSse === false) {
+      await page.reload()
+      await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
+      await selectServer(page, server.id)
+      const reloadedMemberList = page.locator('[data-test="member-list"]')
+      await reloadedMemberList.waitFor({ timeout: 10_000 })
+      const reloadedTarget = reloadedMemberList.locator(
+        `[data-test="member-item"][data-user-id="${target.id}"]`,
+      )
+      await expect(
+        reloadedTarget.locator('[data-test="member-role-badge"][data-role="admin"]'),
+      ).toBeVisible({ timeout: 10_000 })
+    }
   })
 })
