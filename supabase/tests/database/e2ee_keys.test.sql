@@ -73,6 +73,12 @@ VALUES
     ('b2222222-2222-2222-2222-222222222222', 'bob', 'Bob')
 ON CONFLICT (id) DO NOTHING;
 
+-- WHY: E2E Playwright tests leave behind rows in these tables.
+-- Hardcoded expected counts become wrong when leftover data exists.
+-- Safe: entire test runs inside BEGIN/ROLLBACK — no permanent effect.
+DELETE FROM public.one_time_keys;
+DELETE FROM public.device_keys;
+
 -- Device keys for Alice and Bob (needed for RLS tests and one_time_keys FK)
 INSERT INTO public.device_keys (id, user_id, device_id, identity_key, signing_key, device_name)
 VALUES
