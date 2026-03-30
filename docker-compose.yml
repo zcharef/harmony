@@ -1,0 +1,68 @@
+# Harmony — Full self-hosted stack
+# Usage: docker compose up -d --build
+# Docs: docs/self-hosting.md
+
+include:
+  - path: ./supabase/docker/docker-compose.yml
+    env_file:
+      - path: .env
+        required: true
+
+services:
+  # Applies Harmony DB migrations after GoTrue (auth) is healthy.
+  # Uses supabase CLI so migrations are tracked idempotently.
+  migrate:
+    image: supabase/cli:latest
+    volumes:
+      - ./supabase:/supabase:ro
+    working_dir: /supabase
+    entrypoint: supabase
+    command: db push --db-url postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+    depends_on:
+      auth:
+        condition: service_healthy
+    restart: on-failure
+
+  harmony-api:
+    build:
+      context: ./harmony-api
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      SUPABASE_JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://kong:8000
+      ENVIRONMENT: production
+      PLAN_ENFORCEMENT_ENABLED: "false"
+      SESSION_SECRET: ${SESSION_SECRET}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    # NOTE: harmony-api runs on a distroless image (no shell, no curl, no nc).
+    # Healthchecks requiring a shell are not possible. harmony-web therefore
+    # uses `condition: service_started` and relies on nginx upstream error
+    # handling to handle brief startup windows. Monitor liveness via the
+    # /v1/health endpoint from the host or a sidecar if needed.
+    restart: unless-stopped
+
+  harmony-web:
+    build:
+      # WHY context is repo root: the Dockerfile needs both harmony-app/src and
+      # deploy/nginx-app.conf. Using harmony-app/ as context would exclude deploy/.
+      context: .
+      dockerfile: harmony-app/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:8000}
+        VITE_SUPABASE_ANON_KEY: ${ANON_KEY}
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
+        VITE_OFFICIAL_SERVER_ID: ${VITE_OFFICIAL_SERVER_ID:-}
+    depends_on:
+      harmony-api:
+        condition: service_started
+    ports:
+      - "${HARMONY_WEB_PORT:-8080}:80"
+    restart: unless-stopped
