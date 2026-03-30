@@ -13,7 +13,10 @@ interface ConnectionState {
 }
 
 export const useConnectionStore = create<ConnectionState>()((set) => ({
-  status: 'connected',
+  // WHY: Initial status is 'connecting' (not 'connected') because the SSE
+  // connection hasn't been established yet at startup. The banner shows
+  // "Connecting..." until the EventSource fires onopen.
+  status: 'connecting',
   reconnectKey: 0,
   setStatus: (status) => set({ status }),
   requestReconnect: () =>

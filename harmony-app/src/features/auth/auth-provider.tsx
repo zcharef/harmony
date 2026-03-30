@@ -10,12 +10,17 @@ import { useAuthStore } from './stores/auth-store'
  * WHY: After login, we notify the backend so it can upsert the user profile
  * (display_name, avatar_url, etc.) from the Supabase auth metadata.
  *
- * Returns the error detail string on failure, or null on success.
+ * Returns the error detail string on failure, null on success, or 'skipped'
+ * when a sync is already in-flight (to avoid the caller treating a no-op guard
+ * as a successful sync — which would prematurely set isProfileSynced before
+ * the HMAC cookie is actually stored).
  */
-async function syncProfile(isSyncing: React.RefObject<boolean>): Promise<string | null> {
+async function syncProfile(
+  isSyncing: React.RefObject<boolean>,
+): Promise<string | null | 'skipped'> {
   // WHY: Guard against duplicate sync calls from rapid auth events
   if (isSyncing.current) {
-    return null
+    return 'skipped'
   }
   isSyncing.current = true
 
@@ -97,7 +102,8 @@ async function handleDeepLinkCallback({ code, state }: { code: string; state: st
  * Must wrap the entire app to ensure auth state is available everywhere.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { setSession, setUser, setLoading, setProfileSyncError, clear } = useAuthStore()
+  const { setSession, setUser, setLoading, setProfileSyncError, setProfileSynced, clear } =
+    useAuthStore()
   const isSyncing = useRef(false)
 
   useEffect(() => {
@@ -111,9 +117,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false)
 
         if (session !== null) {
-          syncProfile(isSyncing).then((error) => {
-            if (error !== null) {
-              setProfileSyncError(error)
+          syncProfile(isSyncing).then((result) => {
+            // WHY: 'skipped' means a sync is already in-flight — do nothing.
+            // null means the HTTP call succeeded and the HMAC cookie is stored.
+            // Any other string is an error message to surface in the UI.
+            if (result === null) {
+              setProfileSynced(true)
+            } else if (result !== 'skipped') {
+              setProfileSyncError(result)
             }
           })
         }
@@ -133,9 +144,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfileSyncError(null)
 
       if (session !== null) {
-        syncProfile(isSyncing).then((error) => {
-          if (error !== null) {
-            setProfileSyncError(error)
+        syncProfile(isSyncing).then((result) => {
+          if (result === null) {
+            setProfileSynced(true)
+          } else if (result !== 'skipped') {
+            setProfileSyncError(result)
           }
         })
       } else {
@@ -171,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe()
       unlistenDeepLink?.()
     }
-  }, [setSession, setUser, setLoading, setProfileSyncError, clear])
+  }, [setSession, setUser, setLoading, setProfileSyncError, setProfileSynced, clear])
 
   return children
 }

@@ -3,7 +3,9 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
-  workers: 2,
+  // WHY: >1 worker overwhelms the single Supabase instance (local or CI),
+  // causing SSE connections to stall and the connection-banner to stay visible.
+  workers: 1,
   retries: 1,
   timeout: 45_000,
   expect: { timeout: 10_000 },

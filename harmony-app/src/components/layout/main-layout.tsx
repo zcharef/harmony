@@ -247,9 +247,13 @@ export function MainLayout() {
   // WHY: Presence subscribes to ALL servers so the user appears online to
   // friends everywhere, not just on the currently viewed server.
   const userId = useAuthStore((s) => s.user?.id ?? null)
+  // WHY: Gate EventSource on profile sync so the HMAC session cookie is set
+  // before the first SSE request. Without this, EventSource races ahead of
+  // POST /v1/auth/me and gets 401 (cookie not yet stored).
+  const isProfileSynced = useAuthStore((s) => s.isProfileSynced)
   const serverIds = useMemo(() => servers?.map((s) => s.id) ?? [], [servers])
   usePresence(serverIds, selectedServerId, userId)
-  useEventSource({}, userId)
+  useEventSource({}, isProfileSynced ? userId : null)
   useForceDisconnect(userId, selectedServerId, setSelectedServerId, setSelectedChannelId)
   // WHY: Realtime hooks MUST live here (not inside collapsible sidebar/member-list
   // panels). When a panel collapses, its component unmounts and SSE listeners are
