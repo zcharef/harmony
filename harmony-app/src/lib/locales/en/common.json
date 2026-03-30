@@ -19,5 +19,9 @@
   "connecting": "Connecting...",
   "reconnecting": "Reconnecting...",
   "connectionLost": "Connection lost — messages may be outdated",
-  "retryNow": "Retry"
+  "retryNow": "Retry",
+  "updateAvailable": "New version available",
+  "updatePrompt": "v{{version}} — update now? This will restart the app.",
+  "updateAction": "Update",
+  "restartFailed": "Failed to restart — please restart manually"
 }

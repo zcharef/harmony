@@ -6,13 +6,13 @@
  * without explicit JS calls. This hook provides the check → download → prompt flow.
  *
  * Behavior:
- * - Cold start: check immediately → download + install → relaunch (transparent).
- *   If relaunch fails, falls through to showing the notification.
+ * - Cold start: check immediately → download → show prompt → user restarts
  * - Already running: periodic check (30 min) → download → show prompt → user restarts
  * - Web browser: no-op (isTauri() guard)
  * - Background errors: logger.warn (ADR-045). User-action errors: logger.error + toast.
  */
 
+import i18n from 'i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
@@ -32,10 +32,9 @@ type CheckResult = { kind: 'up_to_date' } | { kind: 'ready'; version: string }
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000 // 30 minutes
 
-/** Check for updates, download, and optionally auto-relaunch. */
+/** Check for updates and download. Always prompts the user before restarting. */
 async function checkForUpdate(
   onStatus: (s: UpdateStatus) => void,
-  isStartup: boolean,
 ): Promise<CheckResult> {
   // WHY: Dynamic import — @tauri-apps/plugin-updater crashes in the browser.
   const { check } = await import('@tauri-apps/plugin-updater')
@@ -55,22 +54,6 @@ async function checkForUpdate(
       logger.info('update_downloaded', { version: update.version })
     }
   })
-
-  // WHY: On cold start, try to auto-relaunch seamlessly. If relaunch fails,
-  // fall through to return 'ready' so the notification UI appears instead
-  // of silently dropping the downloaded update.
-  if (isStartup) {
-    try {
-      const { relaunch } = await import('@tauri-apps/plugin-process')
-      logger.info('update_auto_relaunch', { version: update.version })
-      await relaunch()
-    } catch (err: unknown) {
-      logger.warn('update_auto_relaunch_failed', {
-        version: update.version,
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
-  }
 
   return { kind: 'ready', version: update.version }
 }
@@ -97,13 +80,13 @@ export function useAppUpdater(isAppReady: boolean): AppUpdaterState {
   }, [])
 
   const checkAndApply = useCallback(
-    async (isStartup: boolean) => {
+    async () => {
       if (!isTauri()) return
 
       try {
         const result = await checkForUpdate((s) => {
           safeSetStatus(s)
-        }, isStartup)
+        })
 
         if (!mountedRef.current) return
 
@@ -133,7 +116,7 @@ export function useAppUpdater(isAppReady: boolean): AppUpdaterState {
       const { relaunch } = await import('@tauri-apps/plugin-process')
       await relaunch()
     } catch (err: unknown) {
-      toast.error('Failed to restart — please restart manually')
+      toast.error(i18n.t('common:restartFailed'))
       logger.error('update_relaunch_failed', {
         error: err instanceof Error ? err.message : String(err),
       })
@@ -151,7 +134,7 @@ export function useAppUpdater(isAppReady: boolean): AppUpdaterState {
   useEffect(() => {
     if (!isTauri() || !isAppReady || hasCheckedOnce.current) return
     hasCheckedOnce.current = true
-    checkAndApply(true)
+    checkAndApply()
   }, [isAppReady, checkAndApply])
 
   // Periodic check — every 30 minutes while the app is open
@@ -164,7 +147,7 @@ export function useAppUpdater(isAppReady: boolean): AppUpdaterState {
 
     const interval = setInterval(() => {
       if (status === 'idle') {
-        checkAndApply(false)
+        checkAndApply()
       } else if (status === 'ready' && dismissed) {
         setDismissed(false)
       }

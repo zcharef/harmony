@@ -23,8 +23,8 @@ const queryClient = new QueryClient({
 
 function AppContent() {
   const { session, isLoading } = useAuthStore()
-  // WHY: Gate on session !== null so the auto-relaunch on cold start doesn't
-  // interrupt users on the login page with an unexplained restart.
+  // WHY: Defer the update check until after login so the update
+  // notification never appears on the login page.
   const isLoggedIn = !isLoading && session !== null
   const update = useAppUpdater(isLoggedIn)
 
