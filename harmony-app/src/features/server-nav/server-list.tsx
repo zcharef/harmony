@@ -2,6 +2,7 @@ import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
 import { Compass, Info, LogOut, MessageSquare, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useChannels, useUnreadStore } from '@/features/channels'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import type { ServerResponse } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
@@ -10,6 +11,18 @@ import { cn } from '@/lib/utils'
 import { CreateServerDialog } from './create-server-dialog'
 import { useServers } from './hooks/use-servers'
 import { JoinServerDialog } from './join-server-dialog'
+
+/**
+ * WHY: Checks if any channel in a server has unread messages by reading
+ * both the channels list and the unread store. Returns true if any
+ * channel's unread count is > 0.
+ */
+function useServerHasUnread(serverId: string): boolean {
+  const { data: channels } = useChannels(serverId)
+  const counts = useUnreadStore((s) => s.counts)
+  if (channels === undefined) return false
+  return channels.some((c) => (counts[c.id] ?? 0) > 0)
+}
 
 function ServerIcon({
   server,
@@ -28,6 +41,8 @@ function ServerIcon({
     .join('')
     .slice(0, 2)
     .toUpperCase()
+
+  const hasUnread = useServerHasUnread(server.id)
 
   return (
     <Tooltip content={server.name} placement="right" offset={8}>
@@ -64,6 +79,11 @@ function ServerIcon({
             ),
           }}
         />
+
+        {/* Unread dot — shows when any channel in this server has unread messages */}
+        {hasUnread && !isActive && (
+          <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-content1 bg-danger" />
+        )}
       </button>
     </Tooltip>
   )

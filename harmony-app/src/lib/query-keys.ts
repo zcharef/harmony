@@ -36,6 +36,14 @@ export const queryKeys = {
     byChannel: (channelId: string) => ['messages', 'channel', channelId] as const,
     detail: (messageId: string) => ['messages', 'detail', messageId] as const,
   },
+  readStates: {
+    all: ['readStates'] as const,
+    byServer: (serverId: string) => ['readStates', 'server', serverId] as const,
+  },
+  notificationSettings: {
+    all: ['notificationSettings'] as const,
+    byChannel: (channelId: string) => ['notificationSettings', 'channel', channelId] as const,
+  },
   dms: {
     all: ['dms'] as const,
     list: () => ['dms', 'list'] as const,

@@ -24,4 +24,13 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
 
     /// Check whether a username is already taken.
     async fn is_username_taken(&self, username: &str) -> Result<bool, DomainError>;
+
+    /// Update a user's profile fields. `None` means "don't change this field".
+    async fn update(
+        &self,
+        user_id: &UserId,
+        avatar_url: Option<String>,
+        display_name: Option<String>,
+        custom_status: Option<String>,
+    ) -> Result<Profile, DomainError>;
 }

@@ -1,8 +1,11 @@
 import { Avatar, Button, Textarea, Tooltip } from '@heroui/react'
 import type { TFunction } from 'i18next'
-import { ArrowRight, Lock, LockOpen, Pencil, Trash2 } from 'lucide-react'
+import { ArrowRight, Lock, LockOpen, MessageSquare, Pencil, Trash2 } from 'lucide-react'
 import { memo, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
+import ReactMarkdown from 'react-markdown'
+import rehypeSanitize from 'rehype-sanitize'
+import remarkGfm from 'remark-gfm'
 import type { DecryptResult } from '@/features/crypto'
 import { EncryptedMessageContent } from '@/features/crypto'
 import type { MessageResponse } from '@/lib/api'
@@ -14,10 +17,18 @@ interface MessageItemProps {
   /** WHY: When true, the delete button appears on ALL messages (not just own). */
   canModerateMessages: boolean
   isEditing: boolean
+  /** WHY: When true, hides avatar and header to visually group consecutive same-author messages. */
+  isGrouped?: boolean
   onStartEdit: () => void
   onSaveEdit: (content: string) => void
   onCancelEdit: () => void
   onDelete: () => void
+  /** WHY: Callback to add a reaction to this message (toggle on). */
+  onAddReaction?: (emoji: string) => void
+  /** WHY: Callback to remove a reaction from this message (toggle off). */
+  onRemoveReaction?: (emoji: string) => void
+  /** WHY: Callback to start replying to this message. */
+  onReply?: () => void
   /** WHY: When true, encrypted messages are rendered via EncryptedMessageContent (DM Olm). */
   isDm?: boolean
   /** WHY: When true, messages use Megolm channel encryption instead of Olm. */
@@ -190,14 +201,50 @@ function MessageContent({
   }
 
   return (
-    <p data-test="message-content" className="text-sm text-foreground/90">
-      {message.content}
+    <div data-test="message-content" className="text-sm text-foreground/90">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeSanitize]}
+        components={{
+          p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+          code: ({ className, children }) => {
+            const isBlock = className?.includes('language-')
+            if (isBlock) {
+              return (
+                <code className="block rounded bg-default-100 p-2 font-mono text-sm">
+                  {children}
+                </code>
+              )
+            }
+            return <code className="rounded bg-default-100 px-1 font-mono text-sm">{children}</code>
+          },
+          pre: ({ children }) => <pre className="my-1">{children}</pre>,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-3 border-default-300 pl-3 italic text-default-500">
+              {children}
+            </blockquote>
+          ),
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline"
+            >
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {message.content}
+      </ReactMarkdown>
       {message.editedAt !== undefined && message.editedAt !== null && (
         <span className="ml-1 text-xs text-default-400" data-test="message-edited-indicator">
           {t('edited')}
         </span>
       )}
-    </p>
+    </div>
   )
 }
 
@@ -226,6 +273,99 @@ function SystemMessageItem({ message, t }: { message: MessageResponse; t: TFunct
   )
 }
 
+// WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
+function ParentQuote({ parentMessage }: { parentMessage?: MessageResponse['parentMessage'] }) {
+  if (parentMessage === undefined || parentMessage === null) return null
+
+  return (
+    <div className="mb-1 border-l-2 border-default-300 pl-2 opacity-75">
+      <span className="text-xs font-medium">{parentMessage.authorUsername}</span>
+      <p className="truncate text-xs text-default-500">{parentMessage.contentPreview}</p>
+    </div>
+  )
+}
+
+// WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
+function ReactionBar({
+  reactions,
+  isDeleted,
+  onAddReaction,
+  onRemoveReaction,
+}: {
+  reactions: MessageResponse['reactions']
+  isDeleted: boolean
+  onAddReaction?: (emoji: string) => void
+  onRemoveReaction?: (emoji: string) => void
+}) {
+  if (reactions === undefined || reactions.length === 0 || isDeleted) return null
+
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {reactions.map((r) => (
+        <button
+          key={r.emoji}
+          type="button"
+          onClick={() =>
+            r.reactedByMe === true ? onRemoveReaction?.(r.emoji) : onAddReaction?.(r.emoji)
+          }
+          className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors${r.reactedByMe === true ? ' border-primary bg-primary/10 text-primary' : ' border-default-200 bg-default-50 hover:bg-default-100'}`}
+        >
+          <span>{r.emoji}</span>
+          <span>{r.count}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
+function MessageHeader({
+  authorLabel,
+  isPending,
+  message,
+  isDm,
+}: {
+  authorLabel: string
+  isPending: boolean
+  message: MessageResponse
+  isDm: boolean
+}) {
+  const { t } = useTranslation('messages')
+  const { t: tCrypto } = useTranslation('crypto')
+
+  return (
+    <div className="flex items-baseline gap-2">
+      <span
+        data-test="message-author"
+        className="cursor-pointer font-medium text-foreground hover:underline"
+      >
+        {authorLabel}
+      </span>
+      <span data-test="message-timestamp" className="text-xs text-default-500">
+        {isPending ? t('sending') : formatTimestamp(message.createdAt, t)}
+      </span>
+      {isDm && (
+        <Tooltip
+          content={
+            message.encrypted === true
+              ? tCrypto('encryptedTooltip')
+              : tCrypto('notEncryptedTooltip')
+          }
+          size="sm"
+        >
+          <span data-test="message-encryption-indicator" className="inline-flex items-center">
+            {message.encrypted === true ? (
+              <Lock className="h-3 w-3 text-success-500" />
+            ) : (
+              <LockOpen className="h-3 w-3 text-default-400" />
+            )}
+          </span>
+        </Tooltip>
+      )}
+    </div>
+  )
+}
+
 /**
  * WHY React.memo: The virtualizer re-renders all visible items when the
  * messages array reference changes (on every new message via realtime or
@@ -237,10 +377,14 @@ export const MessageItem = memo(function MessageItem({
   currentUserId,
   canModerateMessages,
   isEditing,
+  isGrouped = false,
   onStartEdit,
   onSaveEdit,
   onCancelEdit,
   onDelete,
+  onAddReaction,
+  onRemoveReaction,
+  onReply,
   isDm = false,
   isChannelEncrypted = false,
   decryptMessage,
@@ -248,7 +392,6 @@ export const MessageItem = memo(function MessageItem({
   getCachedPlaintext,
 }: MessageItemProps) {
   const { t } = useTranslation('messages')
-  const { t: tCrypto } = useTranslation('crypto')
   // WHY: useState must be called before any conditional returns (React rules of hooks).
   const [editContent, setEditContent] = useState(message.content)
 
@@ -277,47 +420,32 @@ export const MessageItem = memo(function MessageItem({
     <div
       data-test="message-item"
       data-message-id={message.id}
-      className={`group relative flex gap-4 px-4 py-1 hover:bg-default-200/50${isPending ? ' opacity-60' : ''}`}
+      className={`group relative flex gap-4 px-4 hover:bg-default-200/50${isPending ? ' opacity-60' : ''}${isGrouped ? ' py-0.5' : ' py-1'}`}
     >
-      <Avatar
-        name={authorLabel}
-        color="primary"
-        size="md"
-        classNames={{
-          base: 'mt-0.5 h-10 w-10 shrink-0',
-          name: 'text-sm',
-        }}
-      />
+      {isGrouped ? (
+        <div className="w-10 shrink-0" />
+      ) : (
+        <Avatar
+          name={authorLabel}
+          color="primary"
+          size="md"
+          classNames={{
+            base: 'mt-0.5 h-10 w-10 shrink-0',
+            name: 'text-sm',
+          }}
+        />
+      )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-baseline gap-2">
-          <span
-            data-test="message-author"
-            className="cursor-pointer font-medium text-foreground hover:underline"
-          >
-            {authorLabel}
-          </span>
-          <span data-test="message-timestamp" className="text-xs text-default-500">
-            {isPending ? t('sending') : formatTimestamp(message.createdAt, t)}
-          </span>
-          {isDm && (
-            <Tooltip
-              content={
-                message.encrypted === true
-                  ? tCrypto('encryptedTooltip')
-                  : tCrypto('notEncryptedTooltip')
-              }
-              size="sm"
-            >
-              <span data-test="message-encryption-indicator" className="inline-flex items-center">
-                {message.encrypted === true ? (
-                  <Lock className="h-3 w-3 text-success-500" />
-                ) : (
-                  <LockOpen className="h-3 w-3 text-default-400" />
-                )}
-              </span>
-            </Tooltip>
-          )}
-        </div>
+        {!isGrouped && (
+          <MessageHeader
+            authorLabel={authorLabel}
+            isPending={isPending}
+            message={message}
+            isDm={isDm}
+          />
+        )}
+
+        <ParentQuote parentMessage={message.parentMessage} />
 
         <MessageContent
           message={message}
@@ -332,30 +460,46 @@ export const MessageItem = memo(function MessageItem({
           decryptMessage={activeDecryptFn}
           getCachedPlaintext={getCachedPlaintext}
         />
+
+        <ReactionBar
+          reactions={message.reactions}
+          isDeleted={isDeleted}
+          onAddReaction={onAddReaction}
+          onRemoveReaction={onRemoveReaction}
+        />
       </div>
 
-      {/* WHY: Edit is own-message-only. Delete shows for own messages OR
-          if the current user is moderator+ (canModerateMessages).
-          Actions are hidden for deleted messages (tombstones). */}
-      {(isOwnMessage || canModerateMessages) &&
-        isEditing === false &&
-        isPending === false &&
-        isDeleted === false && (
-          <div
-            data-test="message-actions"
-            className="absolute -top-3 right-4 hidden gap-0.5 rounded-md border border-divider bg-background shadow-sm group-hover:flex"
-          >
-            {isOwnMessage && (
-              <Button
-                variant="light"
-                isIconOnly
-                size="sm"
-                onPress={onStartEdit}
-                data-test="message-edit-button"
-              >
-                <Pencil className="h-4 w-4 text-default-500" />
-              </Button>
-            )}
+      {/* WHY: Actions bar shows for non-deleted, non-pending messages.
+          Reply is available to everyone. Edit is own-message-only.
+          Delete shows for own messages OR if moderator+. */}
+      {isEditing === false && isPending === false && isDeleted === false && (
+        <div
+          data-test="message-actions"
+          className="absolute -top-3 right-4 hidden gap-0.5 rounded-md border border-divider bg-background shadow-sm group-hover:flex"
+        >
+          {onReply !== undefined && (
+            <Button
+              variant="light"
+              isIconOnly
+              size="sm"
+              onPress={onReply}
+              data-test="message-reply-button"
+            >
+              <MessageSquare className="h-4 w-4 text-default-500" />
+            </Button>
+          )}
+          {isOwnMessage && (
+            <Button
+              variant="light"
+              isIconOnly
+              size="sm"
+              onPress={onStartEdit}
+              data-test="message-edit-button"
+            >
+              <Pencil className="h-4 w-4 text-default-500" />
+            </Button>
+          )}
+          {(isOwnMessage || canModerateMessages) && (
             <Button
               variant="light"
               isIconOnly
@@ -365,8 +509,9 @@ export const MessageItem = memo(function MessageItem({
             >
               <Trash2 className="h-4 w-4 text-danger" />
             </Button>
-          </div>
-        )}
+          )}
+        </div>
+      )}
     </div>
   )
 })

@@ -33,6 +33,8 @@ export const SSE_EVENT_NAMES = [
   'dm.created',
   'typing.started',
   'presence.changed',
+  'reaction.added',
+  'reaction.removed',
   'force.disconnect',
 ] as const
 
@@ -52,6 +54,7 @@ const messagePayloadSchema = z.object({
   encrypted: z.boolean(),
   senderDeviceId: z.string().nullable(),
   editedAt: z.string().nullable(),
+  parentMessageId: z.string().nullable().optional(),
   createdAt: z.string(),
 })
 
@@ -210,6 +213,27 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     status: userStatusSchema,
   }),
 
+  // Reactions
+  z.object({
+    type: z.literal('reactionAdded'),
+    senderId: z.string(),
+    serverId: z.string(),
+    channelId: z.string(),
+    messageId: z.string(),
+    emoji: z.string(),
+    userId: z.string(),
+    username: z.string(),
+  }),
+  z.object({
+    type: z.literal('reactionRemoved'),
+    senderId: z.string(),
+    serverId: z.string(),
+    channelId: z.string(),
+    messageId: z.string(),
+    emoji: z.string(),
+    userId: z.string(),
+  }),
+
   // System
   z.object({
     type: z.literal('forceDisconnect'),
@@ -267,5 +291,7 @@ export const SSE_EVENT_NAME_TO_TYPE = {
   'dm.created': 'dmCreated',
   'typing.started': 'typingStarted',
   'presence.changed': 'presenceChanged',
+  'reaction.added': 'reactionAdded',
+  'reaction.removed': 'reactionRemoved',
   'force.disconnect': 'forceDisconnect',
 } as const satisfies Record<SseEventName, ServerEvent['type']>

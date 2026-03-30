@@ -44,5 +44,20 @@ pub struct Message {
     /// Event key for system messages (e.g. `member_join`). Frontend resolves
     /// this to a localized template. Always `None` for default messages.
     pub system_event_key: Option<String>,
+    /// Parent message ID for reply threading. `None` for top-level messages.
+    pub parent_message_id: Option<MessageId>,
     pub created_at: DateTime<Utc>,
+}
+
+/// Lightweight preview of a parent message for reply display.
+///
+/// Sent alongside reply messages so the client can render a quote block
+/// without an extra API call.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ParentMessagePreview {
+    pub id: MessageId,
+    pub author_username: String,
+    /// First 100 characters of the parent message content.
+    pub content_preview: String,
 }

@@ -2,6 +2,7 @@ import type { InfiniteData } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { z } from 'zod'
+import { useUnreadStore } from '@/features/channels'
 import { useServerEvent } from '@/hooks/use-server-event'
 import type { MessageListResponse, MessageResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
@@ -60,6 +61,7 @@ function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): Messa
     editedAt: payload.editedAt,
     createdAt: payload.createdAt,
     messageType: 'default',
+    reactions: [],
   }
 }
 
@@ -93,8 +95,12 @@ export function useRealtimeMessages(channelId: string) {
         return
       }
 
-      // WHY: Only process events for the channel this hook is watching.
-      if (parsed.data.channelId !== channelId) return
+      // WHY: Increment unread count for channels other than the one being viewed.
+      // This ensures the sidebar badge updates in real-time via SSE.
+      if (parsed.data.channelId !== channelId) {
+        useUnreadStore.getState().increment(parsed.data.channelId)
+        return
+      }
 
       const message = toMessageResponse(parsed.data.message)
 

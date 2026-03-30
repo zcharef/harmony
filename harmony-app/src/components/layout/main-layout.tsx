@@ -6,7 +6,12 @@ import { Group, Panel, Separator } from 'react-resizable-panels'
 
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
-import { ChannelSidebar, useChannels, useRealtimeChannels } from '@/features/channels'
+import {
+  ChannelSidebar,
+  useChannels,
+  useReadStates,
+  useRealtimeChannels,
+} from '@/features/channels'
 import { ChatArea } from '@/features/chat'
 import { DmSidebar, useDms } from '@/features/dms'
 import {
@@ -266,6 +271,9 @@ export function MainLayout() {
   // torn down — events would be silently missed until the panel re-opens.
   useRealtimeChannels(selectedServerId ?? '')
   useRealtimeMembers(selectedServerId ?? '')
+  // WHY: Fetch server-computed unread counts on server selection.
+  // Initializes the Zustand unread store so badges show correctly on load.
+  useReadStates(selectedServerId)
   const { data: channels } = useChannels(selectedServerId)
 
   // WHY: DM list needed to derive chat header info (recipient name) when in DM view

@@ -1,3 +1,5 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running `target/debug/export_openapi`
 {
   "openapi": "3.1.0",
   "info": {
@@ -422,6 +424,155 @@
         ]
       }
     },
+    "/v1/channels/{channel_id}/messages/{message_id}/reactions": {
+      "post": {
+        "tags": [
+          "Reactions"
+        ],
+        "summary": "Add a reaction to a message.",
+        "description": "# Errors\nReturns `ApiError` on validation failure, authorization failure, or repository error.",
+        "operationId": "add_reaction",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MessageId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddReactionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Reaction added"
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a server member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}": {
+      "delete": {
+        "tags": [
+          "Reactions"
+        ],
+        "summary": "Remove a reaction from a message.",
+        "description": "# Errors\nReturns `ApiError` on authorization failure or repository error.",
+        "operationId": "remove_reaction",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MessageId"
+            }
+          },
+          {
+            "name": "emoji",
+            "in": "path",
+            "description": "Emoji to remove",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Reaction removed"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a server member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/channels/{id}/megolm-sessions": {
       "post": {
         "tags": [
@@ -624,6 +775,174 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/channels/{id}/notification-settings": {
+      "get": {
+        "tags": [
+          "NotificationSettings"
+        ],
+        "summary": "Get notification settings for a channel.",
+        "description": "Returns the default level (`all`) when no explicit setting exists.\n\n# Errors\nReturns `ApiError` on repository error.",
+        "operationId": "get_notification_settings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notification settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSettingsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "NotificationSettings"
+        ],
+        "summary": "Update notification settings for a channel.",
+        "description": "# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "operationId": "update_notification_settings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNotificationSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Settings updated"
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/channels/{id}/read-state": {
+      "patch": {
+        "tags": [
+          "ReadStates"
+        ],
+        "summary": "Mark a channel as read up to a specific message.",
+        "description": "# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "operationId": "mark_channel_read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Read state updated"
           },
           "400": {
             "description": "Validation error",
@@ -1417,6 +1736,61 @@
           },
           "404": {
             "description": "Profile not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Profiles"
+        ],
+        "summary": "Update the authenticated user's profile fields (avatar, display name, custom status).",
+        "description": "Patch semantics: only provided fields are updated; omitted fields remain unchanged.\n\n# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "operationId": "update_my_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -2632,6 +3006,54 @@
         ]
       }
     },
+    "/v1/servers/{id}/read-states": {
+      "get": {
+        "tags": [
+          "ReadStates"
+        ],
+        "summary": "List read states with unread counts for all channels in a server.",
+        "description": "# Errors\nReturns `ApiError` on repository error.",
+        "operationId": "list_server_read_states",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read states list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadStatesListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/servers/{id}/transfer-ownership": {
       "post": {
         "tags": [
@@ -2723,6 +3145,20 @@
   },
   "components": {
     "schemas": {
+      "AddReactionRequest": {
+        "type": "object",
+        "description": "Request body for adding a reaction.",
+        "required": [
+          "emoji"
+        ],
+        "properties": {
+          "emoji": {
+            "type": "string",
+            "description": "The emoji to react with (e.g., \"👍\")."
+          }
+        },
+        "additionalProperties": false
+      },
       "AssignRoleRequest": {
         "type": "object",
         "description": "Request body for assigning a role to a server member.",
@@ -3489,6 +3925,20 @@
           }
         }
       },
+      "MarkReadRequest": {
+        "type": "object",
+        "description": "Request body for marking a channel as read.",
+        "required": [
+          "lastMessageId"
+        ],
+        "properties": {
+          "lastMessageId": {
+            "$ref": "#/components/schemas/MessageId",
+            "description": "ID of the last message the user has read."
+          }
+        },
+        "additionalProperties": false
+      },
       "MegolmSessionResponse": {
         "type": "object",
         "description": "Response after registering a Megolm session.",
@@ -3711,6 +4161,35 @@
             "$ref": "#/components/schemas/MessageType",
             "description": "`default` for user messages, `system` for announcements."
           },
+          "parentMessage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ParentMessagePreview",
+                "description": "Preview of the parent message (author + content snippet)."
+              }
+            ]
+          },
+          "parentMessageId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MessageId",
+                "description": "Parent message ID when this is a reply."
+              }
+            ]
+          },
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReactionSummary"
+            },
+            "description": "Aggregated reaction summaries for this message."
+          },
           "senderDeviceId": {
             "type": [
               "string",
@@ -3734,6 +4213,31 @@
           "default",
           "system"
         ]
+      },
+      "NotificationLevel": {
+        "type": "string",
+        "description": "Notification level for a channel.",
+        "enum": [
+          "all",
+          "mentions",
+          "none"
+        ]
+      },
+      "NotificationSettingsResponse": {
+        "type": "object",
+        "description": "Response for notification settings.",
+        "required": [
+          "channelId",
+          "level"
+        ],
+        "properties": {
+          "channelId": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "level": {
+            "$ref": "#/components/schemas/NotificationLevel"
+          }
+        }
       },
       "OneTimeKeyDto": {
         "type": "object",
@@ -3764,6 +4268,27 @@
         "format": "uuid",
         "description": "Unique identifier for a one-time key record.",
         "example": "cc0e8400-e29b-41d4-a716-446655440007"
+      },
+      "ParentMessagePreview": {
+        "type": "object",
+        "description": "Lightweight preview of a parent message for reply display.\n\nSent alongside reply messages so the client can render a quote block\nwithout an extra API call.",
+        "required": [
+          "id",
+          "authorUsername",
+          "contentPreview"
+        ],
+        "properties": {
+          "authorUsername": {
+            "type": "string"
+          },
+          "contentPreview": {
+            "type": "string",
+            "description": "First 100 characters of the parent message content."
+          },
+          "id": {
+            "$ref": "#/components/schemas/MessageId"
+          }
+        }
       },
       "PreKeyBundleResponse": {
         "type": "object",
@@ -3896,6 +4421,76 @@
           }
         }
       },
+      "ReactionSummary": {
+        "type": "object",
+        "description": "Aggregated reaction summary for a single emoji on a message.",
+        "required": [
+          "emoji",
+          "count",
+          "reactedByMe"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "emoji": {
+            "type": "string"
+          },
+          "reactedByMe": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ReadStateResponse": {
+        "type": "object",
+        "description": "Read state for a single channel.",
+        "required": [
+          "channelId",
+          "unreadCount"
+        ],
+        "properties": {
+          "channelId": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "lastMessageId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MessageId"
+              }
+            ]
+          },
+          "lastReadAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "unreadCount": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ReadStatesListResponse": {
+        "type": "object",
+        "description": "Envelope for a list of read states.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReadStateResponse"
+            }
+          }
+        }
+      },
       "RedeemDesktopAuthRequest": {
         "type": "object",
         "description": "Request body for redeeming a desktop auth code.",
@@ -3989,6 +4584,17 @@
               "null"
             ],
             "description": "Whether this message contains E2EE ciphertext. Defaults to `false`."
+          },
+          "parentMessageId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MessageId",
+                "description": "Parent message ID for reply threading. Omit for top-level messages."
+              }
+            ]
           },
           "senderDeviceId": {
             "type": [
@@ -4117,6 +4723,19 @@
         },
         "additionalProperties": false
       },
+      "UpdateNotificationSettingsRequest": {
+        "type": "object",
+        "description": "Request body for updating notification settings.",
+        "required": [
+          "level"
+        ],
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/NotificationLevel"
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdatePresenceRequest": {
         "type": "object",
         "description": "Request body for updating presence status.",
@@ -4127,6 +4746,34 @@
           "status": {
             "$ref": "#/components/schemas/UserStatus",
             "description": "User-settable status. Must be one of: `online`, `idle`, `dnd`.\n`offline` is system-managed (set on disconnect) and cannot be set via this endpoint."
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateProfileRequest": {
+        "type": "object",
+        "description": "Request body for updating the authenticated user's profile.",
+        "properties": {
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Avatar image URL (must be HTTPS)."
+          },
+          "customStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Custom status text (max 128 characters)."
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name (1-32 characters)."
           }
         },
         "additionalProperties": false
@@ -4229,6 +4876,18 @@
     {
       "name": "Messages",
       "description": "Messaging within channels"
+    },
+    {
+      "name": "Reactions",
+      "description": "Message reactions"
+    },
+    {
+      "name": "ReadStates",
+      "description": "Channel read state tracking"
+    },
+    {
+      "name": "NotificationSettings",
+      "description": "Per-channel notification preferences"
     },
     {
       "name": "DirectMessages",

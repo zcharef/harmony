@@ -27,6 +27,7 @@ pub struct MessagePayload {
     pub encrypted: bool,
     pub sender_device_id: Option<String>,
     pub edited_at: Option<DateTime<Utc>>,
+    pub parent_message_id: Option<MessageId>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -190,6 +191,25 @@ pub enum ServerEvent {
         status: UserStatus,
     },
 
+    // ── Reactions ────────────────────────────────────────────
+    ReactionAdded {
+        sender_id: UserId,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        message_id: MessageId,
+        emoji: String,
+        user_id: UserId,
+        username: String,
+    },
+    ReactionRemoved {
+        sender_id: UserId,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        message_id: MessageId,
+        emoji: String,
+        user_id: UserId,
+    },
+
     // ── System ───────────────────────────────────────────────
     /// Tells a specific user to disconnect from a server (kicked/banned).
     ForceDisconnect {
@@ -219,6 +239,8 @@ impl ServerEvent {
             Self::DmCreated { .. } => "dm.created",
             Self::TypingStarted { .. } => "typing.started",
             Self::PresenceChanged { .. } => "presence.changed",
+            Self::ReactionAdded { .. } => "reaction.added",
+            Self::ReactionRemoved { .. } => "reaction.removed",
             Self::ForceDisconnect { .. } => "force.disconnect",
         }
     }
@@ -242,6 +264,8 @@ impl ServerEvent {
             | Self::DmCreated { sender_id, .. }
             | Self::TypingStarted { sender_id, .. }
             | Self::PresenceChanged { sender_id, .. }
+            | Self::ReactionAdded { sender_id, .. }
+            | Self::ReactionRemoved { sender_id, .. }
             | Self::ForceDisconnect { sender_id, .. } => sender_id,
         }
     }
@@ -263,6 +287,8 @@ impl ServerEvent {
             | Self::ChannelDeleted { server_id, .. }
             | Self::ServerUpdated { server_id, .. }
             | Self::TypingStarted { server_id, .. }
+            | Self::ReactionAdded { server_id, .. }
+            | Self::ReactionRemoved { server_id, .. }
             | Self::ForceDisconnect { server_id, .. } => Some(server_id),
             Self::DmCreated { .. } | Self::PresenceChanged { .. } => None,
         }
@@ -276,7 +302,20 @@ impl ServerEvent {
             Self::DmCreated { target_user_id, .. }
             | Self::MemberBanned { target_user_id, .. }
             | Self::ForceDisconnect { target_user_id, .. } => Some(target_user_id),
-            _ => None,
+            Self::MessageCreated { .. }
+            | Self::MessageUpdated { .. }
+            | Self::MessageDeleted { .. }
+            | Self::MemberJoined { .. }
+            | Self::MemberRemoved { .. }
+            | Self::MemberRoleUpdated { .. }
+            | Self::ChannelCreated { .. }
+            | Self::ChannelUpdated { .. }
+            | Self::ChannelDeleted { .. }
+            | Self::ServerUpdated { .. }
+            | Self::TypingStarted { .. }
+            | Self::PresenceChanged { .. }
+            | Self::ReactionAdded { .. }
+            | Self::ReactionRemoved { .. } => None,
         }
     }
 }
@@ -321,6 +360,7 @@ mod tests {
                         encrypted: false,
                         sender_device_id: None,
                         edited_at: None,
+                        parent_message_id: None,
                         created_at: Utc::now(),
                     },
                 },

@@ -34,6 +34,7 @@ import { CreateChannelDialog } from './create-channel-dialog'
 import { EditChannelDialog } from './edit-channel-dialog'
 import { useChannels } from './hooks/use-channels'
 import { useDeleteChannel } from './hooks/use-delete-channel'
+import { useUnreadStore } from './stores/unread-store'
 
 function ChannelButton({
   channel,
@@ -51,6 +52,7 @@ function ChannelButton({
   onDelete: () => void
 }) {
   const { t } = useTranslation('channels')
+  const unreadCount = useUnreadStore((s) => s.counts[channel.id] ?? 0)
 
   return (
     <div data-test="channel-item" className="group flex items-center">
@@ -62,8 +64,9 @@ function ChannelButton({
         size="sm"
         onPress={onSelect}
         className={cn(
-          'flex-1 justify-start gap-1.5 px-2 font-medium text-default-500',
+          'flex-1 justify-start gap-1.5 px-2 text-default-500',
           isActive && 'bg-default-200 text-foreground',
+          unreadCount > 0 && !isActive ? 'font-semibold text-foreground' : 'font-medium',
         )}
       >
         {channel.channelType === 'text' ? (
@@ -75,6 +78,11 @@ function ChannelButton({
         {channel.encrypted && <EncryptedChannelBadge />}
         {channel.isPrivate && <Lock className="h-3 w-3 shrink-0 text-default-400" />}
         {channel.isReadOnly && <Megaphone className="h-3 w-3 shrink-0 text-default-400" />}
+        {unreadCount > 0 && (
+          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-xs text-white">
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
       </Button>
       {canManageChannels && (
         <Dropdown>

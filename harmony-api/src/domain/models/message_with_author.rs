@@ -8,6 +8,8 @@
 //! The core [`Message`] entity remains unchanged.
 
 use crate::domain::models::Message;
+use crate::domain::models::ParentMessagePreview;
+use crate::domain::models::ReactionSummary;
 
 /// A message enriched with author profile data (username + avatar).
 ///
@@ -22,4 +24,8 @@ pub struct MessageWithAuthor {
     pub author_username: String,
     /// Author's avatar URL (from `profiles.avatar_url`), if set.
     pub author_avatar_url: Option<String>,
+    /// Aggregated reaction summaries (populated by `MessageService`, not the repository).
+    pub reactions: Vec<ReactionSummary>,
+    /// Preview of the parent message when this is a reply.
+    pub parent_message: Option<ParentMessagePreview>,
 }

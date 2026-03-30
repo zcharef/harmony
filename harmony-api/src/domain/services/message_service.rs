@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Channel, ChannelId, MessageId, MessageWithAuthor, Role, UserId};
 use crate::domain::ports::{
-    ChannelRepository, MemberRepository, MessageRepository, PlanLimitChecker,
+    ChannelRepository, MemberRepository, MessageRepository, PlanLimitChecker, ReactionRepository,
 };
 
 /// Service for message-related business logic.
@@ -17,6 +17,7 @@ pub struct MessageService {
     channel_repo: Arc<dyn ChannelRepository>,
     member_repo: Arc<dyn MemberRepository>,
     plan_checker: Arc<dyn PlanLimitChecker>,
+    reaction_repo: Arc<dyn ReactionRepository>,
 }
 
 /// Maximum message length (DB ceiling — self-hosted max).
@@ -40,12 +41,14 @@ impl MessageService {
         channel_repo: Arc<dyn ChannelRepository>,
         member_repo: Arc<dyn MemberRepository>,
         plan_checker: Arc<dyn PlanLimitChecker>,
+        reaction_repo: Arc<dyn ReactionRepository>,
     ) -> Self {
         Self {
             repo,
             channel_repo,
             member_repo,
             plan_checker,
+            reaction_repo,
         }
     }
 
@@ -102,6 +105,7 @@ impl MessageService {
         content: String,
         encrypted: bool,
         sender_device_id: Option<String>,
+        parent_message_id: Option<MessageId>,
     ) -> Result<MessageWithAuthor, DomainError> {
         let channel = self
             .verify_channel_membership(channel_id, author_id)
@@ -161,6 +165,25 @@ impl MessageService {
             )));
         }
 
+        // WHY: If replying, verify the parent message exists, is not deleted,
+        // and belongs to the same channel (can't reply across channels).
+        if let Some(ref parent_id) = parent_message_id {
+            let parent =
+                self.repo
+                    .find_by_id(parent_id)
+                    .await?
+                    .ok_or_else(|| DomainError::NotFound {
+                        resource_type: "Message",
+                        id: parent_id.to_string(),
+                    })?;
+
+            if parent.channel_id != *channel_id {
+                return Err(DomainError::ValidationError(
+                    "Cannot reply to a message in a different channel".to_string(),
+                ));
+            }
+        }
+
         let recent_count = self
             .repo
             .count_recent(channel_id, author_id, Self::RATE_LIMIT_WINDOW_SECS)
@@ -177,7 +200,14 @@ impl MessageService {
         }
 
         self.repo
-            .create(channel_id, author_id, content, encrypted, sender_device_id)
+            .create(
+                channel_id,
+                author_id,
+                content,
+                encrypted,
+                sender_device_id,
+                parent_message_id,
+            )
             .await
     }
 
@@ -195,7 +225,24 @@ impl MessageService {
     ) -> Result<Vec<MessageWithAuthor>, DomainError> {
         let _channel = self.verify_channel_membership(channel_id, user_id).await?;
 
-        self.repo.list_for_channel(channel_id, cursor, limit).await
+        let mut messages = self
+            .repo
+            .list_for_channel(channel_id, cursor, limit)
+            .await?;
+
+        // WHY: Batch-fetch reactions for all messages in a single query,
+        // then zip into each MessageWithAuthor. Avoids N+1 queries.
+        let ids: Vec<crate::domain::models::MessageId> =
+            messages.iter().map(|m| m.message.id.clone()).collect();
+        let mut reactions_map = self.reaction_repo.batch_for_messages(&ids, user_id).await?;
+
+        for msg in &mut messages {
+            if let Some(reactions) = reactions_map.remove(&msg.message.id) {
+                msg.reactions = reactions;
+            }
+        }
+
+        Ok(messages)
     }
 
     /// Edit a message's content. Only the author can edit.
@@ -483,6 +530,7 @@ mod tests {
             sender_device_id: None,
             message_type: crate::domain::models::MessageType::Default,
             system_event_key: None,
+            parent_message_id: None,
             created_at: Utc::now(),
         };
 

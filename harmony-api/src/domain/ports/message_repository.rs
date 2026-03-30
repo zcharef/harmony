@@ -17,6 +17,7 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         content: String,
         encrypted: bool,
         sender_device_id: Option<String>,
+        parent_message_id: Option<MessageId>,
     ) -> Result<MessageWithAuthor, DomainError>;
 
     /// List messages in a channel with cursor-based pagination (ADR-036).

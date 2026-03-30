@@ -86,7 +86,7 @@ describe('useSendMessage', () => {
     })
 
     await act(async () => {
-      result.current.mutate('hello')
+      result.current.mutate({ content: 'hello' })
     })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
@@ -120,7 +120,7 @@ describe('useSendMessage', () => {
     })
 
     await act(async () => {
-      result.current.mutate('optimistic text')
+      result.current.mutate({ content: 'optimistic text' })
     })
 
     // While the mutation is in-flight, check the cache for the optimistic entry
@@ -159,7 +159,7 @@ describe('useSendMessage', () => {
     })
 
     await act(async () => {
-      result.current.mutate('hello')
+      result.current.mutate({ content: 'hello' })
     })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
@@ -187,7 +187,7 @@ describe('useSendMessage', () => {
     })
 
     await act(async () => {
-      result.current.mutate('will fail')
+      result.current.mutate({ content: 'will fail' })
     })
 
     await waitFor(() => expect(result.current.isError).toBe(true))
@@ -221,7 +221,7 @@ describe('useSendMessage', () => {
     })
 
     await act(async () => {
-      result.current.mutate('hello')
+      result.current.mutate({ content: 'hello' })
     })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
@@ -244,7 +244,7 @@ describe('useSendMessage', () => {
     })
 
     await act(async () => {
-      result.current.mutate('will fail')
+      result.current.mutate({ content: 'will fail' })
     })
 
     await waitFor(() => expect(result.current.isError).toBe(true))

@@ -53,6 +53,21 @@ impl From<bool> for CheckUsernameResponse {
     }
 }
 
+/// Request body for updating the authenticated user's profile.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateProfileRequest {
+    /// Avatar image URL (must be HTTPS).
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    /// Display name (1-32 characters).
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Custom status text (max 128 characters).
+    #[serde(default)]
+    pub custom_status: Option<String>,
+}
+
 impl From<Profile> for ProfileResponse {
     fn from(p: Profile) -> Self {
         Self {

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{
-    ChannelId, Message, MessageId, MessageType, MessageWithAuthor, UserId,
+    ChannelId, Message, MessageId, MessageType, MessageWithAuthor, ParentMessagePreview, UserId,
 };
 use crate::domain::ports::MessageRepository;
 
@@ -55,6 +55,7 @@ struct MessageRow {
     sender_device_id: Option<String>,
     message_type: String,
     system_event_key: Option<String>,
+    parent_message_id: Option<Uuid>,
     created_at: DateTime<Utc>,
 }
 
@@ -72,6 +73,7 @@ impl MessageRow {
             sender_device_id: self.sender_device_id,
             message_type: parse_message_type(&self.message_type),
             system_event_key: self.system_event_key,
+            parent_message_id: self.parent_message_id.map(MessageId::new),
             created_at: self.created_at,
         }
     }
@@ -93,14 +95,30 @@ struct MessageWithAuthorRow {
     sender_device_id: Option<String>,
     message_type: String,
     system_event_key: Option<String>,
+    parent_message_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     // Author profile fields from JOIN.
     author_username: Option<String>,
     author_avatar_url: Option<String>,
+    // Parent message preview fields from self-JOIN.
+    parent_author_username: Option<String>,
+    parent_content_preview: Option<String>,
 }
 
 impl MessageWithAuthorRow {
     fn into_message_with_author(self) -> MessageWithAuthor {
+        // WHY: Build parent preview only when both parent_message_id and
+        // parent_author_username are present. If the parent was deleted
+        // (NULL from LEFT JOIN), we skip the preview entirely.
+        let parent_message = match (self.parent_message_id, self.parent_author_username) {
+            (Some(pid), Some(username)) => Some(ParentMessagePreview {
+                id: MessageId::new(pid),
+                author_username: username,
+                content_preview: self.parent_content_preview.unwrap_or_default(),
+            }),
+            _ => None,
+        };
+
         let message = Message {
             id: MessageId::new(self.id),
             channel_id: ChannelId::new(self.channel_id),
@@ -113,6 +131,7 @@ impl MessageWithAuthorRow {
             sender_device_id: self.sender_device_id,
             message_type: parse_message_type(&self.message_type),
             system_event_key: self.system_event_key,
+            parent_message_id: self.parent_message_id.map(MessageId::new),
             created_at: self.created_at,
         };
 
@@ -125,6 +144,10 @@ impl MessageWithAuthorRow {
                 .author_username
                 .unwrap_or_else(|| "Unknown".to_string()),
             author_avatar_url: self.author_avatar_url,
+            // WHY: Reactions are populated by MessageService after batch-fetching,
+            // not by the repository query. Default to empty here.
+            reactions: vec![],
+            parent_message,
         }
     }
 }
@@ -138,15 +161,17 @@ impl MessageRepository for PgMessageRepository {
         content: String,
         encrypted: bool,
         sender_device_id: Option<String>,
+        parent_message_id: Option<MessageId>,
     ) -> Result<MessageWithAuthor, DomainError> {
         let cid = channel_id.0;
         let aid = author_id.0;
+        let pmid = parent_message_id.map(|id| id.0);
 
         let row = sqlx::query!(
             r#"
             WITH inserted AS (
-                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 RETURNING
                     id,
                     channel_id,
@@ -159,6 +184,7 @@ impl MessageRepository for PgMessageRepository {
                     sender_device_id,
                     message_type,
                     system_event_key,
+                    parent_message_id,
                     created_at
             )
             SELECT
@@ -173,17 +199,23 @@ impl MessageRepository for PgMessageRepository {
                 i.sender_device_id,
                 i.message_type as "message_type!: String",
                 i.system_event_key,
+                i.parent_message_id,
                 i.created_at as "created_at!",
                 p.username AS "author_username?",
-                p.avatar_url AS "author_avatar_url?"
+                p.avatar_url AS "author_avatar_url?",
+                parent_p.username AS "parent_author_username?",
+                LEFT(parent_m.content, 100) AS "parent_content_preview?"
             FROM inserted i
             LEFT JOIN profiles p ON p.id = i.author_id
+            LEFT JOIN messages parent_m ON parent_m.id = i.parent_message_id AND parent_m.deleted_at IS NULL
+            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
             "#,
             cid,
             aid,
             content,
             encrypted,
             sender_device_id,
+            pmid,
         )
         .fetch_one(&self.pool)
         .await
@@ -201,9 +233,12 @@ impl MessageRepository for PgMessageRepository {
             sender_device_id: row.sender_device_id,
             message_type: row.message_type,
             system_event_key: row.system_event_key,
+            parent_message_id: row.parent_message_id,
             created_at: row.created_at,
             author_username: row.author_username,
             author_avatar_url: row.author_avatar_url,
+            parent_author_username: row.parent_author_username,
+            parent_content_preview: row.parent_content_preview,
         };
 
         Ok(msg.into_message_with_author())
@@ -233,11 +268,16 @@ impl MessageRepository for PgMessageRepository {
                 m.sender_device_id,
                 m.message_type as "message_type!: String",
                 m.system_event_key,
+                m.parent_message_id,
                 m.created_at,
                 p.username AS "author_username?",
-                p.avatar_url AS "author_avatar_url?"
+                p.avatar_url AS "author_avatar_url?",
+                parent_p.username AS "parent_author_username?",
+                LEFT(parent_m.content, 100) AS "parent_content_preview?"
             FROM messages m
             LEFT JOIN profiles p ON p.id = m.author_id
+            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id AND parent_m.deleted_at IS NULL
+            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
             WHERE m.channel_id = $1
               AND m.deleted_at IS NULL
               AND ($2::timestamptz IS NULL OR m.created_at < $2)
@@ -267,9 +307,12 @@ impl MessageRepository for PgMessageRepository {
                     sender_device_id: r.sender_device_id,
                     message_type: r.message_type,
                     system_event_key: r.system_event_key,
+                    parent_message_id: r.parent_message_id,
                     created_at: r.created_at,
                     author_username: r.author_username,
                     author_avatar_url: r.author_avatar_url,
+                    parent_author_username: r.parent_author_username,
+                    parent_content_preview: r.parent_content_preview,
                 }
                 .into_message_with_author()
             })
@@ -295,6 +338,7 @@ impl MessageRepository for PgMessageRepository {
                 sender_device_id,
                 message_type as "message_type!: String",
                 system_event_key,
+                parent_message_id,
                 created_at
             FROM messages
             WHERE id = $1 AND deleted_at IS NULL
@@ -318,6 +362,7 @@ impl MessageRepository for PgMessageRepository {
                 sender_device_id: r.sender_device_id,
                 message_type: r.message_type,
                 system_event_key: r.system_event_key,
+                parent_message_id: r.parent_message_id,
                 created_at: r.created_at,
             }
             .into_message()
@@ -349,6 +394,7 @@ impl MessageRepository for PgMessageRepository {
                     sender_device_id,
                     message_type,
                     system_event_key,
+                    parent_message_id,
                     created_at
             )
             SELECT
@@ -363,11 +409,16 @@ impl MessageRepository for PgMessageRepository {
                 u.sender_device_id,
                 u.message_type as "message_type!: String",
                 u.system_event_key,
+                u.parent_message_id,
                 u.created_at as "created_at!",
                 p.username AS "author_username?",
-                p.avatar_url AS "author_avatar_url?"
+                p.avatar_url AS "author_avatar_url?",
+                parent_p.username AS "parent_author_username?",
+                LEFT(parent_m.content, 100) AS "parent_content_preview?"
             FROM updated u
             LEFT JOIN profiles p ON p.id = u.author_id
+            LEFT JOIN messages parent_m ON parent_m.id = u.parent_message_id AND parent_m.deleted_at IS NULL
+            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
             "#,
             mid,
             content,
@@ -392,9 +443,12 @@ impl MessageRepository for PgMessageRepository {
             sender_device_id: row.sender_device_id,
             message_type: row.message_type,
             system_event_key: row.system_event_key,
+            parent_message_id: row.parent_message_id,
             created_at: row.created_at,
             author_username: row.author_username,
             author_avatar_url: row.author_avatar_url,
+            parent_author_username: row.parent_author_username,
+            parent_content_preview: row.parent_content_preview,
         };
 
         Ok(msg.into_message_with_author())
@@ -486,6 +540,7 @@ impl MessageRepository for PgMessageRepository {
                     sender_device_id,
                     message_type,
                     system_event_key,
+                    parent_message_id,
                     created_at
             )
             SELECT
@@ -500,6 +555,7 @@ impl MessageRepository for PgMessageRepository {
                 i.sender_device_id,
                 i.message_type as "message_type!: String",
                 i.system_event_key,
+                i.parent_message_id,
                 i.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?"
@@ -526,9 +582,13 @@ impl MessageRepository for PgMessageRepository {
             sender_device_id: row.sender_device_id,
             message_type: row.message_type,
             system_event_key: row.system_event_key,
+            parent_message_id: row.parent_message_id,
             created_at: row.created_at,
             author_username: row.author_username,
             author_avatar_url: row.author_avatar_url,
+            // WHY: System messages never have parent replies.
+            parent_author_username: None,
+            parent_content_preview: None,
         };
 
         Ok(msg.into_message_with_author())

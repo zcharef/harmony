@@ -53,6 +53,60 @@ impl ProfileService {
                 id: user_id.to_string(),
             })
     }
+
+    /// Update profile fields for the authenticated user.
+    ///
+    /// Validates inputs before delegating to the repository:
+    /// - At least one field must be provided
+    /// - `avatar_url` must start with `https://`
+    /// - `display_name` must be 1-32 characters
+    /// - `custom_status` must be at most 128 characters
+    ///
+    /// # Errors
+    /// Returns `DomainError::ValidationError` on invalid input,
+    /// or a repository error on failure.
+    pub async fn update_profile(
+        &self,
+        user_id: &UserId,
+        avatar_url: Option<String>,
+        display_name: Option<String>,
+        custom_status: Option<String>,
+    ) -> Result<Profile, DomainError> {
+        if avatar_url.is_none() && display_name.is_none() && custom_status.is_none() {
+            return Err(DomainError::ValidationError(
+                "At least one field must be provided".to_string(),
+            ));
+        }
+
+        if let Some(ref url) = avatar_url
+            && !url.starts_with("https://")
+        {
+            return Err(DomainError::ValidationError(
+                "Avatar URL must use HTTPS".to_string(),
+            ));
+        }
+
+        if let Some(ref name) = display_name {
+            let len = name.len();
+            if len == 0 || len > 32 {
+                return Err(DomainError::ValidationError(
+                    "Display name must be 1-32 characters".to_string(),
+                ));
+            }
+        }
+
+        if let Some(ref status) = custom_status
+            && status.len() > 128
+        {
+            return Err(DomainError::ValidationError(
+                "Custom status must be at most 128 characters".to_string(),
+            ));
+        }
+
+        self.repo
+            .update(user_id, avatar_url, display_name, custom_status)
+            .await
+    }
 }
 
 #[cfg(test)]

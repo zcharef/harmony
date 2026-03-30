@@ -7,8 +7,11 @@ mod invite_repository;
 mod key_repository;
 mod member_repository;
 mod message_repository;
+mod notification_settings_repository;
 mod plan_limit_checker;
 mod profile_repository;
+mod reaction_repository;
+mod read_state_repository;
 mod server_repository;
 
 pub use ban_repository::PgBanRepository;
@@ -18,8 +21,11 @@ pub use invite_repository::PgInviteRepository;
 pub use key_repository::PgKeyRepository;
 pub use member_repository::PgMemberRepository;
 pub use message_repository::PgMessageRepository;
+pub use notification_settings_repository::PgNotificationSettingsRepository;
 pub use plan_limit_checker::PgPlanLimitChecker;
 pub use profile_repository::PgProfileRepository;
+pub use reaction_repository::PgReactionRepository;
+pub use read_state_repository::PgReadStateRepository;
 pub use server_repository::PgServerRepository;
 
 use std::time::Duration;

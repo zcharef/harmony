@@ -11,11 +11,12 @@ use super::dto::{
     CreateDmRequest, CreateInviteRequest, CreateMegolmSessionRequest, CreateServerRequest,
     DeviceListResponse, DeviceResponse, DmLastMessageResponse, DmListItem, DmListQuery,
     DmListResponse, DmRecipientResponse, DmResponse, EditMessageRequest, InvitePreviewResponse,
-    InviteResponse, JoinServerRequest, KeyCountResponse, MegolmSessionResponse, MemberListQuery,
-    MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse, MessageResponse,
-    OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse, RedeemDesktopAuthRequest,
-    RedeemDesktopAuthResponse, RegisterDeviceRequest, SendMessageRequest, ServerListResponse,
-    ServerResponse, TransferOwnershipRequest, UpdateChannelRequest, UpdateServerRequest,
+    InviteResponse, JoinServerRequest, KeyCountResponse, MarkReadRequest, MegolmSessionResponse,
+    MemberListQuery, MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse,
+    MessageResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse, ReadStateResponse,
+    ReadStatesListResponse, RedeemDesktopAuthRequest, RedeemDesktopAuthResponse,
+    RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
+    TransferOwnershipRequest, UpdateChannelRequest, UpdateProfileRequest, UpdateServerRequest,
     UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
@@ -24,6 +25,7 @@ use crate::domain::models::{
     CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MessageId, MessageType,
     OneTimeKeyId, ServerId, UserId, UserStatus,
 };
+use crate::domain::models::{ParentMessagePreview, ReactionSummary};
 
 /// `OpenAPI` documentation for Harmony API.
 #[derive(Debug, OpenApi)]
@@ -46,6 +48,7 @@ use crate::domain::models::{
         handlers::profiles::check_username,
         // Profiles
         handlers::profiles::get_my_profile,
+        handlers::profiles::update_my_profile,
         // Servers
         handlers::servers::create_server,
         handlers::servers::list_servers,
@@ -75,6 +78,15 @@ use crate::domain::models::{
         handlers::messages::list_messages,
         handlers::messages::edit_message,
         handlers::messages::delete_message,
+        // Reactions
+        handlers::reactions::add_reaction,
+        handlers::reactions::remove_reaction,
+        // Read States
+        handlers::read_states::mark_channel_read,
+        handlers::read_states::list_server_read_states,
+        // Notification Settings
+        handlers::notification_settings::get_notification_settings,
+        handlers::notification_settings::update_notification_settings,
         // Typing indicators
         handlers::typing::send_typing,
         // Direct Messages
@@ -121,6 +133,7 @@ use crate::domain::models::{
             ProfileResponse,
             CheckUsernameQuery,
             CheckUsernameResponse,
+            UpdateProfileRequest,
             // Server DTOs
             CreateServerRequest,
             UpdateServerRequest,
@@ -155,6 +168,18 @@ use crate::domain::models::{
             MessageResponse,
             MessageListResponse,
             MessageListQuery,
+            // Reaction DTOs
+            super::handlers::reactions::AddReactionRequest,
+            ReactionSummary,
+            ParentMessagePreview,
+            // Notification Settings DTOs
+            super::dto::notification_settings::UpdateNotificationSettingsRequest,
+            super::dto::notification_settings::NotificationSettingsResponse,
+            super::dto::notification_settings::NotificationLevel,
+            // Read State DTOs
+            MarkReadRequest,
+            ReadStateResponse,
+            ReadStatesListResponse,
             // DM DTOs
             CreateDmRequest,
             DmResponse,
@@ -191,6 +216,9 @@ use crate::domain::models::{
         (name = "Members", description = "Server member management"),
         (name = "Moderation", description = "Server moderation (bans, kicks)"),
         (name = "Messages", description = "Messaging within channels"),
+        (name = "Reactions", description = "Message reactions"),
+        (name = "ReadStates", description = "Channel read state tracking"),
+        (name = "NotificationSettings", description = "Per-channel notification preferences"),
         (name = "DirectMessages", description = "Direct message conversations"),
         (name = "Keys", description = "E2EE key distribution (device keys, pre-key bundles)"),
         (name = "Presence", description = "User presence status updates"),

@@ -9,8 +9,11 @@ pub mod invites;
 pub mod keys;
 pub mod members;
 pub mod messages;
+pub mod notification_settings;
 pub mod presence;
 pub mod profiles;
+pub mod reactions;
+pub mod read_states;
 pub mod servers;
 pub mod typing;
 

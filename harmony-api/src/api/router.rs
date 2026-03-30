@@ -73,7 +73,10 @@ pub fn build_router(
         // Auth
         .route("/v1/auth/me", post(handlers::profiles::sync_profile))
         // Profiles
-        .route("/v1/profiles/me", get(handlers::profiles::get_my_profile))
+        .route(
+            "/v1/profiles/me",
+            get(handlers::profiles::get_my_profile).patch(handlers::profiles::update_my_profile),
+        )
         // Servers
         .route(
             "/v1/servers",
@@ -128,6 +131,15 @@ pub fn build_router(
             "/v1/channels/{id}/megolm-sessions",
             post(handlers::channels::create_megolm_session),
         )
+        // Read States
+        .route(
+            "/v1/channels/{id}/read-state",
+            patch(handlers::read_states::mark_channel_read),
+        )
+        .route(
+            "/v1/servers/{id}/read-states",
+            get(handlers::read_states::list_server_read_states),
+        )
         // Messages
         .route(
             "/v1/channels/{id}/messages",
@@ -136,6 +148,21 @@ pub fn build_router(
         .route(
             "/v1/channels/{channel_id}/messages/{message_id}",
             patch(handlers::messages::edit_message).delete(handlers::messages::delete_message),
+        )
+        // Reactions
+        .route(
+            "/v1/channels/{channel_id}/messages/{message_id}/reactions",
+            post(handlers::reactions::add_reaction),
+        )
+        .route(
+            "/v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}",
+            delete(handlers::reactions::remove_reaction),
+        )
+        // Notification Settings
+        .route(
+            "/v1/channels/{id}/notification-settings",
+            get(handlers::notification_settings::get_notification_settings)
+                .patch(handlers::notification_settings::update_notification_settings),
         )
         // Typing indicators
         .route(

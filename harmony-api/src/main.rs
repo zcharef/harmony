@@ -133,6 +133,8 @@ async fn init_app_state(config: &Config) -> AppState {
     let ban_repo = Arc::new(infra::postgres::PgBanRepository::new(pool.clone()));
     let dm_repo = Arc::new(infra::postgres::PgDmRepository::new(pool.clone()));
     let key_repo = Arc::new(infra::postgres::PgKeyRepository::new(pool.clone()));
+    let reaction_repo = Arc::new(infra::postgres::PgReactionRepository::new(pool.clone()));
+    let read_state_repo = Arc::new(infra::postgres::PgReadStateRepository::new(pool.clone()));
 
     // WHY: Self-hosted deployments have no plan restrictions (AlwaysAllowedChecker).
     // SaaS deployments enforce Free/Pro limits via Postgres queries (PgPlanLimitChecker).
@@ -156,6 +158,7 @@ async fn init_app_state(config: &Config) -> AppState {
         channel_repo.clone(),
         member_repo.clone(),
         plan_limit_checker.clone(),
+        reaction_repo.clone(),
     ));
     let invite_service = Arc::new(domain::services::InviteService::new(
         invite_repo,
@@ -165,7 +168,7 @@ async fn init_app_state(config: &Config) -> AppState {
         plan_limit_checker.clone(),
     ));
     let channel_service = Arc::new(domain::services::ChannelService::new(
-        channel_repo,
+        channel_repo.clone(),
         plan_limit_checker.clone(),
     ));
     let moderation_service = Arc::new(domain::services::ModerationService::new(
@@ -181,6 +184,18 @@ async fn init_app_state(config: &Config) -> AppState {
         plan_limit_checker.clone(),
     ));
     let key_service = Arc::new(domain::services::KeyService::new(key_repo));
+    let reaction_service = Arc::new(domain::services::ReactionService::new(
+        reaction_repo,
+        channel_repo.clone(),
+        member_repo.clone(),
+    ));
+    let read_state_service = Arc::new(domain::services::ReadStateService::new(read_state_repo));
+    let notification_settings_repo = Arc::new(
+        infra::postgres::PgNotificationSettingsRepository::new(pool.clone()),
+    );
+    let notification_settings_service = Arc::new(
+        domain::services::NotificationSettingsService::new(notification_settings_repo),
+    );
 
     // Initialize in-process event bus for SSE real-time delivery
     let event_bus: Arc<dyn domain::ports::EventBus> = Arc::new(infra::BroadcastEventBus::new());
@@ -204,6 +219,9 @@ async fn init_app_state(config: &Config) -> AppState {
         moderation_service,
         dm_service,
         key_service,
+        reaction_service,
+        read_state_service,
+        notification_settings_service,
         member_repo,
         ban_repo,
         plan_limit_checker,

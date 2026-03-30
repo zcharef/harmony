@@ -4,9 +4,11 @@ use axum::{
     Extension, Json, extract::Query, extract::State, http::StatusCode, response::IntoResponse,
 };
 
-use crate::api::dto::{CheckUsernameQuery, CheckUsernameResponse, ProfileResponse};
+use crate::api::dto::{
+    CheckUsernameQuery, CheckUsernameResponse, ProfileResponse, UpdateProfileRequest,
+};
 use crate::api::errors::{ApiError, ProblemDetails};
-use crate::api::extractors::AuthUser;
+use crate::api::extractors::{ApiJson, AuthUser};
 use crate::api::session;
 use crate::api::state::AppState;
 use crate::infra::auth::AuthenticatedUser;
@@ -140,6 +142,43 @@ pub async fn get_my_profile(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
     let profile = state.profile_service().get_by_id(&user_id).await?;
+
+    Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
+}
+
+/// Update the authenticated user's profile fields (avatar, display name, custom status).
+///
+/// Patch semantics: only provided fields are updated; omitted fields remain unchanged.
+///
+/// # Errors
+/// Returns `ApiError` on validation failure or repository error.
+#[utoipa::path(
+    patch,
+    path = "/v1/profiles/me",
+    tag = "Profiles",
+    security(("bearer_auth" = [])),
+    request_body = UpdateProfileRequest,
+    responses(
+        (status = 200, description = "Profile updated", body = ProfileResponse),
+        (status = 400, description = "Validation error", body = ProblemDetails),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state, req))]
+pub async fn update_my_profile(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiJson(req): ApiJson<UpdateProfileRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let profile = state
+        .profile_service()
+        .update_profile(
+            &user_id,
+            req.avatar_url,
+            req.display_name,
+            req.custom_status,
+        )
+        .await?;
 
     Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
 }

@@ -4,7 +4,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use crate::domain::models::{ChannelId, MessageId, MessageType, MessageWithAuthor, UserId};
+use crate::domain::models::{
+    ChannelId, MessageId, MessageType, MessageWithAuthor, ParentMessagePreview, ReactionSummary,
+    UserId,
+};
 
 /// Request body for sending a new message.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -16,6 +19,9 @@ pub struct SendMessageRequest {
     pub encrypted: Option<bool>,
     /// Device ID of the sending device. Required when `encrypted = true`.
     pub sender_device_id: Option<String>,
+    /// Parent message ID for reply threading. Omit for top-level messages.
+    #[serde(default)]
+    pub parent_message_id: Option<MessageId>,
 }
 
 /// Request body for editing a message.
@@ -59,6 +65,15 @@ pub struct MessageResponse {
     /// System event key (e.g. `member_join`). Only present for system messages.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_event_key: Option<String>,
+    /// Aggregated reaction summaries for this message.
+    #[serde(default)]
+    pub reactions: Vec<ReactionSummary>,
+    /// Parent message ID when this is a reply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_message_id: Option<MessageId>,
+    /// Preview of the parent message (author + content snippet).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_message: Option<ParentMessagePreview>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -78,6 +93,9 @@ impl From<MessageWithAuthor> for MessageResponse {
             sender_device_id: m.sender_device_id,
             message_type: m.message_type,
             system_event_key: m.system_event_key,
+            reactions: mwa.reactions,
+            parent_message_id: m.parent_message_id,
+            parent_message: mwa.parent_message,
             created_at: m.created_at,
         }
     }

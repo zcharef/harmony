@@ -33,34 +33,35 @@ export function useSendMessage(
   const messageQueryKey = queryKeys.messages.byChannel(channelId)
 
   return useMutation({
-    mutationFn: async (content: string) => {
+    mutationFn: async (input: { content: string; parentMessageId?: string }) => {
       // WHY: If encryption is provided, encrypt before sending to API.
       if (encryption !== undefined) {
-        const encrypted = await encryption.encryptFn(content)
+        const encrypted = await encryption.encryptFn(input.content)
         const { data } = await sendMessage({
           path: { id: channelId },
           body: {
             content: encrypted.content,
             encrypted: true,
             senderDeviceId: encrypted.senderDeviceId,
+            parentMessageId: input.parentMessageId,
           },
           throwOnError: true,
         })
         // WHY: Cache the plaintext locally so the sender can read their own message
         // without needing to decrypt it (sender doesn't have their own session).
-        encryption.cachePlaintext(data.id, channelId, content)
+        encryption.cachePlaintext(data.id, channelId, input.content)
         return data
       }
 
       const { data } = await sendMessage({
         path: { id: channelId },
-        body: { content },
+        body: { content: input.content, parentMessageId: input.parentMessageId },
         throwOnError: true,
       })
       return data
     },
 
-    onMutate: async (content) => {
+    onMutate: async (input: { content: string; parentMessageId?: string }) => {
       // WHY cancel: Prevent in-flight refetches from overwriting our optimistic entry
       await queryClient.cancelQueries({ queryKey: messageQueryKey })
 
@@ -76,10 +77,12 @@ export function useSendMessage(
         authorUsername: username,
         // WHY: Show plaintext in optimistic entry so user sees their message immediately.
         // The encrypted version is what goes to the API, not what displays.
-        content: content,
+        content: input.content,
         createdAt: new Date().toISOString(),
         encrypted: encryption !== undefined,
         messageType: 'default',
+        reactions: [],
+        parentMessageId: input.parentMessageId,
       } satisfies MessageResponse
 
       // WHY page 0: useInfiniteQuery stores pages newest-first — same pattern
@@ -120,7 +123,7 @@ export function useSendMessage(
       })
     },
 
-    onError: (error, _content, context) => {
+    onError: (error, _input, context) => {
       logger.error('Failed to send message', {
         channelId,
         error: error instanceof Error ? error.message : String(error),

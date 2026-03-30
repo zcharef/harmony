@@ -172,4 +172,60 @@ impl ProfileRepository for PgProfileRepository {
             .into_profile()
         }))
     }
+
+    async fn update(
+        &self,
+        user_id: &UserId,
+        avatar_url: Option<String>,
+        display_name: Option<String>,
+        custom_status: Option<String>,
+    ) -> Result<Profile, DomainError> {
+        let id = user_id.0;
+
+        // WHY COALESCE: patch semantics — `None` in Rust = don't change the field.
+        let row = sqlx::query!(
+            r#"
+            UPDATE profiles
+            SET
+                avatar_url = COALESCE($2, avatar_url),
+                display_name = COALESCE($3, display_name),
+                custom_status = COALESCE($4, custom_status),
+                updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id,
+                username,
+                display_name,
+                avatar_url,
+                status,
+                custom_status,
+                created_at,
+                updated_at
+            "#,
+            id,
+            avatar_url,
+            display_name,
+            custom_status,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?
+        .ok_or_else(|| DomainError::NotFound {
+            resource_type: "Profile",
+            id: user_id.to_string(),
+        })?;
+
+        let profile_row = ProfileRow {
+            id: row.id,
+            username: row.username,
+            display_name: row.display_name,
+            avatar_url: row.avatar_url,
+            status: row.status,
+            custom_status: row.custom_status,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        };
+
+        Ok(profile_row.into_profile())
+    }
 }

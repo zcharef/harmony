@@ -9,7 +9,7 @@ use sqlx::PgPool;
 use crate::domain::ports::{BanRepository, EventBus, MemberRepository, PlanLimitChecker};
 use crate::domain::services::{
     ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
-    ProfileService, ServerService,
+    NotificationSettingsService, ProfileService, ReactionService, ReadStateService, ServerService,
 };
 use crate::infra::PresenceTracker;
 
@@ -44,6 +44,12 @@ pub struct AppState {
     dm_service: Arc<DmService>,
     /// Key distribution domain service (E2EE device keys and pre-key bundles).
     key_service: Arc<KeyService>,
+    /// Reaction domain service (add/remove message reactions).
+    reaction_service: Arc<ReactionService>,
+    /// Read state domain service (mark read, list unread counts).
+    read_state_service: Arc<ReadStateService>,
+    /// Notification settings domain service (per-channel notification preferences).
+    notification_settings_service: Arc<NotificationSettingsService>,
     /// Member repository (accessed directly for simple queries; invite logic lives in `InviteService`).
     member_repository: Arc<dyn MemberRepository>,
     /// Ban repository (accessed directly by moderation handlers).
@@ -70,6 +76,12 @@ impl std::fmt::Debug for AppState {
             .field("moderation_service", &self.moderation_service)
             .field("dm_service", &self.dm_service)
             .field("key_service", &self.key_service)
+            .field("reaction_service", &self.reaction_service)
+            .field("read_state_service", &self.read_state_service)
+            .field(
+                "notification_settings_service",
+                &self.notification_settings_service,
+            )
             .field("member_repository", &self.member_repository)
             .field("ban_repository", &self.ban_repository)
             .field("plan_limit_checker", &self.plan_limit_checker)
@@ -97,6 +109,9 @@ impl AppState {
         moderation_service: Arc<ModerationService>,
         dm_service: Arc<DmService>,
         key_service: Arc<KeyService>,
+        reaction_service: Arc<ReactionService>,
+        read_state_service: Arc<ReadStateService>,
+        notification_settings_service: Arc<NotificationSettingsService>,
         member_repository: Arc<dyn MemberRepository>,
         ban_repository: Arc<dyn BanRepository>,
         plan_limit_checker: Arc<dyn PlanLimitChecker>,
@@ -117,6 +132,9 @@ impl AppState {
             moderation_service,
             dm_service,
             key_service,
+            reaction_service,
+            read_state_service,
+            notification_settings_service,
             member_repository,
             ban_repository,
             plan_limit_checker,
@@ -171,6 +189,24 @@ impl AppState {
     #[must_use]
     pub fn key_service(&self) -> &KeyService {
         &self.key_service
+    }
+
+    /// Access the reaction domain service.
+    #[must_use]
+    pub fn reaction_service(&self) -> &ReactionService {
+        &self.reaction_service
+    }
+
+    /// Access the read state domain service.
+    #[must_use]
+    pub fn read_state_service(&self) -> &ReadStateService {
+        &self.read_state_service
+    }
+
+    /// Access the notification settings domain service.
+    #[must_use]
+    pub fn notification_settings_service(&self) -> &NotificationSettingsService {
+        &self.notification_settings_service
     }
 
     /// Access the member repository directly (simple queries; invite logic in `InviteService`).

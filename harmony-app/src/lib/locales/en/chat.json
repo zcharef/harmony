@@ -16,5 +16,12 @@
   "memberList": "Member List",
   "attachFile": "Attach File",
   "stickers": "Stickers",
-  "emojiPicker": "Emoji Picker"
+  "emojiPicker": "Emoji Picker",
+  "replyingTo": "Replying to",
+  "reply": "Reply",
+  "notificationLevel": {
+    "all": "All Messages",
+    "mentions": "@Mentions Only",
+    "none": "Nothing"
+  }
 }

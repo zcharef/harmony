@@ -1,4 +1,14 @@
-import { Avatar, Button, Divider, Spinner, Textarea } from '@heroui/react'
+import emojiData from '@emoji-mart/data'
+import {
+  Avatar,
+  Button,
+  Divider,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Spinner,
+  Textarea,
+} from '@heroui/react'
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual'
 import {
   Bell,
@@ -12,11 +22,13 @@ import {
   SmilePlus,
   Sticker,
   Users,
+  X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore, useCurrentProfile } from '@/features/auth'
+import { useMarkRead, useUnreadStore } from '@/features/channels'
 import {
   DmPlaintextBanner,
   E2eeAlphaBanner,
@@ -38,15 +50,70 @@ import { encrypt } from '@/lib/crypto'
 import { cacheMessage } from '@/lib/crypto-cache'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
+import { useAddReaction } from './hooks/use-add-reaction'
 import { useDeleteMessage } from './hooks/use-delete-message'
 import { useEditMessage } from './hooks/use-edit-message'
 import { useMessages } from './hooks/use-messages'
+import { useNotificationSettings } from './hooks/use-notification-settings'
 import { useRealtimeMessages } from './hooks/use-realtime-messages'
+import { useRealtimeReactions } from './hooks/use-realtime-reactions'
+import { useRemoveReaction } from './hooks/use-remove-reaction'
 import type { SendMessageEncryption } from './hooks/use-send-message'
 import { useSendMessage } from './hooks/use-send-message'
 import { useTypingIndicator } from './hooks/use-typing-indicator'
+import { useUpdateNotificationSettings } from './hooks/use-update-notification-settings'
 import { MessageItem } from './message-item'
 import { TypingIndicator } from './typing-indicator'
+
+const EmojiPicker = lazy(() => import('@emoji-mart/react'))
+
+type VirtualItem =
+  | { type: 'message'; msg: MessageResponse; isGrouped: boolean }
+  | { type: 'date'; label: string }
+
+const GROUPING_THRESHOLD_MS = 5 * 60 * 1000
+
+function getDateLabel(date: Date, today: Date, yesterday: Date): string {
+  if (date.toDateString() === today.toDateString()) return 'Today'
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+}
+
+function buildVirtualItems(messages: MessageResponse[]): VirtualItem[] {
+  if (messages.length === 0) return []
+  const items: VirtualItem[] = []
+  const now = new Date()
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+    if (msg === undefined) continue
+    const msgDate = new Date(msg.createdAt)
+    const prev = i > 0 ? messages[i - 1] : undefined
+
+    if (prev === undefined) {
+      items.push({ type: 'date', label: getDateLabel(msgDate, now, yesterday) })
+    } else {
+      const prevDate = new Date(prev.createdAt)
+      if (msgDate.toDateString() !== prevDate.toDateString()) {
+        items.push({ type: 'date', label: getDateLabel(msgDate, now, yesterday) })
+      }
+    }
+
+    const isGrouped =
+      prev !== undefined &&
+      prev.authorId === msg.authorId &&
+      prev.messageType === 'default' &&
+      msg.messageType === 'default' &&
+      msgDate.getTime() - new Date(prev.createdAt).getTime() < GROUPING_THRESHOLD_MS &&
+      msgDate.toDateString() === new Date(prev.createdAt).toDateString()
+
+    items.push({ type: 'message', msg, isGrouped })
+  }
+
+  return items
+}
 
 interface ChatAreaProps {
   channelId: string | null
@@ -68,6 +135,48 @@ interface ChatAreaProps {
  * in the page cache. Deduplicating at the flatten step is the safest approach
  * since it handles all race conditions regardless of source.
  */
+
+// WHY extracted: Reduces ChatArea cognitive complexity below Biome's limit of 15.
+function ReplyBar({
+  replyingTo,
+  onCancel,
+}: {
+  replyingTo: MessageResponse | null
+  onCancel: () => void
+}) {
+  const { t } = useTranslation('chat')
+
+  if (replyingTo === null) return null
+
+  return (
+    <div className="flex items-center justify-between border-t border-default-200 bg-default-100 px-4 py-2">
+      <div className="min-w-0">
+        <span className="text-xs text-default-500">{t('replyingTo')} </span>
+        <span className="text-xs font-medium">{replyingTo.authorUsername}</span>
+        <p className="truncate text-xs text-default-400">{replyingTo.content.slice(0, 80)}</p>
+      </div>
+      <Button isIconOnly size="sm" variant="light" onPress={onCancel}>
+        <X className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+}
+
+// WHY extracted: Reduces ChatArea cognitive complexity below Biome's limit of 15.
+function useMarkReadOnFocus(channelId: string | null, messages: MessageResponse[]) {
+  const markReadMutation = useMarkRead()
+  const clearUnread = useUnreadStore((s) => s.clear)
+  const messageCount = messages.length
+  const lastMessageId = messageCount > 0 ? messages[messageCount - 1]?.id : undefined
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally stable — only re-run on channel switch or first message load
+  useEffect(() => {
+    if (channelId === null || lastMessageId === undefined) return
+    clearUnread(channelId)
+    markReadMutation.mutate({ channelId, lastMessageId })
+  }, [channelId, lastMessageId])
+}
+
 function useFlatMessages(data: ReturnType<typeof useMessages>['data']) {
   return useMemo(() => {
     if (!data) return []
@@ -255,16 +364,20 @@ function ChatToolbar({
   isDm,
   dmRecipient,
   channelName,
+  channelId,
   isChannelEncrypted,
   onOpenVerify,
 }: {
   isDm: boolean
   dmRecipient: DmRecipientResponse | null
   channelName: string | null
+  channelId: string | null
   isChannelEncrypted: boolean
   onOpenVerify: () => void
 }) {
   const { t } = useTranslation('chat')
+  const { data: notifSettings } = useNotificationSettings(channelId)
+  const updateNotif = useUpdateNotificationSettings(channelId ?? '')
 
   return (
     <div
@@ -286,9 +399,27 @@ function ChatToolbar({
         <Button variant="light" isIconOnly size="sm" aria-label={t('threads')}>
           <MessageSquare className="h-5 w-5 text-default-500" />
         </Button>
-        <Button variant="light" isIconOnly size="sm" aria-label={t('notifications')}>
-          <Bell className="h-5 w-5 text-default-500" />
-        </Button>
+        <Popover placement="bottom-end">
+          <PopoverTrigger>
+            <Button variant="light" isIconOnly size="sm" aria-label={t('notifications')}>
+              <Bell className="h-5 w-5 text-default-500" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent>
+            <div className="flex flex-col gap-1 p-2">
+              {(['all', 'mentions', 'none'] as const).map((level) => (
+                <Button
+                  key={level}
+                  variant={notifSettings?.level === level ? 'flat' : 'light'}
+                  size="sm"
+                  onPress={() => updateNotif.mutate(level)}
+                >
+                  {t(`notificationLevel.${level}`)}
+                </Button>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
         <Button variant="light" isIconOnly size="sm" aria-label={t('pinnedMessages')}>
           <Pin className="h-5 w-5 text-default-500" />
         </Button>
@@ -302,6 +433,16 @@ function ChatToolbar({
           <span className="ml-1 text-xs text-default-500">{t('common:search')}</span>
         </div>
       </div>
+    </div>
+  )
+}
+
+function DateDivider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-4 px-4 py-2">
+      <Divider className="flex-1" />
+      <span className="text-xs font-semibold text-default-500">{label}</span>
+      <Divider className="flex-1" />
     </div>
   )
 }
@@ -323,6 +464,24 @@ function MessageInput({
   onSendTyping: () => void
 }) {
   const { t } = useTranslation('chat')
+  const [isEmojiOpen, setIsEmojiOpen] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const handleEmojiSelect = useCallback(
+    (emoji: { native: string }) => {
+      const textarea = textareaRef.current
+      if (textarea) {
+        const start = textarea.selectionStart
+        const end = textarea.selectionEnd
+        const next = value.slice(0, start) + emoji.native + value.slice(end)
+        onValueChange(next)
+      } else {
+        onValueChange(value + emoji.native)
+      }
+      setIsEmojiOpen(false)
+    },
+    [value, onValueChange],
+  )
 
   return (
     <div className="px-4 pb-6 pt-1">
@@ -339,6 +498,7 @@ function MessageInput({
           </Button>
         )}
         <Textarea
+          ref={textareaRef}
           data-test="message-input"
           placeholder={placeholder}
           variant="flat"
@@ -364,9 +524,18 @@ function MessageInput({
             <Button variant="light" isIconOnly size="sm" aria-label={t('stickers')}>
               <Sticker className="h-5 w-5 text-default-500" />
             </Button>
-            <Button variant="light" isIconOnly size="sm" aria-label={t('emojiPicker')}>
-              <SmilePlus className="h-5 w-5 text-default-500" />
-            </Button>
+            <Popover isOpen={isEmojiOpen} onOpenChange={setIsEmojiOpen} placement="top-end">
+              <PopoverTrigger>
+                <Button variant="light" isIconOnly size="sm" aria-label={t('emojiPicker')}>
+                  <SmilePlus className="h-5 w-5 text-default-500" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="p-0">
+                <Suspense fallback={<Spinner size="sm" className="p-4" />}>
+                  <EmojiPicker data={emojiData} onEmojiSelect={handleEmojiSelect} />
+                </Suspense>
+              </PopoverContent>
+            </Popover>
           </div>
         )}
       </div>
@@ -811,6 +980,7 @@ export function ChatArea({
     handleDelete,
   } = useMessageActions(channelId, currentUser.id, currentUser.username, activeEncryption)
   const [messageContent, setMessageContent] = useState('')
+  const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null)
   const [isVerifyOpen, setIsVerifyOpen] = useState(false)
 
   // WHY: Safety number + trust level for DM identity verification (desktop only).
@@ -827,19 +997,28 @@ export function ChatArea({
   )
 
   useRealtimeMessages(channelId ?? '')
+  useRealtimeReactions(channelId, currentUser.id)
+
+  const addReactionMutation = useAddReaction(channelId ?? '')
+  const removeReactionMutation = useRemoveReaction(channelId ?? '')
+
   const { typingUsers, sendTyping } = useTypingIndicator(channelId ?? '', currentUser.id)
 
   const messages = useFlatMessages(data)
+
+  useMarkReadOnFocus(channelId, messages)
+
+  const virtualItems = useMemo(() => buildVirtualItems(messages), [messages])
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const virtualizer = useVirtualizer({
-    count: messages.length,
+    count: virtualItems.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 52,
+    estimateSize: (index) => (virtualItems[index]?.type === 'date' ? 36 : 52),
     overscan: 10,
   })
 
-  useAutoScroll(scrollRef, messages.length, channelId, virtualizer)
+  useAutoScroll(scrollRef, virtualItems.length, channelId, virtualizer)
 
   const handleScroll = useThrottledScroll(scrollRef, hasNextPage, isFetchingNextPage, fetchNextPage)
 
@@ -856,8 +1035,10 @@ export function ChatArea({
   function handleSend() {
     const trimmed = messageContent.trim()
     if (trimmed.length === 0 || channelId === null) return
+    const parentId = replyingTo?.id
     setMessageContent('')
-    sendMessage.mutate(trimmed)
+    setReplyingTo(null)
+    sendMessage.mutate({ content: trimmed, parentMessageId: parentId })
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -877,6 +1058,7 @@ export function ChatArea({
         isDm={isDm}
         dmRecipient={dmRecipient}
         channelName={channelName}
+        channelId={channelId}
         isChannelEncrypted={isChannelEncrypted}
         onOpenVerify={() => setIsVerifyOpen(true)}
       />
@@ -912,12 +1094,14 @@ export function ChatArea({
           style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
-            const message = messages[virtualRow.index]
-            if (!message) return null
+            const item = virtualItems[virtualRow.index]
+            if (!item) return null
+
+            const key = item.type === 'date' ? `date-${virtualRow.index}` : item.msg.id
 
             return (
               <div
-                key={message.id}
+                key={key}
                 data-index={virtualRow.index}
                 ref={virtualizer.measureElement}
                 style={{
@@ -928,23 +1112,37 @@ export function ChatArea({
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                <MessageItem
-                  message={message}
-                  currentUserId={currentUser.id}
-                  canModerateMessages={ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.moderator}
-                  isEditing={editingMessageId === message.id}
-                  onStartEdit={() => handleStartEdit(message.id)}
-                  onSaveEdit={(content) => handleSaveEdit(message.id, content)}
-                  onCancelEdit={handleCancelEdit}
-                  onDelete={() => handleDelete(message.id)}
-                  isDm={isDm}
-                  isChannelEncrypted={isChannelEncrypted}
-                  decryptMessage={decryptMessage}
-                  decryptChannelMessage={decryptChannelMessage}
-                  getCachedPlaintext={
-                    isChannelEncrypted ? getChannelCachedPlaintext : getCachedPlaintext
-                  }
-                />
+                {item.type === 'date' ? (
+                  <DateDivider label={item.label} />
+                ) : (
+                  <MessageItem
+                    message={item.msg}
+                    currentUserId={currentUser.id}
+                    canModerateMessages={
+                      ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.moderator
+                    }
+                    isEditing={editingMessageId === item.msg.id}
+                    isGrouped={item.isGrouped}
+                    onStartEdit={() => handleStartEdit(item.msg.id)}
+                    onSaveEdit={(content) => handleSaveEdit(item.msg.id, content)}
+                    onCancelEdit={handleCancelEdit}
+                    onDelete={() => handleDelete(item.msg.id)}
+                    onReply={() => setReplyingTo(item.msg)}
+                    onAddReaction={(emoji) =>
+                      addReactionMutation.mutate({ messageId: item.msg.id, emoji })
+                    }
+                    onRemoveReaction={(emoji) =>
+                      removeReactionMutation.mutate({ messageId: item.msg.id, emoji })
+                    }
+                    isDm={isDm}
+                    isChannelEncrypted={isChannelEncrypted}
+                    decryptMessage={decryptMessage}
+                    decryptChannelMessage={decryptChannelMessage}
+                    getCachedPlaintext={
+                      isChannelEncrypted ? getChannelCachedPlaintext : getCachedPlaintext
+                    }
+                  />
+                )}
               </div>
             )
           })}
@@ -953,6 +1151,8 @@ export function ChatArea({
 
       {/* Typing indicator */}
       <TypingIndicator typingUsers={typingUsers} />
+
+      <ReplyBar replyingTo={replyingTo} onCancel={() => setReplyingTo(null)} />
 
       <ChatInputSection
         isBlocked={isBlocked}

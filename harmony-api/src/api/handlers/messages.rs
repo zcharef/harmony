@@ -56,6 +56,7 @@ pub async fn send_message(
             req.content,
             req.encrypted.unwrap_or(false),
             req.sender_device_id,
+            req.parent_message_id,
         )
         .await?;
 
@@ -73,6 +74,7 @@ pub async fn send_message(
             encrypted: message.message.encrypted,
             sender_device_id: message.message.sender_device_id.clone(),
             edited_at: message.message.edited_at,
+            parent_message_id: message.message.parent_message_id.clone(),
             created_at: message.message.created_at,
         },
     };
@@ -202,6 +204,7 @@ pub async fn edit_message(
             encrypted: message.message.encrypted,
             sender_device_id: message.message.sender_device_id.clone(),
             edited_at: message.message.edited_at,
+            parent_message_id: message.message.parent_message_id.clone(),
             created_at: message.message.created_at,
         },
     };

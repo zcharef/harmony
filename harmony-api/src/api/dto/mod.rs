@@ -8,8 +8,10 @@ pub mod invites;
 pub mod keys;
 pub mod members;
 pub mod messages;
+pub mod notification_settings;
 pub mod pagination;
 pub mod profiles;
+pub mod read_states;
 pub mod servers;
 
 pub use bans::{BanListQuery, BanListResponse, BanResponse, BanUserRequest};
@@ -38,5 +40,8 @@ pub use messages::{
     EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, SendMessageRequest,
 };
 pub use pagination::PaginatedResponse;
-pub use profiles::{CheckUsernameQuery, CheckUsernameResponse, ProfileResponse};
+pub use profiles::{
+    CheckUsernameQuery, CheckUsernameResponse, ProfileResponse, UpdateProfileRequest,
+};
+pub use read_states::{MarkReadRequest, ReadStateResponse, ReadStatesListResponse};
 pub use servers::{CreateServerRequest, ServerListResponse, ServerResponse, UpdateServerRequest};

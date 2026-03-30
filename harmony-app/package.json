@@ -23,6 +23,8 @@
     "e2e:report": "playwright show-report"
   },
   "dependencies": {
+    "@emoji-mart/data": "^1.2.1",
+    "@emoji-mart/react": "^1.1.1",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource-variable/nunito": "^5.2.7",
     "@heroui/react": "^2.8.10",
@@ -46,7 +48,10 @@
     "react-error-boundary": "^6.1.1",
     "react-hook-form": "^7.72.0",
     "react-i18next": "^16.6.1",
+    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.7.5",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
     "zod": "^4.3.6",
     "zustand": "^5.0.12"
   },
