@@ -63,7 +63,7 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     // async fn check_category_limit(&self, server_id: &ServerId) -> Result<(), DomainError>;
     //
     // Call from ChannelService when category model is added.
-    //   Free: 10, Supporter: 50, Creator: 100.
+    //   Free: 50, Supporter: 50, Creator: 100.
 
     // ── TODO(plan-limits-v3): §4 — Roles (per server) ───────────────────
     //
