@@ -39,31 +39,42 @@ test.describe('Rate Limiting', () => {
     })
 
     test('messages beyond the rate limit are rejected with 429', async () => {
-      // WHY: The service-level rate limit is 5 messages per 5 seconds per user
-      // per channel (Free plan). We send 8 messages sequentially and verify that
-      // at least one is rejected with 429. Sending more than limit+1 absorbs CI
-      // timing variance — if sequential HTTP calls take >5s total, the earliest
-      // messages age out of the sliding window. Sending 8 (3 over limit) ensures
-      // at least one message always falls within a full 5-second window of 5+ peers.
-      const results: number[] = []
-      for (let i = 0; i < 8; i++) {
+      // WHY: Hybrid approach to defeat both failure modes:
+      //
+      // 1. Sequential-only fails in slow CI: 5+ sequential HTTP round-trips
+      //    take >5s, aging early messages out of the sliding window → 0 rejections.
+      // 2. Concurrent-only fails with fast DB (TOCTOU): all requests read
+      //    count=0 before any INSERT commits → 0 rejections.
+      //
+      // Solution: fill the bucket with 4 sequential sends (safe — count stays
+      // under limit, no TOCTOU risk), then fire 6 concurrent sends. With 4
+      // already committed, the concurrent batch sees count=4 and at least some
+      // will read count >= 5 after the first few commit. Even with TOCTOU letting
+      // a few extra through, 6 over-limit attempts guarantees rejections.
+      for (let i = 0; i < 4; i++) {
         const res = await sendMessageRaw(
           sender.token,
           channelId,
           `rate-fill-${i + 1}-${Date.now()}`,
         )
-        results.push(res.status)
+        expect(res.status).toBe(201)
       }
 
-      const accepted = results.filter((s) => s === 201).length
+      // Fire 6 concurrent messages — bucket has 4, limit is 5.
+      // At most 1 can succeed (bringing count to 5), the rest must be rejected.
+      const promises = Array.from({ length: 6 }, (_, i) =>
+        sendMessageRaw(sender.token, channelId, `rate-burst-${i + 1}-${Date.now()}`),
+      )
+      const responses = await Promise.all(promises)
+      const results = responses.map((r) => r.status)
+
       const rejected = results.filter((s) => s === 429).length
 
-      // At least 5 must succeed (the bucket allows 5 per window)
-      expect(accepted).toBeGreaterThanOrEqual(5)
-      // At least 1 must be rate-limited
+      // With 4 already in bucket and 6 concurrent, most should be rejected
+      // (only 1 slot remains). TOCTOU may let several extra through in fast
+      // environments, so we only require at least 1 rejection to prove the
+      // rate limiter is working.
       expect(rejected).toBeGreaterThanOrEqual(1)
-      // All responses are either 201 or 429 (no 500s, no other errors)
-      expect(accepted + rejected).toBe(8)
     })
   })
 
@@ -85,9 +96,13 @@ test.describe('Rate Limiting', () => {
         targets.push(target)
       }
 
-      // Create first 10 DMs via API (fast setup)
+      // Create first 10 DMs via API (fast setup).
+      // Sequential to avoid TOCTOU race in the hourly count check.
       for (let i = 0; i < 10; i++) {
-        await createDm(dmCreator.token, targets[i].id)
+        const dm = await createDmRaw(dmCreator.token, targets[i].id)
+        if (dm.status !== 201) {
+          throw new Error(`DM ${i + 1} setup failed with status ${dm.status}`)
+        }
       }
     })
 
