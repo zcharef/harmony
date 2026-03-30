@@ -102,7 +102,7 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     //
     // async fn check_voice_concurrent(&self, server_id: &ServerId) -> Result<(), DomainError>;
     //
-    //   Free: 10 concurrent, 5 voice channels, 64kbps, no video, no screen share, 1h max.
+    //   Free: 5 concurrent, 5 voice channels, 64kbps, no video, no screen share, 1h max.
     //   Supporter: 100 concurrent, 50 channels, 128kbps, 720p, 720p 15fps screen share, 8h.
     //   Creator: 500 concurrent, 100 channels, 256kbps, 1080p, 1080p 30fps screen share, 24h.
     // Call from voice join handler when LiveKit integration lands (Phase 3).

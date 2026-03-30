@@ -4,7 +4,7 @@
 //! Self-hosted deployments bypass these entirely via the `AlwaysAllowedChecker` adapter,
 //! or use `SELF_HOSTED_LIMITS` for code paths that read limit values.
 //!
-//! Spec reference: V3 Pricing Simulation
+//! Spec reference: V4 Pricing
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -136,15 +136,16 @@ pub struct PlanLimits {
 }
 
 // -- Hardcoded limit constants -----------------------------------------------
-// Source of truth: V3 Pricing Simulation
+// Source of truth: V4 Pricing — gate on real costs (voice/storage).
+// Members and channels are effectively unlimited on all tiers.
 
 const FREE_LIMITS: PlanLimits = PlanLimits {
     max_owned_servers: 3,
     max_joined_servers: 20,
     max_server_description_chars: 500,
-    max_members: 200,
-    max_channels: 50,
-    max_categories: 10,
+    max_members: 500,
+    max_channels: 10_000,
+    max_categories: 50,
     max_channel_topic_chars: 256,
     max_roles: 20,
     max_message_chars: 2_000,
@@ -160,8 +161,8 @@ const SUPPORTER_LIMITS: PlanLimits = PlanLimits {
     max_owned_servers: 10,
     max_joined_servers: 100,
     max_server_description_chars: 1_000,
-    max_members: 10_000,
-    max_channels: 500,
+    max_members: 500_000,
+    max_channels: 10_000,
     max_categories: 50,
     max_channel_topic_chars: 512,
     max_roles: 250,
@@ -178,8 +179,8 @@ const CREATOR_LIMITS: PlanLimits = PlanLimits {
     max_owned_servers: 25,
     max_joined_servers: 500,
     max_server_description_chars: 2_000,
-    max_members: 50_000,
-    max_channels: 1_000,
+    max_members: 500_000,
+    max_channels: 10_000,
     max_categories: 100,
     max_channel_topic_chars: 1_024,
     max_roles: 500,
@@ -264,10 +265,10 @@ mod tests {
         assert_eq!(limits.max_joined_servers, 20);
         assert_eq!(limits.max_server_description_chars, 500);
         // §2 Members
-        assert_eq!(limits.max_members, 200);
+        assert_eq!(limits.max_members, 500);
         // §3 Channels
-        assert_eq!(limits.max_channels, 50);
-        assert_eq!(limits.max_categories, 10);
+        assert_eq!(limits.max_channels, 10_000);
+        assert_eq!(limits.max_categories, 50);
         assert_eq!(limits.max_channel_topic_chars, 256);
         // §4 Roles
         assert_eq!(limits.max_roles, 20);
@@ -294,8 +295,8 @@ mod tests {
         assert_eq!(limits.max_owned_servers, 10);
         assert_eq!(limits.max_joined_servers, 100);
         assert_eq!(limits.max_server_description_chars, 1_000);
-        assert_eq!(limits.max_members, 10_000);
-        assert_eq!(limits.max_channels, 500);
+        assert_eq!(limits.max_members, 500_000);
+        assert_eq!(limits.max_channels, 10_000);
         assert_eq!(limits.max_categories, 50);
         assert_eq!(limits.max_channel_topic_chars, 512);
         assert_eq!(limits.max_roles, 250);
@@ -317,8 +318,8 @@ mod tests {
         assert_eq!(limits.max_owned_servers, 25);
         assert_eq!(limits.max_joined_servers, 500);
         assert_eq!(limits.max_server_description_chars, 2_000);
-        assert_eq!(limits.max_members, 50_000);
-        assert_eq!(limits.max_channels, 1_000);
+        assert_eq!(limits.max_members, 500_000);
+        assert_eq!(limits.max_channels, 10_000);
         assert_eq!(limits.max_categories, 100);
         assert_eq!(limits.max_channel_topic_chars, 1_024);
         assert_eq!(limits.max_roles, 500);
@@ -446,7 +447,7 @@ mod tests {
     fn limit_for_members() {
         assert_eq!(
             PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Members),
-            200
+            500
         );
     }
 
@@ -454,15 +455,15 @@ mod tests {
     fn limit_for_channels() {
         assert_eq!(
             PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Channels),
-            50
+            10_000
         );
         assert_eq!(
             PlanLimits::for_plan(Plan::Supporter).limit_for(ResourceKind::Channels),
-            500
+            10_000
         );
         assert_eq!(
             PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::Channels),
-            1_000
+            10_000
         );
     }
 
@@ -470,7 +471,7 @@ mod tests {
     fn limit_for_categories() {
         assert_eq!(
             PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Categories),
-            10
+            50
         );
     }
 
