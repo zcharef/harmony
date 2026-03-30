@@ -41,14 +41,11 @@ import { createTestUser, type TestUser } from './fixtures/user-factory'
  * so the response is never missed.
  */
 async function navigateToServer(page: Page, serverId: string): Promise<void> {
-  // WHY: Register listener BEFORE selectServer, because selectServer triggers channel
-  // sidebar mount which fires the members query. If we wait after, the response is missed.
-  const membersLoaded = page.waitForResponse(
-    (res) => res.url().includes(`/v1/servers/${serverId}/members`) && res.status() < 400,
-    { timeout: 15_000 },
-  )
   await selectServer(page, serverId)
-  await membersLoaded
+  // WHY: Wait for members to load so useMyMemberRole resolves the correct role.
+  // Previously used waitForResponse, but TanStack Query cache can satisfy the
+  // query without a new network request — causing the response listener to miss.
+  await page.locator('[data-test="member-list"]').waitFor({ timeout: 15_000 })
 }
 
 /**

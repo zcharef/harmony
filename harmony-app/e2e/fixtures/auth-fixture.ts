@@ -70,11 +70,15 @@ export async function authenticatePage(
   // set and EventSource reconnects, the ConnectionBanner (fixed z-50 overlay at the top)
   // is visible and can intercept clicks on UI elements. Wait for the syncProfile response
   // and then for the banner to disappear to ensure a stable test environment.
+  // WHY: Match the actual POST (not OPTIONS preflight which also returns 200).
   await page.waitForResponse(
-    (response) => response.url().includes('/v1/auth/me') && response.status() === 200,
+    (response) =>
+      response.url().includes('/v1/auth/me') &&
+      response.status() === 200 &&
+      response.request().method() === 'POST',
     { timeout: 15_000 },
   )
-  await expect(page.locator('[data-test="connection-banner"]')).not.toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('[data-test="connection-banner"]')).not.toBeVisible({ timeout: 15_000 })
 }
 
 /**
