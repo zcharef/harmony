@@ -12,6 +12,8 @@
   <a href="https://github.com/zcharef/harmony/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zcharef/harmony/ci.yml?style=flat-square&label=CI&logo=github" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License"></a>
   <a href="https://joinharmony.app"><img src="https://img.shields.io/badge/try_it-joinharmony.app-8b5cf6?style=flat-square" alt="Try Harmony"></a>
+  <br /><br />
+  <a href="https://ko-fi.com/Z8Z11JU7E7"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="ko-fi"></a>
 </p>
 
 > **Status:** Alpha — actively developed. Core chat works. [Try it](https://joinharmony.app) or self-host it.

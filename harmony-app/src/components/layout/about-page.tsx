@@ -17,6 +17,7 @@ const GITHUB_URL = 'https://github.com/zcharef/harmony'
 const ISSUES_URL = 'https://github.com/zcharef/harmony/issues'
 const CONTRIBUTING_URL = 'https://github.com/zcharef/harmony/blob/main/CONTRIBUTING.md'
 const SPONSOR_URL = 'https://github.com/sponsors/zcharef'
+const KOFI_URL = 'https://ko-fi.com/Z8Z11JU7E7'
 const COMMIT_URL = `https://github.com/zcharef/harmony/commit/${buildInfo.commitSha}`
 const LICENSE_URL = 'https://github.com/zcharef/harmony/blob/main/LICENSE'
 const RELEASES_URL = 'https://github.com/zcharef/harmony/releases'
@@ -150,6 +151,18 @@ export function AboutPage() {
               />
             </CardBody>
           </Card>
+
+          {/* Ko-fi — visual CTA, separate from the text-based SupportRow pattern */}
+          <div className="flex justify-center">
+            <button type="button" onClick={() => openExternalUrl(KOFI_URL)}>
+              <img
+                height={36}
+                src="https://storage.ko-fi.com/cdn/kofi2.png?v=6"
+                alt="Buy Me a Coffee at ko-fi.com"
+                className="h-9 border-0"
+              />
+            </button>
+          </div>
         </div>
 
         <Divider />
