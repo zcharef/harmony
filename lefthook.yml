@@ -33,7 +33,7 @@ pre-commit:
     openapi-freshness:
       root: harmony-api/
       glob: "src/**/*.rs"
-      run: $HOME/.cargo/bin/cargo run --bin export_openapi | diff openapi.json - >/dev/null
+      run: RUST_LOG=error $HOME/.cargo/bin/cargo run --bin export_openapi 2>/dev/null | diff openapi.json - >/dev/null
       fail_text: "openapi.json is stale. Run 'just export-openapi' and stage the result."
 
 # ============================================================================
@@ -101,7 +101,7 @@ pre-push:
     # --- Rust API (harmony-api) ---
     openapi-freshness:
       root: harmony-api/
-      run: $HOME/.cargo/bin/cargo run --bin export_openapi | diff openapi.json - >/dev/null
+      run: RUST_LOG=error $HOME/.cargo/bin/cargo run --bin export_openapi 2>/dev/null | diff openapi.json - >/dev/null
       fail_text: "openapi.json is stale. Run 'just export-openapi' and commit the result."
 
     rust-test:
