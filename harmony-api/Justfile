@@ -84,8 +84,12 @@ lint-fix:
 check:
     cargo check
 
-# Full quality wall: fmt + clippy + tests + arch + enforce
-wall: fmt-check lint test test-arch test-enforce
+# Verify sqlx offline cache matches current queries (CI uses SQLX_OFFLINE=true)
+sqlx-check:
+    cargo sqlx prepare --check
+
+# Full quality wall: fmt + clippy + tests + arch + enforce + sqlx
+wall: fmt-check lint test test-arch test-enforce sqlx-check
     @echo "Quality wall passed!"
 
 # Auto-fix everything (format + lint)
