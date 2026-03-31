@@ -33,9 +33,7 @@ type CheckResult = { kind: 'up_to_date' } | { kind: 'ready'; version: string }
 const CHECK_INTERVAL_MS = 30 * 60 * 1000 // 30 minutes
 
 /** Check for updates and download. Always prompts the user before restarting. */
-async function checkForUpdate(
-  onStatus: (s: UpdateStatus) => void,
-): Promise<CheckResult> {
+async function checkForUpdate(onStatus: (s: UpdateStatus) => void): Promise<CheckResult> {
   // WHY: Dynamic import — @tauri-apps/plugin-updater crashes in the browser.
   const { check } = await import('@tauri-apps/plugin-updater')
 
@@ -79,35 +77,32 @@ export function useAppUpdater(isAppReady: boolean): AppUpdaterState {
     if (mountedRef.current) setStatus(s)
   }, [])
 
-  const checkAndApply = useCallback(
-    async () => {
-      if (!isTauri()) return
+  const checkAndApply = useCallback(async () => {
+    if (!isTauri()) return
 
-      try {
-        const result = await checkForUpdate((s) => {
-          safeSetStatus(s)
-        })
+    try {
+      const result = await checkForUpdate((s) => {
+        safeSetStatus(s)
+      })
 
-        if (!mountedRef.current) return
+      if (!mountedRef.current) return
 
-        if (result.kind === 'up_to_date') {
-          logger.info('update_check_complete', { result: 'up_to_date' })
-          safeSetStatus('idle')
-          return
-        }
-
-        setVersion(result.version)
-        setDismissed(false)
-        safeSetStatus('ready')
-      } catch (err: unknown) {
-        logger.warn('update_check_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        })
+      if (result.kind === 'up_to_date') {
+        logger.info('update_check_complete', { result: 'up_to_date' })
         safeSetStatus('idle')
+        return
       }
-    },
-    [safeSetStatus],
-  )
+
+      setVersion(result.version)
+      setDismissed(false)
+      safeSetStatus('ready')
+    } catch (err: unknown) {
+      logger.warn('update_check_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+      safeSetStatus('idle')
+    }
+  }, [safeSetStatus])
 
   // WHY: logger.error + toast because restart is an explicit user action (ADR-045).
   const restart = useCallback(async () => {

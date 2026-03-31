@@ -72,9 +72,7 @@ async function handleDeepLinkCallback({ code, state }: { code: string; state: st
       expected: expectedState,
       received: state,
     })
-    useAuthStore
-      .getState()
-      .setDesktopAuthError(i18n.t('auth:securityValidationError'))
+    useAuthStore.getState().setDesktopAuthError(i18n.t('auth:securityValidationError'))
     return
   }
 

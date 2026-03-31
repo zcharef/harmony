@@ -43,7 +43,13 @@ export function UpdateNotification({ version, onRestart, onDismiss }: UpdateNoti
             <Button size="sm" color="success" variant="flat" onPress={onRestart}>
               {t('updateAction')}
             </Button>
-            <Button size="sm" variant="light" isIconOnly onPress={onDismiss} aria-label={t('dismiss')}>
+            <Button
+              size="sm"
+              variant="light"
+              isIconOnly
+              onPress={onDismiss}
+              aria-label={t('dismiss')}
+            >
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>

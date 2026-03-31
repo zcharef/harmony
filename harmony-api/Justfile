@@ -139,7 +139,7 @@ openapi:
 
 # Export OpenAPI spec to JSON (no running server needed)
 export-openapi:
-    cargo run --bin export_openapi > openapi.json
+    RUST_LOG=error cargo run --bin export_openapi 2>/dev/null > openapi.json
     @echo "Exported openapi.json from Rust structs (SSoT)"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
