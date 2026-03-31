@@ -16,7 +16,6 @@ import { isTauri, openExternalUrl } from '@/lib/platform'
 const GITHUB_URL = 'https://github.com/zcharef/harmony'
 const ISSUES_URL = 'https://github.com/zcharef/harmony/issues'
 const CONTRIBUTING_URL = 'https://github.com/zcharef/harmony/blob/main/CONTRIBUTING.md'
-const SPONSOR_URL = 'https://github.com/sponsors/zcharef'
 const KOFI_URL = 'https://ko-fi.com/Z8Z11JU7E7'
 const COMMIT_URL = `https://github.com/zcharef/harmony/commit/${buildInfo.commitSha}`
 const LICENSE_URL = 'https://github.com/zcharef/harmony/blob/main/LICENSE'
@@ -147,7 +146,7 @@ export function AboutPage() {
                 icon={<Heart className="h-4 w-4 text-danger" />}
                 description={t('sponsorDescription')}
                 buttonLabel={t('sponsorButton')}
-                href={SPONSOR_URL}
+                href={KOFI_URL}
               />
             </CardBody>
           </Card>
