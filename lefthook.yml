@@ -60,12 +60,13 @@ pre-push:
       run: pnpm biome check .
       fail_text: "Biome lint failed. Run 'pnpm biome check --write .' to auto-fix formatting, then fix remaining lint errors."
 
-    # WHY: Regenerate SDK before typecheck to catch spec↔client drift.
-    # SDK files are gitignored, so regeneration has no git side effects.
+    # WHY: TypeScript check. Generated API client must already exist (run
+    # `just gen-api` after Rust API changes). We do NOT regenerate here because
+    # parallel hooks would race on writing to src/lib/api/ and corrupt files.
     typecheck:
       root: harmony-app/
-      run: pnpm openapi-ts && pnpm tsc --noEmit
-      fail_text: "TypeScript errors found. Run 'just gen-api' and fix type errors before pushing."
+      run: "test -f src/lib/api/sdk.gen.ts || { echo 'Generated API client missing. Run: just gen-api'; exit 1; } && pnpm tsc --noEmit"
+      fail_text: "TypeScript errors found. Run 'just gen-api' then fix type errors."
 
     boundaries:
       root: harmony-app/
@@ -74,13 +75,18 @@ pre-push:
 
     circular:
       root: harmony-app/
-      run: pnpm madge --circular --extensions ts,tsx src/
+      # WHY: Exclude lib/api/ — generated files have circular imports by design
+      run: pnpm madge --circular --extensions ts,tsx --exclude 'lib/api/' src/
       fail_text: "Circular dependencies detected."
 
     web-architecture:
       root: harmony-app/
+      # WHY: Arch tests scan src/lib/api/ which is gitignored. typecheck step
+      # already generates via openapi-ts, but since hooks run in parallel we
+      # must NOT also generate here (race condition corrupts output files).
+      # Developers must have run `just gen-api` at least once.
       run: pnpm vitest run --config vitest.config.arch.ts
-      fail_text: "Architecture tests failed. Check feature structure."
+      fail_text: "Architecture tests failed. Run 'just gen-api' first, then check feature structure."
 
     vitest:
       root: harmony-app/

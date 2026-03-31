@@ -79,7 +79,7 @@ function ChannelButton({
         {channel.isPrivate && <Lock className="h-3 w-3 shrink-0 text-default-400" />}
         {channel.isReadOnly && <Megaphone className="h-3 w-3 shrink-0 text-default-400" />}
         {unreadCount > 0 && (
-          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-xs text-white">
+          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-xs text-danger-foreground">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
