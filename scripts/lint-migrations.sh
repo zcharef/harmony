@@ -23,12 +23,15 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
 done
 
 # Check for destructive operations
+# WHY: "DROP TABLE" is checked with word boundary to avoid false positives on
+# "ALTER PUBLICATION ... DROP TABLE" which only removes from replication, not data.
 FORBIDDEN_PATTERNS=(
   "DROP COLUMN"
-  "DROP TABLE"
   "RENAME COLUMN"
   "RENAME TABLE"
 )
+# Separate check for DROP TABLE: must be standalone (not ALTER PUBLICATION ... DROP TABLE)
+STANDALONE_DROP_TABLE="(^|;)[^;]*DROP[[:space:]]+TABLE"
 
 for file in "$MIGRATIONS_DIR"/*.sql; do
   [ -e "$file" ] || continue
@@ -46,6 +49,14 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
     echo "ERROR: ALTER COLUMN TYPE change in $(basename "$file"). Use add-migrate-remove pattern."
     VIOLATIONS=$((VIOLATIONS + 1))
   fi
+
+  # WHY: Separate check for DROP TABLE that excludes ALTER PUBLICATION ... DROP TABLE.
+  # ALTER PUBLICATION removes from replication, not from the database — non-destructive.
+  if grep -inE "DROP[[:space:]]+TABLE" "$file" | grep -iv "ALTER PUBLICATION" | grep -v "lint:allow:destructive" > /dev/null 2>&1; then
+    echo "ERROR: Forbidden destructive operation 'DROP TABLE' in $(basename "$file")"
+    echo "       Use '-- lint:allow:destructive: <reason>' to override with justification"
+    VIOLATIONS=$((VIOLATIONS + 1))
+  fi
 done
 
 # RLS enforcement: CREATE TABLE must be paired with ENABLE ROW LEVEL SECURITY
@@ -59,7 +70,7 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
       echo "         Every table MUST have RLS enabled (ADR-040)"
       VIOLATIONS=$((VIOLATIONS + 1))
     fi
-  done < <(grep -i 'CREATE TABLE' "$file" 2>/dev/null | sed -E 's/.*CREATE TABLE[[:space:]]+(IF NOT EXISTS[[:space:]]+)?(public\.)?([a-zA-Z_][a-zA-Z0-9_]*).*/\3/' || true)
+  done < <(grep -i 'create table' "$file" 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed -E 's/.*create table[[:space:]]+(if not exists[[:space:]]+)?(public\.)?([a-z_][a-z0-9_]*).*/\3/' || true)
 done
 
 if [ "$VIOLATIONS" -gt 0 ]; then
