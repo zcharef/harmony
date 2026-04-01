@@ -305,6 +305,7 @@ function DesktopLoginView() {
   )
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: auth form has inherent complexity from mode switching (login/signup), captcha, honeypot, and Tauri deep link — extracting further would scatter related auth logic across files
 export function LoginPage() {
   const { t } = useTranslation('auth')
   const [mode, setMode] = useState<AuthMode>('login')
@@ -360,8 +361,6 @@ export function LoginPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
 
-    // WHY: Bots auto-fill hidden fields. Real users never see this field.
-    // Silent rejection — no error message to avoid revealing the trap.
     if (honeypot.length > 0) {
       return
     }
