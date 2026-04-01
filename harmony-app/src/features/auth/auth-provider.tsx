@@ -8,50 +8,63 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from './stores/auth-store'
 
 /**
- * WHY: After login, we notify the backend so it can upsert the user profile
- * (display_name, avatar_url, etc.) from the Supabase auth metadata.
+ * Serialized profile sync — deduplicates concurrent calls by queuing.
  *
- * Returns the error detail string on failure, null on success, or 'skipped'
- * when a sync is already in-flight (to avoid the caller treating a no-op guard
- * as a successful sync — which would prematurely set isProfileSynced before
- * the HMAC cookie is actually stored).
+ * WHY: On page load, getSession() and onAuthStateChange fire near-simultaneously.
+ * The first call may fail (stale JWT missing email claim → 400). With a simple
+ * boolean guard, the second call was skipped entirely — leaving isProfileSynced
+ * false and the SSE connection never established.
+ *
+ * This queue ensures the second call WAITS for the first to finish, then runs
+ * with the (now-refreshed) Supabase token. No arbitrary timeouts, no dropped calls.
+ *
+ * Returns error detail string on failure, null on success.
  */
-async function syncProfile(
-  isSyncing: React.RefObject<boolean>,
-): Promise<string | null | 'skipped'> {
-  // WHY: Guard against duplicate sync calls from rapid auth events
-  if (isSyncing.current) {
-    return 'skipped'
-  }
-  isSyncing.current = true
+function createProfileSyncer() {
+  let inFlight: Promise<string | null> | null = null
+  let queued = false
 
-  try {
-    await syncProfileApi({
-      // WHY: `credentials: 'include'` is required for the browser to store the
-      // `Set-Cookie` header from a cross-origin response. Without it, the session
-      // cookie is returned by the server but silently discarded, so EventSource
-      // (which cannot send Authorization headers) can never authenticate (ADR-SSE-005).
-      credentials: 'include',
-      throwOnError: true,
-    })
-    return null
-  } catch (error: unknown) {
-    // WHY: SDK throws ProblemDetails (RFC 9457) for 4xx/5xx, or Error for network failures.
-    let message = 'Profile sync failed'
-    if (error instanceof Error) {
-      message = error.message
-    } else if (
-      typeof error === 'object' &&
-      error !== null &&
-      'detail' in error &&
-      typeof error.detail === 'string'
-    ) {
-      message = error.detail
+  async function doSync(): Promise<string | null> {
+    try {
+      await syncProfileApi({
+        credentials: 'include',
+        throwOnError: true,
+      })
+      return null
+    } catch (error: unknown) {
+      let message = 'Profile sync failed'
+      if (error instanceof Error) {
+        message = error.message
+      } else if (
+        typeof error === 'object' &&
+        error !== null &&
+        'detail' in error &&
+        typeof error.detail === 'string'
+      ) {
+        message = error.detail
+      }
+      logger.error('profile_sync_failed', { error: message })
+      return message
     }
-    logger.error('profile_sync_failed', { error: message })
-    return message
-  } finally {
-    isSyncing.current = false
+  }
+
+  return async function syncProfile(): Promise<string | null> {
+    // WHY: If a sync is already in-flight, queue ONE follow-up call instead of
+    // skipping. When the in-flight call finishes, the queued call runs with the
+    // latest Supabase token (which may have been refreshed during the wait).
+    if (inFlight !== null) {
+      queued = true
+      await inFlight
+      // WHY: Only the last queued caller needs to execute — intermediate ones
+      // can piggyback on the result. Check if we're still the queued one.
+      if (!queued) return null
+    }
+
+    queued = false
+    inFlight = doSync()
+    const result = await inFlight
+    inFlight = null
+    return result
   }
 }
 
@@ -103,7 +116,9 @@ async function handleDeepLinkCallback({ code, state }: { code: string; state: st
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { setSession, setUser, setLoading, setProfileSyncError, setProfileSynced, clear } =
     useAuthStore()
-  const isSyncing = useRef(false)
+  // WHY: useRef so the syncer instance survives re-renders without recreating.
+  const syncerRef = useRef(createProfileSyncer())
+  const syncProfile = syncerRef.current
 
   useEffect(() => {
     // WHY: getSession() reads the locally stored session (from cookies/localStorage).
@@ -116,13 +131,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false)
 
         if (session !== null) {
-          syncProfile(isSyncing).then((result) => {
-            // WHY: 'skipped' means a sync is already in-flight — do nothing.
-            // null means the HTTP call succeeded and the HMAC cookie is stored.
-            // Any other string is an error message to surface in the UI.
+          syncProfile().then((result) => {
             if (result === null) {
               setProfileSynced(true)
-            } else if (result !== 'skipped') {
+            } else {
               setProfileSyncError(result)
               // WHY: The initial getSession() may return a stale JWT missing the
               // email claim (400 error). Meanwhile, onAuthStateChange fires and
@@ -157,10 +169,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfileSyncError(null)
 
       if (session !== null) {
-        syncProfile(isSyncing).then((result) => {
+        syncProfile().then((result) => {
           if (result === null) {
             setProfileSynced(true)
-          } else if (result !== 'skipped') {
+          } else {
             setProfileSyncError(result)
           }
         })
@@ -197,7 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe()
       unlistenDeepLink?.()
     }
-  }, [setSession, setUser, setLoading, setProfileSyncError, setProfileSynced, clear])
+  }, [setSession, setUser, setLoading, setProfileSyncError, setProfileSynced, clear, syncProfile])
 
   return children
 }
