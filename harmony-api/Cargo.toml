@@ -55,7 +55,6 @@ config = "0.15"
 
 # Security
 secrecy = { version = "0.10", features = ["serde"] }
-hmac = "0.12"
 sha2 = "0.10"
 subtle = "2"
 hex = "0.4"

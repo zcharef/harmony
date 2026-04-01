@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use jsonwebtoken::DecodingKey;
-use secrecy::SecretString;
 use sqlx::PgPool;
 
 use crate::domain::ports::{
@@ -25,11 +24,9 @@ pub struct AppState {
     /// WHY: Private — only exposed via `pool()` accessor for the health check.
     pool: PgPool,
     /// Supabase JWT secret for HS256 token verification.
-    pub jwt_secret: SecretString,
+    pub jwt_secret: secrecy::SecretString,
     /// ES256 public key from Supabase JWKS (for newer Supabase CLI versions).
     pub es256_key: Option<DecodingKey>,
-    /// Session secret for signing HMAC session tokens.
-    pub session_secret: SecretString,
     /// Whether the server is running in production mode.
     pub is_production: bool,
     /// Profile domain service.
@@ -107,9 +104,8 @@ impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: PgPool,
-        jwt_secret: SecretString,
+        jwt_secret: secrecy::SecretString,
         es256_key: Option<DecodingKey>,
-        session_secret: SecretString,
         is_production: bool,
         profile_service: Arc<ProfileService>,
         server_service: Arc<ServerService>,
@@ -134,7 +130,6 @@ impl AppState {
             pool,
             jwt_secret,
             es256_key,
-            session_secret,
             is_production,
             profile_service,
             server_service,

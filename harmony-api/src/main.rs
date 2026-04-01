@@ -18,7 +18,7 @@ use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::ExposeSecret;
 use sentry::integrations::tracing::EventFilter;
 use tokio::signal;
 use tracing_opentelemetry::OpenTelemetryLayer;
@@ -113,16 +113,6 @@ async fn init_app_state(config: &Config) -> AppState {
     // Fetch ES256 public key from Supabase JWKS (newer CLI versions sign with ECDSA)
     let es256_key = fetch_supabase_jwks(config).await;
 
-    // Session secret (required — stateless HMAC session tokens)
-    let session_secret: SecretString = config.session_secret.clone().unwrap_or_else(|| {
-        if config.is_production() {
-            panic!("SESSION_SECRET must be set in production");
-        }
-        tracing::warn!("SESSION_SECRET not set — generating random ephemeral secret (sessions won't survive restart)");
-        let random_bytes: [u8; 32] = rand::random();
-        SecretString::from(hex::encode(random_bytes))
-    });
-
     // Construct Postgres adapters (ports → adapters)
     let profile_repo = Arc::new(infra::postgres::PgProfileRepository::new(pool.clone()));
     let server_repo = Arc::new(infra::postgres::PgServerRepository::new(pool.clone()));
@@ -213,7 +203,6 @@ async fn init_app_state(config: &Config) -> AppState {
         pool,
         config.supabase_jwt_secret.clone(),
         es256_key,
-        session_secret,
         config.is_production(),
         profile_service,
         server_service,

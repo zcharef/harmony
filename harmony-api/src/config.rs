@@ -26,9 +26,6 @@ pub struct Config {
     /// Supabase project URL (optional, for storage/auth admin calls)
     pub supabase_url: Option<String>,
 
-    /// Session secret for signing session tokens (min 32 bytes recommended)
-    pub session_secret: Option<SecretString>,
-
     /// Sentry DSN for crash reporting (optional in dev)
     pub sentry_dsn: Option<SecretString>,
 
@@ -115,7 +112,6 @@ impl std::fmt::Debug for Config {
             .field("max_db_connections", &self.max_db_connections)
             .field("supabase_jwt_secret", &"[REDACTED]")
             .field("supabase_url", &self.supabase_url)
-            .field("session_secret", &"[REDACTED]")
             .field(
                 "sentry_dsn",
                 &self.sentry_dsn.as_ref().map(|_| "[REDACTED]"),
