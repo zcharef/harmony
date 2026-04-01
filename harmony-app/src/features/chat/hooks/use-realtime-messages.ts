@@ -2,7 +2,6 @@ import type { InfiniteData } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { z } from 'zod'
-import { useUnreadStore } from '@/features/channels'
 import { useServerEvent } from '@/hooks/use-server-event'
 import type { MessageListResponse, MessageResponse } from '@/lib/api'
 import { messagePayloadSchema } from '@/lib/event-types'
@@ -74,12 +73,6 @@ export function useRealtimeMessages(channelId: string) {
       }
 
       const eventChannelId = parsed.data.channelId
-
-      // WHY: Increment unread count for channels other than the one being viewed.
-      // This ensures the sidebar badge updates in real-time via SSE.
-      if (eventChannelId !== channelId) {
-        useUnreadStore.getState().increment(eventChannelId)
-      }
 
       // WHY: Update the cache for whichever channel this message belongs to
       // (active or inactive). For inactive channels, the cache may not exist

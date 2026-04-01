@@ -12,6 +12,7 @@ import {
   useAllReadStates,
   useChannels,
   useRealtimeChannels,
+  useRealtimeUnread,
 } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
 import { DmSidebar, useDms, useRealtimeDms } from '@/features/dms'
@@ -354,6 +355,11 @@ export function MainLayout() {
   // server). The backend now dynamically updates the server_ids filter via a
   // watch channel, so no client-side reconnect is needed.
   useRealtimeDms()
+  // WHY: Mounted here (not in ChatArea) so unread increments happen even when
+  // no channel is selected (e.g. DM view with no conversation open). The
+  // previous approach coupled incrementing to useRealtimeMessages(channelId)
+  // which only subscribed when channelId was non-empty.
+  useRealtimeUnread(selectedChannelId)
   // WHY: Fetch server-computed unread counts for ALL servers on load.
   // Initializes the Zustand unread store so badges show correctly across all
   // server icons, not just the selected one. initFromServer merges, so each
