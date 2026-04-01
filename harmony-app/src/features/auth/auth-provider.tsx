@@ -1,72 +1,12 @@
 import i18n from 'i18next'
 import type { ReactNode } from 'react'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { syncProfile as syncProfileApi } from '@/lib/api'
+import { useConnectionStore } from '@/lib/connection-store'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from './stores/auth-store'
-
-/**
- * Serialized profile sync — deduplicates concurrent calls by queuing.
- *
- * WHY: On page load, getSession() and onAuthStateChange fire near-simultaneously.
- * The first call may fail (stale JWT missing email claim → 400). With a simple
- * boolean guard, the second call was skipped entirely — leaving isProfileSynced
- * false and the SSE connection never established.
- *
- * This queue ensures the second call WAITS for the first to finish, then runs
- * with the (now-refreshed) Supabase token. No arbitrary timeouts, no dropped calls.
- *
- * Returns error detail string on failure, null on success.
- */
-function createProfileSyncer() {
-  let inFlight: Promise<string | null> | null = null
-  let queued = false
-
-  async function doSync(): Promise<string | null> {
-    try {
-      await syncProfileApi({
-        credentials: 'include',
-        throwOnError: true,
-      })
-      return null
-    } catch (error: unknown) {
-      let message = 'Profile sync failed'
-      if (error instanceof Error) {
-        message = error.message
-      } else if (
-        typeof error === 'object' &&
-        error !== null &&
-        'detail' in error &&
-        typeof error.detail === 'string'
-      ) {
-        message = error.detail
-      }
-      logger.error('profile_sync_failed', { error: message })
-      return message
-    }
-  }
-
-  return async function syncProfile(): Promise<string | null> {
-    // WHY: If a sync is already in-flight, queue ONE follow-up call instead of
-    // skipping. When the in-flight call finishes, the queued call runs with the
-    // latest Supabase token (which may have been refreshed during the wait).
-    if (inFlight !== null) {
-      queued = true
-      await inFlight
-      // WHY: Only the last queued caller needs to execute — intermediate ones
-      // can piggyback on the result. Check if we're still the queued one.
-      if (!queued) return null
-    }
-
-    queued = false
-    inFlight = doSync()
-    const result = await inFlight
-    inFlight = null
-    return result
-  }
-}
 
 /**
  * WHY extracted: Handles the deep link auth callback from the system browser.
@@ -114,21 +54,13 @@ async function handleDeepLinkCallback({ code, state }: { code: string; state: st
  * Must wrap the entire app to ensure auth state is available everywhere.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { setSession, setUser, setLoading, setProfileSyncError, setProfileSynced, clear } =
-    useAuthStore()
-  // WHY: useRef so the syncer instance survives re-renders without recreating.
-  const syncerRef = useRef(createProfileSyncer())
-  const syncProfile = syncerRef.current
+  const { setSession, setUser, setLoading, clear } = useAuthStore()
 
   useEffect(() => {
-    // WHY: getSession() reads the locally stored session (from cookies/localStorage).
-    // This avoids a network call on every page load while still rehydrating auth state.
     // WHY: getSession() returns a CACHED session from localStorage. Its JWT
     // may be stale (missing email claim after Supabase schema changes). We
     // only use it to restore UI state (session/user/loading). The actual
-    // syncProfile call is deferred to onAuthStateChange, which fires with
-    // a refreshed token (TOKEN_REFRESHED event). This eliminates the
-    // spurious 400 error on every page refresh.
+    // profile sync is a fire-and-forget side effect on SIGNED_IN/TOKEN_REFRESHED.
     supabase.auth
       .getSession()
       .then(({ data: { session } }) => {
@@ -148,27 +80,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
       setUser(session?.user ?? null)
-      setProfileSyncError(null)
 
       if (session === null) {
         clear()
         return
       }
 
-      // WHY: INITIAL_SESSION fires with the same cached JWT as getSession() —
-      // it may lack the email claim (stale token). Supabase auto-refreshes the
-      // token and fires TOKEN_REFRESHED shortly after. Syncing on INITIAL_SESSION
-      // would produce a 400 error on every page refresh. SIGNED_IN fires on fresh
-      // login (token is always valid). TOKEN_REFRESHED fires after auto-refresh
-      // (token is valid). These are the only events where syncProfile should run.
+      // WHY: Fire-and-forget profile sync to update metadata (display_name,
+      // avatar_url) from OAuth providers. The DB trigger (Phase 1) handles
+      // initial profile creation, so this is NOT on the critical path.
+      // SSE connects independently based on userId — no sync gate needed.
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        syncProfile().then((result) => {
-          if (result === null) {
-            setProfileSynced(true)
-          } else {
-            setProfileSyncError(result)
-          }
+        syncProfileApi({ throwOnError: true }).catch((error: unknown) => {
+          logger.error('profile_sync_failed', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+          })
         })
+      }
+
+      // WHY: The SSE endpoint verifies the JWT once at connection time and
+      // does NOT re-verify mid-stream. When Supabase refreshes the token,
+      // we reconnect so the server sees the new JWT. This is silent — we
+      // increment reconnectKey directly (not requestReconnect()) to avoid
+      // flashing the "Reconnecting..." banner on routine token rotation.
+      if (event === 'TOKEN_REFRESHED') {
+        useConnectionStore.setState((s) => ({ reconnectKey: s.reconnectKey + 1 }))
       }
     })
 
@@ -200,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe()
       unlistenDeepLink?.()
     }
-  }, [setSession, setUser, setLoading, setProfileSyncError, setProfileSynced, clear, syncProfile])
+  }, [setSession, setUser, setLoading, clear])
 
   return children
 }
