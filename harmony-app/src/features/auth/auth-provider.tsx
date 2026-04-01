@@ -123,22 +123,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // WHY: getSession() reads the locally stored session (from cookies/localStorage).
     // This avoids a network call on every page load while still rehydrating auth state.
+    // WHY: getSession() returns a CACHED session from localStorage. Its JWT
+    // may be stale (missing email claim after Supabase schema changes). We
+    // only use it to restore UI state (session/user/loading). The actual
+    // syncProfile call is deferred to onAuthStateChange, which fires with
+    // a refreshed token (TOKEN_REFRESHED event). This eliminates the
+    // spurious 400 error on every page refresh.
     supabase.auth
       .getSession()
       .then(({ data: { session } }) => {
         setSession(session)
         setUser(session?.user ?? null)
         setLoading(false)
-
-        if (session !== null) {
-          syncProfile().then((result) => {
-            if (result === null) {
-              setProfileSynced(true)
-            } else {
-              setProfileSyncError(result)
-            }
-          })
-        }
       })
       .catch((err: unknown) => {
         logger.error('session_restore_failed', {
@@ -149,12 +145,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
       setUser(session?.user ?? null)
       setProfileSyncError(null)
 
-      if (session !== null) {
+      if (session === null) {
+        clear()
+        return
+      }
+
+      // WHY: INITIAL_SESSION fires with the same cached JWT as getSession() —
+      // it may lack the email claim (stale token). Supabase auto-refreshes the
+      // token and fires TOKEN_REFRESHED shortly after. Syncing on INITIAL_SESSION
+      // would produce a 400 error on every page refresh. SIGNED_IN fires on fresh
+      // login (token is always valid). TOKEN_REFRESHED fires after auto-refresh
+      // (token is valid). These are the only events where syncProfile should run.
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         syncProfile().then((result) => {
           if (result === null) {
             setProfileSynced(true)
@@ -162,8 +169,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setProfileSyncError(result)
           }
         })
-      } else {
-        clear()
       }
     })
 
