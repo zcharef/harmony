@@ -259,39 +259,3 @@ export type BanPayload = z.infer<typeof banPayloadSchema>
 export type ChannelPayload = z.infer<typeof channelPayloadSchema>
 export type ServerPayload = z.infer<typeof serverPayloadSchema>
 export type DmPayload = z.infer<typeof dmPayloadSchema>
-
-// ── Event handler map type ───────────────────────────────────────────
-// WHY: Used by useEventSource to dispatch events to type-safe handlers.
-// Handlers are optional — features subscribe only to events they care about.
-// WHY ServerEvent (not narrowed): avoids `as any` cast in the dispatcher.
-// Each handler receives the full union but can narrow via `event.type` check
-// (TypeScript control flow narrowing). This is the simplest correct approach.
-
-export type ServerEventHandlers = {
-  [K in ServerEvent['type']]?: (event: ServerEvent) => void
-}
-
-// ── Mapping: SSE event name → discriminator type ─────────────────────
-// WHY: The SSE `event:` field uses dot-separated names (e.g., "message.created")
-// but the JSON `data.type` uses camelCase (e.g., "messageCreated"). This map
-// allows the hook to look up handlers by SSE event name.
-
-export const SSE_EVENT_NAME_TO_TYPE = {
-  'message.created': 'messageCreated',
-  'message.updated': 'messageUpdated',
-  'message.deleted': 'messageDeleted',
-  'member.joined': 'memberJoined',
-  'member.removed': 'memberRemoved',
-  'member.banned': 'memberBanned',
-  'member.role_updated': 'memberRoleUpdated',
-  'channel.created': 'channelCreated',
-  'channel.updated': 'channelUpdated',
-  'channel.deleted': 'channelDeleted',
-  'server.updated': 'serverUpdated',
-  'dm.created': 'dmCreated',
-  'typing.started': 'typingStarted',
-  'presence.changed': 'presenceChanged',
-  'reaction.added': 'reactionAdded',
-  'reaction.removed': 'reactionRemoved',
-  'force.disconnect': 'forceDisconnect',
-} as const satisfies Record<SseEventName, ServerEvent['type']>

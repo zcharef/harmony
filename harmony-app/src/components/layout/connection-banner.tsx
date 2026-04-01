@@ -19,6 +19,7 @@ import { useConnectionStatus, useConnectionStore } from '@/lib/connection-store'
 
 export function ConnectionBanner() {
   const status = useConnectionStatus()
+  const errorMessage = useConnectionStore((s) => s.errorMessage)
   const requestReconnect = useConnectionStore((s) => s.requestReconnect)
   const { t } = useTranslation('common')
   const queryClient = useQueryClient()
@@ -59,7 +60,7 @@ export function ConnectionBanner() {
           <span>
             {status === 'connecting' && t('connecting')}
             {status === 'reconnecting' && t('reconnecting')}
-            {status === 'disconnected' && t('connectionLost')}
+            {status === 'disconnected' && (errorMessage ?? t('connectionLost'))}
           </span>
 
           {status === 'disconnected' && (

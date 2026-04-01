@@ -24,12 +24,12 @@ import {
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, useSettingsUiStore } from '@/features/settings'
-import { useEventSource } from '@/hooks/use-event-source'
+import { useFetchSSE } from '@/hooks/use-fetch-sse'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import { type ConnectionStatus, useConnectionStatus } from '@/lib/connection-store'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
-import { isTauri } from '@/lib/platform'
+import { supabase } from '@/lib/supabase'
 import { AboutPage } from './about-page'
 import { ConnectionBanner } from './connection-banner'
 import { WelcomeScreen } from './welcome-screen'
@@ -331,28 +331,28 @@ export function MainLayout() {
   // WHY: Presence subscribes to ALL servers so the user appears online to
   // friends everywhere, not just on the currently viewed server.
   const userId = useAuthStore((s) => s.user?.id ?? null)
-  // WHY: Gate EventSource on profile sync so the HMAC session cookie is set
-  // before the first SSE request. Without this, EventSource races ahead of
-  // POST /v1/auth/me and gets 401 (cookie not yet stored).
-  const isProfileSynced = useAuthStore((s) => s.isProfileSynced)
-  // WHY: In Tauri, WKWebView's ITP silently drops cross-origin cookies, so
-  // EventSource can't use cookie auth. We pass the Supabase JWT as a query
-  // parameter instead. Web browsers use cookie auth (accessToken stays null).
-  const isTauriApp = isTauri()
-  const accessToken = useAuthStore((s) => (isTauriApp ? (s.session?.access_token ?? null) : null))
+  // WHY: Stable callback that returns the latest Supabase JWT.
+  // getSession() auto-refreshes expired access tokens internally.
+  // Token rotation is handled by AuthProvider reacting to TOKEN_REFRESHED.
+  const getToken = useCallback(async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    return session?.access_token
+  }, [])
   const serverIds = useMemo(() => servers?.map((s) => s.id) ?? [], [servers])
   usePresence(serverIds, selectedServerId, userId)
-  useEventSource({}, isProfileSynced ? userId : null, accessToken)
+  useFetchSSE(userId, getToken)
   useForceDisconnect(userId, selectedServerId, setSelectedServerId, setSelectedChannelId)
   // WHY: Realtime hooks MUST live here (not inside collapsible sidebar/member-list
   // panels). When a panel collapses, its component unmounts and SSE listeners are
   // torn down — events would be silently missed until the panel re-opens.
   useRealtimeChannels(selectedServerId ?? '')
   useRealtimeMembers(selectedServerId ?? '')
-  // WHY: Moved from DmSidebar so dm.created SSE events trigger a reconnect
-  // even when the DM sidebar is unmounted (user viewing a server). Without this,
-  // newly created DMs would silently miss all message events because the SSE
-  // server_ids snapshot never refreshes.
+  // WHY: Mounted here (not in DmSidebar) so dm.created SSE events invalidate
+  // the DM list cache even when the DM sidebar is unmounted (user viewing a
+  // server). The backend now dynamically updates the server_ids filter via a
+  // watch channel, so no client-side reconnect is needed.
   useRealtimeDms()
   // WHY: Fetch server-computed unread counts on server selection.
   // Initializes the Zustand unread store so badges show correctly on load.

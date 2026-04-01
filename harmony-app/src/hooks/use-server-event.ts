@@ -26,8 +26,7 @@ export const SSE_EVENT_PREFIX = 'sse:' as const
  *   the generic provided no runtime guarantee and every caller already validates.
  */
 export function useServerEvent(eventType: string | null, handler: (payload: unknown) => void) {
-  // WHY: Ref avoids re-subscribing when handler changes. Follows the same
-  // pattern as handlersRef in use-event-source.ts:47-48. Without this, every
+  // WHY: Ref avoids re-subscribing when handler changes. Without this, every
   // render that produces a new handler reference tears down and re-adds the
   // event listener, causing subscription churn.
   const handlerRef = useRef(handler)
