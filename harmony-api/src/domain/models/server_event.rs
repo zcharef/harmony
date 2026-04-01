@@ -8,8 +8,10 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use super::ChannelType;
+use super::MessageWithAuthor;
 use super::UserStatus;
 use super::ids::{ChannelId, MessageId, ServerId, UserId};
+use super::message::MessageType;
 use super::role::Role;
 
 // ── Payload structs ──────────────────────────────────────────────
@@ -28,7 +30,33 @@ pub struct MessagePayload {
     pub sender_device_id: Option<String>,
     pub edited_at: Option<DateTime<Utc>>,
     pub parent_message_id: Option<MessageId>,
+    /// `default` for user messages, `system` for announcements.
+    pub message_type: MessageType,
+    /// System event key (e.g. `member_join`). Only present for system messages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_event_key: Option<String>,
     pub created_at: DateTime<Utc>,
+}
+
+impl From<MessageWithAuthor> for MessagePayload {
+    fn from(mwa: MessageWithAuthor) -> Self {
+        let m = mwa.message;
+        Self {
+            id: m.id,
+            channel_id: m.channel_id,
+            content: m.content,
+            author_id: m.author_id,
+            author_username: mwa.author_username,
+            author_avatar_url: mwa.author_avatar_url,
+            encrypted: m.encrypted,
+            sender_device_id: m.sender_device_id,
+            edited_at: m.edited_at,
+            parent_message_id: m.parent_message_id,
+            message_type: m.message_type,
+            system_event_key: m.system_event_key,
+            created_at: m.created_at,
+        }
+    }
 }
 
 /// Member payload embedded in member events.
@@ -361,6 +389,8 @@ mod tests {
                         sender_device_id: None,
                         edited_at: None,
                         parent_message_id: None,
+                        message_type: crate::domain::models::MessageType::Default,
+                        system_event_key: None,
                         created_at: Utc::now(),
                     },
                 },

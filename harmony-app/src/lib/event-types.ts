@@ -14,7 +14,7 @@
  */
 
 import { z } from 'zod'
-import type { ChannelType, UserStatus } from '@/lib/api'
+import type { ChannelType, MessageType, UserStatus } from '@/lib/api'
 
 // ── SSE event names (dot-separated, as sent in the `event:` field) ───
 
@@ -45,7 +45,7 @@ export type SseEventName = (typeof SSE_EVENT_NAMES)[number]
 // WHY: Separate payload schemas enable reuse across event variants and
 // keep the discriminated union schema readable.
 
-const messagePayloadSchema = z.object({
+export const messagePayloadSchema = z.object({
   id: z.string(),
   channelId: z.string(),
   content: z.string(),
@@ -56,6 +56,8 @@ const messagePayloadSchema = z.object({
   senderDeviceId: z.string().nullable(),
   editedAt: z.string().nullable(),
   parentMessageId: z.string().nullable().optional(),
+  messageType: z.enum(['default', 'system'] satisfies [MessageType, ...MessageType[]]),
+  systemEventKey: z.string().nullable().optional(),
   createdAt: z.string(),
 })
 

@@ -254,10 +254,13 @@ function MessageContent({
  * to a localized template via i18n.
  */
 function SystemMessageItem({ message, t }: { message: MessageResponse; t: TFunction<'messages'> }) {
-  const text =
-    message.systemEventKey === 'member_join'
-      ? t('system.memberJoin', { username: message.authorUsername })
-      : t('system.unknown')
+  const systemEventMap: Record<string, string> = {
+    member_join: t('system.memberJoin', { username: message.authorUsername }),
+    member_leave: t('system.memberLeave', { username: message.authorUsername }),
+    member_kick: t('system.memberKick', { username: message.authorUsername }),
+    member_ban: t('system.memberBan', { username: message.authorUsername }),
+  }
+  const text = systemEventMap[message.systemEventKey ?? ''] ?? t('system.unknown')
 
   return (
     <div

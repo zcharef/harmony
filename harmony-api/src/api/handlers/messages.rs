@@ -64,19 +64,7 @@ pub async fn send_message(
         sender_id: user_id.clone(),
         server_id: channel.server_id,
         channel_id: channel_id.clone(),
-        message: MessagePayload {
-            id: message.message.id.clone(),
-            channel_id: channel_id.clone(),
-            content: message.message.content.clone(),
-            author_id: message.message.author_id.clone(),
-            author_username: message.author_username.clone(),
-            author_avatar_url: message.author_avatar_url.clone(),
-            encrypted: message.message.encrypted,
-            sender_device_id: message.message.sender_device_id.clone(),
-            edited_at: message.message.edited_at,
-            parent_message_id: message.message.parent_message_id.clone(),
-            created_at: message.message.created_at,
-        },
+        message: MessagePayload::from(message.clone()),
     };
     let receivers = state.event_bus().publish(event);
     tracing::debug!(channel_id = %channel_id, receivers, "emitted message.created");
@@ -194,19 +182,7 @@ pub async fn edit_message(
         sender_id: user_id.clone(),
         server_id: channel.server_id,
         channel_id: path.channel_id.clone(),
-        message: MessagePayload {
-            id: message.message.id.clone(),
-            channel_id: path.channel_id.clone(),
-            content: message.message.content.clone(),
-            author_id: message.message.author_id.clone(),
-            author_username: message.author_username.clone(),
-            author_avatar_url: message.author_avatar_url.clone(),
-            encrypted: message.message.encrypted,
-            sender_device_id: message.message.sender_device_id.clone(),
-            edited_at: message.message.edited_at,
-            parent_message_id: message.message.parent_message_id.clone(),
-            created_at: message.message.created_at,
-        },
+        message: MessagePayload::from(message.clone()),
     };
     let receivers = state.event_bus().publish(event);
     tracing::debug!(

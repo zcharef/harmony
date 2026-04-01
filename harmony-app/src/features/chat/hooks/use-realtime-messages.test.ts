@@ -63,6 +63,7 @@ function buildMessagePayload(overrides: Record<string, unknown> = {}) {
     encrypted: false,
     senderDeviceId: null,
     editedAt: null,
+    messageType: 'default',
     createdAt: '2026-03-16T01:00:00.000Z',
     ...overrides,
   }

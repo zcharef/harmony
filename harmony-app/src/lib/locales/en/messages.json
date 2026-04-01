@@ -8,6 +8,9 @@
   "escapeToCancel": "escape to <cancel>cancel</cancel> \u2022 enter to <save>save</save>",
   "system": {
     "memberJoin": "{{username}} joined the server",
+    "memberLeave": "{{username}} left the server",
+    "memberKick": "{{username}} was kicked from the server",
+    "memberBan": "{{username}} was banned from the server",
     "unknown": "[System message]"
   }
 }

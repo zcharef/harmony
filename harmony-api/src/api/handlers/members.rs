@@ -90,6 +90,68 @@ pub async fn list_members(
     ))
 }
 
+/// Leave a server voluntarily. The owner cannot leave (must transfer ownership first).
+///
+/// # Errors
+/// Returns `ApiError` on validation failure or repository error.
+#[utoipa::path(
+    post,
+    path = "/v1/servers/{id}/leave",
+    tag = "Members",
+    security(("bearer_auth" = [])),
+    params(("id" = ServerId, Path, description = "Server ID")),
+    responses(
+        (status = 204, description = "Left the server"),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Owner cannot leave", body = ProblemDetails),
+        (status = 404, description = "Server not found or not a member", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn leave_server(
+    AuthUser(caller_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(server_id): ApiPath<ServerId>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .moderation_service()
+        .leave_server(&server_id, &caller_id)
+        .await?;
+
+    tracing::info!(
+        server_id = %server_id,
+        user_id = %caller_id,
+        "User left server"
+    );
+
+    state.event_bus().publish(ServerEvent::MemberRemoved {
+        sender_id: caller_id.clone(),
+        server_id: server_id.clone(),
+        user_id: caller_id.clone(),
+    });
+
+    state.event_bus().publish(ServerEvent::ForceDisconnect {
+        sender_id: caller_id.clone(),
+        server_id: server_id.clone(),
+        target_user_id: caller_id.clone(),
+        reason: "left".to_string(),
+    });
+
+    // WHY: Best-effort system message — announce the leave in the default channel.
+    // Must never fail the leave itself.
+    if let Err(e) = super::post_system_message(&state, &server_id, &caller_id, "member_leave").await
+    {
+        tracing::warn!(
+            server_id = %server_id,
+            user_id = %caller_id,
+            error = ?e,
+            "Failed to post leave announcement (best-effort)"
+        );
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Path parameters for member-specific operations.
 #[derive(Debug, Deserialize)]
 pub struct MemberPath {
@@ -149,6 +211,18 @@ pub async fn kick_member(
         reason: "kicked".to_string(),
     });
     tracing::debug!(server_id = %path.id, target_user_id = %path.user_id, receivers, "emitted force.disconnect");
+
+    // WHY: Best-effort system message — announce the kick in the default channel.
+    // Must never fail the kick itself.
+    if let Err(e) = super::post_system_message(&state, &path.id, &path.user_id, "member_kick").await
+    {
+        tracing::warn!(
+            server_id = %path.id,
+            user_id = %path.user_id,
+            error = ?e,
+            "Failed to post kick announcement (best-effort)"
+        );
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

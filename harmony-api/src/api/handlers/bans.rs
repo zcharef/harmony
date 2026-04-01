@@ -144,6 +144,19 @@ pub async fn ban_member(
     });
     tracing::debug!(server_id = %server_id, target_user_id = %banned_user_id, receivers, "emitted force.disconnect");
 
+    // WHY: Best-effort system message — announce the ban in the default channel.
+    // Must never fail the ban itself.
+    if let Err(e) =
+        super::post_system_message(&state, &server_id, &banned_user_id, "member_ban").await
+    {
+        tracing::warn!(
+            server_id = %server_id,
+            user_id = %banned_user_id,
+            error = ?e,
+            "Failed to post ban announcement (best-effort)"
+        );
+    }
+
     Ok((StatusCode::CREATED, Json(BanResponse::from(ban))))
 }
 

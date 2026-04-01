@@ -24,6 +24,8 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::api::state::AppState;
+use crate::domain::models::server_event::{MessagePayload, ServerEvent};
+use crate::domain::models::{ServerId, UserId};
 use crate::infra::postgres;
 
 /// Fallback handler for unmatched routes.
@@ -129,4 +131,52 @@ pub async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
     };
 
     (status_code, Json(response))
+}
+
+/// Post a system message in the server's default channel and emit SSE.
+///
+/// WHY shared: Used by join (invites.rs), leave/kick (members.rs), and ban (bans.rs).
+/// Best-effort — callers should catch errors and log, never propagate.
+///
+/// `sender_id` is set to `subject_user_id` (the user who joined/was kicked/banned/left).
+/// This leverages the SSE sender-exclusion filter: the subject won't receive their
+/// own system message via SSE (for join: they fetch on load; for kick/ban/leave:
+/// they're already disconnected via `ForceDisconnect`).
+///
+/// # Errors
+/// Returns `anyhow::Error` if the default channel lookup or message creation fails.
+#[tracing::instrument(skip(state))]
+pub async fn post_system_message(
+    state: &AppState,
+    server_id: &ServerId,
+    subject_user_id: &UserId,
+    system_event_key: &str,
+) -> anyhow::Result<()> {
+    let channel = state
+        .channel_service()
+        .find_default_for_server(server_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("No default channel found for server {server_id}"))?;
+
+    let message = state
+        .message_service()
+        .create_system_message(&channel.id, subject_user_id, system_event_key.to_string())
+        .await?;
+
+    let event = ServerEvent::MessageCreated {
+        sender_id: subject_user_id.clone(),
+        server_id: server_id.clone(),
+        channel_id: channel.id.clone(),
+        message: MessagePayload::from(message),
+    };
+    let receivers = state.event_bus().publish(event);
+    tracing::debug!(
+        server_id = %server_id,
+        subject_user_id = %subject_user_id,
+        system_event_key,
+        receivers,
+        "emitted message.created for system message"
+    );
+
+    Ok(())
 }

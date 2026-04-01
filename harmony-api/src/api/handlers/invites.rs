@@ -214,16 +214,5 @@ async fn post_join_announcement(
     server_id: &ServerId,
     user_id: &crate::domain::models::UserId,
 ) -> anyhow::Result<()> {
-    let channel = state
-        .channel_service()
-        .find_default_for_server(server_id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("No default channel found for server {server_id}"))?;
-
-    state
-        .message_service()
-        .create_system_message(&channel.id, user_id, "member_join".to_string())
-        .await?;
-
-    Ok(())
+    super::post_system_message(state, server_id, user_id, "member_join").await
 }

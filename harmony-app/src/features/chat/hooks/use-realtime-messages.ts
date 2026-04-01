@@ -5,29 +5,9 @@ import { z } from 'zod'
 import { useUnreadStore } from '@/features/channels'
 import { useServerEvent } from '@/hooks/use-server-event'
 import type { MessageListResponse, MessageResponse } from '@/lib/api'
+import { messagePayloadSchema } from '@/lib/event-types'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-
-/**
- * WHY local schema (not imported from event-types.ts): useEventSource already
- * validates the full discriminated union via serverEventSchema. This local schema
- * validates only the subset of fields needed for cache mutation (no `type`,
- * `senderId`, etc.), and maps them to MessageResponse via toMessageResponse().
- * Keeping it local makes the handler self-contained and avoids coupling to the
- * full event shape.
- */
-const messagePayloadSchema = z.object({
-  id: z.string(),
-  channelId: z.string(),
-  content: z.string(),
-  authorId: z.string(),
-  authorUsername: z.string(),
-  authorAvatarUrl: z.string().nullable(),
-  encrypted: z.boolean(),
-  senderDeviceId: z.string().nullable(),
-  editedAt: z.string().nullable(),
-  createdAt: z.string(),
-})
 
 /** WHY: message.created and message.updated carry the full message payload. */
 const messageEventSchema = z.object({
@@ -42,11 +22,7 @@ const messageDeletedSchema = z.object({
 })
 
 /**
- * WHY: The SSE MessagePayload is a subset of the REST MessageResponse.
- * The SSE payload lacks `messageType` and `systemEventKey` because the Rust
- * ServerEvent::MessagePayload struct doesn't include them. We default to
- * 'default' for messageType — system messages are rare and will get the
- * correct type on the next full fetch.
+ * WHY: Maps SSE MessagePayload to the REST MessageResponse shape for cache insertion.
  */
 function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): MessageResponse {
   return {
@@ -59,8 +35,10 @@ function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): Messa
     encrypted: payload.encrypted,
     senderDeviceId: payload.senderDeviceId,
     editedAt: payload.editedAt,
+    parentMessageId: payload.parentMessageId ?? undefined,
     createdAt: payload.createdAt,
-    messageType: 'default',
+    messageType: payload.messageType,
+    systemEventKey: payload.systemEventKey ?? undefined,
     reactions: [],
   }
 }
