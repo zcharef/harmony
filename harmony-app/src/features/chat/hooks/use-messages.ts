@@ -27,5 +27,11 @@ export function useMessages(channelId: string | null) {
     initialPageParam: undefined satisfies string | undefined,
     getNextPageParam: (lastPage: MessageListResponse) => lastPage.nextCursor ?? undefined,
     enabled: channelId !== null,
+    // WHY: Override global staleTime (5min) so TQ always background-refetches
+    // when the user navigates to a channel. When ChatArea is unmounted (user on
+    // DMs/settings), SSE message events aren't handled — the cache goes stale
+    // without TQ knowing. staleTime: 0 ensures a background refetch on mount
+    // while still showing cached data instantly (no loading flash).
+    staleTime: 0,
   })
 }

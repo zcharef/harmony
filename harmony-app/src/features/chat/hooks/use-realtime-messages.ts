@@ -95,22 +95,22 @@ export function useRealtimeMessages(channelId: string) {
         return
       }
 
+      const eventChannelId = parsed.data.channelId
+
       // WHY: Increment unread count for channels other than the one being viewed.
       // This ensures the sidebar badge updates in real-time via SSE.
-      // Also invalidate that channel's message cache so TanStack Query refetches
-      // when the user navigates back (otherwise staleTime keeps serving old data).
-      if (parsed.data.channelId !== channelId) {
-        useUnreadStore.getState().increment(parsed.data.channelId)
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.messages.byChannel(parsed.data.channelId),
-        })
-        return
+      if (eventChannelId !== channelId) {
+        useUnreadStore.getState().increment(eventChannelId)
       }
 
+      // WHY: Update the cache for whichever channel this message belongs to
+      // (active or inactive). For inactive channels, the cache may not exist
+      // (gcTime expired) — the `if (!old) return undefined` guard handles that.
+      // Using setQueryData (not invalidateQueries) per CLAUDE.md §4.5.
       const message = toMessageResponse(parsed.data.message)
 
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        queryKeys.messages.byChannel(channelId),
+        queryKeys.messages.byChannel(eventChannelId),
         (old) => {
           if (!old) return undefined
 
@@ -145,12 +145,10 @@ export function useRealtimeMessages(channelId: string) {
         return
       }
 
-      if (parsed.data.channelId !== channelId) return
-
       const message = toMessageResponse(parsed.data.message)
 
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        queryKeys.messages.byChannel(channelId),
+        queryKeys.messages.byChannel(parsed.data.channelId),
         (old) => {
           if (!old) return undefined
           return {
@@ -179,15 +177,13 @@ export function useRealtimeMessages(channelId: string) {
         return
       }
 
-      if (parsed.data.channelId !== channelId) return
-
       // WHY: Soft-delete — set deletedBy to signal the UI to show
       // "[Message deleted]" instead of silently removing the message.
       // The SSE message.deleted event doesn't carry who deleted it,
       // so we use a sentinel value. The REST API will have the real
       // deletedBy on next full fetch.
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        queryKeys.messages.byChannel(channelId),
+        queryKeys.messages.byChannel(parsed.data.channelId),
         (old) => {
           if (!old) return undefined
           return {
