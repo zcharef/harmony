@@ -11,9 +11,18 @@ const IDLE_CHECK_INTERVAL_MS = 30_000
 const ACTIVITY_EVENTS = ['mousemove', 'keydown', 'pointerdown'] as const
 
 // WHY Zod: SSE event payloads are external data (CLAUDE.md §1.2).
+const userStatusSchema = z.enum(['online', 'idle', 'dnd', 'offline'] satisfies [
+  UserStatus,
+  ...UserStatus[],
+])
+
 const presenceEventSchema = z.object({
   userId: z.string(),
-  status: z.enum(['online', 'idle', 'dnd', 'offline'] satisfies [UserStatus, ...UserStatus[]]),
+  status: userStatusSchema,
+})
+
+const presenceSyncSchema = z.object({
+  users: z.record(z.string(), userStatusSchema),
 })
 
 /**
@@ -32,22 +41,14 @@ function postPresenceStatus(status: UserStatus): void {
 
 /**
  * Tracks the current user's online/idle status and subscribes to
- * presence changes from other users via SSE.
+ * presence updates from other users via SSE.
  *
- * WHY simplified from 3 effects to 2: The server now handles connect/disconnect
- * lifecycle. The client only needs to:
+ * Responsibilities:
  * 1. Track local activity and POST status changes (online/idle)
- * 2. Receive PresenceChanged SSE events and update the Zustand store
- *
- * Parameters `_serverIds` and `_selectedServerId` are retained for call-site
- * compatibility (main-layout.tsx:179) but unused — the server manages
- * per-server presence broadcasting internally.
+ * 2. Handle `presence.sync` snapshot on connect/reconnect (full state)
+ * 3. Handle `presence.changed` deltas (incremental updates)
  */
-export function usePresence(
-  _serverIds: string[],
-  _selectedServerId: string | null,
-  userId: string | null,
-): void {
+export function usePresence(userId: string | null): void {
   const lastActivityRef = useRef(Date.now())
   const isIdleRef = useRef(false)
 
@@ -133,4 +134,31 @@ export function usePresence(
   )
 
   useServerEvent(userId !== null ? 'presence.changed' : null, handlePresenceEvent)
+
+  // SSE listener: Receive presence.sync snapshot on connect/reconnect.
+  // WHY: When a user connects, they have no knowledge of who is already online.
+  // The server sends a full snapshot as the first SSE event. On reconnect, the
+  // same event replaces any stale state. This is the "initial snapshot +
+  // incremental deltas" pattern.
+  const handlePresenceSync = useCallback(
+    (payload: unknown) => {
+      if (userId === null) return
+
+      const parsed = presenceSyncSchema.safeParse(payload)
+      if (!parsed.success) {
+        logger.warn('malformed_presence_sync_event', { error: parsed.error.message })
+        return
+      }
+
+      const map = new Map<string, UserStatus>()
+      for (const [uid, status] of Object.entries(parsed.data.users)) {
+        map.set(uid, status)
+      }
+
+      usePresenceStore.getState().syncPresenceState(map)
+    },
+    [userId],
+  )
+
+  useServerEvent(userId !== null ? 'presence.sync' : null, handlePresenceSync)
 }

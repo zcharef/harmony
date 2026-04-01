@@ -33,6 +33,7 @@ export const SSE_EVENT_NAMES = [
   'dm.created',
   'typing.started',
   'presence.changed',
+  'presence.sync',
   'reaction.added',
   'reaction.removed',
   'force.disconnect',
@@ -211,6 +212,13 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     senderId: z.string(),
     userId: z.string(),
     status: userStatusSchema,
+  }),
+  // WHY: Per-connection synthetic event (not broadcast). Server sends this as
+  // the first SSE event on connect with a full snapshot of online users across
+  // the user's servers. Handles both initial connect and reconnect.
+  z.object({
+    type: z.literal('presenceSynced'),
+    users: z.record(z.string(), userStatusSchema),
   }),
 
   // Reactions

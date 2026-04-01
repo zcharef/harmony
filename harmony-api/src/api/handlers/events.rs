@@ -5,7 +5,7 @@
 //!
 //! Auth: Bearer JWT via the `require_auth` middleware (same as all endpoints).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::time::Duration;
 
@@ -18,7 +18,37 @@ use tokio_stream::wrappers::BroadcastStream;
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::AuthUser;
 use crate::api::state::AppState;
-use crate::domain::models::{ServerEvent, ServerId, UserStatus};
+use crate::domain::models::{ServerEvent, ServerId, UserId, UserStatus};
+
+/// Guard that decrements a user's connection count when the SSE stream is dropped.
+///
+/// WHY: Without this, offline detection relies on the background sweep (60s interval,
+/// 90s `max_age` = up to 150s delay). The guard fires instantly on disconnect.
+///
+/// Uses `PresenceTracker::disconnect()` which decrements the connection counter.
+/// The offline event is only published when the last connection drops (count → 0),
+/// so closing one tab while another is still open does NOT mark the user offline.
+struct PresenceGuard {
+    user_id: UserId,
+    state: AppState,
+}
+
+impl Drop for PresenceGuard {
+    fn drop(&mut self) {
+        let went_offline = self.state.presence_tracker().disconnect(&self.user_id);
+        if went_offline {
+            let event = ServerEvent::PresenceChanged {
+                sender_id: self.user_id.clone(),
+                user_id: self.user_id.clone(),
+                status: UserStatus::Offline,
+            };
+            self.state.event_bus().publish(event);
+            tracing::info!(user_id = %self.user_id.0, "last SSE connection dropped, user marked offline");
+        } else {
+            tracing::debug!(user_id = %self.user_id.0, "SSE connection dropped, other connections remain");
+        }
+    }
+}
 
 /// SSE event stream — delivers real-time events to the authenticated user.
 ///
@@ -83,7 +113,7 @@ pub async fn sse_events(
     let server_id_vec: Vec<ServerId> = server_ids.iter().cloned().collect();
     state
         .presence_tracker()
-        .set_online(user_id.clone(), server_id_vec);
+        .connect(user_id.clone(), server_id_vec);
 
     let online_event = ServerEvent::PresenceChanged {
         sender_id: user_id.clone(),
@@ -102,8 +132,9 @@ pub async fn sse_events(
         "SSE connection established, user marked online"
     );
 
-    // Clone user_id for the heartbeat stream before moving into the event closures.
+    // Clone user_id for the heartbeat stream and guard before moving into event closures.
     let heartbeat_user_id = user_id.clone();
+    let guard_user_id = user_id.clone();
     let intercept_user_id = user_id.clone();
 
     // ── Stage 1 (intercept): update server_ids on membership changes ──
@@ -275,8 +306,47 @@ pub async fn sse_events(
             None::<Result<Event, Infallible>>
         });
 
-    // Merge event delivery with heartbeat touches into a single stream.
-    let merged = event_stream.merge(heartbeat_stream);
+    // ── Presence snapshot: initial sync event ───────────────────
+    // WHY: Clients that connect after other users are already online have no
+    // way to learn their status — PresenceChanged events are ephemeral.
+    // Emitting a presence.sync event as the first SSE event gives every client
+    // a full snapshot on connect (and reconnect). This is the "initial snapshot
+    // + incremental deltas" pattern (à la Discord READY).
+    // WHY not in ServerEvent enum: this is a per-connection synthetic event,
+    // never published to the broadcast bus.
+    let mut presence_users: HashMap<String, UserStatus> = HashMap::new();
+    for sid in &server_ids {
+        for (uid, status) in state.presence_tracker().get_server_presence(sid) {
+            presence_users.insert(uid.0.to_string(), status);
+        }
+    }
+    let sync_data = serde_json::json!({
+        "type": "presenceSynced",
+        "users": presence_users,
+    });
+    let initial_event = Event::default()
+        .event("presence.sync")
+        .data(sync_data.to_string());
+    let initial_stream = tokio_stream::once(Ok::<Event, Infallible>(initial_event));
+
+    // ── Disconnect guard: instant offline on stream drop ─────────
+    // WHY: Capturing the guard in a `.map()` closure ties its lifetime to the
+    // stream. When Axum drops the stream (client disconnect), the closure is
+    // dropped, which drops the guard, which calls `disconnect()`. If the
+    // connection count reaches 0, it publishes the offline event. The
+    // background sweep remains as a safety net (e.g., process crash).
+    let guard = PresenceGuard {
+        user_id: guard_user_id,
+        state: state.clone(),
+    };
+
+    // Merge event delivery with heartbeat touches, prepend presence snapshot.
+    let merged = initial_stream
+        .chain(event_stream.merge(heartbeat_stream))
+        .map(move |item| {
+            let _guard = &guard;
+            item
+        });
 
     Ok(Sse::new(merged).keep_alive(
         KeepAlive::new()

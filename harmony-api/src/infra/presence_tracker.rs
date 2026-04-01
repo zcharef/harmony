@@ -1,7 +1,10 @@
 //! In-memory presence tracker backed by `DashMap`.
 //!
 //! Tracks which users are online, their status, and which servers they
-//! belong to. Used by SSE connection lifecycle and the `POST /v1/presence`
+//! belong to. Uses **connection ref-counting** so that multi-tab /
+//! multi-device users stay online until their last connection drops.
+//!
+//! Used by SSE connection lifecycle (Drop guard) and the `POST /v1/presence`
 //! endpoint. When Harmony scales past one instance, presence will need a
 //! shared store (Redis) — same migration path as the event bus (ADR-SSE-002).
 
@@ -20,6 +23,10 @@ pub struct PresenceEntry {
     pub server_ids: Vec<ServerId>,
     /// Monotonic timestamp of last heartbeat (for stale-entry sweeps).
     pub last_heartbeat: Instant,
+    /// Number of active SSE connections for this user.
+    /// WHY: Multi-tab / multi-device support. The user goes offline only when
+    /// the last connection drops (count reaches 0).
+    pub connection_count: u32,
 }
 
 /// In-memory presence tracker using lock-free `DashMap`.
@@ -37,18 +44,47 @@ impl PresenceTracker {
         }
     }
 
-    /// Mark a user as online with their server memberships.
+    /// Register a new SSE connection for a user.
     ///
-    /// Inserts or replaces the entry. Heartbeat is set to now.
-    pub fn set_online(&self, user_id: UserId, server_ids: Vec<ServerId>) {
-        self.entries.insert(
-            user_id,
-            PresenceEntry {
+    /// If the user already has an entry, increments `connection_count` and
+    /// updates `server_ids` + heartbeat. Otherwise, inserts a new entry
+    /// with count = 1 and status = Online.
+    pub fn connect(&self, user_id: UserId, server_ids: Vec<ServerId>) {
+        self.entries
+            .entry(user_id)
+            .and_modify(|entry| {
+                entry.connection_count += 1;
+                entry.server_ids = server_ids.clone();
+                entry.last_heartbeat = Instant::now();
+            })
+            .or_insert(PresenceEntry {
                 status: UserStatus::Online,
                 server_ids,
                 last_heartbeat: Instant::now(),
-            },
-        );
+                connection_count: 1,
+            });
+    }
+
+    /// Unregister an SSE connection for a user.
+    ///
+    /// Decrements `connection_count`. Returns `true` if the user went fully
+    /// offline (count reached 0 and entry was removed). The caller should
+    /// publish a `PresenceChanged { offline }` event only when this returns
+    /// `true`.
+    #[must_use]
+    pub fn disconnect(&self, user_id: &UserId) -> bool {
+        // WHY two-step: DashMap doesn't support "decrement then conditionally
+        // remove" atomically. The `remove_if` re-acquires the shard lock and
+        // checks the count, so a concurrent `connect()` between the two steps
+        // would bump the count back above 0 and `remove_if` would correctly
+        // keep the entry.
+        if let Some(mut entry) = self.entries.get_mut(user_id) {
+            entry.connection_count = entry.connection_count.saturating_sub(1);
+        }
+
+        self.entries
+            .remove_if(user_id, |_, entry| entry.connection_count == 0)
+            .is_some()
     }
 
     /// Update a user's status (e.g. Idle, `DoNotDisturb`) without changing `server_ids`.
@@ -59,11 +95,6 @@ impl PresenceTracker {
             entry.status = status;
             entry.last_heartbeat = Instant::now();
         }
-    }
-
-    /// Remove a user's presence entry (they went offline).
-    pub fn set_offline(&self, user_id: &UserId) {
-        self.entries.remove(user_id);
     }
 
     /// Get a user's current status, or `None` if they have no presence entry.
@@ -88,13 +119,13 @@ impl PresenceTracker {
     /// Remove entries whose heartbeat is older than `max_age`.
     ///
     /// Returns the `UserId`s that were removed (caller emits offline events).
+    /// Uses `retain()` which ignores `connection_count` — this is intentional:
+    /// stale entries are leaked connections that should be cleaned regardless.
     #[must_use]
     pub fn sweep_stale(&self, max_age: Duration) -> Vec<UserId> {
         let cutoff = Instant::now() - max_age;
         let mut removed = Vec::new();
 
-        // WHY: retain() is the DashMap-idiomatic way to remove multiple entries
-        // in a single pass without holding a ref across iterations.
         self.entries.retain(|user_id, entry| {
             if entry.last_heartbeat < cutoff {
                 removed.push(user_id.clone());
@@ -139,13 +170,13 @@ mod tests {
     }
 
     #[test]
-    fn set_online_and_get_status() {
+    fn connect_and_get_status() {
         let tracker = PresenceTracker::new();
         let uid = user(1);
 
         assert!(tracker.get_status(&uid).is_none());
 
-        tracker.set_online(uid.clone(), vec![server(10)]);
+        tracker.connect(uid.clone(), vec![server(10)]);
 
         assert_eq!(tracker.get_status(&uid).unwrap(), UserStatus::Online);
     }
@@ -156,7 +187,7 @@ mod tests {
         let uid = user(2);
         let sid = server(20);
 
-        tracker.set_online(uid.clone(), vec![sid.clone()]);
+        tracker.connect(uid.clone(), vec![sid.clone()]);
         tracker.set_status(&uid, UserStatus::DoNotDisturb);
 
         assert_eq!(tracker.get_status(&uid).unwrap(), UserStatus::DoNotDisturb);
@@ -168,13 +199,34 @@ mod tests {
     }
 
     #[test]
-    fn set_offline_removes_entry() {
+    fn disconnect_single_connection_goes_offline() {
         let tracker = PresenceTracker::new();
         let uid = user(3);
 
-        tracker.set_online(uid.clone(), vec![server(30)]);
-        tracker.set_offline(&uid);
+        tracker.connect(uid.clone(), vec![server(30)]);
+        let went_offline = tracker.disconnect(&uid);
 
+        assert!(went_offline);
+        assert!(tracker.get_status(&uid).is_none());
+    }
+
+    #[test]
+    fn disconnect_multi_connection_stays_online() {
+        let tracker = PresenceTracker::new();
+        let uid = user(4);
+
+        // Two tabs open
+        tracker.connect(uid.clone(), vec![server(40)]);
+        tracker.connect(uid.clone(), vec![server(40)]);
+
+        // Close first tab — should NOT go offline
+        let went_offline = tracker.disconnect(&uid);
+        assert!(!went_offline);
+        assert_eq!(tracker.get_status(&uid).unwrap(), UserStatus::Online);
+
+        // Close second tab — NOW goes offline
+        let went_offline = tracker.disconnect(&uid);
+        assert!(went_offline);
         assert!(tracker.get_status(&uid).is_none());
     }
 
@@ -184,9 +236,9 @@ mod tests {
         let s1 = server(100);
         let s2 = server(200);
 
-        tracker.set_online(user(1), vec![s1.clone(), s2.clone()]);
-        tracker.set_online(user(2), vec![s1.clone()]);
-        tracker.set_online(user(3), vec![s2.clone()]);
+        tracker.connect(user(1), vec![s1.clone(), s2.clone()]);
+        tracker.connect(user(2), vec![s1.clone()]);
+        tracker.connect(user(3), vec![s2.clone()]);
 
         let s1_presence = tracker.get_server_presence(&s1);
         assert_eq!(s1_presence.len(), 2); // user 1 and 2
@@ -201,14 +253,9 @@ mod tests {
     #[test]
     fn sweep_stale_removes_old_entries() {
         let tracker = PresenceTracker::new();
-        let uid = user(4);
+        let uid = user(5);
 
-        tracker.set_online(uid.clone(), vec![server(40)]);
-
-        // Manually backdating the heartbeat is not possible through the public API,
-        // so we verify that a zero-duration sweep removes everything (heartbeat is
-        // always in the past relative to the sweep's Instant::now()).
-        // A non-zero max_age keeps fresh entries alive.
+        tracker.connect(uid.clone(), vec![server(50)]);
 
         // Fresh entry should survive a generous max_age
         let removed = tracker.sweep_stale(Duration::from_secs(60));
@@ -223,13 +270,26 @@ mod tests {
     }
 
     #[test]
+    fn sweep_ignores_connection_count() {
+        let tracker = PresenceTracker::new();
+        let uid = user(6);
+
+        // Two connections, but stale heartbeat → sweep removes anyway
+        tracker.connect(uid.clone(), vec![server(60)]);
+        tracker.connect(uid.clone(), vec![server(60)]);
+
+        let removed = tracker.sweep_stale(Duration::ZERO);
+        assert_eq!(removed.len(), 1);
+        assert!(tracker.get_status(&uid).is_none());
+    }
+
+    #[test]
     fn touch_refreshes_heartbeat() {
         let tracker = PresenceTracker::new();
-        let uid = user(5);
+        let uid = user(7);
 
-        tracker.set_online(uid.clone(), vec![server(50)]);
+        tracker.connect(uid.clone(), vec![server(70)]);
 
-        // Touch should keep the entry alive through a sweep
         tracker.touch(&uid);
         let removed = tracker.sweep_stale(Duration::from_secs(60));
         assert!(removed.is_empty());
@@ -239,10 +299,19 @@ mod tests {
     #[test]
     fn set_status_noop_when_not_present() {
         let tracker = PresenceTracker::new();
-        let uid = user(6);
+        let uid = user(8);
 
         // Should not panic or insert an entry
         tracker.set_status(&uid, UserStatus::Idle);
         assert!(tracker.get_status(&uid).is_none());
+    }
+
+    #[test]
+    fn disconnect_noop_when_not_present() {
+        let tracker = PresenceTracker::new();
+        let uid = user(9);
+
+        let went_offline = tracker.disconnect(&uid);
+        assert!(!went_offline);
     }
 }

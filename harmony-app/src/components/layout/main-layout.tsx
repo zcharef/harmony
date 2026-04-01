@@ -9,8 +9,8 @@ import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
 import {
   ChannelSidebar,
+  useAllReadStates,
   useChannels,
-  useReadStates,
   useRealtimeChannels,
 } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
@@ -341,7 +341,7 @@ export function MainLayout() {
     return session?.access_token
   }, [])
   const serverIds = useMemo(() => servers?.map((s) => s.id) ?? [], [servers])
-  usePresence(serverIds, selectedServerId, userId)
+  usePresence(userId)
   useFetchSSE(userId, getToken)
   useForceDisconnect(userId, selectedServerId, setSelectedServerId, setSelectedChannelId)
   // WHY: Realtime hooks MUST live here (not inside collapsible sidebar/member-list
@@ -354,9 +354,11 @@ export function MainLayout() {
   // server). The backend now dynamically updates the server_ids filter via a
   // watch channel, so no client-side reconnect is needed.
   useRealtimeDms()
-  // WHY: Fetch server-computed unread counts on server selection.
-  // Initializes the Zustand unread store so badges show correctly on load.
-  useReadStates(selectedServerId)
+  // WHY: Fetch server-computed unread counts for ALL servers on load.
+  // Initializes the Zustand unread store so badges show correctly across all
+  // server icons, not just the selected one. initFromServer merges, so each
+  // server's counts coexist without wiping others.
+  useAllReadStates(serverIds)
   const { data: channels } = useChannels(selectedServerId)
 
   // WHY: DM list needed to derive chat header info (recipient name) when in DM view
