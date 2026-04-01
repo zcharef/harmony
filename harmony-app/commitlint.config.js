@@ -16,6 +16,7 @@ export default {
         'ci',
         'chore',
         'revert',
+        'release',
       ],
     ],
     'scope-enum': [
