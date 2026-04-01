@@ -192,6 +192,51 @@ impl ModerationService {
         self.ban_repo.unban_user(server_id, target_user_id).await
     }
 
+    /// Leave a server voluntarily. Any member can leave except the owner.
+    ///
+    /// # Errors
+    /// - `DomainError::NotFound` if the server doesn't exist or caller is not a member.
+    /// - `DomainError::ValidationError` if the server is a DM.
+    /// - `DomainError::Forbidden` if the caller is the server owner (must transfer ownership first).
+    pub async fn leave_server(
+        &self,
+        server_id: &ServerId,
+        caller_id: &UserId,
+    ) -> Result<(), DomainError> {
+        let server = self
+            .server_repo
+            .get_by_id(server_id)
+            .await?
+            .ok_or_else(|| DomainError::NotFound {
+                resource_type: "Server",
+                id: server_id.to_string(),
+            })?;
+
+        if server.is_dm {
+            return Err(DomainError::ValidationError(
+                "Cannot leave a DM conversation. Use close instead.".to_string(),
+            ));
+        }
+
+        // WHY: Verify caller is actually a member before checking ownership,
+        // so non-members get NotFound rather than a misleading Forbidden.
+        let is_member = self.member_repo.is_member(server_id, caller_id).await?;
+        if !is_member {
+            return Err(DomainError::NotFound {
+                resource_type: "ServerMember",
+                id: format!("server={}, user={}", server_id, caller_id),
+            });
+        }
+
+        if server.owner_id == *caller_id {
+            return Err(DomainError::Forbidden(
+                "Server owner cannot leave. Transfer ownership first.".to_string(),
+            ));
+        }
+
+        self.member_repo.remove_member(server_id, caller_id).await
+    }
+
     /// Kick a member from a server. Requires moderator+ role with hierarchy.
     ///
     /// # Errors

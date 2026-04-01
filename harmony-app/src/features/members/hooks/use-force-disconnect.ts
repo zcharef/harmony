@@ -20,6 +20,36 @@ const forceDisconnectSchema = z.object({
 })
 
 /**
+ * WHY extracted: Keeps the main handler below Biome's cognitive complexity
+ * limit (15) by isolating the toast reason-mapping logic.
+ */
+function notifyRemoval(reason: string, serverName: string | undefined): void {
+  // WHY: "left" means the user voluntarily left — they already know,
+  // so skip the toast. Only notify for involuntary removals.
+  if (reason === 'left') return
+
+  const titleKey =
+    reason === 'banned'
+      ? 'members:bannedTitle'
+      : reason === 'kicked'
+        ? 'members:kickedTitle'
+        : 'members:removedTitle'
+
+  const descriptionKey =
+    serverName !== undefined
+      ? reason === 'banned'
+        ? 'members:bannedFromServer'
+        : reason === 'kicked'
+          ? 'members:kickedFromServer'
+          : 'members:removedFromServerNamed'
+      : 'members:removedFromServer'
+
+  toast.error(i18n.t(titleKey), {
+    description: i18n.t(descriptionKey, { serverName }),
+  })
+}
+
+/**
  * Subscribes to `force.disconnect` SSE events and, when the current user is
  * the target, invalidates caches and clears the server selection so the UI
  * navigates away from the kicked/banned server.
@@ -82,27 +112,7 @@ export function useForceDisconnect(
         setSelectedChannelId(null)
       }
 
-      // WHY: Explicit match on reason — a boolean shortcut would mislabel
-      // unknown future reasons (e.g. "server_deleted") as "kicked".
-      const titleKey =
-        reason === 'banned'
-          ? 'members:bannedTitle'
-          : reason === 'kicked'
-            ? 'members:kickedTitle'
-            : 'members:removedTitle'
-
-      const descriptionKey =
-        serverName !== undefined
-          ? reason === 'banned'
-            ? 'members:bannedFromServer'
-            : reason === 'kicked'
-              ? 'members:kickedFromServer'
-              : 'members:removedFromServerNamed'
-          : 'members:removedFromServer'
-
-      toast.error(i18n.t(titleKey), {
-        description: i18n.t(descriptionKey, { serverName }),
-      })
+      notifyRemoval(reason, serverName)
     },
     [currentUserId, selectedServerId, queryClient, setSelectedServerId, setSelectedChannelId],
   )

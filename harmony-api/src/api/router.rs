@@ -99,10 +99,14 @@ pub fn build_router(
             "/v1/servers/{id}/invites",
             post(handlers::invites::create_invite),
         )
-        // Members (join + list + kick + role assignment)
+        // Members (join + list + leave + kick + role assignment)
         .route(
             "/v1/servers/{id}/members",
             post(handlers::invites::join_server).get(handlers::members::list_members),
+        )
+        .route(
+            "/v1/servers/{id}/leave",
+            post(handlers::members::leave_server),
         )
         .route(
             "/v1/servers/{id}/members/{user_id}",

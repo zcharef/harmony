@@ -9,6 +9,7 @@
   "serverSettings": "Server Settings",
   "createChannel": "Create Channel",
   "leaveServer": "Leave Server",
+  "leaveConfirm": "Leave {{serverName}}? You won't be able to rejoin unless you are re-invited.",
   "failedToLoadChannels": "Failed to load channels",
   "selectServerToViewChannels": "Select a server to view channels",
   "noChannelsYet": "No channels yet",

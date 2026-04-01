@@ -24,11 +24,12 @@ import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { EncryptedChannelBadge } from '@/features/crypto'
-import { ROLE_HIERARCHY, useMyMemberRole } from '@/features/members'
+import { ROLE_HIERARCHY, useLeaveServer, useMyMemberRole } from '@/features/members'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { CreateInviteDialog } from '@/features/server-nav'
 import { useSettingsUiStore } from '@/features/settings'
 import type { ChannelResponse } from '@/lib/api'
+import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { CreateChannelDialog } from './create-channel-dialog'
 import { EditChannelDialog } from './edit-channel-dialog'
@@ -130,6 +131,7 @@ function ServerHeader({
   onInvite,
   onSettings,
   onCreateChannel,
+  onLeave,
 }: {
   serverId: string | null
   serverName: string | null
@@ -137,6 +139,7 @@ function ServerHeader({
   onInvite: () => void
   onSettings: () => void
   onCreateChannel: () => void
+  onLeave: () => void
 }) {
   const { t } = useTranslation('channels')
 
@@ -170,6 +173,7 @@ function ServerHeader({
           if (key === 'invite') onInvite()
           if (key === 'settings' && canAccessSettings) onSettings()
           if (key === 'create-channel' && canAccessSettings) onCreateChannel()
+          if (key === 'leave') onLeave()
         }}
       >
         <DropdownSection showDivider>
@@ -232,6 +236,7 @@ export function ChannelSidebar({
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false)
   const [editChannel, setEditChannel] = useState<ChannelResponse | null>(null)
   const deleteChannelMutation = useDeleteChannel(serverId ?? '')
+  const leaveServerMutation = useLeaveServer()
   const openServerSettings = useSettingsUiStore((s) => s.openServerSettings)
   const { role: callerRole } = useMyMemberRole(serverId)
   /** WHY: Only admin+ can access server settings. */
@@ -259,6 +264,16 @@ export function ChannelSidebar({
           onInvite={() => setIsInviteOpen(true)}
           onSettings={openServerSettings}
           onCreateChannel={() => setIsCreateChannelOpen(true)}
+          onLeave={() => {
+            if (serverId === null) return
+            if (window.confirm(t('leaveConfirm', { serverName: serverName ?? '' }))) {
+              leaveServerMutation.mutate(serverId, {
+                onError: (error) => {
+                  toast.error(error instanceof Error ? error.message : t('leaveServer'))
+                },
+              })
+            }
+          }}
         />
       </div>
 

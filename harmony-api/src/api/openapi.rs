@@ -66,6 +66,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         handlers::invites::join_server,
         // Members
         handlers::members::list_members,
+        handlers::members::leave_server,
         handlers::members::kick_member,
         handlers::members::assign_role,
         handlers::members::transfer_ownership,
