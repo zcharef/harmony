@@ -1,23 +1,24 @@
 /**
  * E2E Tests — SSE Reliability & DM Real-Time Delivery
  *
- * Tests the critical SSE failure mode where DMs created AFTER the SSE
- * connection is established have their server_id missing from the server-side
- * snapshot (events.rs:57-68). Without the reconnect fix, MessageCreated events
- * for these DMs are silently dropped.
+ * Tests that DMs created AFTER the SSE connection is established correctly
+ * receive real-time message events. The backend SSE handler dynamically updates
+ * the server_ids filter via a tokio::sync::watch channel when membership-change
+ * events (MemberJoined, MemberRemoved, DmCreated) are intercepted. No client-side
+ * reconnect is needed.
  *
  * These tests are NOT redundant with realtime-sync.spec.ts or dms.spec.ts:
  * - realtime-sync.spec.ts creates DMs in beforeAll (snapshot includes them)
- * - dms.spec.ts tests DM CRUD, not live SSE delivery with stale snapshots
+ * - dms.spec.ts tests DM CRUD, not live SSE delivery with post-connect DMs
  *
  * WHY UI-based DM creation: Tests 1, 2, and 5 create DMs through the UI
- * (user search dialog) rather than the raw API. This ensures the useCreateDm
- * hook's onSuccess fires (which triggers requestReconnect() on the creator
- * side). A raw API call bypasses the React hook entirely.
+ * (user search dialog) to exercise the full creation flow including cache
+ * invalidation. The backend dynamically updates the SSE filter for both
+ * creator and recipient without requiring a reconnect.
  *
  * SSE events exercised:
  * - message.created: useRealtimeMessages inserts new message into cache
- * - dm.created: useRealtimeDms invalidates DM list + triggers reconnect
+ * - dm.created: useRealtimeDms invalidates DM list cache
  *
  * Real data-test attributes from:
  * - main-layout.tsx (main-layout, data-test-sse-status)
