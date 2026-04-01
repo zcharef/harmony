@@ -10,6 +10,11 @@
  * - realtime-sync.spec.ts creates DMs in beforeAll (snapshot includes them)
  * - dms.spec.ts tests DM CRUD, not live SSE delivery with stale snapshots
  *
+ * WHY UI-based DM creation: Tests 1, 2, and 5 create DMs through the UI
+ * (user search dialog) rather than the raw API. This ensures the useCreateDm
+ * hook's onSuccess fires (which triggers requestReconnect() on the creator
+ * side). A raw API call bypasses the React hook entirely.
+ *
  * SSE events exercised:
  * - message.created: useRealtimeMessages inserts new message into cache
  * - dm.created: useRealtimeDms invalidates DM list + triggers reconnect
@@ -19,6 +24,8 @@
  * - connection-banner.tsx (connection-banner)
  * - server-list.tsx:117 (dm-home-button)
  * - dm-sidebar.tsx (dm-sidebar, dm-conversation-item, dm-list)
+ * - user-search-dialog.tsx:110 (user-search-dialog), :120 (user-search-input),
+ *   :147 (user-search-result)
  * - chat-area.tsx:468 (chat-area), :475 (message-list), :286 (message-input)
  * - message-item.tsx:169 (message-content)
  */
@@ -71,12 +78,49 @@ async function waitForSseConnected(page: Page) {
   )
 }
 
+/**
+ * Creates a DM via the UI (user search dialog) and returns the DM server ID.
+ *
+ * WHY: Creating via UI ensures useCreateDm hook's onSuccess fires, which
+ * triggers requestReconnect() on the creator side. A raw API call (createDm
+ * from test-data-factory) bypasses the React hook entirely.
+ */
+async function createDmViaUi(page: Page, targetUserId: string): Promise<string> {
+  // Navigate to DM view
+  await page.locator('[data-test="dm-home-button"]').click()
+  await page.locator('[data-test="dm-sidebar"]').waitFor({ timeout: 10_000 })
+
+  // Open user search dialog
+  await page.locator('[data-test="dm-new-message-button"]').click()
+  const searchDialog = page.locator('[data-test="user-search-dialog"]')
+  await expect(searchDialog).toBeVisible({ timeout: 5_000 })
+
+  // WHY: Wait for search results to load (users fetched from shared servers).
+  const searchResults = page.locator('[data-test="user-search-result"]')
+  await searchResults.first().waitFor({ timeout: 10_000 })
+
+  // WHY: Set up the POST response listener BEFORE clicking to capture the DM server ID.
+  const dmResponsePromise = page.waitForResponse(
+    (response) => response.url().includes('/v1/dms') && response.request().method() === 'POST',
+  )
+
+  // Click the target user
+  await page.locator(`[data-test="user-search-result"][data-user-id="${targetUserId}"]`).click()
+
+  const dmResponse = await dmResponsePromise
+  const dmBody = (await dmResponse.json()) as { serverId: string; channelId: string }
+
+  // Dialog should close
+  await expect(searchDialog).not.toBeVisible({ timeout: 5_000 })
+
+  return dmBody.serverId
+}
+
 // ── Tests ─────────────────────────────────────────────────────────
 
 test.describe('SSE Reliability — DM created during active session', () => {
   let userA: TestUser
   let userB: TestUser
-  let server: { id: string; name: string }
 
   test.beforeAll(async () => {
     userA = await createTestUser('sse-dm-a')
@@ -84,17 +128,17 @@ test.describe('SSE Reliability — DM created during active session', () => {
     for (const u of [userA, userB]) await syncProfile(u.token)
 
     // WHY: Both users must share a server for DM eligibility.
-    server = await createServer(userA.token, `SSE DM E2E ${Date.now()}`)
+    const server = await createServer(userA.token, `SSE DM E2E ${Date.now()}`)
     const invite = await createInvite(userA.token, server.id)
     await joinServer(userB.token, server.id, invite.code)
   })
 
   test('creator receives messages sent by recipient in post-connect DM', async ({ browser }) => {
     // WHY: This is the primary bug regression test. Both users have active SSE
-    // connections when the DM is created. The creator's SSE snapshot does NOT
-    // include the new DM server_id. Without the requestReconnect() fix in
-    // use-create-dm.ts, MessageCreated events for UserB's messages would be
-    // silently dropped by the server_ids filter (events.rs:125-129).
+    // connections when the DM is created VIA THE UI. The creator's useCreateDm
+    // onSuccess fires requestReconnect(), refreshing the server_ids snapshot.
+    // The recipient receives dm.created SSE event → useRealtimeDms fires
+    // requestReconnect() too.
     //
     // Direction: UserB sends → UserA receives. This tests the CREATOR's
     // snapshot refresh. Sender-exclusion (events.rs:144) prevents UserB from
@@ -109,19 +153,19 @@ test.describe('SSE Reliability — DM created during active session', () => {
       await authenticatePage(pageA, userA)
       await authenticatePage(pageB, userB)
 
-      // Create DM AFTER both SSE connections are active
-      const dm = await createDm(userA.token, userB.id)
+      // Create DM via UI — triggers useCreateDm.onSuccess → requestReconnect()
+      const dmServerId = await createDmViaUi(pageA, userB.id)
 
-      // WHY: The fix triggers requestReconnect() on both sides:
-      // - Creator (userA): via use-create-dm.ts onSuccess
-      // - Recipient (userB): via use-realtime-dms.ts handleDmCreated
-      // Wait for both reconnects to complete before navigating.
+      // Wait for both reconnects to complete
       await waitForSseConnected(pageA)
       await waitForSseConnected(pageB)
 
-      // Both users navigate to the new DM
-      await openDmConversation(pageA, dm.serverId)
-      await openDmConversation(pageB, dm.serverId)
+      // WHY: pageA is already on the DM view (createDmViaUi navigated there).
+      // Wait for chat-area and message-list to confirm the channel is ready.
+      await pageA.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+      // pageB navigates to the DM
+      await openDmConversation(pageB, dmServerId)
 
       // UserB sends a message via the UI
       const uniqueMessage = `sse-creator-recv-${Date.now()}`
@@ -163,16 +207,18 @@ test.describe('SSE Reliability — DM created during active session', () => {
       await authenticatePage(pageA, userA)
       await authenticatePage(pageB, userB)
 
-      // Create DM after SSE connections are active
-      const dm = await createDm(userA.token, userB.id)
+      // Create DM via UI on pageA
+      const dmServerId = await createDmViaUi(pageA, userB.id)
 
-      // Wait for reconnects
+      // Wait for both reconnects
       await waitForSseConnected(pageA)
       await waitForSseConnected(pageB)
 
-      // Navigate to the DM
-      await openDmConversation(pageA, dm.serverId)
-      await openDmConversation(pageB, dm.serverId)
+      // pageA is already on DM view
+      await pageA.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+      // pageB navigates to the DM
+      await openDmConversation(pageB, dmServerId)
 
       // UserA sends a message via the UI
       const uniqueMessage = `sse-recipient-recv-${Date.now()}`
@@ -217,11 +263,8 @@ test.describe('SSE Reliability — DM creation race conditions', () => {
     const invite = await createInvite(userA.token, srv.id)
     await joinServer(userB.token, srv.id, invite.code)
 
-    // UserA authenticates and creates DM + sends message while UserB is offline
-    const contextA = await browser.newContext({ baseURL: 'http://localhost:1420' })
-    const pageA = await contextA.newPage()
-    await authenticatePage(pageA, userA)
-
+    // UserA creates DM + sends message while UserB is offline (raw API is fine
+    // here since we're testing the offline→online path, not the hook path)
     const dm = await createDm(userA.token, userB.id)
     const uniqueMessage = `sse-race-msg-${Date.now()}`
     await sendMessage(userA.token, dm.channelId, uniqueMessage)
@@ -251,7 +294,6 @@ test.describe('SSE Reliability — DM creation race conditions', () => {
         .filter({ hasText: uniqueMessage })
       await expect(messageContent.first()).toBeVisible({ timeout: 15_000 })
     } finally {
-      await contextA.close()
       await contextB.close()
     }
   })
@@ -349,16 +391,18 @@ test.describe('SSE Reliability — Bidirectional exchange in post-connect DM', (
       await authenticatePage(pageA, userA)
       await authenticatePage(pageB, userB)
 
-      // Create DM after both SSE connections are active
-      const dm = await createDm(userA.token, userB.id)
+      // Create DM via UI on pageA — triggers useCreateDm.onSuccess → requestReconnect()
+      const dmServerId = await createDmViaUi(pageA, userB.id)
 
       // Wait for both reconnects to complete
       await waitForSseConnected(pageA)
       await waitForSseConnected(pageB)
 
-      // Both navigate to the DM
-      await openDmConversation(pageA, dm.serverId)
-      await openDmConversation(pageB, dm.serverId)
+      // pageA is already on DM view from createDmViaUi
+      await pageA.locator('[data-test="chat-area"]').waitFor({ timeout: 10_000 })
+
+      // pageB navigates to the DM
+      await openDmConversation(pageB, dmServerId)
 
       // --- Round 1: UserA sends, UserB receives ---
       const msgFromA = `bidir-from-A-${Date.now()}`
