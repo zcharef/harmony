@@ -15,6 +15,13 @@ const typingEventSchema = z.object({
   username: z.string(),
 })
 
+// WHY minimal schema: We only need senderId + channelId from message.created
+// to clear the typing indicator when a user sends a message.
+const messageCreatedMinSchema = z.object({
+  senderId: z.string(),
+  channelId: z.string(),
+})
+
 export interface TypingUser {
   userId: string
   username: string
@@ -96,7 +103,10 @@ export function useTypingIndicator(channelId: string, currentUserId: string) {
         clearTimeout(existingTimer)
       }
       const timer = setTimeout(() => {
-        setTypingUsers((prev) => prev.filter((u) => u.userId !== senderId))
+        setTypingUsers((prev) => {
+          const next = prev.filter((u) => u.userId !== senderId)
+          return next.length === prev.length ? prev : next
+        })
         expiryTimersRef.current.delete(senderId)
       }, 5000)
       expiryTimersRef.current.set(senderId, timer)
@@ -104,8 +114,34 @@ export function useTypingIndicator(channelId: string, currentUserId: string) {
     [channelId, currentUserId],
   )
 
+  // WHY: When a user sends a message, immediately clear their typing indicator
+  // instead of waiting for the 5-second expiry. Without this, the typing dots
+  // linger for up to 5s after the message already appeared in chat.
+  const handleMessageCreated = useCallback(
+    (payload: unknown) => {
+      const parsed = messageCreatedMinSchema.safeParse(payload)
+      if (!parsed.success) return
+
+      const { senderId, channelId: eventChannelId } = parsed.data
+      if (eventChannelId !== channelId) return
+
+      const existingTimer = expiryTimersRef.current.get(senderId)
+      if (existingTimer !== undefined) {
+        clearTimeout(existingTimer)
+        expiryTimersRef.current.delete(senderId)
+      }
+
+      setTypingUsers((prev) => {
+        const next = prev.filter((u) => u.userId !== senderId)
+        return next.length === prev.length ? prev : next
+      })
+    },
+    [channelId],
+  )
+
   const isActive = channelId.length > 0 && currentUserId.length > 0
   useServerEvent(isActive ? 'typing.started' : null, handleTypingEvent)
+  useServerEvent(isActive ? 'message.created' : null, handleMessageCreated)
 
   // WHY: 3-second throttle prevents flooding the API with typing POSTs.
   // Typing events are cosmetic — losing a few is acceptable, but

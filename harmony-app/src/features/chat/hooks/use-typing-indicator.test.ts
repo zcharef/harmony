@@ -21,6 +21,11 @@ function fireTypingSSE(detail: unknown) {
   window.dispatchEvent(new CustomEvent('sse:typing.started', { detail }))
 }
 
+/** Dispatches an sse:message.created CustomEvent on window, mimicking useEventSource. */
+function fireMessageCreatedSSE(detail: unknown) {
+  window.dispatchEvent(new CustomEvent('sse:message.created', { detail }))
+}
+
 // -- Tests --------------------------------------------------------------------
 
 describe('useTypingIndicator', () => {
@@ -293,6 +298,58 @@ describe('useTypingIndicator', () => {
       path: { id: CHANNEL_ID },
       throwOnError: true,
     })
+  })
+
+  // -- Message sent: typing indicator cleared immediately --------------------
+
+  it('clears typing user when their message.created event arrives', () => {
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
+
+    // User starts typing
+    act(() => {
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: CHANNEL_ID,
+      })
+    })
+    expect(result.current.typingUsers).toHaveLength(1)
+
+    // User sends a message — typing indicator should clear immediately
+    act(() => {
+      fireMessageCreatedSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        channelId: CHANNEL_ID,
+        message: { id: 'msg-1', authorId: 'user-other' },
+      })
+    })
+    expect(result.current.typingUsers).toHaveLength(0)
+  })
+
+  it('does not clear typing users when message.created is from a different channel', () => {
+    const { result } = renderHook(() => useTypingIndicator(CHANNEL_ID, CURRENT_USER_ID))
+
+    act(() => {
+      fireTypingSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        username: 'Alice',
+        channelId: CHANNEL_ID,
+      })
+    })
+    expect(result.current.typingUsers).toHaveLength(1)
+
+    act(() => {
+      fireMessageCreatedSSE({
+        senderId: 'user-other',
+        serverId: 'server-1',
+        channelId: 'other-channel',
+        message: { id: 'msg-1', authorId: 'user-other' },
+      })
+    })
+    expect(result.current.typingUsers).toHaveLength(1)
   })
 
   // -- Cleanup: event listener removed on unmount ----------------------------
