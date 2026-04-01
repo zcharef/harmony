@@ -51,7 +51,7 @@ just env                # Copy .env.example → .env
 - **Config:** Use typed `config` structs with `secrecy::Secret` for sensitive
   values.
 - **Auth:** Supabase JWT (HS256) verified server-side via `jsonwebtoken` crate.
-  Session cookies use HMAC-SHA256 tokens.
+  Bearer-only auth — no session cookies.
 - **Observability:** Structured JSON logs via `tracing`. Propagate Trace IDs
   (OpenTelemetry) (ADR-017).
 - **Compile-Time SQL:** All queries use `sqlx::query!` or `sqlx::query_as!`.
@@ -91,7 +91,7 @@ just env                # Copy .env.example → .env
 - **Runtime:** Tokio
 - **API Docs:** Utoipa 5 (OpenAPI 3.1)
 - **Database:** SQLx (PostgreSQL via Supabase)
-- **Auth:** `jsonwebtoken` (Supabase JWT) + `axum-extra` (Cookies)
+- **Auth:** `jsonwebtoken` (Supabase JWT, Bearer-only)
 - **Desktop Client:** Tauri
 
 ## Directory Structure

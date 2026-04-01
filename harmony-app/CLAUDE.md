@@ -309,9 +309,9 @@ All push notifications use Server-Sent Events from the Rust API. Supabase Realti
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  MainLayout (src/components/layout/main-layout.tsx)         │
-│  └─ useEventSource({}, userId)  — single SSE connection     │
-│       ↓ EventSource → GET /v1/events (cookie auth)          │
-│       ↓ parse JSON → validate with Zod (event-types.ts)     │
+│  └─ useFetchSSE(userId, getToken) — single SSE connection   │
+│       ↓ fetch('/v1/events', Bearer token) → ReadableStream  │
+│       ↓ eventsource-parser → validate with Zod              │
 │       ↓ window.dispatchEvent(CustomEvent("sse:<name>"))     │
 └──────────────────────────────┬──────────────────────────────┘
                                │ CustomEvent bus
@@ -329,8 +329,8 @@ All push notifications use Server-Sent Events from the Rust API. Supabase Realti
 
 | File | Role |
 |------|------|
-| `src/hooks/use-event-source.ts` | Single SSE connection, mounted once in MainLayout. Cookie auth (`withCredentials: true`). Auto-reconnect with full cache invalidation on reconnect (ADR-SSE-006). |
-| `src/hooks/use-server-event.ts` | Bridge hook: subscribes to `window` CustomEvents keyed by SSE event name. Feature hooks use this instead of touching the EventSource directly. |
+| `src/hooks/use-fetch-sse.ts` | Single fetch-based SSE connection, mounted once in MainLayout. Bearer token auth via `Authorization` header. Exponential backoff reconnect. 50-min forced reconnect (JWT expires at 1h). Full cache invalidation on reconnect (ADR-SSE-006). |
+| `src/hooks/use-server-event.ts` | Bridge hook: subscribes to `window` CustomEvents keyed by SSE event name. Feature hooks use this instead of touching the SSE stream directly. |
 | `src/lib/event-types.ts` | SSoT for event types. Zod discriminated union validates all payloads. Mirrors Rust `ServerEvent` enum. Exports `ServerEvent`, `ServerEventOf<T>`, payload types. |
 | `src/features/*/hooks/use-realtime-*.ts` | Feature-specific handlers. Each subscribes to relevant SSE events via `useServerEvent()` and updates TanStack Query cache directly (no refetch). |
 
@@ -341,7 +341,7 @@ All push notifications use Server-Sent Events from the Rust API. Supabase Realti
 | `import ... from 'supabase-js/realtime'` or Supabase channel subscriptions | **FORBIDDEN** |
 | Direct cache mutation in SSE handlers (no `invalidateQueries` per event) | **REQUIRED** (instant UI) |
 | Zod validation on every SSE payload before cache insertion | **REQUIRED** (CLAUDE.md 1.2) |
-| One `useEventSource` call per app (in MainLayout only) | **REQUIRED** (single connection) |
+| One `useFetchSSE` call per app (in MainLayout only) | **REQUIRED** (single connection) |
 | Feature hooks use `useServerEvent()`, never `addEventListener` directly | **REQUIRED** |
 
 #### Adding a New SSE Event
