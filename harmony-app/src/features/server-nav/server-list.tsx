@@ -3,6 +3,7 @@ import { Compass, Info, LogOut, MessageSquare, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChannels, useUnreadStore } from '@/features/channels'
+import { useDms } from '@/features/dms'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import type { ServerResponse } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
@@ -22,6 +23,17 @@ function useServerHasUnread(serverId: string): boolean {
   const counts = useUnreadStore((s) => s.counts)
   if (channels === undefined) return false
   return channels.some((c) => (counts[c.id] ?? 0) > 0)
+}
+
+/**
+ * WHY: Checks if any DM conversation has unread messages. Used to show
+ * an unread dot on the DM home button when the user is in server view.
+ */
+function useDmsHaveUnread(): boolean {
+  const { data: dms } = useDms()
+  const counts = useUnreadStore((s) => s.counts)
+  if (dms === undefined) return false
+  return dms.some((dm) => (counts[dm.channelId] ?? 0) > 0)
 }
 
 function ServerIcon({
@@ -110,6 +122,7 @@ export function ServerList({
   const { data: servers, isPending, isError } = useServers()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isJoinOpen, setIsJoinOpen] = useState(false)
+  const hasDmUnread = useDmsHaveUnread()
 
   if (isPending) {
     return (
@@ -164,6 +177,11 @@ export function ServerList({
               icon: 'text-current',
             }}
           />
+
+          {/* Unread dot — shows when any DM has unread messages */}
+          {hasDmUnread && !isDmView && (
+            <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-content1 bg-danger" />
+          )}
         </button>
       </Tooltip>
 
