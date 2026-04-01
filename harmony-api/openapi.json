@@ -1394,7 +1394,7 @@
             "description": "Device ID to check key count for",
             "required": true,
             "schema": {
-              "type": "string"
+              "$ref": "#/components/schemas/DeviceId"
             }
           }
         ],
@@ -1509,7 +1509,7 @@
             "description": "Device ID to remove",
             "required": true,
             "schema": {
-              "type": "string"
+              "$ref": "#/components/schemas/DeviceId"
             }
           }
         ],
@@ -3785,7 +3785,7 @@
         "required": [
           "status",
           "components",
-          "latency_ms",
+          "latencyMs",
           "version"
         ],
         "properties": {
@@ -3793,7 +3793,7 @@
             "$ref": "#/components/schemas/ComponentHealth",
             "description": "Individual component health"
           },
-          "latency_ms": {
+          "latencyMs": {
             "type": "integer",
             "format": "int64",
             "description": "Time taken for health check in milliseconds",
@@ -3937,6 +3937,12 @@
         },
         "additionalProperties": false
       },
+      "MegolmSessionId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a Megolm session record.",
+        "example": "dd0e8400-e29b-41d4-a716-446655440008"
+      },
       "MegolmSessionResponse": {
         "type": "object",
         "description": "Response after registering a Megolm session.",
@@ -3955,7 +3961,7 @@
             "format": "date-time"
           },
           "id": {
-            "type": "string",
+            "$ref": "#/components/schemas/MegolmSessionId",
             "description": "Server-generated record ID."
           },
           "sessionId": {
