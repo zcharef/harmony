@@ -9,6 +9,10 @@ import {
 } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
 
+// WHY: Configurable for CI (deployed API) while defaulting to local dev.
+// Same pattern as test-data-factory.ts:10.
+const API_URL = process.env.VITE_API_URL ?? 'http://localhost:3000'
+
 /**
  * Input validation E2E tests.
  *
@@ -204,7 +208,7 @@ test.describe('Input Validation', () => {
       await joinServer(target.token, server.id, invite.code)
 
       // Try to ban with a reason > 512 chars via API
-      const banRes = await fetch(`http://localhost:3000/v1/servers/${server.id}/bans`, {
+      const banRes = await fetch(`${API_URL}/v1/servers/${server.id}/bans`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -228,7 +232,7 @@ test.describe('Input Validation', () => {
       // Rust API (alphanumeric only, 1-32 chars). Using direct HTTP eliminates
       // flaky UI interactions (dialog open/fill/click) that caused intermittent
       // timeouts due to Supabase session refreshes detaching the DOM.
-      const res = await fetch('http://localhost:3000/v1/invites/abc-def!@#')
+      const res = await fetch(`${API_URL}/v1/invites/abc-def!@#`)
 
       expect(res.status).toBeGreaterThanOrEqual(400)
     })
@@ -237,7 +241,7 @@ test.describe('Input Validation', () => {
       // WHY: Pure API test — same rationale as above. The 32-char limit is a
       // server-side validation rule, not a client-side UX concern.
       const longCode = 'a'.repeat(33)
-      const res = await fetch(`http://localhost:3000/v1/invites/${longCode}`)
+      const res = await fetch(`${API_URL}/v1/invites/${longCode}`)
 
       expect(res.status).toBeGreaterThanOrEqual(400)
     })
@@ -251,19 +255,16 @@ test.describe('Input Validation', () => {
       const channelId = channels[0].id
 
       // PATCH with oversized topic via API
-      const res = await fetch(
-        `http://localhost:3000/v1/servers/${server.id}/channels/${channelId}`,
-        {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${owner.token}`,
-          },
-          body: JSON.stringify({
-            topic: 't'.repeat(1025),
-          }),
+      const res = await fetch(`${API_URL}/v1/servers/${server.id}/channels/${channelId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${owner.token}`,
         },
-      )
+        body: JSON.stringify({
+          topic: 't'.repeat(1025),
+        }),
+      })
 
       expect(res.status).toBeGreaterThanOrEqual(400)
     })
