@@ -4,8 +4,10 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore, useCurrentProfile } from '@/features/auth'
+import { useUnreadStore } from '@/features/channels'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import type { DmListItem } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import { useCloseDm } from './hooks/use-close-dm'
 import { useDms } from './hooks/use-dms'
 import { UserSearchDialog } from './user-search-dialog'
@@ -47,6 +49,7 @@ function DmConversationItem({
   const { t } = useTranslation('dms')
   const displayName = dm.recipient.displayName ?? dm.recipient.username
   const status = useUserStatus(dm.recipient.id)
+  const unreadCount = useUnreadStore((s) => s.counts[dm.channelId] ?? 0)
 
   return (
     <div
@@ -59,9 +62,10 @@ function DmConversationItem({
         data-dm-server-id={dm.serverId}
         type="button"
         onClick={onSelect}
-        className={`flex flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
-          isActive ? 'bg-default-200' : 'hover:bg-default-200/50'
-        }`}
+        className={cn(
+          'flex flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+          isActive ? 'bg-default-200' : 'hover:bg-default-200/50',
+        )}
       >
         <div className="relative shrink-0">
           <Avatar
@@ -76,7 +80,14 @@ function DmConversationItem({
           </div>
         </div>
         <div className="flex flex-1 flex-col overflow-hidden">
-          <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+          <span
+            className={cn(
+              'truncate text-sm text-foreground',
+              unreadCount > 0 && !isActive ? 'font-semibold' : 'font-medium',
+            )}
+          >
+            {displayName}
+          </span>
           {/* TODO(e2ee): DmLastMessageResponse needs `encrypted` field from backend
              to show "[Encrypted message]" fallback on web. Without it, encrypted
              messages from desktop will show raw ciphertext in the sidebar. */}
@@ -88,10 +99,17 @@ function DmConversationItem({
             </span>
           )}
         </div>
-        {dm.lastMessage !== undefined && dm.lastMessage !== null && (
-          <span className="shrink-0 text-[10px] text-default-400">
-            {formatRelativeTime(dm.lastMessage.createdAt, t)}
+        {unreadCount > 0 ? (
+          <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-danger px-1 text-xs text-danger-foreground">
+            {unreadCount > 99 ? '99+' : unreadCount}
           </span>
+        ) : (
+          dm.lastMessage !== undefined &&
+          dm.lastMessage !== null && (
+            <span className="shrink-0 text-[10px] text-default-400">
+              {formatRelativeTime(dm.lastMessage.createdAt, t)}
+            </span>
+          )
         )}
       </button>
       <Button

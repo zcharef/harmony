@@ -21,7 +21,10 @@ export const useUnreadStore = create<UnreadStore>((set) => ({
       counts: { ...s.counts, [channelId]: 0 },
     })),
   initFromServer: (states) =>
-    set({
-      counts: Object.fromEntries(states.map((s) => [s.channelId, s.unreadCount])),
-    }),
+    set((prev) => ({
+      counts: {
+        ...prev.counts,
+        ...Object.fromEntries(states.map((s) => [s.channelId, s.unreadCount])),
+      },
+    })),
 }))
