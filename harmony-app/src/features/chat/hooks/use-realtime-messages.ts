@@ -97,8 +97,13 @@ export function useRealtimeMessages(channelId: string) {
 
       // WHY: Increment unread count for channels other than the one being viewed.
       // This ensures the sidebar badge updates in real-time via SSE.
+      // Also invalidate that channel's message cache so TanStack Query refetches
+      // when the user navigates back (otherwise staleTime keeps serving old data).
       if (parsed.data.channelId !== channelId) {
         useUnreadStore.getState().increment(parsed.data.channelId)
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.messages.byChannel(parsed.data.channelId),
+        })
         return
       }
 
