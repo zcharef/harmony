@@ -1,7 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { useServerEvent } from '@/hooks/use-server-event'
-import { useConnectionStore } from '@/lib/connection-store'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 
@@ -17,6 +16,10 @@ import { queryKeys } from '@/lib/query-keys'
  * WHY no local Zod parse: payload is pre-validated by useEventSource/serverEventSchema
  * before dispatch. This hook only invalidates the query cache (no direct cache mutation),
  * so a second validation pass adds no additional safety.
+ *
+ * WHY no requestReconnect: The backend SSE handler (events.rs) now dynamically
+ * updates the server_ids filter via a tokio::sync::watch channel when a DmCreated
+ * event is intercepted. No client-side reconnect needed.
  */
 export function useRealtimeDms() {
   const queryClient = useQueryClient()
@@ -28,13 +31,6 @@ export function useRealtimeDms() {
       })
 
       queryClient.invalidateQueries({ queryKey: queryKeys.dms.list() })
-
-      // WHY: The SSE endpoint snapshots server_ids at connection time (events.rs:63-68).
-      // A newly created DM is a new server whose ID is NOT in the snapshot. Without
-      // reconnecting, all MessageCreated events for this DM are silently dropped by
-      // the server_ids filter. requestReconnect() tears down the EventSource and
-      // creates a fresh one — list_all_memberships() now includes the new DM server.
-      useConnectionStore.getState().requestReconnect()
     },
     [queryClient],
   )
