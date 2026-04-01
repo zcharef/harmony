@@ -124,6 +124,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setProfileSynced(true)
             } else if (result !== 'skipped') {
               setProfileSyncError(result)
+              // WHY: The initial getSession() may return a stale JWT missing the
+              // email claim (400 error). Meanwhile, onAuthStateChange fires and
+              // gets 'skipped' because isSyncing is still true. After the first
+              // call fails and releases the lock, no retry happens — leaving
+              // isProfileSynced=false and the SSE connection never established.
+              // Retry once after a brief delay to use the refreshed token.
+              setTimeout(() => {
+                syncProfile(isSyncing).then((retryResult) => {
+                  if (retryResult === null) {
+                    setProfileSynced(true)
+                    setProfileSyncError(null)
+                  }
+                })
+              }, 1_000)
             }
           })
         }
