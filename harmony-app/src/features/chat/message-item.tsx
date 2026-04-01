@@ -63,6 +63,17 @@ function formatTimestamp(iso: string, t: TFunction<'messages'>): string {
   })
 }
 
+// WHY: Bare domains like "evil.com" have no protocol, so rehype-sanitize strips
+// the href entirely. Prepending "https://" before sanitization makes them pass
+// the protocol whitelist and renders a clickable (but still warning-gated) link.
+const PROTOCOL_RE = /^[a-z][a-z\d+\-.]*:/i
+function normalizeUrl(url: string): string {
+  if (!PROTOCOL_RE.test(url)) {
+    return `https://${url}`
+  }
+  return url
+}
+
 // WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
 function MessageContent({
   message,
@@ -224,6 +235,7 @@ function MessageContent({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeSanitize]}
+        urlTransform={normalizeUrl}
         components={{
           p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
           strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
