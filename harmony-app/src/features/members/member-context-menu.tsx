@@ -97,8 +97,10 @@ export function MemberContextMenu({
         // WHY: Hook-level onError in useCreateDm already logs the raw error.
         // This call-site handler shows user feedback and adds target context for diagnostics.
         toast.error(t('couldNotOpenDm'), {
-          targetUserId,
-          error: error instanceof Error ? error.message : String(error),
+          context: {
+            targetUserId,
+            error: error instanceof Error ? error.message : String(error),
+          },
         })
       },
     })

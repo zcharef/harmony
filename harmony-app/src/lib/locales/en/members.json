@@ -35,5 +35,11 @@
 
   "sendMessage": "Message {{username}}",
   "couldNotOpenDm": "Could not open DM",
-  "removedFromServer": "You have been removed from this server"
+  "kickedTitle": "Kicked",
+  "kickedFromServer": "You were kicked from {{serverName}}. You can rejoin with an invite.",
+  "bannedTitle": "Banned",
+  "bannedFromServer": "You were banned from {{serverName}}.",
+  "removedTitle": "Removed",
+  "removedFromServerNamed": "You have been removed from {{serverName}}.",
+  "removedFromServer": "You have been removed from a server"
 }

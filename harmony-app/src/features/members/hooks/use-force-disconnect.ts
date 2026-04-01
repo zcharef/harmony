@@ -3,6 +3,7 @@ import i18n from 'i18next'
 import { useCallback } from 'react'
 import { z } from 'zod'
 import { useServerEvent } from '@/hooks/use-server-event'
+import type { ServerResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 import { toast } from '@/lib/toast'
@@ -62,6 +63,11 @@ export function useForceDisconnect(
 
       logger.info('force_disconnect_received', { serverId, reason })
 
+      // WHY: Read server name from cache BEFORE invalidation wipes it.
+      // invalidateQueries is async — the stale data is still readable here.
+      const cachedServers = queryClient.getQueryData<ServerResponse[]>(queryKeys.servers.list())
+      const serverName = cachedServers?.find((s) => s.id === serverId)?.name
+
       // WHY: Invalidate server list so the kicked server disappears from the
       // sidebar. Also invalidate members for that server to clean stale cache.
       queryClient.invalidateQueries({ queryKey: queryKeys.servers.all })
@@ -76,9 +82,27 @@ export function useForceDisconnect(
         setSelectedChannelId(null)
       }
 
-      // WHY toast: This is an explicit system action affecting the user — they
-      // need to know they were removed (ADR-045: user-facing actions get feedback).
-      toast.error(reason.length > 0 ? reason : i18n.t('members:removedFromServer'))
+      // WHY: Explicit match on reason — a boolean shortcut would mislabel
+      // unknown future reasons (e.g. "server_deleted") as "kicked".
+      const titleKey =
+        reason === 'banned'
+          ? 'members:bannedTitle'
+          : reason === 'kicked'
+            ? 'members:kickedTitle'
+            : 'members:removedTitle'
+
+      const descriptionKey =
+        serverName !== undefined
+          ? reason === 'banned'
+            ? 'members:bannedFromServer'
+            : reason === 'kicked'
+              ? 'members:kickedFromServer'
+              : 'members:removedFromServerNamed'
+          : 'members:removedFromServer'
+
+      toast.error(i18n.t(titleKey), {
+        description: i18n.t(descriptionKey, { serverName }),
+      })
     },
     [currentUserId, selectedServerId, queryClient, setSelectedServerId, setSelectedChannelId],
   )

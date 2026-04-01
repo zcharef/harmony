@@ -19,16 +19,34 @@ import { logger } from '@/lib/logger'
 const DEFAULT_TIMEOUT = 5000
 
 export const toast = {
-  error(message: string, context?: Record<string, unknown>) {
-    logger.error(message, context)
-    addToast({ title: message, color: 'danger', severity: 'danger', timeout: DEFAULT_TIMEOUT })
+  error(message: string, options?: { description?: string; context?: Record<string, unknown> }) {
+    logger.error(message, options?.context)
+    addToast({
+      title: message,
+      description: options?.description,
+      color: 'danger',
+      severity: 'danger',
+      timeout: DEFAULT_TIMEOUT,
+    })
   },
 
-  success(message: string) {
-    addToast({ title: message, color: 'success', severity: 'success', timeout: DEFAULT_TIMEOUT })
+  success(message: string, options?: { description?: string }) {
+    addToast({
+      title: message,
+      description: options?.description,
+      color: 'success',
+      severity: 'success',
+      timeout: DEFAULT_TIMEOUT,
+    })
   },
 
-  info(message: string) {
-    addToast({ title: message, color: 'primary', severity: 'primary', timeout: DEFAULT_TIMEOUT })
+  info(message: string, options?: { description?: string }) {
+    addToast({
+      title: message,
+      description: options?.description,
+      color: 'primary',
+      severity: 'primary',
+      timeout: DEFAULT_TIMEOUT,
+    })
   },
 }

@@ -261,7 +261,7 @@ export function ServerList({
           onClick={() => {
             supabase.auth.signOut().catch((err: unknown) => {
               toast.error(tAuth('logoutFailed'), {
-                error: err instanceof Error ? err.message : String(err),
+                context: { error: err instanceof Error ? err.message : String(err) },
               })
             })
           }}
