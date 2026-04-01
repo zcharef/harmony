@@ -34,6 +34,7 @@ export const SSE_EVENT_NAMES = [
   'typing.started',
   'presence.changed',
   'presence.sync',
+  'unread.sync',
   'reaction.added',
   'reaction.removed',
   'force.disconnect',
@@ -221,6 +222,14 @@ export const serverEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('presenceSynced'),
     users: z.record(z.string(), userStatusSchema),
+  }),
+  // WHY: Per-connection synthetic event (not broadcast). Server sends this as
+  // the second SSE event on connect with a full snapshot of unread counts across
+  // all channels the user has unread messages in. Handles both initial connect
+  // and reconnect. Same pattern as presenceSynced.
+  z.object({
+    type: z.literal('unreadSynced'),
+    channels: z.record(z.string(), z.number()),
   }),
 
   // Reactions

@@ -13,11 +13,10 @@ use super::dto::{
     DmListResponse, DmRecipientResponse, DmResponse, EditMessageRequest, InvitePreviewResponse,
     InviteResponse, JoinServerRequest, KeyCountResponse, MarkReadRequest, MegolmSessionResponse,
     MemberListQuery, MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse,
-    MessageResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse, ReadStateResponse,
-    ReadStatesListResponse, RedeemDesktopAuthRequest, RedeemDesktopAuthResponse,
-    RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
-    TransferOwnershipRequest, UpdateChannelRequest, UpdateProfileRequest, UpdateServerRequest,
-    UploadOneTimeKeysRequest,
+    MessageResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
+    RedeemDesktopAuthRequest, RedeemDesktopAuthResponse, RegisterDeviceRequest, SendMessageRequest,
+    ServerListResponse, ServerResponse, TransferOwnershipRequest, UpdateChannelRequest,
+    UpdateProfileRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
@@ -84,7 +83,6 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         handlers::reactions::remove_reaction,
         // Read States
         handlers::read_states::mark_channel_read,
-        handlers::read_states::list_server_read_states,
         // Notification Settings
         handlers::notification_settings::get_notification_settings,
         handlers::notification_settings::update_notification_settings,
@@ -180,8 +178,6 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             super::dto::notification_settings::NotificationLevel,
             // Read State DTOs
             MarkReadRequest,
-            ReadStateResponse,
-            ReadStatesListResponse,
             // DM DTOs
             CreateDmRequest,
             DmResponse,

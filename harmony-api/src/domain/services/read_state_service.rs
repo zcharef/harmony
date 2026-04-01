@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{ChannelId, ChannelReadState, MessageId, ServerId, UserId};
+use crate::domain::models::{ChannelId, ChannelReadState, MessageId, UserId};
 use crate::domain::ports::ReadStateRepository;
 
 /// Service for channel read state business logic.
@@ -33,15 +33,15 @@ impl ReadStateService {
             .await
     }
 
-    /// List read states with computed unread counts for all channels in a server.
+    /// List channels with unread messages across all servers the user belongs to.
+    /// Used by the SSE `unread.sync` initial snapshot.
     ///
     /// # Errors
     /// Returns `DomainError` on repository failure.
-    pub async fn list_for_server(
+    pub async fn list_all_for_user(
         &self,
-        server_id: &ServerId,
         user_id: &UserId,
     ) -> Result<Vec<ChannelReadState>, DomainError> {
-        self.repo.list_for_server(server_id, user_id).await
+        self.repo.list_all_for_user(user_id).await
     }
 }

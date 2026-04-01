@@ -43,5 +43,5 @@ pub use pagination::PaginatedResponse;
 pub use profiles::{
     CheckUsernameQuery, CheckUsernameResponse, ProfileResponse, UpdateProfileRequest,
 };
-pub use read_states::{MarkReadRequest, ReadStateResponse, ReadStatesListResponse};
+pub use read_states::MarkReadRequest;
 pub use servers::{CreateServerRequest, ServerListResponse, ServerResponse, UpdateServerRequest};

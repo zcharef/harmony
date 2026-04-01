@@ -2,12 +2,17 @@ import { create } from 'zustand'
 
 interface UnreadStore {
   counts: Record<string, number>
-  /** Increment unread count for a channel (called on SSE message.created for non-active channels). */
+  /** Increment unread count for a channel (SSE message.created delta). */
   increment: (channelId: string) => void
-  /** Clear unread count for a channel (called when user focuses that channel). */
+  /** Clear unread count for a channel (user views or mark-as-read). */
   clear: (channelId: string) => void
-  /** Initialize counts from server response (called on server load). */
-  initFromServer: (states: ReadonlyArray<{ channelId: string; unreadCount: number }>) => void
+  /**
+   * Replace entire counts with authoritative server snapshot (SSE unread.sync).
+   * WHY full replace: the server snapshot is the source of truth on connect/reconnect.
+   * Ordering is safe because initial_stream.chain() guarantees unread.sync arrives
+   * before any message.created deltas.
+   */
+  sync: (channels: Record<string, number>) => void
 }
 
 export const useUnreadStore = create<UnreadStore>((set) => ({
@@ -20,11 +25,5 @@ export const useUnreadStore = create<UnreadStore>((set) => ({
     set((s) => ({
       counts: { ...s.counts, [channelId]: 0 },
     })),
-  initFromServer: (states) =>
-    set((prev) => ({
-      counts: {
-        ...prev.counts,
-        ...Object.fromEntries(states.map((s) => [s.channelId, s.unreadCount])),
-      },
-    })),
+  sync: (channels) => set({ counts: channels }),
 }))

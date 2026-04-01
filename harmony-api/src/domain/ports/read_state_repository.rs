@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{ChannelId, ChannelReadState, MessageId, ServerId, UserId};
+use crate::domain::models::{ChannelId, ChannelReadState, MessageId, UserId};
 
 /// Intent-based repository for channel read states.
 #[async_trait]
@@ -16,10 +16,11 @@ pub trait ReadStateRepository: Send + Sync + std::fmt::Debug {
         last_message_id: &MessageId,
     ) -> Result<(), DomainError>;
 
-    /// List read states with computed unread counts for all channels in a server.
-    async fn list_for_server(
+    /// List channels with unread messages across ALL servers the user belongs to.
+    /// Returns only channels with unread > 0, capped at 999 per channel.
+    /// Used by the SSE `unread.sync` initial snapshot.
+    async fn list_all_for_user(
         &self,
-        server_id: &ServerId,
         user_id: &UserId,
     ) -> Result<Vec<ChannelReadState>, DomainError>;
 }

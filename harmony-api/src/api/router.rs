@@ -140,10 +140,6 @@ pub fn build_router(
             "/v1/channels/{id}/read-state",
             patch(handlers::read_states::mark_channel_read),
         )
-        .route(
-            "/v1/servers/{id}/read-states",
-            get(handlers::read_states::list_server_read_states),
-        )
         // Messages
         .route(
             "/v1/channels/{id}/messages",

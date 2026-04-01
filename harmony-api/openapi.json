@@ -3065,54 +3065,6 @@
         ]
       }
     },
-    "/v1/servers/{id}/read-states": {
-      "get": {
-        "tags": [
-          "ReadStates"
-        ],
-        "summary": "List read states with unread counts for all channels in a server.",
-        "description": "# Errors\nReturns `ApiError` on repository error.",
-        "operationId": "list_server_read_states",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Server ID",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ServerId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Read states list",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReadStatesListResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
     "/v1/servers/{id}/transfer-ownership": {
       "post": {
         "tags": [
@@ -4504,55 +4456,6 @@
           },
           "reactedByMe": {
             "type": "boolean"
-          }
-        }
-      },
-      "ReadStateResponse": {
-        "type": "object",
-        "description": "Read state for a single channel.",
-        "required": [
-          "channelId",
-          "unreadCount"
-        ],
-        "properties": {
-          "channelId": {
-            "$ref": "#/components/schemas/ChannelId"
-          },
-          "lastMessageId": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/MessageId"
-              }
-            ]
-          },
-          "lastReadAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "unreadCount": {
-            "type": "integer",
-            "format": "int64"
-          }
-        }
-      },
-      "ReadStatesListResponse": {
-        "type": "object",
-        "description": "Envelope for a list of read states.",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ReadStateResponse"
-            }
           }
         }
       },

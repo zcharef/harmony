@@ -9,10 +9,10 @@ import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
 import {
   ChannelSidebar,
-  useAllReadStates,
   useChannels,
   useRealtimeChannels,
   useRealtimeUnread,
+  useUnreadSync,
 } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
 import { DmSidebar, useDms, useRealtimeDms } from '@/features/dms'
@@ -341,7 +341,6 @@ export function MainLayout() {
     } = await supabase.auth.getSession()
     return session?.access_token
   }, [])
-  const serverIds = useMemo(() => servers?.map((s) => s.id) ?? [], [servers])
   usePresence(userId)
   useFetchSSE(userId, getToken)
   useForceDisconnect(userId, selectedServerId, setSelectedServerId, setSelectedChannelId)
@@ -360,11 +359,9 @@ export function MainLayout() {
   // previous approach coupled incrementing to useRealtimeMessages(channelId)
   // which only subscribed when channelId was non-empty.
   useRealtimeUnread(selectedChannelId)
-  // WHY: Fetch server-computed unread counts for ALL servers on load.
-  // Initializes the Zustand unread store so badges show correctly across all
-  // server icons, not just the selected one. initFromServer merges, so each
-  // server's counts coexist without wiping others.
-  useAllReadStates(serverIds)
+  // WHY: Handles the SSE unread.sync snapshot on connect/reconnect.
+  // Replaces N per-server REST calls with a single SSE initial event.
+  useUnreadSync(userId)
   const { data: channels } = useChannels(selectedServerId)
 
   // WHY: DM list needed to derive chat header info (recipient name) when in DM view

@@ -132,10 +132,11 @@ pub async fn sse_events(
         "SSE connection established, user marked online"
     );
 
-    // Clone user_id for the heartbeat stream and guard before moving into event closures.
+    // Clone user_id for the heartbeat stream, guard, and unread query before moving into event closures.
     let heartbeat_user_id = user_id.clone();
     let guard_user_id = user_id.clone();
     let intercept_user_id = user_id.clone();
+    let unread_user_id = user_id.clone();
 
     // ── Stage 1 (intercept): update server_ids on membership changes ──
     // WHY: MemberJoined for a server the user just joined has server_id = X,
@@ -320,14 +321,45 @@ pub async fn sse_events(
             presence_users.insert(uid.0.to_string(), status);
         }
     }
-    let sync_data = serde_json::json!({
+    let presence_data = serde_json::json!({
         "type": "presenceSynced",
         "users": presence_users,
     });
-    let initial_event = Event::default()
+    let presence_event = Event::default()
         .event("presence.sync")
-        .data(sync_data.to_string());
-    let initial_stream = tokio_stream::once(Ok::<Event, Infallible>(initial_event));
+        .data(presence_data.to_string());
+
+    // ── Unread snapshot: initial sync event ──────────────────────
+    // WHY: Clients need full unread counts on connect (and reconnect) without
+    // N per-server REST calls. Same "initial snapshot + incremental deltas"
+    // pattern as presence.sync (à la Discord READY).
+    // WHY after subscribe(): the broadcast subscription (line 126) captures
+    // events from this point. Running the SQL query after ensures no gap where
+    // events are missed. Brief under-count window is accepted (see plan).
+    // WHY synthetic (not ServerEvent): per-user data, cannot go through broadcast bus.
+    let unread_states = state
+        .read_state_service()
+        .list_all_for_user(&unread_user_id)
+        .await?;
+    let mut unread_channels: HashMap<String, i64> = HashMap::new();
+    for rs in &unread_states {
+        unread_channels.insert(rs.channel_id.0.to_string(), rs.unread_count);
+    }
+    let unread_data = serde_json::json!({
+        "type": "unreadSynced",
+        "channels": unread_channels,
+    });
+    let unread_event = Event::default()
+        .event("unread.sync")
+        .data(unread_data.to_string());
+
+    // WHY iter(vec![...]): both synthetic events must be emitted BEFORE any
+    // broadcast events. chain() guarantees this ordering, preventing the
+    // client from receiving message.created deltas before the snapshot.
+    let initial_stream = tokio_stream::iter(vec![
+        Ok::<Event, Infallible>(presence_event),
+        Ok::<Event, Infallible>(unread_event),
+    ]);
 
     // ── Disconnect guard: instant offline on stream drop ─────────
     // WHY: Capturing the guard in a `.map()` closure ties its lifetime to the
