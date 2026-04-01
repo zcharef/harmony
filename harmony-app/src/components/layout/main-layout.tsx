@@ -26,7 +26,7 @@ import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, useSettingsUiStore } from '@/features/settings'
 import { useEventSource } from '@/hooks/use-event-source'
 import { useAboutUiStore } from '@/lib/about-ui-store'
-import { useConnectionStatus } from '@/lib/connection-store'
+import { type ConnectionStatus, useConnectionStatus } from '@/lib/connection-store'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
@@ -244,6 +244,76 @@ function ServersErrorView({
   )
 }
 
+// WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
+function ServerSettingsView({
+  serverId,
+  connectionStatus,
+}: {
+  serverId: string
+  connectionStatus: ConnectionStatus
+}) {
+  return (
+    <div
+      data-test="main-layout"
+      data-test-sse-status={connectionStatus}
+      className="flex h-screen w-screen overflow-hidden"
+    >
+      <ConnectionBanner />
+      <ServerSettings serverId={serverId} />
+      <AlphaBadge />
+    </div>
+  )
+}
+
+// WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
+function AboutPageView({ connectionStatus }: { connectionStatus: ConnectionStatus }) {
+  return (
+    <div
+      data-test="main-layout"
+      data-test-sse-status={connectionStatus}
+      className="flex h-screen w-screen overflow-hidden"
+    >
+      <AboutPage />
+    </div>
+  )
+}
+
+// WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
+function WelcomeView({
+  onSelectServer,
+  onSelectDmView,
+  onServerCreated,
+  onServerJoined,
+  selectedServerId,
+  view,
+}: {
+  onSelectServer: (serverId: string) => void
+  onSelectDmView: () => void
+  onServerCreated: (serverId: string) => void
+  onServerJoined: (serverId: string) => void
+  selectedServerId: string | null
+  view: ViewMode
+}) {
+  const sseStatus = useConnectionStatus()
+  return (
+    <div
+      data-test="main-layout"
+      data-test-sse-status={sseStatus}
+      className="flex h-screen w-screen overflow-hidden"
+    >
+      <ConnectionBanner />
+      <ServerList
+        selectedServerId={selectedServerId}
+        view={view}
+        onSelectServer={onSelectServer}
+        onSelectDmView={onSelectDmView}
+      />
+      <WelcomeScreen onServerCreated={onServerCreated} onServerJoined={onServerJoined} />
+      <AlphaBadge />
+    </div>
+  )
+}
+
 export function MainLayout() {
   const [view, setView] = useState<ViewMode>('servers')
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null)
@@ -352,7 +422,8 @@ export function MainLayout() {
     () => regularServers.filter((s) => s.id !== env.VITE_OFFICIAL_SERVER_ID),
     [regularServers],
   )
-  const hasNoServers = servers !== undefined && userServers.length === 0
+  const showWelcome = servers !== undefined && userServers.length === 0 && !isDmView
+  const showServersError = isServersError && servers === undefined && !isDmView
 
   // WHY: Pre-compute props to move ternary/logical complexity out of MainLayout,
   // reducing Biome cognitive complexity below the limit of 15.
@@ -366,58 +437,33 @@ export function MainLayout() {
 
   /** WHY: About page renders before server settings so it's accessible from any state. */
   if (showAboutPage) {
-    return (
-      <div
-        data-test="main-layout"
-        data-test-sse-status={connectionStatus}
-        className="flex h-screen w-screen overflow-hidden"
-      >
-        <AboutPage />
-      </div>
-    )
+    return <AboutPageView connectionStatus={connectionStatus} />
   }
 
   /** WHY: Server settings replaces the entire main content area (like Discord). */
   if (showServerSettings && selectedServerId !== null) {
-    return (
-      <div
-        data-test="main-layout"
-        data-test-sse-status={connectionStatus}
-        className="flex h-screen w-screen overflow-hidden"
-      >
-        <ConnectionBanner />
-        <ServerSettings serverId={selectedServerId} />
-        <AlphaBadge />
-      </div>
-    )
+    return <ServerSettingsView serverId={selectedServerId} connectionStatus={connectionStatus} />
   }
 
   /** WHY: Early return avoids a JSX ternary that would increase nesting complexity
    *  for every conditional inside the Group (Biome cognitive complexity limit).
    *  Skip when in DM view — a kicked user with no servers must still see DmSidebar. */
-  if (hasNoServers && !isDmView) {
+  if (showWelcome) {
     return (
-      <div
-        data-test="main-layout"
-        data-test-sse-status={connectionStatus}
-        className="flex h-screen w-screen overflow-hidden"
-      >
-        <ConnectionBanner />
-        <ServerList
-          selectedServerId={selectedServerId}
-          view={view}
-          onSelectServer={handleSelectServer}
-          onSelectDmView={handleSelectDmView}
-        />
-        <WelcomeScreen onServerCreated={handleSelectServer} onServerJoined={handleSelectServer} />
-        <AlphaBadge />
-      </div>
+      <WelcomeView
+        onSelectServer={handleSelectServer}
+        onSelectDmView={handleSelectDmView}
+        onServerCreated={handleSelectServer}
+        onServerJoined={handleSelectServer}
+        selectedServerId={selectedServerId}
+        view={view}
+      />
     )
   }
 
   /** WHY: Servers query failed with no cache — show error instead of blank app.
    *  The ConnectionBanner handles SSE-level errors; this covers REST query failures. */
-  if (isServersError && servers === undefined && !isDmView) {
+  if (showServersError) {
     return (
       <ServersErrorView
         selectedServerId={selectedServerId}
