@@ -22,14 +22,14 @@ pub trait ChannelRepository: Send + Sync + std::fmt::Debug {
     async fn get_by_id(&self, channel_id: &ChannelId) -> Result<Option<Channel>, DomainError>;
 
     /// Create a new channel. Returns the created channel.
-    async fn create(&self, channel: &Channel) -> Result<Channel, DomainError>;
+    async fn create_channel(&self, channel: &Channel) -> Result<Channel, DomainError>;
 
     /// Update a channel's name, topic, permission flags, and/or encryption toggle.
     ///
     /// `topic` uses `Option<Option<String>>`: outer = "was field provided?",
     /// inner = "null (clear) or a value". Follows JSON PATCH semantics.
     /// `is_private` / `is_read_only` / `encrypted` use `Option<bool>`: `None` = no change.
-    async fn update(
+    async fn update_channel(
         &self,
         channel_id: &ChannelId,
         name: Option<String>,

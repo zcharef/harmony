@@ -2,9 +2,11 @@
 
 mod ban_repository;
 mod channel_repository;
+mod desktop_auth_repository;
 mod dm_repository;
 mod invite_repository;
 mod key_repository;
+mod megolm_session_repository;
 mod member_repository;
 mod message_repository;
 mod notification_settings_repository;
@@ -16,9 +18,11 @@ mod server_repository;
 
 pub use ban_repository::PgBanRepository;
 pub use channel_repository::PgChannelRepository;
+pub use desktop_auth_repository::PgDesktopAuthRepository;
 pub use dm_repository::PgDmRepository;
 pub use invite_repository::PgInviteRepository;
 pub use key_repository::PgKeyRepository;
+pub use megolm_session_repository::PgMegolmSessionRepository;
 pub use member_repository::PgMemberRepository;
 pub use message_repository::PgMessageRepository;
 pub use notification_settings_repository::PgNotificationSettingsRepository;

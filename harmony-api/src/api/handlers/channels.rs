@@ -317,64 +317,13 @@ pub async fn create_megolm_session(
         ));
     }
 
-    // Insert the Megolm session record via direct pool query
-    // WHY: This is a thin passthrough — no complex domain logic needed,
-    // so we skip a dedicated service/repository layer to avoid over-abstraction.
-    let row = sqlx::query!(
-        r#"
-        INSERT INTO megolm_sessions (channel_id, session_id, creator_id)
-        VALUES ($1, $2, $3)
-        ON CONFLICT ON CONSTRAINT megolm_sessions_channel_session_unique DO NOTHING
-        RETURNING id, channel_id, session_id, created_at
-        "#,
-        channel_id.0,
-        req.session_id,
-        user_id.0,
-    )
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to insert megolm_session");
-        ApiError::internal("Failed to register Megolm session")
-    })?;
+    let session = state
+        .megolm_session_repository()
+        .store_session(&channel_id, &req.session_id, &user_id)
+        .await?;
 
-    match row {
-        Some(r) => Ok((
-            StatusCode::CREATED,
-            Json(MegolmSessionResponse::new(
-                r.id,
-                ChannelId::new(r.channel_id),
-                r.session_id,
-                r.created_at,
-            )),
-        )),
-        // ON CONFLICT DO NOTHING — session already registered, return 201 idempotently
-        None => {
-            let existing = sqlx::query!(
-                r#"
-                SELECT id, channel_id, session_id, created_at
-                FROM megolm_sessions
-                WHERE channel_id = $1 AND session_id = $2
-                "#,
-                channel_id.0,
-                req.session_id,
-            )
-            .fetch_one(&state.pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to fetch existing megolm_session");
-                ApiError::internal("Failed to register Megolm session")
-            })?;
-
-            Ok((
-                StatusCode::CREATED,
-                Json(MegolmSessionResponse::new(
-                    existing.id,
-                    ChannelId::new(existing.channel_id),
-                    existing.session_id,
-                    existing.created_at,
-                )),
-            ))
-        }
-    }
+    Ok((
+        StatusCode::CREATED,
+        Json(MegolmSessionResponse::from(session)),
+    ))
 }

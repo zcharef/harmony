@@ -204,7 +204,7 @@ impl ChannelRepository for PgChannelRepository {
         }))
     }
 
-    async fn create(&self, channel: &Channel) -> Result<Channel, DomainError> {
+    async fn create_channel(&self, channel: &Channel) -> Result<Channel, DomainError> {
         let id = channel.id.0;
         let server_id = channel.server_id.0;
         let channel_type_str = channel_type_to_str(&channel.channel_type);
@@ -257,7 +257,7 @@ impl ChannelRepository for PgChannelRepository {
         .into_channel())
     }
 
-    async fn update(
+    async fn update_channel(
         &self,
         channel_id: &ChannelId,
         name: Option<String>,

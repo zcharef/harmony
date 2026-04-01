@@ -30,22 +30,26 @@ ALTER TABLE public.device_keys ENABLE ROW LEVEL SECURITY;
 
 -- WHY: Any authenticated user needs to read device keys to establish
 -- an Olm session with another user's device.
+DROP POLICY IF EXISTS device_keys_select_authenticated ON public.device_keys;
 CREATE POLICY device_keys_select_authenticated ON public.device_keys
     FOR SELECT TO authenticated
     USING (true);
 
 -- WHY: Users can only register their own device keys
+DROP POLICY IF EXISTS device_keys_insert_own ON public.device_keys;
 CREATE POLICY device_keys_insert_own ON public.device_keys
     FOR INSERT TO authenticated
     WITH CHECK (user_id = auth.uid());
 
 -- WHY: Users can only update their own device keys (e.g., key rotation)
+DROP POLICY IF EXISTS device_keys_update_own ON public.device_keys;
 CREATE POLICY device_keys_update_own ON public.device_keys
     FOR UPDATE TO authenticated
     USING (user_id = auth.uid())
     WITH CHECK (user_id = auth.uid());
 
 -- WHY: Users can only delete their own device keys (e.g., device logout)
+DROP POLICY IF EXISTS device_keys_delete_own ON public.device_keys;
 CREATE POLICY device_keys_delete_own ON public.device_keys
     FOR DELETE TO authenticated
     USING (user_id = auth.uid());

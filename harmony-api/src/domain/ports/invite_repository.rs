@@ -9,7 +9,7 @@ use crate::domain::models::{Invite, InviteCode, ServerId, UserId};
 #[async_trait]
 pub trait InviteRepository: Send + Sync + std::fmt::Debug {
     /// Persist a new invite.
-    async fn create(&self, invite: &Invite) -> Result<Invite, DomainError>;
+    async fn create_invite(&self, invite: &Invite) -> Result<Invite, DomainError>;
 
     /// Look up an invite by its code. Returns `None` if not found.
     async fn get_by_code(&self, code: &InviteCode) -> Result<Option<Invite>, DomainError>;

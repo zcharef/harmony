@@ -160,7 +160,7 @@ pub async fn list_devices(
     path = "/v1/keys/device/{device_id}",
     tag = "Keys",
     security(("bearer_auth" = [])),
-    params(("device_id" = String, Path, description = "Device ID to remove")),
+    params(("device_id" = DeviceId, Path, description = "Device ID to remove")),
     responses(
         (status = 204, description = "Device removed"),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
@@ -171,10 +171,8 @@ pub async fn list_devices(
 pub async fn remove_device(
     AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
-    ApiPath(device_id_str): ApiPath<String>,
+    ApiPath(device_id): ApiPath<DeviceId>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let device_id = DeviceId::try_new(device_id_str).map_err(ApiError::bad_request)?;
-
     state
         .key_service()
         .remove_device(&user_id, &device_id)
@@ -195,7 +193,7 @@ pub async fn remove_device(
     tag = "Keys",
     security(("bearer_auth" = [])),
     params(
-        ("device_id" = String, Query, description = "Device ID to check key count for"),
+        ("device_id" = DeviceId, Query, description = "Device ID to check key count for"),
     ),
     responses(
         (status = 200, description = "Key count", body = KeyCountResponse),
@@ -209,11 +207,9 @@ pub async fn get_key_count(
     State(state): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<KeyCountQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let device_id = DeviceId::try_new(params.device_id).map_err(ApiError::bad_request)?;
-
     let count = state
         .key_service()
-        .get_one_time_key_count(&user_id, &device_id)
+        .get_one_time_key_count(&user_id, &params.device_id)
         .await?;
 
     Ok((StatusCode::OK, Json(KeyCountResponse::new(count))))
@@ -225,5 +221,5 @@ pub async fn get_key_count(
 #[into_params(parameter_in = Query)]
 pub struct KeyCountQuery {
     /// Device ID to check key count for.
-    pub device_id: String,
+    pub device_id: DeviceId,
 }

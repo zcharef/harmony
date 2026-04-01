@@ -49,7 +49,7 @@ impl InviteRow {
 
 #[async_trait]
 impl InviteRepository for PgInviteRepository {
-    async fn create(&self, invite: &Invite) -> Result<Invite, DomainError> {
+    async fn create_invite(&self, invite: &Invite) -> Result<Invite, DomainError> {
         let code = &invite.code.0;
         let server_id = invite.server_id.0;
         let creator_id = invite.creator_id.0;

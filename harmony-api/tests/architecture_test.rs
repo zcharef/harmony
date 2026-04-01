@@ -172,12 +172,23 @@ fn api_handlers_use_ports_not_concrete_types() {
     );
 
     // Concrete types that should NOT be imported in handlers.
-    // Add future concrete implementations here as they are created.
+    // WHY: Uses the actual `Pg` prefix (not `Postgres`) matching all 14 concrete
+    // repository types in src/infra/postgres/. Exhaustive to catch new additions.
     let forbidden_concrete_imports: &[&str] = &[
-        "PostgresUserRepository",
-        "PostgresServerRepository",
-        "PostgresChannelRepository",
-        "PostgresMessageRepository",
+        "PgProfileRepository",
+        "PgServerRepository",
+        "PgChannelRepository",
+        "PgMessageRepository",
+        "PgMemberRepository",
+        "PgBanRepository",
+        "PgInviteRepository",
+        "PgDmRepository",
+        "PgKeyRepository",
+        "PgMegolmSessionRepository",
+        "PgDesktopAuthRepository",
+        "PgReactionRepository",
+        "PgReadStateRepository",
+        "PgNotificationSettingsRepository",
     ];
 
     let mut violations: Vec<Violation> = Vec::new();

@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { UserId } from '@/lib/api'
 import { createDm } from '@/lib/api'
+import { useConnectionStore } from '@/lib/connection-store'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 
@@ -23,6 +24,11 @@ export function useCreateDm() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.dms.all })
       queryClient.invalidateQueries({ queryKey: queryKeys.servers.all })
+      // WHY: The creator's SSE snapshot (events.rs:63-68) does not include the
+      // new DM server_id. The DmCreated event targets the recipient (not the
+      // creator), so the creator has no SSE-triggered reconnect. Without this,
+      // the creator would not receive messages FROM the recipient in the new DM.
+      useConnectionStore.getState().requestReconnect()
     },
     onError: (error) => {
       logger.error('Failed to create DM', {

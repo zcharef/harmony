@@ -9,8 +9,8 @@ use crate::domain::models::{ChannelId, Message, MessageId, MessageWithAuthor, Us
 /// Intent-based repository for messages.
 #[async_trait]
 pub trait MessageRepository: Send + Sync + std::fmt::Debug {
-    /// Create a new message in a channel.
-    async fn create(
+    /// Send a new message to a channel.
+    async fn send_to_channel(
         &self,
         channel_id: &ChannelId,
         author_id: &UserId,

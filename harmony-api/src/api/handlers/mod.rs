@@ -66,6 +66,7 @@ pub async fn liveness_check() -> impl IntoResponse {
 
 /// Deep health check response with component status.
 #[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct HealthResponse {
     /// Overall service status: "up" or "down"
     pub status: &'static str,
@@ -79,6 +80,7 @@ pub struct HealthResponse {
 
 /// Health status of individual components.
 #[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ComponentHealth {
     /// Database connectivity: "connected", "disconnected", or error detail
     pub database: String,
@@ -99,7 +101,7 @@ pub struct ComponentHealth {
 pub async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
     let start = Instant::now();
 
-    let db_status = match postgres::ping(&state.pool).await {
+    let db_status = match postgres::ping(state.pool()).await {
         Ok(()) => "connected".to_string(),
         Err(e) => {
             tracing::warn!(error = %e, "Database ping failed");

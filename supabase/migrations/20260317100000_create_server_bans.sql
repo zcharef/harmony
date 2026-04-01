@@ -31,6 +31,7 @@ ALTER TABLE public.server_bans ENABLE ROW LEVEL SECURITY;
 
 -- WHY: server_bans should NOT sync to regular members (privacy).
 -- Only the server owner can see who is banned.
+DROP POLICY IF EXISTS server_bans_select_owner ON public.server_bans;
 CREATE POLICY server_bans_select_owner ON public.server_bans
     FOR SELECT
     USING (
@@ -42,6 +43,7 @@ CREATE POLICY server_bans_select_owner ON public.server_bans
     );
 
 -- WHY: Only the server owner can ban users.
+DROP POLICY IF EXISTS server_bans_insert_owner ON public.server_bans;
 CREATE POLICY server_bans_insert_owner ON public.server_bans
     FOR INSERT
     WITH CHECK (
@@ -53,6 +55,7 @@ CREATE POLICY server_bans_insert_owner ON public.server_bans
     );
 
 -- WHY: Only the server owner can unban users.
+DROP POLICY IF EXISTS server_bans_delete_owner ON public.server_bans;
 CREATE POLICY server_bans_delete_owner ON public.server_bans
     FOR DELETE
     USING (

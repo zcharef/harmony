@@ -22,8 +22,8 @@ use super::dto::{
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
 use crate::domain::models::{
-    CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MessageId, MessageType,
-    OneTimeKeyId, ServerId, UserId, UserStatus,
+    CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MegolmSessionId,
+    MessageId, MessageType, OneTimeKeyId, ServerId, UserId, UserStatus,
 };
 use crate::domain::models::{ParentMessagePreview, ReactionSummary};
 
@@ -125,6 +125,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             DeviceKeyId,
             OneTimeKeyId,
             DeviceId,
+            MegolmSessionId,
             // Domain enums
             UserStatus,
             ChannelType,

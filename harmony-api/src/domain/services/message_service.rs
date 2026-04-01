@@ -200,7 +200,7 @@ impl MessageService {
         }
 
         self.repo
-            .create(
+            .send_to_channel(
                 channel_id,
                 author_id,
                 content,

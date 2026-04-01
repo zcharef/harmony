@@ -154,7 +154,7 @@ impl MessageWithAuthorRow {
 
 #[async_trait]
 impl MessageRepository for PgMessageRepository {
-    async fn create(
+    async fn send_to_channel(
         &self,
         channel_id: &ChannelId,
         author_id: &UserId,

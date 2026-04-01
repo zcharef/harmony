@@ -190,6 +190,10 @@ async fn init_app_state(config: &Config) -> AppState {
         member_repo.clone(),
     ));
     let read_state_service = Arc::new(domain::services::ReadStateService::new(read_state_repo));
+    let megolm_session_repo = Arc::new(infra::postgres::PgMegolmSessionRepository::new(
+        pool.clone(),
+    ));
+    let desktop_auth_repo = Arc::new(infra::postgres::PgDesktopAuthRepository::new(pool.clone()));
     let notification_settings_repo = Arc::new(
         infra::postgres::PgNotificationSettingsRepository::new(pool.clone()),
     );
@@ -227,6 +231,8 @@ async fn init_app_state(config: &Config) -> AppState {
         plan_limit_checker,
         event_bus,
         presence_tracker,
+        megolm_session_repo,
+        desktop_auth_repo,
     )
 }
 

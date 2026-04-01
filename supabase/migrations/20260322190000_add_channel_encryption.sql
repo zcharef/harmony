@@ -53,12 +53,14 @@ ALTER TABLE public.megolm_sessions ENABLE ROW LEVEL SECURITY;
 
 -- WHY: Any channel member needs to read session metadata to
 -- request the Megolm session key from the creator's device.
+DROP POLICY IF EXISTS megolm_sessions_select_member ON public.megolm_sessions;
 CREATE POLICY megolm_sessions_select_member ON public.megolm_sessions
     FOR SELECT TO authenticated
     USING (public.is_channel_member(channel_id));
 
 -- WHY: Any channel member can create a new Megolm session
 -- (e.g., on key rotation). creator_id must match the caller.
+DROP POLICY IF EXISTS megolm_sessions_insert_member ON public.megolm_sessions;
 CREATE POLICY megolm_sessions_insert_member ON public.megolm_sessions
     FOR INSERT TO authenticated
     WITH CHECK (

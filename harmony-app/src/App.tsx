@@ -2,6 +2,7 @@ import { HeroUIProvider, Spinner, ToastProvider } from '@heroui/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AnimatePresence } from 'motion/react'
 import { MainLayout } from '@/components/layout/main-layout'
+import { FeatureErrorBoundary } from '@/components/shared/error-boundary'
 import { UpdateNotification } from '@/components/shared/update-notification'
 import { AuthProvider, DesktopAuthRedirect, LoginPage, useAuthStore } from '@/features/auth'
 import { CryptoProvider } from '@/features/crypto'
@@ -74,7 +75,9 @@ function App() {
         <main className="dark text-foreground bg-background">
           <AuthProvider>
             <CryptoProvider>
-              <AppContent />
+              <FeatureErrorBoundary name="AppContent">
+                <AppContent />
+              </FeatureErrorBoundary>
             </CryptoProvider>
           </AuthProvider>
         </main>

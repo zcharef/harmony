@@ -6,7 +6,10 @@ use jsonwebtoken::DecodingKey;
 use secrecy::SecretString;
 use sqlx::PgPool;
 
-use crate::domain::ports::{BanRepository, EventBus, MemberRepository, PlanLimitChecker};
+use crate::domain::ports::{
+    BanRepository, DesktopAuthRepository, EventBus, MegolmSessionRepository, MemberRepository,
+    PlanLimitChecker,
+};
 use crate::domain::services::{
     ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
     NotificationSettingsService, ProfileService, ReactionService, ReadStateService, ServerService,
@@ -19,7 +22,8 @@ use crate::infra::PresenceTracker;
 #[derive(Clone)]
 pub struct AppState {
     /// Postgres connection pool (Supabase).
-    pub pool: PgPool,
+    /// WHY: Private — only exposed via `pool()` accessor for the health check.
+    pool: PgPool,
     /// Supabase JWT secret for HS256 token verification.
     pub jwt_secret: SecretString,
     /// ES256 public key from Supabase JWKS (for newer Supabase CLI versions).
@@ -60,6 +64,10 @@ pub struct AppState {
     event_bus: Arc<dyn EventBus>,
     /// In-memory presence tracker (online/idle/dnd per user).
     presence_tracker: Arc<PresenceTracker>,
+    /// Megolm session repository (E2EE channel sessions).
+    megolm_session_repository: Arc<dyn MegolmSessionRepository>,
+    /// Desktop auth repository (PKCE exchange codes).
+    desktop_auth_repository: Arc<dyn DesktopAuthRepository>,
 }
 
 // WHY: Manual Debug because `dyn MemberRepository` needs explicit impl through Arc.
@@ -87,6 +95,8 @@ impl std::fmt::Debug for AppState {
             .field("plan_limit_checker", &self.plan_limit_checker)
             .field("event_bus", &self.event_bus)
             .field("presence_tracker", &self.presence_tracker)
+            .field("megolm_session_repository", &self.megolm_session_repository)
+            .field("desktop_auth_repository", &self.desktop_auth_repository)
             .finish()
     }
 }
@@ -117,6 +127,8 @@ impl AppState {
         plan_limit_checker: Arc<dyn PlanLimitChecker>,
         event_bus: Arc<dyn EventBus>,
         presence_tracker: Arc<PresenceTracker>,
+        megolm_session_repository: Arc<dyn MegolmSessionRepository>,
+        desktop_auth_repository: Arc<dyn DesktopAuthRepository>,
     ) -> Self {
         Self {
             pool,
@@ -140,6 +152,8 @@ impl AppState {
             plan_limit_checker,
             event_bus,
             presence_tracker,
+            megolm_session_repository,
+            desktop_auth_repository,
         }
     }
 
@@ -237,5 +251,26 @@ impl AppState {
     #[must_use]
     pub fn presence_tracker(&self) -> &PresenceTracker {
         &self.presence_tracker
+    }
+
+    /// Access the Megolm session repository (E2EE channel sessions).
+    #[must_use]
+    pub fn megolm_session_repository(&self) -> &dyn MegolmSessionRepository {
+        &*self.megolm_session_repository
+    }
+
+    /// Access the desktop auth repository (PKCE exchange codes).
+    #[must_use]
+    pub fn desktop_auth_repository(&self) -> &dyn DesktopAuthRepository {
+        &*self.desktop_auth_repository
+    }
+
+    /// Access the Postgres connection pool.
+    ///
+    /// WHY: Only exposed for the health check (infra ping). All data access
+    /// MUST go through repository ports.
+    #[must_use]
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
     }
 }

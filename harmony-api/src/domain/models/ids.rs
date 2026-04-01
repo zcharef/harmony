@@ -208,6 +208,31 @@ impl From<Uuid> for OneTimeKeyId {
     }
 }
 
+/// Unique identifier for a Megolm session record.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "dd0e8400-e29b-41d4-a716-446655440008")]
+#[serde(transparent)]
+pub struct MegolmSessionId(pub Uuid);
+
+impl MegolmSessionId {
+    #[must_use]
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for MegolmSessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for MegolmSessionId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
 /// Device identifier (client-generated string, not a UUID).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[schema(example = "ABCDEF123456")]

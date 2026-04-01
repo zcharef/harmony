@@ -121,7 +121,7 @@ impl InviteService {
             created_at: Utc::now(),
         };
 
-        self.invite_repo.create(&invite).await
+        self.invite_repo.create_invite(&invite).await
     }
 
     /// Preview an invite by code (no auth required).

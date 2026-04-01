@@ -122,7 +122,7 @@ impl ChannelService {
             is_private,
             is_read_only,
         );
-        self.repo.create(&channel).await
+        self.repo.create_channel(&channel).await
     }
 
     /// List channels visible to the caller in a server, ordered by position.
@@ -208,7 +208,7 @@ impl ChannelService {
         }
 
         self.repo
-            .update(
+            .update_channel(
                 channel_id,
                 validated_name,
                 topic,

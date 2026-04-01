@@ -78,21 +78,16 @@ pub async fn create_desktop_auth_code(
 
     let expires_at = chrono::Utc::now() + chrono::Duration::seconds(CODE_TTL_SECONDS);
 
-    sqlx::query!(
-        "INSERT INTO desktop_auth_codes (auth_code, code_challenge, access_token, refresh_token, expires_at) \
-         VALUES ($1, $2, $3, $4, $5)",
-        &auth_code,
-        &req.code_challenge,
-        access_token,
-        &req.refresh_token,
-        expires_at,
-    )
-    .execute(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to insert desktop auth code");
-        ApiError::internal("Failed to create auth code")
-    })?;
+    state
+        .desktop_auth_repository()
+        .create_code(
+            &auth_code,
+            &req.code_challenge,
+            access_token,
+            &req.refresh_token,
+            expires_at,
+        )
+        .await?;
 
     Ok((
         StatusCode::OK,
@@ -100,15 +95,7 @@ pub async fn create_desktop_auth_code(
     ))
 }
 
-// ─── Redeem (public) ────────────────────────────────────────────────
-
-/// Row returned by the DELETE + RETURNING query.
-#[derive(Debug, sqlx::FromRow)]
-struct DesktopAuthCodeRow {
-    code_challenge: String,
-    access_token: String,
-    refresh_token: String,
-}
+// --- Redeem (public) --------------------------------------------------------
 
 /// Redeem a one-time desktop auth code for session tokens.
 ///
@@ -134,51 +121,37 @@ pub async fn redeem_desktop_auth_code(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<RedeemDesktopAuthRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    if req.auth_code.is_empty() {
-        return Err(ApiError::bad_request("auth_code must not be empty"));
+    // WHY: Auth codes are 32-byte hex (64 chars). Reject anything else early
+    // to avoid sending arbitrarily large strings to Postgres.
+    if req.auth_code.len() != 64 || !req.auth_code.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(ApiError::bad_request(
+            "auth_code must be a 64-character hex string",
+        ));
     }
     if req.code_verifier.is_empty() {
         return Err(ApiError::bad_request("code_verifier must not be empty"));
     }
 
-    // WHY: Single DELETE + RETURNING query guarantees the code is single-use.
-    // If two requests race, only one will get the row back.
-    let row: Option<DesktopAuthCodeRow> = sqlx::query_as!(
-        DesktopAuthCodeRow,
-        "DELETE FROM desktop_auth_codes \
-         WHERE auth_code = $1 AND expires_at > now() \
-         RETURNING code_challenge, access_token, refresh_token",
-        &req.auth_code,
-    )
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to redeem desktop auth code");
-        ApiError::internal("Failed to redeem auth code")
-    })?;
+    let code = state
+        .desktop_auth_repository()
+        .redeem_code(&req.auth_code)
+        .await?
+        .ok_or_else(|| ApiError::unauthorized("Invalid or expired auth code"))?;
 
-    let row = row.ok_or_else(|| ApiError::unauthorized("Invalid or expired auth code"))?;
-
-    // WHY: Verify PKCE — SHA256(code_verifier), base64url-encoded, must match
+    // WHY: Verify PKCE -- SHA256(code_verifier), base64url-encoded, must match
     // the stored code_challenge. This proves the redeemer is the same party
     // that initiated the flow (or has the code_verifier from that party).
     let expected_challenge = s256(&req.code_verifier);
     if expected_challenge
         .as_bytes()
-        .ct_eq(row.code_challenge.as_bytes())
+        .ct_eq(code.code_challenge.as_bytes())
         .unwrap_u8()
         == 0
     {
         return Err(ApiError::unauthorized("PKCE verification failed"));
     }
 
-    Ok((
-        StatusCode::OK,
-        Json(RedeemDesktopAuthResponse::new(
-            row.access_token,
-            row.refresh_token,
-        )),
-    ))
+    Ok((StatusCode::OK, Json(RedeemDesktopAuthResponse::from(code))))
 }
 
 /// SHA-256 hash, base64url-encoded without padding (S256 per RFC 7636).

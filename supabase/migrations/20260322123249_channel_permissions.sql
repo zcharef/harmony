@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS public.channel_role_access (
 -- ─────────────────────────────────────────────────────────────
 ALTER TABLE public.channel_role_access ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS channel_role_access_select_admin ON public.channel_role_access;
 CREATE POLICY channel_role_access_select_admin ON public.channel_role_access
     FOR SELECT TO authenticated
     USING (
@@ -53,6 +54,7 @@ CREATE POLICY channel_role_access_select_admin ON public.channel_role_access
         )
     );
 
+DROP POLICY IF EXISTS channel_role_access_insert_admin ON public.channel_role_access;
 CREATE POLICY channel_role_access_insert_admin ON public.channel_role_access
     FOR INSERT TO authenticated
     WITH CHECK (
@@ -62,6 +64,7 @@ CREATE POLICY channel_role_access_insert_admin ON public.channel_role_access
         )
     );
 
+DROP POLICY IF EXISTS channel_role_access_update_admin ON public.channel_role_access;
 CREATE POLICY channel_role_access_update_admin ON public.channel_role_access
     FOR UPDATE TO authenticated
     USING (
@@ -71,6 +74,7 @@ CREATE POLICY channel_role_access_update_admin ON public.channel_role_access
         )
     );
 
+DROP POLICY IF EXISTS channel_role_access_delete_admin ON public.channel_role_access;
 CREATE POLICY channel_role_access_delete_admin ON public.channel_role_access
     FOR DELETE TO authenticated
     USING (

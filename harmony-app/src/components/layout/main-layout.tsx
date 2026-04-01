@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 
+import { FeatureErrorBoundary } from '@/components/shared/error-boundary'
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
 import {
@@ -13,7 +14,7 @@ import {
   useRealtimeChannels,
 } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
-import { DmSidebar, useDms } from '@/features/dms'
+import { DmSidebar, useDms, useRealtimeDms } from '@/features/dms'
 import {
   MemberList,
   useForceDisconnect,
@@ -25,6 +26,7 @@ import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, useSettingsUiStore } from '@/features/settings'
 import { useEventSource } from '@/hooks/use-event-source'
 import { useAboutUiStore } from '@/lib/about-ui-store'
+import { useConnectionStatus } from '@/lib/connection-store'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
@@ -220,8 +222,13 @@ function ServersErrorView({
   view: ViewMode
 }) {
   const { t } = useTranslation('common')
+  const sseStatus = useConnectionStatus()
   return (
-    <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+    <div
+      data-test="main-layout"
+      data-test-sse-status={sseStatus}
+      className="flex h-screen w-screen overflow-hidden"
+    >
       <ConnectionBanner />
       <ServerList
         selectedServerId={selectedServerId}
@@ -245,6 +252,7 @@ export function MainLayout() {
   // WHY: Derive server/channel names from query cache to display in headers.
   // This avoids passing full objects between features (CLAUDE.md 4.5: pass IDs, not objects).
   const { data: servers, isError: isServersError } = useServers()
+  const connectionStatus = useConnectionStatus()
 
   // WHY: Filter DM servers so we can check if user has real servers.
   // Same filter applied inside ServerList (server-list.tsx:106).
@@ -271,6 +279,11 @@ export function MainLayout() {
   // torn down — events would be silently missed until the panel re-opens.
   useRealtimeChannels(selectedServerId ?? '')
   useRealtimeMembers(selectedServerId ?? '')
+  // WHY: Moved from DmSidebar so dm.created SSE events trigger a reconnect
+  // even when the DM sidebar is unmounted (user viewing a server). Without this,
+  // newly created DMs would silently miss all message events because the SSE
+  // server_ids snapshot never refreshes.
+  useRealtimeDms()
   // WHY: Fetch server-computed unread counts on server selection.
   // Initializes the Zustand unread store so badges show correctly on load.
   useReadStates(selectedServerId)
@@ -354,7 +367,11 @@ export function MainLayout() {
   /** WHY: About page renders before server settings so it's accessible from any state. */
   if (showAboutPage) {
     return (
-      <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+      <div
+        data-test="main-layout"
+        data-test-sse-status={connectionStatus}
+        className="flex h-screen w-screen overflow-hidden"
+      >
         <AboutPage />
       </div>
     )
@@ -363,7 +380,11 @@ export function MainLayout() {
   /** WHY: Server settings replaces the entire main content area (like Discord). */
   if (showServerSettings && selectedServerId !== null) {
     return (
-      <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+      <div
+        data-test="main-layout"
+        data-test-sse-status={connectionStatus}
+        className="flex h-screen w-screen overflow-hidden"
+      >
         <ConnectionBanner />
         <ServerSettings serverId={selectedServerId} />
         <AlphaBadge />
@@ -376,7 +397,11 @@ export function MainLayout() {
    *  Skip when in DM view — a kicked user with no servers must still see DmSidebar. */
   if (hasNoServers && !isDmView) {
     return (
-      <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+      <div
+        data-test="main-layout"
+        data-test-sse-status={connectionStatus}
+        className="flex h-screen w-screen overflow-hidden"
+      >
         <ConnectionBanner />
         <ServerList
           selectedServerId={selectedServerId}
@@ -404,7 +429,11 @@ export function MainLayout() {
   }
 
   return (
-    <div data-test="main-layout" className="flex h-screen w-screen overflow-hidden">
+    <div
+      data-test="main-layout"
+      data-test-sse-status={connectionStatus}
+      className="flex h-screen w-screen overflow-hidden"
+    >
       <ConnectionBanner />
       {/* Server nav - fixed width, outside resizable group */}
       <ServerList
@@ -417,30 +446,34 @@ export function MainLayout() {
       {/* Resizable panels for sidebar, chat, members */}
       <Group orientation="horizontal" className="flex h-full w-full flex-1">
         <Panel data-test="server-sidebar" defaultSize="20%" minSize="15%" maxSize="30%">
-          {isDmView ? (
-            <DmSidebar selectedServerId={selectedServerId} onSelectDm={handleSelectDm} />
-          ) : (
-            <ChannelSidebar
-              serverId={selectedServerId}
-              serverName={serverName}
-              selectedChannelId={selectedChannelId}
-              onSelectChannel={setSelectedChannelId}
-            />
-          )}
+          <FeatureErrorBoundary name={isDmView ? 'DmSidebar' : 'ChannelSidebar'}>
+            {isDmView ? (
+              <DmSidebar selectedServerId={selectedServerId} onSelectDm={handleSelectDm} />
+            ) : (
+              <ChannelSidebar
+                serverId={selectedServerId}
+                serverName={serverName}
+                selectedChannelId={selectedChannelId}
+                onSelectChannel={setSelectedChannelId}
+              />
+            )}
+          </FeatureErrorBoundary>
         </Panel>
 
         <ResizeHandle />
 
         <Panel defaultSize={isDmView ? '80%' : '60%'} minSize="30%">
-          <ChatArea
-            channelId={selectedChannelId}
-            channelName={chatHeaderName}
-            currentUserRole={currentUserRole}
-            isDm={chatProps.isDm}
-            dmRecipient={chatProps.dmRecipient}
-            isReadOnly={chatProps.isReadOnly}
-            isChannelEncrypted={chatProps.isChannelEncrypted}
-          />
+          <FeatureErrorBoundary name="ChatArea">
+            <ChatArea
+              channelId={selectedChannelId}
+              channelName={chatHeaderName}
+              currentUserRole={currentUserRole}
+              isDm={chatProps.isDm}
+              dmRecipient={chatProps.dmRecipient}
+              isReadOnly={chatProps.isReadOnly}
+              isChannelEncrypted={chatProps.isChannelEncrypted}
+            />
+          </FeatureErrorBoundary>
         </Panel>
 
         {/* WHY: Hide member list in DM mode — DMs have exactly 2 members, no list needed */}
@@ -448,11 +481,13 @@ export function MainLayout() {
           <>
             <ResizeHandle />
             <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">
-              <MemberList
-                serverId={selectedServerId}
-                serverName={serverName}
-                onNavigateDm={handleNavigateDm}
-              />
+              <FeatureErrorBoundary name="MemberList">
+                <MemberList
+                  serverId={selectedServerId}
+                  serverName={serverName}
+                  onNavigateDm={handleNavigateDm}
+                />
+              </FeatureErrorBoundary>
             </Panel>
           </>
         )}

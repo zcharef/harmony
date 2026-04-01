@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::models::{CategoryId, Channel, ChannelId, ChannelType, ServerId};
+use crate::domain::models::{
+    CategoryId, Channel, ChannelId, ChannelType, MegolmSession, MegolmSessionId, ServerId,
+};
 
 /// Channel response returned to API consumers.
 #[derive(Debug, Serialize, ToSchema)]
@@ -112,25 +114,19 @@ pub struct CreateMegolmSessionRequest {
 #[serde(rename_all = "camelCase")]
 pub struct MegolmSessionResponse {
     /// Server-generated record ID.
-    pub id: String,
+    pub id: MegolmSessionId,
     pub channel_id: ChannelId,
     pub session_id: String,
     pub created_at: DateTime<Utc>,
 }
 
-impl MegolmSessionResponse {
-    #[must_use]
-    pub fn new(
-        id: uuid::Uuid,
-        channel_id: ChannelId,
-        session_id: String,
-        created_at: DateTime<Utc>,
-    ) -> Self {
+impl From<MegolmSession> for MegolmSessionResponse {
+    fn from(s: MegolmSession) -> Self {
         Self {
-            id: id.to_string(),
-            channel_id,
-            session_id,
-            created_at,
+            id: s.id,
+            channel_id: s.channel_id,
+            session_id: s.session_id,
+            created_at: s.created_at,
         }
     }
 }

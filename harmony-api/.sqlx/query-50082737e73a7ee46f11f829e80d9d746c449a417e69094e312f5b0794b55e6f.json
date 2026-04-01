@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO megolm_sessions (channel_id, session_id, creator_id)\n        VALUES ($1, $2, $3)\n        ON CONFLICT ON CONSTRAINT megolm_sessions_channel_session_unique DO NOTHING\n        RETURNING id, channel_id, session_id, created_at\n        ",
+  "query": "\n            INSERT INTO megolm_sessions (channel_id, session_id, creator_id)\n            VALUES ($1, $2, $3)\n            ON CONFLICT ON CONSTRAINT megolm_sessions_channel_session_unique DO NOTHING\n            RETURNING id, channel_id, session_id, creator_id, created_at\n            ",
   "describe": {
     "columns": [
       {
@@ -20,6 +20,11 @@
       },
       {
         "ordinal": 3,
+        "name": "creator_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -35,8 +40,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "e7b48376fb9b5d145f709927e4ef8c0c52cb716d353848aceaef2760510c297c"
+  "hash": "50082737e73a7ee46f11f829e80d9d746c449a417e69094e312f5b0794b55e6f"
 }
