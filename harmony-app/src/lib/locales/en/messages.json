@@ -12,5 +12,17 @@
     "memberKick": "{{username}} was kicked from the server",
     "memberBan": "{{username}} was banned from the server",
     "unknown": "[System message]"
+  },
+  "externalLink": {
+    "title": "You're leaving Harmony",
+    "description": "This link will take you to an external website. External sites are not controlled by Harmony and may pose security risks.",
+    "warnings": {
+      "phishing": "Never enter your Harmony credentials on external sites",
+      "malware": "External links may lead to malicious content or downloads",
+      "privacy": "The destination site may collect your data"
+    },
+    "destination": "You're going to:",
+    "goBack": "Go Back",
+    "continue": "Continue to Site"
   }
 }

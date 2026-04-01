@@ -1,11 +1,12 @@
 import { Avatar, Button, Textarea, Tooltip } from '@heroui/react'
 import type { TFunction } from 'i18next'
 import { ArrowRight, Lock, LockOpen, MessageSquare, Pencil, Trash2 } from 'lucide-react'
-import { memo, useRef, useState } from 'react'
+import { memo, useCallback, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
+import { ExternalLinkWarning } from '@/components/shared/external-link-warning'
 import type { DecryptResult } from '@/features/crypto'
 import { EncryptedMessageContent } from '@/features/crypto'
 import type { MessageResponse } from '@/lib/api'
@@ -91,6 +92,24 @@ function MessageContent({
   const { t } = useTranslation('messages')
   const { t: tCrypto } = useTranslation('crypto')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [pendingUrl, setPendingUrl] = useState<string | null>(null)
+
+  const handleLinkClick = useCallback((e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    e.preventDefault()
+    // WHY: Defense-in-depth — rehype-sanitize already strips dangerous protocols,
+    // but we re-check here to guard against future config changes or plugin swaps.
+    const isAllowedProtocol =
+      href.startsWith('https://') || href.startsWith('http://') || href.startsWith('mailto:')
+    if (isAllowedProtocol) {
+      setPendingUrl(href)
+    }
+  }, [])
+
+  const handleLinkContinue = useCallback(() => {
+    if (pendingUrl === null) return
+    window.open(pendingUrl, '_blank', 'noopener,noreferrer')
+    setPendingUrl(null)
+  }, [pendingUrl])
 
   function handleEditKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Escape') {
@@ -228,9 +247,10 @@ function MessageContent({
           a: ({ href, children }) => (
             <a
               href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary underline"
+              onClick={(e) => {
+                if (href !== undefined) handleLinkClick(e, href)
+              }}
+              className="cursor-pointer text-primary underline"
             >
               {children}
             </a>
@@ -244,6 +264,12 @@ function MessageContent({
           {t('edited')}
         </span>
       )}
+      <ExternalLinkWarning
+        isOpen={pendingUrl !== null}
+        url={pendingUrl ?? ''}
+        onClose={() => setPendingUrl(null)}
+        onContinue={handleLinkContinue}
+      />
     </div>
   )
 }
