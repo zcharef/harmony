@@ -40,7 +40,7 @@ export function useRealtimeUnread(activeChannelId: string | null) {
     (payload: unknown) => {
       const parsed = unreadEventSchema.safeParse(payload)
       if (!parsed.success) {
-        logger.error('Malformed message.created payload for unread', {
+        logger.warn('malformed_message_created_for_unread', {
           error: parsed.error.message,
         })
         return
@@ -65,7 +65,10 @@ export function useRealtimeUnread(activeChannelId: string | null) {
   const handleChannelDeleted = useCallback(
     (payload: unknown) => {
       const parsed = channelDeletedSchema.safeParse(payload)
-      if (!parsed.success) return
+      if (!parsed.success) {
+        logger.warn('malformed_channel_deleted_for_unread', { error: parsed.error.message })
+        return
+      }
       clear(parsed.data.channelId)
     },
     [clear],
