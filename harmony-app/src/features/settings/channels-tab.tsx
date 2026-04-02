@@ -48,9 +48,6 @@ function ChannelRow({
   const { t } = useTranslation('settings')
   const { t: tCrypto } = useTranslation('crypto')
 
-  const [isPrivate, setIsPrivate] = useState(channel.isPrivate)
-  const [isReadOnly, setIsReadOnly] = useState(channel.isReadOnly)
-  const [isEncrypted, setIsEncrypted] = useState(channel.encrypted)
   const [isEnabling, setIsEnabling] = useState(false)
 
   const updatePerms = useUpdateChannel(serverId, channel.id)
@@ -58,19 +55,17 @@ function ChannelRow({
   const isInitialized = useCryptoStore((s) => s.isInitialized)
 
   function handlePrivateToggle(value: boolean) {
-    setIsPrivate(value)
     updatePerms.mutate({ isPrivate: value })
   }
 
   function handleReadOnlyToggle(value: boolean) {
-    setIsReadOnly(value)
     updatePerms.mutate({ isReadOnly: value })
   }
 
   async function handleEncryptionToggle(value: boolean) {
     // WHY: One-way toggle — can only enable, never disable.
     if (!value) return
-    if (isEncrypted) return
+    if (channel.encrypted) return
 
     if (!window.confirm(tCrypto('enableEncryptionConfirm', { channelName: channel.name }))) {
       return
@@ -86,7 +81,6 @@ function ChannelRow({
             try {
               // Step 2: Create outbound Megolm session + register with API
               await createAndRegisterMegolmSession(channel.id)
-              setIsEncrypted(true)
               toast.success(tCrypto('encryptionEnabledSuccess', { channelName: channel.name }))
             } catch (error) {
               logger.error('Failed to create Megolm session after enabling encryption', {
@@ -98,12 +92,9 @@ function ChannelRow({
               setIsEnabling(false)
             }
           },
-          onError: (error) => {
-            logger.error('Failed to enable channel encryption', {
-              channelId: channel.id,
-              error: error instanceof Error ? error.message : String(error),
-            })
-            toast.error(tCrypto('encryptionEnableFailed'))
+          // WHY no toast: hook-level onError already shows one via getApiErrorDetail.
+          // Adding a second here would stack two toasts for one failure (ADR-028).
+          onError: () => {
             setIsEnabling(false)
           },
         },
@@ -134,7 +125,7 @@ function ChannelRow({
       <div className="flex-1 overflow-hidden">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-sm font-medium text-foreground">{channel.name}</span>
-          {isEncrypted && (
+          {channel.encrypted && (
             <Lock className="h-3 w-3 shrink-0 text-success" data-test="channel-encrypted-icon" />
           )}
         </div>
@@ -146,15 +137,17 @@ function ChannelRow({
         <div className="flex items-center gap-4">
           {canEnableEncryption && (
             <Tooltip
-              content={isEncrypted ? tCrypto('encryptionPermanent') : tCrypto('enableEncryption')}
+              content={
+                channel.encrypted ? tCrypto('encryptionPermanent') : tCrypto('enableEncryption')
+              }
               placement="top"
               delay={300}
             >
               <div>
                 <Switch
                   size="sm"
-                  isSelected={isEncrypted}
-                  isDisabled={isEncrypted || isEnabling}
+                  isSelected={channel.encrypted}
+                  isDisabled={channel.encrypted || isEnabling}
                   onValueChange={handleEncryptionToggle}
                   aria-label={tCrypto('enableEncryption')}
                   data-test="channel-encryption-toggle"
@@ -169,7 +162,7 @@ function ChannelRow({
               <div>
                 <Switch
                   size="sm"
-                  isSelected={isEncrypted}
+                  isSelected={channel.encrypted}
                   isDisabled
                   aria-label={tCrypto('enableEncryption')}
                   data-test="channel-encryption-toggle-disabled"
@@ -181,7 +174,7 @@ function ChannelRow({
           )}
           <Switch
             size="sm"
-            isSelected={isPrivate}
+            isSelected={channel.isPrivate}
             onValueChange={handlePrivateToggle}
             aria-label={t('privateChannel')}
             data-test="channel-private-toggle"
@@ -190,7 +183,7 @@ function ChannelRow({
           </Switch>
           <Switch
             size="sm"
-            isSelected={isReadOnly}
+            isSelected={channel.isReadOnly}
             onValueChange={handleReadOnlyToggle}
             aria-label={t('readOnlyChannel')}
             data-test="channel-readonly-toggle"

@@ -278,6 +278,20 @@ import type { MessageDto } from '@/lib/api'
 3. **Ephemeral UI State:** `useState` (isMenuOpen, isHovered).
 4. **Global State (Session):** Zustand (use sparingly).
 
+#### No `useState` Shadow for Real-Time Data (ADR-045)
+
+Never copy query-derived props into `useState` — it creates a stale shadow that ignores SSE/cache updates:
+
+```typescript
+// FORBIDDEN: shadow breaks real-time sync (ADR-045)
+const [isPrivate, setIsPrivate] = useState(channel.isPrivate)
+
+// REQUIRED: read from prop (cache is the source of truth)
+<Switch isSelected={channel.isPrivate} />
+```
+
+For instant toggle/inline-edit feedback without local state, use optimistic cache updates in the mutation hook (`onMutate` → `onError` rollback → `onSettled` invalidation). See `use-update-channel.ts` and `use-send-message.ts` as reference implementations.
+
 ### 4.4 Async Forms (React Hook Form) — MANDATORY
 
 ```typescript
@@ -559,6 +573,7 @@ createDm.mutate(userId, {
 - [ ] Form state: React Hook Form
 - [ ] Ephemeral UI state: `useState`
 - [ ] Global state: Zustand (sparingly)
+- [ ] No `useState(prop)` shadow on query-derived data (ADR-045)
 
 ### Forms
 - [ ] Async forms use load-then-render pattern
