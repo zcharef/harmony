@@ -69,12 +69,20 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # ── Playwright with browser cache ───────────────────
+      # WHY version-specific key: the old key (hash of entire pnpm-lock.yaml)
+      # invalidated the ~350MB browser cache on ANY dependency change. This key
+      # only invalidates when Playwright itself is upgraded.
+      - name: Get Playwright version
+        id: pw-version
+        working-directory: harmony-app
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('harmony-app/pnpm-lock.yaml') }}
+          key: playwright-${{ steps.pw-version.outputs.version }}
 
       - name: Install Playwright (chromium only)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -86,18 +94,20 @@ jobs:
         working-directory: harmony-app
         run: npx playwright install-deps chromium
 
-      # ── Rust toolchain (shared cache from rust-quality) ─
+      # ── Rust toolchain (shared cache from CI rust-quality job) ─
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: harmony-api
-          shared-key: harmony-rust
+          shared-key: harmony-api
 
       # ── Supabase Cloud: apply pending migrations ─────────
+      # WHY pinned: `latest` causes non-deterministic CI failures when Supabase
+      # ships breaking changes. Bump deliberately via Dependabot or manually.
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.84.2
 
       - name: Link Supabase CI project
         env:
@@ -188,7 +198,10 @@ jobs:
         run: |
           npx playwright test --grep "should return 200 on health endpoint" --reporter=list 2>&1 || true
           echo "--- Smoke check: navigating to app root ---"
-          node -e "
+          # WHY --input-type=commonjs: harmony-app/package.json has "type": "module",
+          # so Node.js 22 treats inline scripts as ESM by default. require() is only
+          # available in CJS mode. --input-type forces CJS regardless of package.json.
+          node --input-type=commonjs -e "
           const { chromium } = require('@playwright/test');
           (async () => {
             const browser = await chromium.launch();
@@ -272,7 +285,7 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.84.2
 
       - name: Link production Supabase project
         env:
@@ -300,7 +313,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # WHY pinned: @master is a supply-chain risk — any push to their repo
+      # changes what runs in our production deploy pipeline.
+      - uses: superfly/flyctl-actions/setup-flyctl@1.5
 
       - name: Deploy to Fly.io
         working-directory: harmony-api

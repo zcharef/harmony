@@ -24,10 +24,61 @@ env:
 
 jobs:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Gate: detect which paths changed so downstream jobs can skip when irrelevant
+  # WHY: A frontend-only PR should not wait for Rust compilation, and vice versa.
+  # Push to main always runs everything (empty filter outputs default to true).
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      api: ${{ steps.filter.outputs.api }}
+      tauri: ${{ steps.filter.outputs.tauri }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            app:
+              - 'harmony-app/src/**'
+              - 'harmony-app/public/**'
+              - 'harmony-app/index.html'
+              - 'harmony-app/package.json'
+              - 'harmony-app/pnpm-lock.yaml'
+              - 'harmony-app/tsconfig*.json'
+              - 'harmony-app/vite.config.*'
+              - 'harmony-app/vitest.config.*'
+              - 'harmony-app/biome.json'
+              - 'harmony-app/eslint.config.*'
+              - 'harmony-app/openapi-ts.config.*'
+              - 'harmony-api/openapi.json'
+              - '.github/workflows/ci.yml'
+            api:
+              - 'harmony-api/src/**'
+              - 'harmony-api/tests/**'
+              - 'harmony-api/Cargo.toml'
+              - 'harmony-api/Cargo.lock'
+              - 'harmony-api/.sqlx/**'
+              - 'harmony-api/openapi.json'
+              - 'harmony-api/deny.toml'
+              - 'supabase/**'
+              - '.github/workflows/ci.yml'
+            tauri:
+              - 'harmony-app/src-tauri/**'
+              - '.github/workflows/ci.yml'
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Job 1: App Quality Wall
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   app-quality:
     name: App Quality Wall
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -76,11 +127,15 @@ jobs:
         run: pnpm knip
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # Job 2: Rust Quality Wall
+  # Job 2: Rust API Quality Wall
   # WHY no Postgres service: all steps use SQLX_OFFLINE=true with .sqlx/ cache.
+  # WHY fail-fast ordering: fmt (<1s) → clippy (compile) → openapi (reuses
+  # clippy build, near-instant) → tests (slowest, most informative last).
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   rust-quality:
-    name: Rust Quality Wall
+    name: Rust API Quality Wall
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -99,10 +154,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            harmony-api
-            harmony-app/src-tauri
-          shared-key: harmony-rust
+          workspaces: harmony-api
+          shared-key: harmony-api
 
       - name: Check formatting
         run: cargo fmt --check
@@ -110,41 +163,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: Install cargo-audit
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-audit
-
-      - name: Security audit
-        # WHY ignore: RUSTSEC-2023-0071 is in `rsa` via `sqlx-mysql` (transitive). We only use Postgres. No fix available.
-        run: cargo audit --ignore RUSTSEC-2023-0071
-
-      - name: Install cargo-deny
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny
-
-      - name: License & crate compliance
-        run: cargo deny check
-
-      - name: Install Tauri system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-
-      - name: Tauri crypto tests
-        working-directory: harmony-app/src-tauri
-        run: cargo test --all-targets
-
-      - name: Run tests
-        env:
-          DATABASE_URL: postgres://unused:unused@localhost/unused
-          SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-          SUPABASE_URL: http://localhost:9999
-          ENVIRONMENT: test
-          SERVER_PORT: "3000"
-        run: cargo test --all-targets
-
+      # WHY here: clippy already compiled everything, so cargo run only links (~1s).
+      # Catches stale openapi.json before waiting for the full test suite.
       - name: OpenAPI freshness check
         env:
           DATABASE_URL: postgres://unused:unused@localhost/unused
@@ -158,3 +178,80 @@ jobs:
             echo "openapi.json is stale. Run just export-openapi and commit."
             exit 1
           }
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgres://unused:unused@localhost/unused
+          SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          SUPABASE_URL: http://localhost:9999
+          ENVIRONMENT: test
+          SERVER_PORT: "3000"
+        run: cargo test --all-targets
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 3: Rust Security & License Audit
+  # WHY separate: cargo-audit and cargo-deny only read Cargo.lock — no
+  # compilation needed. Runs in parallel with rust-quality instead of
+  # waiting behind a 5-min compile.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  rust-security:
+    name: Rust Security & License
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: harmony-api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+
+      - name: Security audit
+        # WHY ignore: RUSTSEC-2023-0071 is in `rsa` via `sqlx-mysql` (transitive). We only use Postgres. No fix available.
+        run: cargo audit --ignore RUSTSEC-2023-0071
+
+      - name: License & crate compliance
+        run: cargo deny check
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 4: Tauri Crypto Quality Wall
+  # WHY separate: requires apt-get install of GTK/WebKit (~30-60s) and
+  # compiles a different workspace (vodozemac, rusqlite). Splitting this
+  # removes ~3-5 min from the API quality wall.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  tauri-quality:
+    name: Tauri Crypto Tests
+    needs: changes
+    if: needs.changes.outputs.tauri == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # WHY separate shared-key: prevents cache thrashing with harmony-api.
+      # Swatinem/rust-cache only saves on the first job that finishes — if both
+      # jobs share a key, the faster one "wins" and the other recompiles from
+      # scratch on the next run.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: harmony-app/src-tauri
+          shared-key: harmony-tauri
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Tauri crypto tests
+        working-directory: harmony-app/src-tauri
+        run: cargo test --all-targets

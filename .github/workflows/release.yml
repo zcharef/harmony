@@ -8,6 +8,8 @@
 
 name: Release Desktop
 
+permissions: {}
+
 on:
   push:
     tags:
@@ -22,6 +24,8 @@ jobs:
   validate-version:
     name: Validate tag matches app version
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Compare tag version with tauri.conf.json
@@ -90,7 +94,7 @@ jobs:
           workspaces: |
             harmony-api
             harmony-app/src-tauri
-          shared-key: harmony-rust
+          shared-key: harmony-release
 
       # WHY: Cache restore can overwrite target list. Ensure cross-compile target is present.
       - name: Add x86_64-apple-darwin target
@@ -139,7 +143,9 @@ jobs:
 
       # ── Build, sign & upload to GitHub Release ──────────
       - name: Build and release
-        uses: tauri-apps/tauri-action@v0
+        # WHY v0.6 not v0: pre-1.0 semver allows breaking changes on minor bumps.
+        # v0.6 gets patch fixes only. Bump deliberately when tauri-action releases v0.7+.
+        uses: tauri-apps/tauri-action@v0.6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Tauri updater signing (all platforms)
