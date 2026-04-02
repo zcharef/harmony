@@ -47,6 +47,7 @@ harmony-app/src-tauri/gen/schemas
 !.github/*.png
 
 # Playwright
+test-results/
 harmony-app/test-results/
 harmony-app/playwright-report/
 harmony-app/blob-report/
