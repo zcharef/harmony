@@ -94,7 +94,7 @@ export function BansTab({ serverId, callerRole }: BansTabProps) {
                 variant="flat"
                 color="success"
                 onPress={() => unban.mutate(ban.userId)}
-                isLoading={unban.isPending}
+                isLoading={unban.isPending && unban.variables === ban.userId}
                 data-test="unban-button"
               >
                 {t('unban')}

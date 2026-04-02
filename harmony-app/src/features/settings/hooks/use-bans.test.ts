@@ -2,10 +2,10 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { queryKeys } from '@/lib/query-keys'
 import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 
-vi.mock('@/lib/api', () => ({
-  listBans: vi.fn(),
-  unbanMember: vi.fn(),
-}))
+vi.mock('@/lib/api', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/api')>()
+  return { ...original, listBans: vi.fn(), unbanMember: vi.fn() }
+})
 
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
