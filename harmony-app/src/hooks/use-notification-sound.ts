@@ -27,11 +27,9 @@ type SoundEvent = z.infer<typeof soundEventSchema>
 // ── Extracted helpers (keep handler under Biome cognitive complexity limit) ──
 
 /**
- * WHY: Intentionally differs from desktop notifications suppression.
- * Desktop notifications suppress when document.hasFocus() alone (user is in
- * the app at all). Sound only suppresses when the user is focused on the
- * exact channel where the message arrived — a sound for other channels is
- * useful even when the app is in the foreground.
+ * WHY: Suppresses sound when the user is already viewing the source channel.
+ * No focus check needed — if the channel is selected, the user sees the
+ * message in real-time via the chat area regardless of window focus state.
  */
 function shouldSuppressSound(
   event: SoundEvent,
@@ -44,7 +42,7 @@ function shouldSuppressSound(
 
   if (message.messageType === 'system') return true
   if (userId !== null && senderId === userId) return true
-  if (channelId === activeChannelId && document.hasFocus()) return true
+  if (channelId === activeChannelId) return true
 
   const settings = queryClient.getQueryData<NotificationSettingsResponse>(
     queryKeys.notificationSettings.byChannel(channelId),
