@@ -150,10 +150,18 @@ export function useChannelEncryption() {
     return decryptedCache.current.get(messageId)
   }, [])
 
+  /** WHY: Allows the sender to cache their own message's plaintext in-memory.
+   * Same pattern as useEncryptedMessages.setCachedPlaintext — needed so the sender
+   * can read their own encrypted message without a decrypt round-trip. */
+  const setCachedPlaintext = useCallback((messageId: string, plaintext: string) => {
+    decryptedCache.current.set(messageId, plaintext)
+  }, [])
+
   return {
     encryptChannelMessage,
     decryptChannelMessage,
     loadCachedChannelDecryptions,
     getCachedPlaintext,
+    setCachedPlaintext,
   }
 }

@@ -5,6 +5,7 @@ import { vi } from 'vitest'
 import type { MessageListResponse, MessageResponse } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { createQueryWrapper } from '@/tests/test-utils'
+import type { SendMessageEncryption } from './use-send-message'
 import { useSendMessage } from './use-send-message'
 
 vi.mock('@/lib/api', () => ({
@@ -250,5 +251,169 @@ describe('useSendMessage', () => {
     await waitFor(() => expect(result.current.isError).toBe(true))
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: messageKey })
+  })
+
+  describe('with encryption', () => {
+    function buildEncryption(
+      overrides: Partial<SendMessageEncryption> = {},
+    ): SendMessageEncryption {
+      return {
+        encryptFn: vi.fn().mockResolvedValue({
+          content: '{"message_type":0,"ciphertext":"abc"}',
+          senderDeviceId: 'device-1',
+        }),
+        cachePlaintext: vi.fn(),
+        ...overrides,
+      }
+    }
+
+    it('sends encrypted content when encryptFn succeeds', async () => {
+      const encryption = buildEncryption()
+      const serverMessage = buildMessage({ id: 'msg-enc', encrypted: true })
+      vi.mocked(sendMessage).mockResolvedValueOnce({ data: serverMessage } as never)
+
+      const queryClient = createMutationTestClient()
+      queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
+
+      const wrapper = createQueryWrapper(queryClient)
+      const { result } = renderHook(
+        () => useSendMessage(CHANNEL_ID, USER_ID, 'testuser', encryption),
+        { wrapper },
+      )
+
+      await act(async () => {
+        result.current.mutate({ content: 'secret hello' })
+      })
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+      expect(encryption.encryptFn).toHaveBeenCalledWith('secret hello')
+      expect(sendMessage).toHaveBeenCalledWith({
+        path: { id: CHANNEL_ID },
+        body: {
+          content: '{"message_type":0,"ciphertext":"abc"}',
+          encrypted: true,
+          senderDeviceId: 'device-1',
+        },
+        throwOnError: true,
+      })
+    })
+
+    it('caches plaintext after successful encrypted send', async () => {
+      const encryption = buildEncryption()
+      const serverMessage = buildMessage({ id: 'msg-enc-2', encrypted: true })
+      vi.mocked(sendMessage).mockResolvedValueOnce({ data: serverMessage } as never)
+
+      const queryClient = createMutationTestClient()
+      queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
+
+      const wrapper = createQueryWrapper(queryClient)
+      const { result } = renderHook(
+        () => useSendMessage(CHANNEL_ID, USER_ID, 'testuser', encryption),
+        { wrapper },
+      )
+
+      await act(async () => {
+        result.current.mutate({ content: 'cache me' })
+      })
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+      expect(encryption.cachePlaintext).toHaveBeenCalledWith('msg-enc-2', CHANNEL_ID, 'cache me')
+    })
+
+    it('falls back to plaintext send when encryptFn throws', async () => {
+      const encryption = buildEncryption({
+        encryptFn: vi.fn().mockRejectedValue(new Error('No pre-keys available')),
+      })
+      const serverMessage = buildMessage({ id: 'msg-plain', encrypted: false })
+      vi.mocked(sendMessage).mockResolvedValueOnce({ data: serverMessage } as never)
+
+      const queryClient = createMutationTestClient()
+      queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
+
+      const wrapper = createQueryWrapper(queryClient)
+      const { result } = renderHook(
+        () => useSendMessage(CHANNEL_ID, USER_ID, 'testuser', encryption),
+        { wrapper },
+      )
+
+      await act(async () => {
+        result.current.mutate({ content: 'fallback hello' })
+      })
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+      // Should fall back to plaintext send
+      expect(sendMessage).toHaveBeenCalledWith({
+        path: { id: CHANNEL_ID },
+        body: { content: 'fallback hello' },
+        throwOnError: true,
+      })
+      // Should NOT cache plaintext (not encrypted)
+      expect(encryption.cachePlaintext).not.toHaveBeenCalled()
+    })
+
+    it('logs warning when encryption fails and falls back to plaintext', async () => {
+      const encryption = buildEncryption({
+        encryptFn: vi.fn().mockRejectedValue(new Error('No pre-keys available')),
+      })
+      const serverMessage = buildMessage({ id: 'msg-fallback' })
+      vi.mocked(sendMessage).mockResolvedValueOnce({ data: serverMessage } as never)
+
+      const queryClient = createMutationTestClient()
+      queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
+
+      const wrapper = createQueryWrapper(queryClient)
+      const { result } = renderHook(
+        () => useSendMessage(CHANNEL_ID, USER_ID, 'testuser', encryption),
+        { wrapper },
+      )
+
+      await act(async () => {
+        result.current.mutate({ content: 'hello' })
+      })
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+      expect(logger.warn).toHaveBeenCalledWith('dm_encryption_failed_fallback_plaintext', {
+        channelId: CHANNEL_ID,
+        error: 'No pre-keys available',
+      })
+    })
+
+    it('optimistic message always has encrypted: false even with encryption param', async () => {
+      const encryption = buildEncryption()
+      let resolveMutation!: (value: unknown) => void
+      vi.mocked(sendMessage).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveMutation = resolve
+          }) as never,
+      )
+
+      const queryClient = createMutationTestClient()
+      const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+      queryClient.setQueryData(messageKey, buildCacheData([]))
+
+      const wrapper = createQueryWrapper(queryClient)
+      const { result } = renderHook(
+        () => useSendMessage(CHANNEL_ID, USER_ID, 'testuser', encryption),
+        { wrapper },
+      )
+
+      await act(async () => {
+        result.current.mutate({ content: 'check optimistic' })
+      })
+
+      const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+      const optimistic = cacheData?.pages[0]?.items[0]
+
+      expect(optimistic?.encrypted).toBe(false)
+      expect(optimistic?.content).toBe('check optimistic')
+
+      resolveMutation({ data: buildMessage({ id: 'msg-real', encrypted: true }) })
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    })
   })
 })

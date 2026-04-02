@@ -128,7 +128,14 @@ export function useEncryptedMessages() {
     return decryptedCache.current.get(messageId)
   }, [])
 
-  return { decryptMessage, loadCachedDecryptions, getCachedPlaintext }
+  /** WHY: Allows the sender to cache their own message's plaintext in-memory.
+   * The sender cannot decrypt their own Olm message (asymmetric encryption),
+   * so the plaintext must be cached at send time for immediate display. */
+  const setCachedPlaintext = useCallback((messageId: string, plaintext: string) => {
+    decryptedCache.current.set(messageId, plaintext)
+  }, [])
+
+  return { decryptMessage, loadCachedDecryptions, getCachedPlaintext, setCachedPlaintext }
 }
 
 type CreateInboundFn = (

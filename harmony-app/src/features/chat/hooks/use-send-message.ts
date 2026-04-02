@@ -34,23 +34,41 @@ export function useSendMessage(
 
   return useMutation({
     mutationFn: async (input: { content: string; parentMessageId?: string }) => {
-      // WHY: If encryption is provided, encrypt before sending to API.
+      // WHY: Attempt encryption if available. encryptFn is wrapped in its own
+      // try/catch so that encryption failures (e.g. recipient has no E2EE keys →
+      // 404 from getPreKeyBundle) fall back to plaintext instead of killing the
+      // entire mutation. sendMessage is called outside this catch so API errors
+      // propagate to onError as expected.
       if (encryption !== undefined) {
-        const encrypted = await encryption.encryptFn(input.content)
-        const { data } = await sendMessage({
-          path: { id: channelId },
-          body: {
-            content: encrypted.content,
-            encrypted: true,
-            senderDeviceId: encrypted.senderDeviceId,
-            parentMessageId: input.parentMessageId,
-          },
-          throwOnError: true,
-        })
-        // WHY: Cache the plaintext locally so the sender can read their own message
-        // without needing to decrypt it (sender doesn't have their own session).
-        encryption.cachePlaintext(data.id, channelId, input.content)
-        return data
+        let encrypted: { content: string; senderDeviceId: string } | null = null
+        try {
+          encrypted = await encryption.encryptFn(input.content)
+        } catch (encryptionError) {
+          // WHY: Graceful degradation — matches web DM behavior (always plaintext).
+          // The lock icon in MessageHeader already signals encrypted vs plaintext.
+          logger.warn('dm_encryption_failed_fallback_plaintext', {
+            channelId,
+            error:
+              encryptionError instanceof Error ? encryptionError.message : String(encryptionError),
+          })
+        }
+
+        if (encrypted !== null) {
+          const { data } = await sendMessage({
+            path: { id: channelId },
+            body: {
+              content: encrypted.content,
+              encrypted: true,
+              senderDeviceId: encrypted.senderDeviceId,
+              parentMessageId: input.parentMessageId,
+            },
+            throwOnError: true,
+          })
+          // WHY: Cache the plaintext locally so the sender can read their own message
+          // without needing to decrypt it (sender doesn't have their own session).
+          encryption.cachePlaintext(data.id, channelId, input.content)
+          return data
+        }
       }
 
       const { data } = await sendMessage({
@@ -77,9 +95,12 @@ export function useSendMessage(
         authorUsername: username,
         // WHY: Show plaintext in optimistic entry so user sees their message immediately.
         // The encrypted version is what goes to the API, not what displays.
+        // WHY encrypted: false: The optimistic message contains plaintext. Setting
+        // encrypted: true would route it through EncryptedMessageContent, which tries
+        // to JSON.parse the plaintext as an Olm envelope and fails with "Could not decrypt".
         content: input.content,
         createdAt: new Date().toISOString(),
-        encrypted: encryption !== undefined,
+        encrypted: false,
         messageType: 'default',
         reactions: [],
         parentMessageId: input.parentMessageId,

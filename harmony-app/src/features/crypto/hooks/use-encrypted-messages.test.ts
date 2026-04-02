@@ -285,4 +285,37 @@ describe('useEncryptedMessages', () => {
       expect(result.current.getCachedPlaintext('unknown')).toBeUndefined()
     })
   })
+
+  describe('setCachedPlaintext', () => {
+    it('populates in-memory cache so getCachedPlaintext returns the value', () => {
+      vi.mocked(isTauri).mockReturnValue(true)
+
+      const { result } = renderHook(() => useEncryptedMessages())
+
+      result.current.setCachedPlaintext('msg-sender-1', 'my own message')
+
+      expect(result.current.getCachedPlaintext('msg-sender-1')).toBe('my own message')
+    })
+
+    it('makes decryptMessage skip decryption for cached message', async () => {
+      vi.mocked(isTauri).mockReturnValue(true)
+
+      const { result } = renderHook(() => useEncryptedMessages())
+
+      result.current.setCachedPlaintext('msg-pre-cached', 'pre-cached text')
+
+      const msg = buildMessage({
+        id: 'msg-pre-cached',
+        encrypted: true,
+        content: JSON.stringify({ message_type: 1, ciphertext: 'irrelevant' }),
+      })
+
+      const decrypted = await result.current.decryptMessage(msg as never)
+
+      expect(decrypted.plaintext).toBe('pre-cached text')
+      expect(decrypted.error).toBeNull()
+      // decrypt should NOT have been called — cache hit
+      expect(decrypt).not.toHaveBeenCalled()
+    })
+  })
 })

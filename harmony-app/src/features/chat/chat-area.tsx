@@ -626,6 +626,8 @@ function useInputPlaceholder(
 function useDmEncryption(
   isDm: boolean,
   recipientUserId: string | null,
+  /** WHY: Updates the in-memory decrypt cache so the sender can read their own message. */
+  setCachedPlaintext?: (messageId: string, plaintext: string) => void,
 ): SendMessageEncryption | undefined {
   const { ensureSession } = useCryptoSession()
   const isDesktop = isTauri()
@@ -649,6 +651,9 @@ function useDmEncryption(
         return { content, senderDeviceId: deviceId }
       },
       cachePlaintext: (messageId: string, channelId: string, plaintext: string) => {
+        // WHY: Update in-memory cache so EncryptedMessageContent can display the
+        // sender's own message immediately (sender can't decrypt their own Olm message).
+        setCachedPlaintext?.(messageId, plaintext)
         cacheMessage(messageId, channelId, plaintext, new Date().toISOString()).catch(
           (err: unknown) => {
             logger.warn('cache_plaintext_failed', {
@@ -659,7 +664,7 @@ function useDmEncryption(
         )
       },
     }
-  }, [isDm, isDesktop, isInitialized, recipientUserId, deviceId, ensureSession])
+  }, [isDm, isDesktop, isInitialized, recipientUserId, deviceId, ensureSession, setCachedPlaintext])
 }
 
 /**
@@ -670,6 +675,8 @@ function useDmEncryption(
 function useChannelEncryptionParam(
   isChannelEncrypted: boolean,
   channelId: string | null,
+  /** WHY: Updates the in-memory decrypt cache so the sender can read their own message. */
+  setCachedPlaintext?: (messageId: string, plaintext: string) => void,
 ): SendMessageEncryption | undefined {
   const { encryptChannelMessage } = useChannelEncryption()
   const isDesktop = isTauri()
@@ -693,6 +700,9 @@ function useChannelEncryptionParam(
         return { content: result.content, senderDeviceId: result.senderDeviceId }
       },
       cachePlaintext: (messageId: string, chId: string, plaintext: string) => {
+        // WHY: Update in-memory cache so EncryptedMessageContent can display the
+        // sender's own message immediately (same pattern as useDmEncryption).
+        setCachedPlaintext?.(messageId, plaintext)
         cacheMessage(messageId, chId, plaintext, new Date().toISOString()).catch((err: unknown) => {
           logger.warn('cache_plaintext_failed', {
             messageId,
@@ -701,7 +711,15 @@ function useChannelEncryptionParam(
         })
       },
     }
-  }, [isChannelEncrypted, isDesktop, isInitialized, channelId, deviceId, encryptChannelMessage])
+  }, [
+    isChannelEncrypted,
+    isDesktop,
+    isInitialized,
+    channelId,
+    deviceId,
+    encryptChannelMessage,
+    setCachedPlaintext,
+  ])
 }
 
 /**
@@ -948,18 +966,25 @@ export function ChatArea({
 }: ChatAreaProps) {
   const currentUser = useCurrentUser()
 
-  // WHY: Build encryption param for DMs on desktop. Undefined for channels or web.
-  const dmEncryption = useDmEncryption(isDm, dmRecipient?.id ?? null)
-  // WHY: Build encryption param for encrypted channels on desktop.
-  const channelEncryption = useChannelEncryptionParam(isChannelEncrypted, channelId)
-  // WHY: Use channel encryption if available, else DM encryption, else undefined.
-  const activeEncryption = channelEncryption ?? dmEncryption
-  const { decryptMessage, loadCachedDecryptions, getCachedPlaintext } = useEncryptedMessages()
+  const { decryptMessage, loadCachedDecryptions, getCachedPlaintext, setCachedPlaintext } =
+    useEncryptedMessages()
   const {
     decryptChannelMessage,
     loadCachedChannelDecryptions,
     getCachedPlaintext: getChannelCachedPlaintext,
+    setCachedPlaintext: setChannelCachedPlaintext,
   } = useChannelEncryption()
+
+  // WHY: Build encryption param for DMs on desktop. Undefined for channels or web.
+  const dmEncryption = useDmEncryption(isDm, dmRecipient?.id ?? null, setCachedPlaintext)
+  // WHY: Build encryption param for encrypted channels on desktop.
+  const channelEncryption = useChannelEncryptionParam(
+    isChannelEncrypted,
+    channelId,
+    setChannelCachedPlaintext,
+  )
+  // WHY: Use channel encryption if available, else DM encryption, else undefined.
+  const activeEncryption = channelEncryption ?? dmEncryption
 
   const {
     data,
