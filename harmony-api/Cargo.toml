@@ -55,7 +55,7 @@ config = "0.15"
 
 # Security
 secrecy = { version = "0.10", features = ["serde"] }
-sha2 = "0.10"
+sha2 = "0.11"
 subtle = "2"
 hex = "0.4"
 base64 = "0.22"
