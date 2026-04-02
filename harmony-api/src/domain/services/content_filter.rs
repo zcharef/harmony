@@ -159,10 +159,9 @@ impl ContentFilter {
     /// Tier 2: soft redact. Returns the masked version if banned words are found.
     ///
     /// Used for messages: preserves the message but replaces bad words with `****`.
-    /// Operates entirely on the normalized form to avoid byte-position mismatches
-    /// between normalized and original text. The returned `masked_content` is the
-    /// normalized (accent-stripped, zero-width-stripped) version with banned words
-    /// replaced by `*` characters.
+    /// Operates on the normalized form to avoid byte-position mismatches between
+    /// normalized and original text. The returned `masked_content` preserves the
+    /// original casing while replacing banned words with `*` characters.
     #[must_use]
     pub fn check_soft(&self, text: &str) -> ModerationVerdict {
         if !self.enabled {
@@ -239,7 +238,10 @@ impl ContentFilter {
     /// - Pass 4: leet speak (catches `n1gga`, `@ss`, `sh1t`)
     fn mask_banned_words(&self, text: &str) -> String {
         let lower = text.to_lowercase();
-        let mut result = lower.clone();
+        // WHY: Start from original text to preserve casing. `lower` is used
+        // only for matching. Byte offsets are stable because after NFKC
+        // normalization the remaining chars are ASCII-safe for case folding.
+        let mut result = text.to_string();
 
         // Pass 1: word-boundary masking
         for (start, word) in word_positions(&lower) {
@@ -535,6 +537,34 @@ mod tests {
             filter.check_soft("hello world"),
             ModerationVerdict::Clean
         ));
+    }
+
+    #[test]
+    fn soft_returns_clean_for_mixed_case_safe_text() {
+        let filter = test_filter(&["slurword"]);
+        // WHY: Regression — mask_banned_words previously lowercased the result,
+        // so "xD" became "xd" which differed from normalized "xD", causing a
+        // false Flagged verdict.
+        assert!(matches!(filter.check_soft("xD"), ModerationVerdict::Clean));
+        assert!(matches!(
+            filter.check_soft("Hello World"),
+            ModerationVerdict::Clean
+        ));
+        assert!(matches!(
+            filter.check_soft("GG WP"),
+            ModerationVerdict::Clean
+        ));
+    }
+
+    #[test]
+    fn soft_preserves_casing_around_masked_words() {
+        let filter = test_filter(&["slurword"]);
+        match filter.check_soft("Hey GUYS slurword BYE") {
+            ModerationVerdict::Flagged { masked_content, .. } => {
+                assert_eq!(masked_content, r"Hey GUYS \*\*\*\*\*\*\*\* BYE");
+            }
+            ModerationVerdict::Clean => panic!("Expected Flagged"),
+        }
     }
 
     #[test]
