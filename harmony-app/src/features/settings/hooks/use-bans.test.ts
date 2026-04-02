@@ -27,8 +27,10 @@ beforeEach(() => {
 
 describe('useBans', () => {
   it('fetches bans with correct path and throwOnError', async () => {
-    const bansData = [{ userId: 'user-1', username: 'banned-user', reason: 'spam' }]
-    vi.mocked(listBans).mockResolvedValueOnce({ data: bansData } as never)
+    const bansPayload = {
+      items: [{ userId: 'user-1', reason: 'spam', createdAt: '2026-04-01T00:00:00Z' }],
+    }
+    vi.mocked(listBans).mockResolvedValueOnce({ data: bansPayload } as never)
 
     const queryClient = createTestQueryClient()
     const wrapper = createQueryWrapper(queryClient)
@@ -42,11 +44,11 @@ describe('useBans', () => {
       path: { id: SERVER_ID },
       throwOnError: true,
     })
-    expect(result.current.data).toEqual(bansData)
+    expect(result.current.data).toEqual(bansPayload)
   })
 
   it('uses the correct query key from factory', () => {
-    vi.mocked(listBans).mockResolvedValueOnce({ data: [] } as never)
+    vi.mocked(listBans).mockResolvedValueOnce({ data: { items: [] } } as never)
 
     const queryClient = createTestQueryClient()
     const wrapper = createQueryWrapper(queryClient)

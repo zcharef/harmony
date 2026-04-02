@@ -1,5 +1,5 @@
 import { Avatar, Button, Spinner } from '@heroui/react'
-import { ShieldAlert, ShieldOff, UserX } from 'lucide-react'
+import { AlertTriangle, ShieldAlert, ShieldOff, UserX } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
 import { useBans, useUnbanMember } from './hooks/use-bans'
@@ -12,7 +12,7 @@ interface BansTabProps {
 export function BansTab({ serverId, callerRole }: BansTabProps) {
   const { t } = useTranslation('settings')
   const isAdmin = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
-  const { data, isPending } = useBans(serverId)
+  const { data, isPending, isError } = useBans(serverId)
   const unban = useUnbanMember(serverId)
   const bans = data?.items ?? []
 
@@ -32,6 +32,18 @@ export function BansTab({ serverId, callerRole }: BansTabProps) {
     return (
       <div className="flex justify-center py-8">
         <Spinner size="md" />
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div
+        data-test="settings-bans-error"
+        className="flex flex-col items-center justify-center gap-2 py-12"
+      >
+        <AlertTriangle className="h-10 w-10 text-danger-300" />
+        <p className="text-sm text-default-500">{t('bansLoadError')}</p>
       </div>
     )
   }
