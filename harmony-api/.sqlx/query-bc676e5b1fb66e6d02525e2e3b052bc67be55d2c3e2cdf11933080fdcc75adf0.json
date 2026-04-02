@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                c.id AS \"channel_id!\",\n                crs.last_read_at AS \"last_read_at?\",\n                crs.last_message_id,\n                LEAST(COALESCE(COUNT(m.id)::BIGINT, 0), 999) AS \"unread_count!\"\n            FROM server_members sm\n            JOIN channels c ON c.server_id = sm.server_id\n            LEFT JOIN channel_read_states crs\n                ON crs.channel_id = c.id AND crs.user_id = $1\n            LEFT JOIN messages m\n                ON m.channel_id = c.id\n                AND m.deleted_at IS NULL\n                AND m.author_id != $1\n                AND m.message_type != 'system'\n                AND (crs.last_read_at IS NULL OR m.created_at > crs.last_read_at)\n            WHERE sm.user_id = $1\n            GROUP BY c.id, crs.last_read_at, crs.last_message_id\n            HAVING COALESCE(COUNT(m.id)::BIGINT, 0) > 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channel_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "last_read_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "last_message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "unread_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "bc676e5b1fb66e6d02525e2e3b052bc67be55d2c3e2cdf11933080fdcc75adf0"
+}

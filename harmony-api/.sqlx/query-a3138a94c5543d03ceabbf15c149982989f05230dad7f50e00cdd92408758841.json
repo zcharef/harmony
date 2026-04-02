@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM desktop_auth_codes\n            WHERE auth_code = $1 AND expires_at > now()\n            RETURNING auth_code, code_challenge, access_token, refresh_token, expires_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "auth_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "code_challenge",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "access_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "refresh_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a3138a94c5543d03ceabbf15c149982989f05230dad7f50e00cdd92408758841"
+}

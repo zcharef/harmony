@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!--
+    Harmony Logo v3
+    Concept: Abstract H as two people/pillars connected by a bridge.
+    One continuous bold white silhouette on violet.
+    The negative space between the pillars forms a subtle doorway/portal shape.
+    No small details — survives at 16px.
+  -->
+  
+  <!-- Deep violet rounded square -->
+  <rect width="512" height="512" rx="112" fill="#7c3aed"/>
+  
+  <!-- Bold H mark — one continuous path, no gaps -->
+  <path d="
+    M128 96
+    L208 96
+    L208 216
+    L304 216
+    L304 96
+    L384 96
+    L384 416
+    L304 416
+    L304 296
+    L208 296
+    L208 416
+    L128 416
+    Z
+  " fill="white" rx="12"/>
+</svg>

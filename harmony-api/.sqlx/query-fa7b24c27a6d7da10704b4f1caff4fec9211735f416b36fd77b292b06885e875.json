@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM channels\n            WHERE id = $1\n              AND (\n                SELECT COUNT(*)\n                FROM channels c2\n                WHERE c2.server_id = (SELECT server_id FROM channels WHERE id = $1)\n              ) > 1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fa7b24c27a6d7da10704b4f1caff4fec9211735f416b36fd77b292b06885e875"
+}

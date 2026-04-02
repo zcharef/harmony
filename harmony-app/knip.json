@@ -1,0 +1,22 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "project": ["src/**/*.{ts,tsx}"],
+  "tags": ["-@public"],
+  "commitlint": {
+    "config": ["commitlint.config.js"]
+  },
+  "rules": {
+    "files": "warn",
+    "dependencies": "error",
+    "unlisted": "warn",
+    "exports": "warn",
+    "types": "warn"
+  },
+  "ignoreDependencies": [
+    "@commitlint/cli",
+    "tailwindcss",
+    "@tauri-apps/plugin-opener",
+    "motion",
+    "react-error-boundary"
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO device_keys (user_id, device_id, identity_key, signing_key, device_name)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (user_id, device_id)\n            DO UPDATE SET\n                identity_key = EXCLUDED.identity_key,\n                signing_key = EXCLUDED.signing_key,\n                device_name = EXCLUDED.device_name,\n                last_key_upload_at = now()\n            RETURNING\n                id,\n                user_id,\n                device_id,\n                identity_key,\n                signing_key,\n                device_name,\n                created_at,\n                last_key_upload_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "device_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "identity_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "signing_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "device_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_key_upload_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "e66e4c27ad321c48c3387a398e93a4caee467e9faeee131cb1e5f478e5ea9258"
+}

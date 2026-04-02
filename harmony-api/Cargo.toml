@@ -1,0 +1,143 @@
+[package]
+name = "harmony-api"
+version = "0.1.0"
+edition = "2024"
+publish = false
+default-run = "harmony-api"
+license = "AGPL-3.0"
+repository = "https://github.com/zcharef/harmony"
+homepage = "https://joinharmony.app"
+
+[dependencies]
+# Web Framework (latest stable)
+axum = { version = "0.8", features = ["macros"] }
+axum-extra = { version = "0.10", features = ["cookie", "typed-header"] }
+
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "timeout", "limit", "compression-gzip", "set-header"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# OpenAPI (Code-First) - Rust structs are SSoT
+utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+utoipa-swagger-ui = { version = "9", features = ["axum", "vendored"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Database (Supabase Postgres via SQLx)
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "migrate"] }
+
+# Auth (Supabase JWT verification)
+jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
+
+# External Services (rustls-tls avoids OpenSSL deps in Distroless)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# Observability (OpenTelemetry - SOTA 2026)
+tracing-opentelemetry = "0.32"
+opentelemetry = "0.31"
+opentelemetry_sdk = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
+
+# Config
+dotenvy = "0.15"
+config = "0.15"
+
+# Security
+secrecy = { version = "0.10", features = ["serde"] }
+sha2 = "0.10"
+subtle = "2"
+hex = "0.4"
+base64 = "0.22"
+
+# Utils
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+rand = "0.9"
+time = "0.3"
+http = "1"
+
+# Rate Limiting
+governor = "0.10"
+
+# Async Streams
+tokio-stream = { version = "0.1", features = ["sync", "time"] }
+
+# Sentry (Crash Reporting + Alerting) - 0.47+ required for axum 0.8 compatibility
+sentry = { version = "0.47", features = ["tower", "tower-axum-matched-path", "tracing", "rustls"] }
+dashmap = "6.1.0"
+bitflags = "2"
+ipnet = "2.12.0"
+
+# ── Lints ────────────────────────────────────────────────
+# These lints are enforced project-wide. Contributors MUST comply.
+# Run `cargo clippy -- -D warnings` to check locally.
+
+[lints.rust]
+unsafe_code = "forbid"               # No unsafe in a chat app
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+# Panics — forbidden in production code.
+# Tests are allowed via #[cfg_attr(test, allow(...))] on test modules.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+todo = "warn"
+unimplemented = "warn"
+
+# Correctness
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+cast_possible_wrap = "warn"
+float_cmp = "warn"
+
+# Style & clarity
+needless_pass_by_value = "warn"
+redundant_closure_for_method_calls = "warn"
+cloned_instead_of_copied = "warn"
+explicit_iter_loop = "warn"
+implicit_clone = "warn"
+inefficient_to_string = "warn"
+semicolon_if_nothing_returned = "warn"
+unused_self = "warn"
+wildcard_imports = "warn"
+
+# Stdout/stderr — use tracing instead (ADR-017)
+print_stdout = "deny"
+print_stderr = "deny"
+dbg_macro = "deny"
+
+# Pedantic (selective — full pedantic is too noisy)
+doc_markdown = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+must_use_candidate = "warn"
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+# Meta-linting: AST parsing for static analysis tests
+syn = { version = "2.0", features = ["full", "visit", "extra-traits"] }
+walkdir = "2"
+quote = "1"  # Required for ToTokens in syn
+
+# Snapshot testing
+insta = { version = "1.46.3", features = ["json", "redactions"] }
+
+# Integration tests
+tower = { version = "0.5", features = ["util"] }
+hyper = { version = "1", features = ["full"] }
+http-body-util = "0.1"

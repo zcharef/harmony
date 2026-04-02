@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO desktop_auth_codes (auth_code, code_challenge, access_token, refresh_token, expires_at) VALUES ($1, $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "18b9b8cf74e082efc76d530866075e2d3fdd466ba82ebaf2b6fc7a62c0cca4d8"
+}

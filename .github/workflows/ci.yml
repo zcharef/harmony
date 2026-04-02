@@ -1,0 +1,160 @@
+# Harmony CI — Quality Wall (Tier 1: No Secrets Required)
+#
+# Runs on ALL pull requests including forks.
+# These checks do NOT require secrets — safe for untrusted code.
+# E2E tests and deploys are in e2e-deploy.yml (Tier 2).
+
+name: CI
+
+permissions: {}
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 1: App Quality Wall
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  app-quality:
+    name: App Quality Wall
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: harmony-app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: harmony-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate API client from OpenAPI spec
+        run: pnpm gen:api
+
+      - name: Biome lint
+        run: pnpm lint
+
+      - name: TypeScript check
+        run: pnpm typecheck
+
+      - name: Module boundaries
+        run: pnpm lint:boundaries
+
+      - name: Circular dependencies
+        run: pnpm circular
+
+      - name: Unit tests (Vitest)
+        run: pnpm test
+
+      - name: Architecture tests
+        run: pnpm test:arch
+
+      - name: Dead code check (Knip)
+        run: pnpm knip
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 2: Rust Quality Wall
+  # WHY no Postgres service: all steps use SQLX_OFFLINE=true with .sqlx/ cache.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  rust-quality:
+    name: Rust Quality Wall
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: harmony-api
+    env:
+      SQLX_OFFLINE: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            harmony-api
+            harmony-app/src-tauri
+          shared-key: harmony-rust
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Security audit
+        # WHY ignore: RUSTSEC-2023-0071 is in `rsa` via `sqlx-mysql` (transitive). We only use Postgres. No fix available.
+        run: cargo audit --ignore RUSTSEC-2023-0071
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: License & crate compliance
+        run: cargo deny check
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Tauri crypto tests
+        working-directory: harmony-app/src-tauri
+        run: cargo test --all-targets
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgres://unused:unused@localhost/unused
+          SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          SUPABASE_URL: http://localhost:9999
+          ENVIRONMENT: test
+          SERVER_PORT: "3000"
+        run: cargo test --all-targets
+
+      - name: OpenAPI freshness check
+        env:
+          DATABASE_URL: postgres://unused:unused@localhost/unused
+          SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          SUPABASE_URL: http://localhost:9999
+          ENVIRONMENT: test
+          SERVER_PORT: "3000"
+        run: |
+          RUST_LOG=error cargo run --bin export_openapi > /tmp/openapi-fresh.json
+          diff -u openapi.json /tmp/openapi-fresh.json || {
+            echo "openapi.json is stale. Run just export-openapi and commit."
+            exit 1
+          }

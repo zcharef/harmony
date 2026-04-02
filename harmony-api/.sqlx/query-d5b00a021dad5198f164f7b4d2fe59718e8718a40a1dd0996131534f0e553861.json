@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                sm.user_id,\n                sm.server_id,\n                p.username,\n                p.avatar_url,\n                sm.nickname,\n                sm.role as \"role!\",\n                sm.joined_at\n            FROM server_members sm\n            INNER JOIN profiles p ON p.id = sm.user_id\n            WHERE sm.server_id = $1\n            ORDER BY sm.joined_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "nickname",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "role!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d5b00a021dad5198f164f7b4d2fe59718e8718a40a1dd0996131534f0e553861"
+}

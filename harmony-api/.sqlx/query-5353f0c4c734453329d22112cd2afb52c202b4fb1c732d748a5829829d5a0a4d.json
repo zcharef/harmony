@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE device_keys\n            SET last_key_upload_at = now()\n            WHERE user_id = $1 AND device_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5353f0c4c734453329d22112cd2afb52c202b4fb1c732d748a5829829d5a0a4d"
+}

@@ -1,0 +1,131 @@
+# Harmony monorepo — Quality Wall
+# Run manually: lefthook run pre-commit
+# Skip once: LEFTHOOK=0 git commit -m "..."
+
+# ============================================================================
+# PRE-COMMIT: Fast checks on staged files only (<5s target)
+# ============================================================================
+pre-commit:
+  parallel: true
+  commands:
+    # --- Tauri App (harmony-app) ---
+    biome:
+      root: harmony-app/
+      glob: "*.{js,ts,cjs,mjs,jsx,tsx,json,jsonc}"
+      run: pnpm biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+
+    # --- Rust API (harmony-api) ---
+    rust-fmt:
+      root: harmony-api/
+      glob: "*.rs"
+      run: $HOME/.cargo/bin/cargo fmt --check
+      fail_text: "Run 'cargo fmt' to fix formatting"
+
+    rust-clippy:
+      root: harmony-api/
+      glob: "*.rs"
+      run: $HOME/.cargo/bin/cargo clippy --all-targets -- -D warnings
+      fail_text: "Fix clippy warnings before committing"
+
+    # WHY: Catch stale openapi.json early when Rust source changes.
+    # Only triggers when .rs files are staged (skipped for frontend-only commits).
+    openapi-freshness:
+      root: harmony-api/
+      glob: "src/**/*.rs"
+      run: RUST_LOG=error $HOME/.cargo/bin/cargo run --bin export_openapi 2>/dev/null | diff openapi.json - >/dev/null
+      fail_text: "openapi.json is stale. Run 'just export-openapi' and stage the result."
+
+# ============================================================================
+# COMMIT-MSG: Conventional Commits enforcement
+# ============================================================================
+commit-msg:
+  commands:
+    commitlint:
+      root: harmony-app/
+      run: pnpm commitlint --edit {1}
+
+# ============================================================================
+# PRE-PUSH: Heavy checks that MUST pass before code reaches remote
+# ============================================================================
+pre-push:
+  parallel: true
+  commands:
+    # --- Tauri App (harmony-app) ---
+    # WHY: Pre-commit runs biome on staged files only. If pre-commit was
+    # bypassed (LEFTHOOK=0) or complexity grew in already-committed code,
+    # this full-repo check catches it before CI does (~50ms).
+    biome-lint:
+      root: harmony-app/
+      run: pnpm biome check .
+      fail_text: "Biome lint failed. Run 'pnpm biome check --write .' to auto-fix formatting, then fix remaining lint errors."
+
+    # WHY: TypeScript check. Generated API client must already exist (run
+    # `just gen-api` after Rust API changes). We do NOT regenerate here because
+    # parallel hooks would race on writing to src/lib/api/ and corrupt files.
+    typecheck:
+      root: harmony-app/
+      run: "test -f src/lib/api/sdk.gen.ts || { echo 'Generated API client missing. Run: just gen-api'; exit 1; } && pnpm tsc --noEmit"
+      fail_text: "TypeScript errors found. Run 'just gen-api' then fix type errors."
+
+    boundaries:
+      root: harmony-app/
+      run: pnpm eslint --config eslint.config.mjs src/
+      fail_text: "Module boundary violations. Deep imports are forbidden."
+
+    circular:
+      root: harmony-app/
+      # WHY: Exclude lib/api/ — generated files have circular imports by design
+      run: pnpm madge --circular --extensions ts,tsx --exclude 'lib/api/' src/
+      fail_text: "Circular dependencies detected."
+
+    web-architecture:
+      root: harmony-app/
+      # WHY: Arch tests scan src/lib/api/ which is gitignored. typecheck step
+      # already generates via openapi-ts, but since hooks run in parallel we
+      # must NOT also generate here (race condition corrupts output files).
+      # Developers must have run `just gen-api` at least once.
+      run: pnpm vitest run --config vitest.config.arch.ts
+      fail_text: "Architecture tests failed. Run 'just gen-api' first, then check feature structure."
+
+    vitest:
+      root: harmony-app/
+      run: pnpm vitest run
+      fail_text: "Vitest unit tests failed. Run 'pnpm vitest run' for details."
+
+    knip:
+      root: harmony-app/
+      run: pnpm knip --no-progress
+      fail_text: "Dead code detected. Run 'pnpm knip' to see unused files/exports/deps."
+
+    # --- Tauri Crypto (harmony-app/src-tauri) ---
+    tauri-test:
+      root: harmony-app/src-tauri/
+      run: $HOME/.cargo/bin/cargo test --all-targets
+      fail_text: "Tauri crypto tests failed. Run 'cargo test' in src-tauri/."
+
+    # --- Rust API (harmony-api) ---
+    openapi-freshness:
+      root: harmony-api/
+      run: RUST_LOG=error $HOME/.cargo/bin/cargo run --bin export_openapi 2>/dev/null | diff openapi.json - >/dev/null
+      fail_text: "openapi.json is stale. Run 'just export-openapi' and commit the result."
+
+    rust-test:
+      root: harmony-api/
+      run: $HOME/.cargo/bin/cargo test
+      fail_text: "Rust tests failed. Run 'just wall' for details."
+
+    # WHY: Developers compile against a real Supabase DB, so sqlx::query!
+    # macros always resolve. CI uses SQLX_OFFLINE=true with .sqlx/ cache.
+    # New/changed queries without 'cargo sqlx prepare' compile locally but
+    # break CI. This replicates CI's offline build to catch stale cache.
+    sqlx-cache:
+      root: harmony-api/
+      run: SQLX_OFFLINE=true $HOME/.cargo/bin/cargo check
+      fail_text: "SQLX offline cache is stale. Run 'cargo sqlx prepare' and commit .sqlx/ files."
+
+    # --- Monorepo-wide ---
+    lint-migrations:
+      run: bash scripts/lint-migrations.sh
+      fail_text: "Migration lint failed. See ADR-019 (non-destructive) and ADR-040 (RLS)."
+
