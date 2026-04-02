@@ -1,6 +1,5 @@
 import { HeroUIProvider, Spinner, ToastProvider } from '@heroui/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { AnimatePresence } from 'motion/react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { FeatureErrorBoundary } from '@/components/shared/error-boundary'
 import { UpdateNotification } from '@/components/shared/update-notification'
@@ -50,20 +49,21 @@ function AppContent() {
     return <DesktopAuthRedirect />
   }
 
-  const updateVersion = update.status === 'ready' && !update.dismissed ? update.version : null
+  // WHY: Inline narrowing so TypeScript knows updateInfo is non-null inside the JSX.
+  const readyUpdate = update.status === 'ready' && !update.dismissed ? update.updateInfo : null
 
   return (
     <>
       <MainLayout />
-      <AnimatePresence>
-        {updateVersion !== null && (
-          <UpdateNotification
-            version={updateVersion}
-            onRestart={update.restart}
-            onDismiss={update.dismiss}
-          />
-        )}
-      </AnimatePresence>
+      {readyUpdate !== null && (
+        <UpdateNotification
+          version={readyUpdate.version}
+          currentVersion={readyUpdate.currentVersion}
+          body={readyUpdate.body}
+          onRestart={update.restart}
+          onDismiss={update.dismiss}
+        />
+      )}
     </>
   )
 }

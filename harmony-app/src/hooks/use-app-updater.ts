@@ -6,12 +6,20 @@
  * without explicit JS calls. This hook provides the check → download → prompt flow.
  *
  * Behavior:
- * - Cold start: check immediately → download → show prompt → user restarts
+ * - Cold start: check immediately → download in background → show prompt → user restarts
  * - Already running: periodic check (30 min) → download → show prompt → user restarts
+ * - App closed before restart: Tauri applies the downloaded update on next launch
  * - Web browser: no-op (isTauri() guard)
  * - Background errors: logger.warn (ADR-045). User-action errors: logger.error + toast.
+ *
+ * WHY download() + install() instead of downloadAndInstall():
+ * downloadAndInstall() replaces the app binary immediately on macOS, killing
+ * the running process before the user ever sees the restart prompt. Splitting
+ * into download() (background) + install() (on user confirmation) ensures the
+ * user is always prompted first.
  */
 
+import type { Update } from '@tauri-apps/plugin-updater'
 import i18n from 'i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { logger } from '@/lib/logger'
@@ -20,20 +28,27 @@ import { toast } from '@/lib/toast'
 
 type UpdateStatus = 'idle' | 'checking' | 'downloading' | 'ready'
 
-interface AppUpdaterState {
+interface UpdateInfo {
+  version: string
+  currentVersion: string
+  body: string | null
+  date: string | null
+}
+
+export interface AppUpdaterState {
   status: UpdateStatus
-  version: string | null
+  updateInfo: UpdateInfo | null
   restart: () => void
   dismiss: () => void
   dismissed: boolean
 }
 
-type CheckResult = { kind: 'up_to_date' } | { kind: 'ready'; version: string }
+type CheckResult = { kind: 'up_to_date' } | { kind: 'ready'; info: UpdateInfo; update: Update }
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000 // 30 minutes
 
-/** Check for updates and download. Always prompts the user before restarting. */
-async function checkForUpdate(onStatus: (s: UpdateStatus) => void): Promise<CheckResult> {
+/** Check for updates and download only. Never installs — that's the user's choice. */
+async function checkAndDownload(onStatus: (s: UpdateStatus) => void): Promise<CheckResult> {
   // WHY: Dynamic import — @tauri-apps/plugin-updater crashes in the browser.
   const { check } = await import('@tauri-apps/plugin-updater')
 
@@ -44,24 +59,43 @@ async function checkForUpdate(onStatus: (s: UpdateStatus) => void): Promise<Chec
     return { kind: 'up_to_date' }
   }
 
-  logger.info('update_available', { version: update.version })
+  logger.info('update_available', {
+    version: update.version,
+    currentVersion: update.currentVersion,
+  })
   onStatus('downloading')
 
-  await update.downloadAndInstall((progress) => {
+  // WHY: download() stages the update without installing. If the user closes
+  // the app, Tauri applies it on next launch. If the app stays open, we
+  // prompt the user and call install() only on confirmation.
+  await update.download((progress) => {
     if (progress.event === 'Finished') {
       logger.info('update_downloaded', { version: update.version })
     }
   })
 
-  return { kind: 'ready', version: update.version }
+  return {
+    kind: 'ready',
+    update,
+    info: {
+      version: update.version,
+      currentVersion: update.currentVersion,
+      body: update.body ?? null,
+      date: update.date ?? null,
+    },
+  }
 }
 
 export function useAppUpdater(isAppReady: boolean): AppUpdaterState {
   const [status, setStatus] = useState<UpdateStatus>('idle')
-  const [version, setVersion] = useState<string | null>(null)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [dismissed, setDismissed] = useState(false)
   const hasCheckedOnce = useRef(false)
-  // WHY: Async operations (downloadAndInstall, relaunch) can resolve after
+  // WHY: install() requires the same Update instance that called download(),
+  // because downloadedBytes is an instance property. A fresh check() returns
+  // a new object with downloadedBytes=undefined, which makes install() throw.
+  const pendingUpdateRef = useRef<Update | null>(null)
+  // WHY: Async operations (download, relaunch) can resolve after
   // the component unmounts. Guard state updates to avoid stale writes.
   const mountedRef = useRef(true)
 
@@ -81,7 +115,7 @@ export function useAppUpdater(isAppReady: boolean): AppUpdaterState {
     if (!isTauri()) return
 
     try {
-      const result = await checkForUpdate((s) => {
+      const result = await checkAndDownload((s) => {
         safeSetStatus(s)
       })
 
@@ -93,7 +127,8 @@ export function useAppUpdater(isAppReady: boolean): AppUpdaterState {
         return
       }
 
-      setVersion(result.version)
+      pendingUpdateRef.current = result.update
+      setUpdateInfo(result.info)
       setDismissed(false)
       safeSetStatus('ready')
     } catch (err: unknown) {
@@ -104,10 +139,18 @@ export function useAppUpdater(isAppReady: boolean): AppUpdaterState {
     }
   }, [safeSetStatus])
 
-  // WHY: logger.error + toast because restart is an explicit user action (ADR-045).
+  // WHY: install() + relaunch() only on explicit user confirmation.
+  // logger.error + toast because restart is an explicit user action (ADR-045).
   const restart = useCallback(async () => {
     if (!isTauri()) return
     try {
+      // WHY: install() must be called on the same Update instance that called
+      // download(), because downloadedBytes is an instance property. A fresh
+      // check() would return a new object with downloadedBytes=undefined.
+      const update = pendingUpdateRef.current
+      if (update) {
+        await update.install()
+      }
       const { relaunch } = await import('@tauri-apps/plugin-process')
       await relaunch()
     } catch (err: unknown) {
@@ -151,5 +194,5 @@ export function useAppUpdater(isAppReady: boolean): AppUpdaterState {
     return () => clearInterval(interval)
   }, [isAppReady, status, dismissed, checkAndApply])
 
-  return { status, version, restart, dismiss, dismissed }
+  return { status, updateInfo, restart, dismiss, dismissed }
 }

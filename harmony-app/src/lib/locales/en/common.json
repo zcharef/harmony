@@ -20,8 +20,9 @@
   "reconnecting": "Reconnecting...",
   "connectionLost": "Connection lost — messages may be outdated",
   "retryNow": "Retry",
-  "updateAvailable": "New version available",
-  "updatePrompt": "v{{version}} — update now? This will restart the app.",
-  "updateAction": "Update",
+  "updateTitle": "Update available",
+  "updateVersionTransition": "v{{from}} → v{{to}}",
+  "updateAction": "Restart now",
+  "updateDismiss": "Not now",
   "restartFailed": "Failed to restart — please restart manually"
 }
