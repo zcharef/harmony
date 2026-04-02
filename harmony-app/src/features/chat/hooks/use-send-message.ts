@@ -1,7 +1,7 @@
 import type { InfiniteData } from '@tanstack/react-query'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
-import type { MessageListResponse, MessageResponse } from '@/lib/api'
+import type { DmListItem, MessageListResponse, MessageResponse } from '@/lib/api'
 import { sendMessage } from '@/lib/api'
 import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
@@ -144,6 +144,24 @@ export function useSendMessage(
             items: page.items.map((m) => (m.id === context.optimisticId ? realMessage : m)),
           })),
         }
+      })
+
+      // WHY: The backend excludes the sender from message.created SSE events
+      // (optimistic UI handles the chat area). But the DM sidebar preview
+      // never receives the update. This updates lastMessage + reorders the
+      // list for the sender. No-op if channelId doesn't match any DM.
+      queryClient.setQueryData<DmListItem[]>(queryKeys.dms.list(), (old) => {
+        if (!old) return undefined
+
+        const idx = old.findIndex((dm) => dm.channelId === channelId)
+        const match = old[idx]
+        if (idx === -1 || !match) return old
+
+        const updated: DmListItem = {
+          ...match,
+          lastMessage: { content: realMessage.content, createdAt: realMessage.createdAt },
+        }
+        return [updated, ...old.slice(0, idx), ...old.slice(idx + 1)]
       })
     },
 
