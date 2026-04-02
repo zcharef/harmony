@@ -97,7 +97,7 @@ jobs:
       # ── Rust toolchain (shared cache from CI rust-quality job) ─
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2.9
+      - uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: harmony-api
           shared-key: harmony-api
@@ -105,7 +105,7 @@ jobs:
       # ── Supabase Cloud: apply pending migrations ─────────
       # WHY pinned: `latest` causes non-deterministic CI failures when Supabase
       # ships breaking changes. Bump deliberately via Dependabot or manually.
-      - uses: supabase/setup-cli@v1.6
+      - uses: supabase/setup-cli@v1.6.0
         with:
           version: 2.84.2
 
@@ -283,7 +283,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: supabase/setup-cli@v1.6
+      - uses: supabase/setup-cli@v1.6.0
         with:
           version: 2.84.2
 
