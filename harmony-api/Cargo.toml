@@ -135,7 +135,7 @@ walkdir = "2"
 quote = "1"  # Required for ToTokens in syn
 
 # Snapshot testing
-insta = { version = "1.46.3", features = ["json", "redactions"] }
+insta = { version = "1.47.2", features = ["json", "redactions"] }
 
 # Integration tests
 tower = { version = "0.5", features = ["util"] }
