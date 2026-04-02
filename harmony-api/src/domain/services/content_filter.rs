@@ -7,7 +7,7 @@
 //! - `check_hard`: rejects input entirely (server names, usernames, etc.)
 //! - `check_soft`: masks matched words with `****` (messages)
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -74,7 +74,11 @@ pub struct ContentFilter {
     /// Unified set from all `*_abuse.txt` files across 24 languages.
     banned_words: HashSet<String>,
     /// Collapsed forms: consecutive identical chars → 1. Catches "niggaaa" → "niga".
-    collapsed_banned_words: HashSet<String>,
+    /// Value = minimum input token length to accept a match.
+    /// WHY: "ass" → collapsed "as". Without a min-length guard, the English word
+    /// "as" would be a false positive. Requiring input ≥ 3 chars means "as" (2)
+    /// doesn't match, but "asss" (4) and "kkkk" (4) do.
+    collapsed_banned_words: HashMap<String, usize>,
     enabled: bool,
 }
 
@@ -102,13 +106,23 @@ impl ContentFilter {
         }
 
         // WHY: Pre-compute collapsed forms for repeated-char bypass detection.
-        // "nigga" → "niga", "ass" → "as". Only entries with ≥3 collapsed chars
-        // are included to avoid false positives ("as" matching common English).
-        let collapsed_banned_words: HashSet<String> = banned_words
-            .iter()
-            .map(|w| collapse_repeats(w))
-            .filter(|w| w.len() >= 3)
-            .collect();
+        // Each entry stores the minimum input token length to accept a match.
+        // "nigga" (5) → ("niga", 3), "kkk" (3) → ("k", 3), "ass" (3) → ("as", 3).
+        // This means "as" (2 chars) won't match collapsed "as" (min 3), avoiding
+        // false positives, while "asss" (4 ≥ 3) and "kkkk" (4 ≥ 3) still match.
+        let mut collapsed_banned_words: HashMap<String, usize> = HashMap::new();
+        for word in &banned_words {
+            if word.len() >= 3 {
+                let collapsed = collapse_repeats(word);
+                // WHY: Use min() — if multiple banned words collapse to the same form,
+                // keep the smallest min-length so the strictest check applies.
+                let min_len = 3.min(word.len());
+                collapsed_banned_words
+                    .entry(collapsed)
+                    .and_modify(|existing| *existing = (*existing).min(min_len))
+                    .or_insert(min_len);
+            }
+        }
 
         tracing::info!(
             word_count = banned_words.len(),
@@ -128,9 +142,18 @@ impl ContentFilter {
     pub fn noop() -> Self {
         Self {
             banned_words: HashSet::new(),
-            collapsed_banned_words: HashSet::new(),
+            collapsed_banned_words: HashMap::new(),
             enabled: false,
         }
+    }
+
+    /// Check if a word's collapsed form matches the collapsed banned set,
+    /// respecting the minimum input length guard to prevent false positives.
+    fn is_collapsed_match(&self, original_word: &str) -> bool {
+        let collapsed = collapse_repeats(original_word);
+        self.collapsed_banned_words
+            .get(&collapsed)
+            .is_some_and(|&min_len| original_word.len() >= min_len)
     }
 
     /// Tier 1: hard reject. Returns `Err(ValidationError)` if banned words are found.
@@ -188,6 +211,15 @@ impl ContentFilter {
     }
 
     /// Check if any token in the normalized text matches a banned word.
+    ///
+    /// Six matching passes, ordered from cheapest to most aggressive:
+    ///
+    /// 1. Exact word match
+    /// 2. Squeezed (separator bypass: `f*u*c*k`)
+    ///    2b. Squeezed + collapsed (`n-i-g-g-a-a-a`)
+    ///    2c. Squeezed + leet (`n-1-g-g-a`)
+    /// 3. Collapsed repeats (`niggaaa`, `kkkk`)
+    /// 4. Leet speak (`n1gga`, `@ss`) + leet+collapse (`n1ggaaa`)
     fn has_banned_word(&self, normalized: &str) -> bool {
         // Pass 1: word-boundary tokenization (exact match)
         if tokenize(normalized).any(|word| self.banned_words.contains(&word)) {
@@ -200,30 +232,37 @@ impl ContentFilter {
             return true;
         }
 
-        // Pass 3: collapsed repeats — catches "niggaaa" → "niga", "fuuuck" → "fuck"
-        if tokenize(normalized).any(|word| {
-            let collapsed = collapse_repeats(&word);
-            collapsed.len() >= 3 && self.collapsed_banned_words.contains(&collapsed)
-        }) {
+        // Pass 2b: squeezed + collapsed — catches "n-i-g-g-a-a-a"
+        if tokenize(&squeezed).any(|word| self.is_collapsed_match(&word)) {
             return true;
         }
 
-        // Pass 4: leet speak — catches "n1gga" → "nigga", "@ss" → "ass"
+        // Pass 2c: leet + squeezed — catches "n-1-g-g-a", "$-h-1-t"
+        // WHY: Apply leet BEFORE squeeze. Squeeze strips `$`, `@`, `!` etc.
+        // but those are leet substitutes. Decode first so `$-h-1-t` → `s-h-i-t`,
+        // then squeeze → `shit`.
+        let decoded_then_squeezed = squeeze(&leet_to_alpha(normalized));
+        if decoded_then_squeezed != squeezed
+            && tokenize(&decoded_then_squeezed)
+                .any(|word| self.banned_words.contains(&word) || self.is_collapsed_match(&word))
+        {
+            return true;
+        }
+
+        // Pass 3: collapsed repeats — catches "niggaaa", "kkkk"
+        if tokenize(normalized).any(|word| self.is_collapsed_match(&word)) {
+            return true;
+        }
+
+        // Pass 4: leet speak — catches "n1gga", "@ss"
         // WHY: Apply leet decoding to the FULL text before tokenizing, because
         // leet chars like `@` and `!` are non-alphanumeric token boundaries.
-        // `@ss` → `ass` must be a single token, not `["ss"]`.
         let decoded = leet_to_alpha(normalized);
-        if decoded != *normalized {
-            if tokenize(&decoded).any(|word| self.banned_words.contains(&word)) {
-                return true;
-            }
-            // Also try leet + collapse for "n1ggaaa"
-            if tokenize(&decoded).any(|word| {
-                let collapsed = collapse_repeats(&word);
-                collapsed.len() >= 3 && self.collapsed_banned_words.contains(&collapsed)
-            }) {
-                return true;
-            }
+        if decoded != *normalized
+            && tokenize(&decoded)
+                .any(|word| self.banned_words.contains(&word) || self.is_collapsed_match(&word))
+        {
+            return true;
         }
 
         false
@@ -231,11 +270,7 @@ impl ContentFilter {
 
     /// Replace banned words in text with `*` characters of the same length.
     ///
-    /// Runs four passes (matching `has_banned_word`):
-    /// - Pass 1: word-boundary tokenization (catches whole words)
-    /// - Pass 2: squeezed pass (catches `f*u*c*k` separator bypasses)
-    /// - Pass 3: collapsed repeats (catches `niggaaa`, `fuuuck`)
-    /// - Pass 4: leet speak (catches `n1gga`, `@ss`, `sh1t`)
+    /// Mirrors the six passes in `has_banned_word`, masking each match.
     fn mask_banned_words(&self, text: &str) -> String {
         let lower = text.to_lowercase();
         // WHY: Start from original text to preserve casing. `lower` is used
@@ -260,11 +295,28 @@ impl ContentFilter {
             }
         }
 
-        // Pass 3: collapsed repeats — mask "niggaaa", "fuuuck" etc.
+        // Pass 2b: squeezed + collapsed — catches "n-i-g-g-a-a-a"
+        for (_, word) in word_positions(&squeezed) {
+            if self.is_collapsed_match(&word) {
+                result = mask_separated_word(&result, &word);
+            }
+        }
+
+        // Pass 2c: leet + squeezed — catches "n-1-g-g-a", "$-h-1-t"
+        // WHY: Leet decode the full text BEFORE squeezing, so `$` → `s` etc.
+        let decoded_then_squeezed = squeeze(&leet_to_alpha(&lower));
+        if decoded_then_squeezed != squeezed {
+            for (_, word) in word_positions(&decoded_then_squeezed) {
+                if self.banned_words.contains(&word) || self.is_collapsed_match(&word) {
+                    result = mask_separated_word(&result, &word);
+                }
+            }
+        }
+
+        // Pass 3: collapsed repeats — mask "niggaaa", "kkkk" etc.
         // WHY: Only check words not already fully masked (still contain alphanumeric).
         for (start, word) in word_positions(&result) {
-            let collapsed = collapse_repeats(&word);
-            if collapsed.len() >= 3 && self.collapsed_banned_words.contains(&collapsed) {
+            if self.is_collapsed_match(&word) {
                 let end = start + word.len();
                 let mask = "*".repeat(word.len());
                 result.replace_range(start..end, &mask);
@@ -278,14 +330,9 @@ impl ContentFilter {
         let decoded_result = leet_to_alpha(&result);
         if decoded_result != result {
             for (start, word) in word_positions(&decoded_result) {
-                let is_match = self.banned_words.contains(&word) || {
-                    let collapsed = collapse_repeats(&word);
-                    collapsed.len() >= 3 && self.collapsed_banned_words.contains(&collapsed)
-                };
+                let is_match = self.banned_words.contains(&word) || self.is_collapsed_match(&word);
                 if is_match {
                     let end = start + word.len();
-                    // WHY: Mask in both decoded and result at the same positions.
-                    // Leet chars like @ → a don't change byte length (both 1 byte).
                     let mask = "*".repeat(word.len());
                     result.replace_range(start..end, &mask);
                 }
@@ -433,9 +480,11 @@ fn leet_to_alpha(text: &str) -> String {
             '3' => 'e',
             '4' | '@' => 'a',
             '5' | '$' => 's',
+            '6' | '9' => 'g',
             '7' => 't',
             '8' => 'b',
             '+' => 't',
+            '(' => 'c',
             _ => c,
         })
         .collect()
@@ -473,13 +522,20 @@ mod tests {
     use super::*;
 
     /// Helper: build a filter with a small custom word list for testing.
+    /// Mirrors `ContentFilter::new()` logic for collapsed set construction.
     fn test_filter(words: &[&str]) -> ContentFilter {
         let banned_words: HashSet<String> = words.iter().map(|w| w.to_lowercase()).collect();
-        let collapsed_banned_words: HashSet<String> = banned_words
-            .iter()
-            .map(|w| collapse_repeats(w))
-            .filter(|w| w.len() >= 3)
-            .collect();
+        let mut collapsed_banned_words: HashMap<String, usize> = HashMap::new();
+        for word in &banned_words {
+            if word.len() >= 3 {
+                let collapsed = collapse_repeats(word);
+                let min_len = 3.min(word.len());
+                collapsed_banned_words
+                    .entry(collapsed)
+                    .and_modify(|existing| *existing = (*existing).min(min_len))
+                    .or_insert(min_len);
+            }
+        }
         ContentFilter {
             banned_words,
             collapsed_banned_words,
@@ -889,5 +945,91 @@ mod tests {
         // That's intentional: "a55" is a known leet-speak bypass for "ass".
         let filter = test_filter(&["ass"]);
         assert!(filter.check_hard("a55").is_err());
+    }
+
+    // ── P0 fix: kkk variants ────────────────────────────────────────
+
+    #[test]
+    fn hard_catches_kkk_variants() {
+        let filter = test_filter(&["kkk"]);
+        assert!(filter.check_hard("kkk").is_err());
+        assert!(filter.check_hard("kkkk").is_err());
+        assert!(filter.check_hard("kkkkkk").is_err());
+    }
+
+    // ── P1 fix: squeeze + collapse ──────────────────────────────────
+
+    #[test]
+    fn hard_catches_squeeze_plus_collapse() {
+        let filter = test_filter(&["nigga"]);
+        assert!(filter.check_hard("n-i-g-g-a-a-a").is_err());
+        assert!(filter.check_hard("n.i.g.g.a.a.a").is_err());
+    }
+
+    #[test]
+    fn hard_catches_squeeze_plus_collapse_other() {
+        let filter = test_filter(&["fuck"]);
+        assert!(filter.check_hard("f-u-u-u-c-k").is_err());
+    }
+
+    // ── P1 fix: squeeze + leet ──────────────────────────────────────
+
+    #[test]
+    fn hard_catches_squeeze_plus_leet() {
+        let filter = test_filter(&["nigga"]);
+        assert!(filter.check_hard("n-1-g-g-a").is_err());
+    }
+
+    #[test]
+    fn hard_catches_squeeze_plus_leet_other() {
+        let filter = test_filter(&["shit"]);
+        assert!(filter.check_hard("$-h-1-t").is_err());
+    }
+
+    // ── P2 fix: leet 6→g, 9→g ───────────────────────────────────────
+
+    #[test]
+    fn leet_6_and_9_map_to_g() {
+        assert_eq!(leet_to_alpha("ni6ga"), "nigga");
+        assert_eq!(leet_to_alpha("ni9ga"), "nigga");
+        assert_eq!(leet_to_alpha("fa6"), "fag");
+    }
+
+    #[test]
+    fn hard_catches_leet_6_and_9() {
+        let filter = test_filter(&["nigga", "fag"]);
+        assert!(filter.check_hard("ni6ga").is_err());
+        assert!(filter.check_hard("fa9").is_err());
+    }
+
+    // ── Edge cases for collapse_repeats ──────────────────────────────
+
+    #[test]
+    fn collapse_repeats_edge_cases() {
+        assert_eq!(collapse_repeats(""), "");
+        assert_eq!(collapse_repeats("a"), "a");
+        assert_eq!(collapse_repeats("aaaa"), "a");
+    }
+
+    // ── Mixed bypass: multiple techniques in one message ─────────────
+
+    #[test]
+    fn soft_masks_mixed_bypasses() {
+        let filter = test_filter(&["nigga", "fuck"]);
+        match filter.check_soft("niggaaa and n1gga") {
+            ModerationVerdict::Flagged { masked_content, .. } => {
+                assert!(
+                    !masked_content.contains("niggaaa"),
+                    "first bypass not masked: {}",
+                    masked_content
+                );
+                assert!(
+                    !masked_content.contains("n1gga"),
+                    "second bypass not masked: {}",
+                    masked_content
+                );
+            }
+            ModerationVerdict::Clean => panic!("Expected Flagged for mixed bypasses"),
+        }
     }
 }
