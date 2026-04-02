@@ -1,8 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import type { AssignRoleRequest } from '@/lib/api'
 import { client } from '@/lib/api/client.gen'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 /**
  * WHY: PATCH /v1/servers/{server_id}/members/{user_id}/role is not yet in the
@@ -31,6 +34,7 @@ export function useChangeRole(serverId: string) {
         serverId,
         error: error instanceof Error ? error.message : String(error),
       })
+      toast.error(getApiErrorDetail(error, i18n.t('members:changeRoleFailed')))
     },
   })
 }

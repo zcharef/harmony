@@ -9,7 +9,6 @@ import { MessageSquare } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useCreateDm } from '@/features/dms'
 import type { AssignRoleRequest } from '@/lib/api'
-import { toast } from '@/lib/toast'
 import { useChangeRole } from './hooks/use-change-role'
 import { type MemberRole, ROLE_HIERARCHY } from './moderation-types'
 
@@ -92,16 +91,6 @@ export function MemberContextMenu({
     createDm.mutate(targetUserId, {
       onSuccess: (data) => {
         onNavigateDm(data.serverId, data.channelId)
-      },
-      onError: (error) => {
-        // WHY: Hook-level onError in useCreateDm already logs the raw error.
-        // This call-site handler shows user feedback and adds target context for diagnostics.
-        toast.error(t('couldNotOpenDm'), {
-          context: {
-            targetUserId,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        })
       },
     })
   }

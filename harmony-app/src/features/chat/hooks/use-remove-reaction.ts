@@ -1,9 +1,12 @@
 import type { InfiniteData } from '@tanstack/react-query'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import type { MessageListResponse, ReactionSummary } from '@/lib/api'
 import { removeReaction } from '@/lib/api'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 /**
  * WHY: Mutation hook for removing a reaction from a message.
@@ -54,6 +57,7 @@ export function useRemoveReaction(channelId: string) {
         channelId,
         error: error instanceof Error ? error.message : String(error),
       })
+      toast.error(getApiErrorDetail(error, i18n.t('chat:removeReactionFailed')))
       if (context?.previousData) {
         queryClient.setQueryData(messageQueryKey, context.previousData)
       }

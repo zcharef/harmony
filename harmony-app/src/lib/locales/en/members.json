@@ -24,14 +24,15 @@
   "kickUser": "Kick {{username}}",
   "kickConfirmation": "Kick @{{username}} from {{serverName}}? They can rejoin with an invite.",
   "kickAction": "Kick",
-  "kickFailed": "Failed to kick member. Please try again.",
+  "kickFailed": "Failed to kick member",
+  "changeRoleFailed": "Failed to change role",
 
   "banUser": "Ban {{username}}",
   "banConfirmation": "Ban @{{username}} from {{serverName}}? They will not be able to rejoin.",
   "banReason": "Reason (optional)",
   "banReasonPlaceholder": "Why is this user being banned?",
   "banAction": "Ban",
-  "banFailed": "Failed to ban member. Please try again.",
+  "banFailed": "Failed to ban member",
 
   "sendMessage": "Message {{username}}",
   "couldNotOpenDm": "Could not open DM",

@@ -1,8 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import type { JoinServerRequest } from '@/lib/api'
 import { joinServer } from '@/lib/api'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 // WHY: serverId comes from the preview response, body type from OpenAPI SSoT.
 interface JoinServerInput {
@@ -33,6 +36,7 @@ export function useJoinServer() {
       logger.error('join_server_failed', {
         error: error instanceof Error ? error.message : String(error),
       })
+      toast.error(getApiErrorDetail(error, i18n.t('servers:failedToJoinServer')))
     },
   })
 }

@@ -10,6 +10,10 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }))
 
+vi.mock('@/lib/toast', () => ({
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}))
+
 const { updateServer } = await import('@/lib/api')
 const { logger } = await import('@/lib/logger')
 const { useUpdateServer } = await import('./use-update-server')

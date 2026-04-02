@@ -29,7 +29,6 @@ import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { CreateInviteDialog } from '@/features/server-nav'
 import { useSettingsUiStore } from '@/features/settings'
 import type { ChannelResponse } from '@/lib/api'
-import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { CreateChannelDialog } from './create-channel-dialog'
 import { EditChannelDialog } from './edit-channel-dialog'
@@ -267,11 +266,7 @@ export function ChannelSidebar({
           onLeave={() => {
             if (serverId === null) return
             if (window.confirm(t('leaveConfirm', { serverName: serverName ?? '' }))) {
-              leaveServerMutation.mutate(serverId, {
-                onError: (error) => {
-                  toast.error(error instanceof Error ? error.message : t('leaveServer'))
-                },
-              })
+              leaveServerMutation.mutate(serverId)
             }
           }}
         />

@@ -1,8 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import type { CreateServerRequest } from '@/lib/api'
 import { createServer } from '@/lib/api'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 /**
  * WHY: Wraps createServer SDK in a mutation with automatic cache
@@ -26,6 +29,7 @@ export function useCreateServer() {
       logger.error('create_server_failed', {
         error: error instanceof Error ? error.message : String(error),
       })
+      toast.error(getApiErrorDetail(error, i18n.t('servers:createServerFailed')))
     },
   })
 }

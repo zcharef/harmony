@@ -1,7 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import { transferOwnership } from '@/lib/api'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 /**
  * WHY: Wraps the generated transferOwnership SDK call in a mutation.
@@ -29,6 +32,7 @@ export function useTransferOwnership(serverId: string) {
         serverId,
         error: error instanceof Error ? error.message : String(error),
       })
+      toast.error(getApiErrorDetail(error, i18n.t('servers:transferOwnershipFailed')))
     },
   })
 }

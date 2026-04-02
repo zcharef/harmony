@@ -1,7 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import { client } from '@/lib/api/client.gen'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 /**
  * WHY: DELETE /v1/servers/{id} is not yet in the generated SDK.
@@ -26,6 +29,7 @@ export function useDeleteServer() {
       logger.error('Failed to delete server', {
         error: error instanceof Error ? error.message : String(error),
       })
+      toast.error(getApiErrorDetail(error, i18n.t('servers:deleteServerFailed')))
     },
   })
 }

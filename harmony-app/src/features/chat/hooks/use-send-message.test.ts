@@ -16,6 +16,10 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }))
 
+vi.mock('@/lib/toast', () => ({
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}))
+
 // Imports after vi.mock so we get the mocked versions
 const { sendMessage } = await import('@/lib/api')
 const { logger } = await import('@/lib/logger')

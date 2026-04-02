@@ -1,8 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import type { CreateInviteRequest } from '@/lib/api'
 import { createInvite } from '@/lib/api'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 /**
  * WHY: Wraps createInvite SDK in a mutation with automatic cache
@@ -27,6 +30,7 @@ export function useCreateInvite(serverId: string) {
       logger.error('create_invite_failed', {
         error: error instanceof Error ? error.message : String(error),
       })
+      toast.error(getApiErrorDetail(error, i18n.t('servers:createInviteFailed')))
     },
   })
 }

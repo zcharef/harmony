@@ -1,9 +1,12 @@
 import type { InfiniteData } from '@tanstack/react-query'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import type { MessageListResponse, MessageResponse } from '@/lib/api'
 import { sendMessage } from '@/lib/api'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 export interface SendMessageEncryption {
   /** WHY: Async function that encrypts plaintext and returns the ciphertext envelope + deviceId. */
@@ -149,6 +152,7 @@ export function useSendMessage(
         channelId,
         error: error instanceof Error ? error.message : String(error),
       })
+      toast.error(getApiErrorDetail(error, i18n.t('chat:sendMessageFailed')))
 
       // WHY rollback: Restore the exact cache state from before the mutation
       // so the user does not see a ghost message that never reached the server

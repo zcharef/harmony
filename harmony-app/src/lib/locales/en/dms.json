@@ -8,6 +8,8 @@
   "noUsersFound": "No users found",
   "loadingUsers": "Loading users...",
   "failedToLoadDms": "Failed to load conversations",
+  "createDmFailed": "Failed to open DM",
+  "closeDmFailed": "Failed to close DM",
   "failedToLoadUsers": "Failed to load users",
   "startingConversation": "Starting conversation...",
   "closeDm": "Close DM",

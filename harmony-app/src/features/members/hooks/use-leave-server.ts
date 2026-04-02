@@ -1,5 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
+import i18n from 'i18next'
 import { leaveServer } from '@/lib/api'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { toast } from '@/lib/toast'
 
@@ -20,7 +22,7 @@ export function useLeaveServer() {
       logger.error('leave_server_failed', {
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error('Failed to leave server')
+      toast.error(getApiErrorDetail(error, i18n.t('channels:leaveServerFailed')))
     },
   })
 }

@@ -1,8 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import type { ServerId } from '@/lib/api'
 import { closeDm } from '@/lib/api'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 /**
  * WHY: Wraps closeDm SDK in a mutation with automatic cache invalidation.
@@ -26,6 +29,7 @@ export function useCloseDm() {
       logger.error('Failed to close DM', {
         error: error instanceof Error ? error.message : String(error),
       })
+      toast.error(getApiErrorDetail(error, i18n.t('dms:closeDmFailed')))
     },
   })
 }
