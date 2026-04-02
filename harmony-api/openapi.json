@@ -3232,9 +3232,16 @@
         "description": "Server ban response returned to API consumers.",
         "required": [
           "userId",
+          "username",
           "createdAt"
         ],
         "properties": {
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "bannedBy": {
             "oneOf": [
               {
@@ -3257,6 +3264,9 @@
           },
           "userId": {
             "$ref": "#/components/schemas/UserId"
+          },
+          "username": {
+            "type": "string"
           }
         }
       },

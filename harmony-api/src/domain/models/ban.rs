@@ -9,6 +9,8 @@ use super::ids::{ServerId, UserId};
 pub struct ServerBan {
     pub server_id: ServerId,
     pub user_id: UserId,
+    pub username: String,
+    pub avatar_url: Option<String>,
     pub banned_by: Option<UserId>,
     pub reason: Option<String>,
     pub created_at: DateTime<Utc>,

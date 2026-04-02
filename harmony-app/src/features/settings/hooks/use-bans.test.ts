@@ -28,7 +28,14 @@ beforeEach(() => {
 describe('useBans', () => {
   it('fetches bans with correct path and throwOnError', async () => {
     const bansPayload = {
-      items: [{ userId: 'user-1', reason: 'spam', createdAt: '2026-04-01T00:00:00Z' }],
+      items: [
+        {
+          userId: 'user-1',
+          username: 'banned-user',
+          reason: 'spam',
+          createdAt: '2026-04-01T00:00:00Z',
+        },
+      ],
     }
     vi.mocked(listBans).mockResolvedValueOnce({ data: bansPayload } as never)
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT server_id, user_id, banned_by, reason, created_at\n            FROM server_bans\n            WHERE server_id = $1\n            ORDER BY created_at DESC\n            ",
+  "query": "\n            SELECT sb.server_id, sb.user_id, p.username, p.avatar_url,\n                   sb.banned_by, sb.reason, sb.created_at\n            FROM server_bans sb\n            INNER JOIN profiles p ON p.id = sb.user_id\n            WHERE sb.server_id = $1\n            ORDER BY sb.created_at DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -15,16 +15,26 @@
       },
       {
         "ordinal": 2,
-        "name": "banned_by",
-        "type_info": "Uuid"
+        "name": "username",
+        "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "reason",
+        "name": "avatar_url",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
+        "name": "banned_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -37,10 +47,12 @@
     "nullable": [
       false,
       false,
+      false,
+      true,
       true,
       true,
       false
     ]
   },
-  "hash": "70e7ba2befb7183b59593bbe6bec2d11356819341b8ff7128e885b5e0b569a03"
+  "hash": "3095575af71dd23a4d223089a21fceb705430b6355e85cbc9e74fe7ed90e6bb1"
 }

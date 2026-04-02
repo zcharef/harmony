@@ -74,14 +74,15 @@ export function BansTab({ serverId, callerRole }: BansTabProps) {
               data-user-id={ban.userId}
             >
               <Avatar
-                name={ban.userId.slice(0, 2)}
+                name={ban.username}
+                src={ban.avatarUrl ?? undefined}
                 size="sm"
                 showFallback
                 icon={<UserX className="h-4 w-4" />}
                 classNames={{ base: 'h-8 w-8 shrink-0', name: 'text-xs' }}
               />
               <div className="flex-1 overflow-hidden">
-                <span className="truncate text-sm font-medium text-foreground">{ban.userId}</span>
+                <span className="truncate text-sm font-medium text-foreground">{ban.username}</span>
                 <div className="flex items-center gap-2">
                   {ban.reason !== undefined && ban.reason !== null && (
                     <span className="truncate text-xs text-default-400">{ban.reason}</span>

@@ -20,6 +20,9 @@ pub struct BanUserRequest {
 #[serde(rename_all = "camelCase")]
 pub struct BanResponse {
     pub user_id: UserId,
+    pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub banned_by: Option<UserId>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,6 +34,8 @@ impl From<ServerBan> for BanResponse {
     fn from(b: ServerBan) -> Self {
         Self {
             user_id: b.user_id,
+            username: b.username,
+            avatar_url: b.avatar_url,
             banned_by: b.banned_by,
             reason: b.reason,
             created_at: b.created_at,

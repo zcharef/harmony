@@ -26,6 +26,8 @@ impl PgBanRepository {
 struct BanRow {
     server_id: Uuid,
     user_id: Uuid,
+    username: String,
+    avatar_url: Option<String>,
     banned_by: Option<Uuid>,
     reason: Option<String>,
     created_at: DateTime<Utc>,
@@ -36,6 +38,8 @@ impl BanRow {
         ServerBan {
             server_id: ServerId::new(self.server_id),
             user_id: UserId::new(self.user_id),
+            username: self.username,
+            avatar_url: self.avatar_url,
             banned_by: self.banned_by.map(UserId::new),
             reason: self.reason,
             created_at: self.created_at,
@@ -89,6 +93,19 @@ impl BanRepository for PgBanRepository {
             }
         })?;
 
+        // WHY: Fetch profile info for the ban response (username + avatar).
+        let profile = sqlx::query!(
+            r#"
+            SELECT username, avatar_url
+            FROM profiles
+            WHERE id = $1
+            "#,
+            uid,
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
         // Remove membership (idempotent — OK if user already left)
         sqlx::query!(
             r#"
@@ -107,6 +124,8 @@ impl BanRepository for PgBanRepository {
         let ban = BanRow {
             server_id: row.server_id,
             user_id: row.user_id,
+            username: profile.username,
+            avatar_url: profile.avatar_url,
             banned_by: row.banned_by,
             reason: row.reason,
             created_at: row.created_at,
@@ -146,10 +165,12 @@ impl BanRepository for PgBanRepository {
 
         let rows = sqlx::query!(
             r#"
-            SELECT server_id, user_id, banned_by, reason, created_at
-            FROM server_bans
-            WHERE server_id = $1
-            ORDER BY created_at DESC
+            SELECT sb.server_id, sb.user_id, p.username, p.avatar_url,
+                   sb.banned_by, sb.reason, sb.created_at
+            FROM server_bans sb
+            INNER JOIN profiles p ON p.id = sb.user_id
+            WHERE sb.server_id = $1
+            ORDER BY sb.created_at DESC
             "#,
             sid,
         )
@@ -163,6 +184,8 @@ impl BanRepository for PgBanRepository {
                 BanRow {
                     server_id: r.server_id,
                     user_id: r.user_id,
+                    username: r.username,
+                    avatar_url: r.avatar_url,
                     banned_by: r.banned_by,
                     reason: r.reason,
                     created_at: r.created_at,
@@ -185,11 +208,13 @@ impl BanRepository for PgBanRepository {
         // Cursor pagination (ADR-036): filter by created_at < cursor when present.
         let rows = sqlx::query!(
             r#"
-            SELECT server_id, user_id, banned_by, reason, created_at
-            FROM server_bans
-            WHERE server_id = $1
-              AND ($2::timestamptz IS NULL OR created_at < $2)
-            ORDER BY created_at DESC
+            SELECT sb.server_id, sb.user_id, p.username, p.avatar_url,
+                   sb.banned_by, sb.reason, sb.created_at
+            FROM server_bans sb
+            INNER JOIN profiles p ON p.id = sb.user_id
+            WHERE sb.server_id = $1
+              AND ($2::timestamptz IS NULL OR sb.created_at < $2)
+            ORDER BY sb.created_at DESC
             LIMIT $3
             "#,
             sid,
@@ -206,6 +231,8 @@ impl BanRepository for PgBanRepository {
                 BanRow {
                     server_id: r.server_id,
                     user_id: r.user_id,
+                    username: r.username,
+                    avatar_url: r.avatar_url,
                     banned_by: r.banned_by,
                     reason: r.reason,
                     created_at: r.created_at,
