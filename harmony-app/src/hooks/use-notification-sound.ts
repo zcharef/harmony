@@ -69,7 +69,10 @@ function isDmServer(serverId: string, queryClient: QueryClient): boolean {
   return dms.some((dm) => dm.serverId === serverId)
 }
 
+const NOTIFICATION_VOLUME = 0.6
+
 function playSound(audio: HTMLAudioElement): void {
+  audio.volume = NOTIFICATION_VOLUME
   audio.currentTime = 0
   audio.play().catch((err: unknown) => {
     logger.warn('notification_sound_play_failed', {
