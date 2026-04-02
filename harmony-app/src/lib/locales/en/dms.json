@@ -26,5 +26,6 @@
   "statusIdle": "Idle",
   "statusDnd": "Do Not Disturb",
   "statusOffline": "Offline",
-  "you": "You"
+  "you": "You",
+  "encryptedPreview": "Encrypted message"
 }

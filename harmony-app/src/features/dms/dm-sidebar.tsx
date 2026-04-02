@@ -1,5 +1,5 @@
 import { Avatar, Button, Spinner } from '@heroui/react'
-import { Headphones, MessageSquarePlus, Mic, Settings, X } from 'lucide-react'
+import { Headphones, Lock, MessageSquarePlus, Mic, Settings, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
@@ -88,14 +88,18 @@ function DmConversationItem({
           >
             {displayName}
           </span>
-          {/* TODO(e2ee): DmLastMessageResponse needs `encrypted` field from backend
-             to show "[Encrypted message]" fallback on web. Without it, encrypted
-             messages from desktop will show raw ciphertext in the sidebar. */}
           {dm.lastMessage !== undefined && dm.lastMessage !== null && (
             <span className="truncate text-xs text-default-500">
-              {dm.lastMessage.content.length > 50
-                ? `${dm.lastMessage.content.slice(0, 50)}...`
-                : dm.lastMessage.content}
+              {dm.lastMessage.encrypted === true ? (
+                <span className="inline-flex items-center gap-1 italic">
+                  <Lock className="h-3 w-3" />
+                  {t('encryptedPreview')}
+                </span>
+              ) : dm.lastMessage.content.length > 50 ? (
+                `${dm.lastMessage.content.slice(0, 50)}...`
+              ) : (
+                dm.lastMessage.content
+              )}
             </span>
           )}
         </div>

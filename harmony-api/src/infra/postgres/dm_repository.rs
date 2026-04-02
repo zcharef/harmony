@@ -175,6 +175,7 @@ impl DmRepository for PgDmRepository {
                 p.avatar_url AS other_avatar_url,
                 latest_msg.content AS "last_message_content?",
                 latest_msg.created_at AS "last_message_at?: DateTime<Utc>",
+                latest_msg.encrypted AS "last_message_encrypted?",
                 my_membership.joined_at AS joined_at
             FROM servers s
             INNER JOIN server_members my_membership
@@ -184,7 +185,7 @@ impl DmRepository for PgDmRepository {
             INNER JOIN channels c ON c.server_id = s.id
             INNER JOIN profiles p ON p.id = other_member.user_id
             LEFT JOIN LATERAL (
-                SELECT m.content, m.created_at
+                SELECT m.content, m.created_at, m.encrypted
                 FROM messages m
                 WHERE m.channel_id = c.id AND m.deleted_at IS NULL
                 ORDER BY m.created_at DESC
@@ -217,6 +218,7 @@ impl DmRepository for PgDmRepository {
                 other_avatar_url: r.other_avatar_url,
                 last_message_content: r.last_message_content,
                 last_message_at: r.last_message_at,
+                last_message_encrypted: r.last_message_encrypted,
                 joined_at: r.joined_at,
             })
             .collect();

@@ -3655,7 +3655,8 @@
         "description": "Last message preview embedded in DM list items.",
         "required": [
           "content",
-          "createdAt"
+          "createdAt",
+          "encrypted"
         ],
         "properties": {
           "content": {
@@ -3664,6 +3665,10 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "encrypted": {
+            "type": "boolean",
+            "description": "Whether this message contains E2EE ciphertext."
           }
         }
       },

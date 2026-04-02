@@ -57,6 +57,8 @@ impl From<DmConversation> for DmResponse {
 pub struct DmLastMessageResponse {
     pub content: String,
     pub created_at: DateTime<Utc>,
+    /// Whether this message contains E2EE ciphertext.
+    pub encrypted: bool,
 }
 
 /// A single DM conversation in the list response.
@@ -76,6 +78,7 @@ impl From<DmConversation> for DmListItem {
             (Some(content), Some(created_at)) => Some(DmLastMessageResponse {
                 content,
                 created_at,
+                encrypted: dm.last_message_encrypted.unwrap_or(false),
             }),
             _ => None,
         };

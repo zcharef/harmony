@@ -20,6 +20,8 @@ pub struct DmRow {
     pub last_message_content: Option<String>,
     /// Timestamp of the most recent message (`None` if no messages yet).
     pub last_message_at: Option<DateTime<Utc>>,
+    /// Whether the most recent message is E2EE ciphertext.
+    pub last_message_encrypted: Option<bool>,
     /// When the caller joined this DM (used as sort fallback).
     pub joined_at: DateTime<Utc>,
 }

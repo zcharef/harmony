@@ -7,10 +7,10 @@ import { messagePayloadSchema } from '@/lib/event-types'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 
-/** WHY: message.created carries channelId + full message — we only need content + createdAt for the preview. */
+/** WHY: message.created carries channelId + full message — we only need content, createdAt, and encrypted for the preview. */
 const messageEventSchema = z.object({
   channelId: z.string(),
-  message: messagePayloadSchema.pick({ content: true, createdAt: true }),
+  message: messagePayloadSchema.pick({ content: true, createdAt: true, encrypted: true }),
 })
 
 /**
@@ -59,7 +59,11 @@ export function useRealtimeDms() {
 
         const updated: DmListItem = {
           ...match,
-          lastMessage: { content: message.content, createdAt: message.createdAt },
+          lastMessage: {
+            content: message.content,
+            createdAt: message.createdAt,
+            encrypted: message.encrypted,
+          },
         }
 
         // WHY: Move the updated DM to position 0 so the sidebar reflects

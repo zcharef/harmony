@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                s.id AS server_id,\n                c.id AS channel_id,\n                other_member.user_id AS other_user_id,\n                p.username AS other_username,\n                p.display_name AS other_display_name,\n                p.avatar_url AS other_avatar_url,\n                latest_msg.content AS \"last_message_content?\",\n                latest_msg.created_at AS \"last_message_at?: DateTime<Utc>\",\n                latest_msg.encrypted AS \"last_message_encrypted?\",\n                my_membership.joined_at AS joined_at\n            FROM servers s\n            INNER JOIN server_members my_membership\n                ON my_membership.server_id = s.id AND my_membership.user_id = $1\n            INNER JOIN server_members other_member\n                ON other_member.server_id = s.id AND other_member.user_id != $1\n            INNER JOIN channels c ON c.server_id = s.id\n            INNER JOIN profiles p ON p.id = other_member.user_id\n            LEFT JOIN LATERAL (\n                SELECT m.content, m.created_at, m.encrypted\n                FROM messages m\n                WHERE m.channel_id = c.id AND m.deleted_at IS NULL\n                ORDER BY m.created_at DESC\n                LIMIT 1\n            ) latest_msg ON true\n            WHERE s.is_dm = true\n              AND (\n                  $2::timestamptz IS NULL\n                  OR COALESCE(latest_msg.created_at, my_membership.joined_at) < $2\n              )\n            ORDER BY COALESCE(latest_msg.created_at, my_membership.joined_at) DESC\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "other_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "other_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "other_display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "other_avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_message_content?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_message_at?: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_message_encrypted?",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "79a14609cdba2f2cd5a22a59561ba5cee83b5df299c609d425e169085b7a45bc"
+}

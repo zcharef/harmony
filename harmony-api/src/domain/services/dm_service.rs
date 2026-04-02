@@ -22,6 +22,8 @@ pub struct DmConversation {
     pub recipient_avatar_url: Option<String>,
     pub last_message_content: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
+    /// Whether the most recent message is E2EE ciphertext.
+    pub last_message_encrypted: Option<bool>,
     /// When the caller joined this DM (used as cursor fallback when no messages exist).
     pub joined_at: DateTime<Utc>,
 }
@@ -37,6 +39,7 @@ impl From<DmRow> for DmConversation {
             recipient_avatar_url: row.other_avatar_url,
             last_message_content: row.last_message_content,
             last_message_at: row.last_message_at,
+            last_message_encrypted: row.last_message_encrypted,
             joined_at: row.joined_at,
         }
     }
@@ -127,6 +130,7 @@ impl DmService {
                 recipient_avatar_url: recipient.avatar_url,
                 last_message_content: None,
                 last_message_at: None,
+                last_message_encrypted: None,
                 // WHY: For the create-or-get path we don't have the real joined_at
                 // from the DB, but this value is only used as a cursor fallback when
                 // last_message_at is None. Using `now` is acceptable here because
@@ -163,6 +167,7 @@ impl DmService {
             recipient_avatar_url: recipient.avatar_url,
             last_message_content: None,
             last_message_at: None,
+            last_message_encrypted: None,
             // WHY: Just created, so joined_at is effectively now.
             joined_at: now,
         };
@@ -302,6 +307,7 @@ mod tests {
             other_avatar_url: Some("https://example.com/avatar.png".to_string()),
             last_message_content: Some("Hello!".to_string()),
             last_message_at: Some(now),
+            last_message_encrypted: Some(true),
             joined_at: now,
         };
 
@@ -321,6 +327,7 @@ mod tests {
         );
         assert_eq!(conversation.last_message_content.as_deref(), Some("Hello!"));
         assert_eq!(conversation.last_message_at, Some(now));
+        assert_eq!(conversation.last_message_encrypted, Some(true));
         assert_eq!(conversation.joined_at, now);
     }
 
@@ -336,6 +343,7 @@ mod tests {
             other_avatar_url: None,
             last_message_content: None,
             last_message_at: None,
+            last_message_encrypted: None,
             joined_at: now,
         };
 
@@ -345,6 +353,7 @@ mod tests {
         assert!(conversation.recipient_avatar_url.is_none());
         assert!(conversation.last_message_content.is_none());
         assert!(conversation.last_message_at.is_none());
+        assert!(conversation.last_message_encrypted.is_none());
     }
 
     // ── Async service methods requiring repos ────────────────────
