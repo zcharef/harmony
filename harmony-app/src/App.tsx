@@ -97,7 +97,16 @@ function App() {
             </CryptoProvider>
           </AuthProvider>
         </main>
-        <ToastProvider placement="bottom-right" toastOffset={16} />
+        <ToastProvider
+          placement="bottom-right"
+          toastOffset={16}
+          toastProps={{
+            classNames: {
+              base: 'w-full sm:w-auto sm:max-w-md',
+              title: 'whitespace-normal',
+            },
+          }}
+        />
       </HeroUIProvider>
     </QueryClientProvider>
   )
