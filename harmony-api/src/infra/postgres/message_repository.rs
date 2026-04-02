@@ -103,19 +103,33 @@ struct MessageWithAuthorRow {
     // Parent message preview fields from self-JOIN.
     parent_author_username: Option<String>,
     parent_content_preview: Option<String>,
+    // WHY: Indicates whether the parent message was soft-deleted.
+    // Used to show "[Original message was deleted]" in the quote block.
+    parent_deleted: Option<bool>,
 }
 
 impl MessageWithAuthorRow {
     fn into_message_with_author(self) -> MessageWithAuthor {
-        // WHY: Build parent preview only when both parent_message_id and
-        // parent_author_username are present. If the parent was deleted
-        // (NULL from LEFT JOIN), we skip the preview entirely.
-        let parent_message = match (self.parent_message_id, self.parent_author_username) {
-            (Some(pid), Some(username)) => Some(ParentMessagePreview {
+        // WHY: Check parent_deleted FIRST. When a parent is deleted AND
+        // its author profile is also deleted, parent_author_username is
+        // None — matching on username first would skip the preview entirely
+        // instead of showing "[deleted]".
+        let parent_message = match (self.parent_message_id, self.parent_deleted.unwrap_or(false)) {
+            (Some(pid), true) => Some(ParentMessagePreview {
                 id: MessageId::new(pid),
-                author_username: username,
-                content_preview: self.parent_content_preview.unwrap_or_default(),
+                deleted: true,
+                author_username: String::new(),
+                content_preview: String::new(),
             }),
+            (Some(pid), false) => {
+                self.parent_author_username
+                    .map(|username| ParentMessagePreview {
+                        id: MessageId::new(pid),
+                        deleted: false,
+                        author_username: username,
+                        content_preview: self.parent_content_preview.unwrap_or_default(),
+                    })
+            }
             _ => None,
         };
 
@@ -204,10 +218,11 @@ impl MessageRepository for PgMessageRepository {
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?",
                 parent_p.username AS "parent_author_username?",
-                LEFT(parent_m.content, 100) AS "parent_content_preview?"
+                LEFT(parent_m.content, 100) AS "parent_content_preview?",
+                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
             FROM inserted i
             LEFT JOIN profiles p ON p.id = i.author_id
-            LEFT JOIN messages parent_m ON parent_m.id = i.parent_message_id AND parent_m.deleted_at IS NULL
+            LEFT JOIN messages parent_m ON parent_m.id = i.parent_message_id
             LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
             "#,
             cid,
@@ -239,6 +254,7 @@ impl MessageRepository for PgMessageRepository {
             author_avatar_url: row.author_avatar_url,
             parent_author_username: row.parent_author_username,
             parent_content_preview: row.parent_content_preview,
+            parent_deleted: row.parent_deleted,
         };
 
         Ok(msg.into_message_with_author())
@@ -273,10 +289,11 @@ impl MessageRepository for PgMessageRepository {
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?",
                 parent_p.username AS "parent_author_username?",
-                LEFT(parent_m.content, 100) AS "parent_content_preview?"
+                LEFT(parent_m.content, 100) AS "parent_content_preview?",
+                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
             FROM messages m
             LEFT JOIN profiles p ON p.id = m.author_id
-            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id AND parent_m.deleted_at IS NULL
+            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id
             LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
             WHERE m.channel_id = $1
               AND m.deleted_at IS NULL
@@ -313,6 +330,7 @@ impl MessageRepository for PgMessageRepository {
                     author_avatar_url: r.author_avatar_url,
                     parent_author_username: r.parent_author_username,
                     parent_content_preview: r.parent_content_preview,
+                    parent_deleted: r.parent_deleted,
                 }
                 .into_message_with_author()
             })
@@ -414,10 +432,11 @@ impl MessageRepository for PgMessageRepository {
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?",
                 parent_p.username AS "parent_author_username?",
-                LEFT(parent_m.content, 100) AS "parent_content_preview?"
+                LEFT(parent_m.content, 100) AS "parent_content_preview?",
+                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
             FROM updated u
             LEFT JOIN profiles p ON p.id = u.author_id
-            LEFT JOIN messages parent_m ON parent_m.id = u.parent_message_id AND parent_m.deleted_at IS NULL
+            LEFT JOIN messages parent_m ON parent_m.id = u.parent_message_id
             LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
             "#,
             mid,
@@ -449,6 +468,7 @@ impl MessageRepository for PgMessageRepository {
             author_avatar_url: row.author_avatar_url,
             parent_author_username: row.parent_author_username,
             parent_content_preview: row.parent_content_preview,
+            parent_deleted: row.parent_deleted,
         };
 
         Ok(msg.into_message_with_author())
@@ -589,6 +609,7 @@ impl MessageRepository for PgMessageRepository {
             // WHY: System messages never have parent replies.
             parent_author_username: None,
             parent_content_preview: None,
+            parent_deleted: None,
         };
 
         Ok(msg.into_message_with_author())

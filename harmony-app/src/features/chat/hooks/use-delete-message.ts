@@ -33,9 +33,23 @@ export function useDeleteMessage(channelId: string, currentUserId: string) {
           ...old,
           pages: old.pages.map((page) => ({
             ...page,
-            items: page.items.map((m) =>
-              m.id === messageId ? { ...m, deletedBy: currentUserId } : m,
-            ),
+            items: page.items.map((m) => {
+              if (m.id === messageId) {
+                return { ...m, deletedBy: currentUserId }
+              }
+              if (m.parentMessage?.id === messageId) {
+                return {
+                  ...m,
+                  parentMessage: {
+                    ...m.parentMessage,
+                    deleted: true,
+                    contentPreview: '',
+                    authorUsername: '',
+                  },
+                }
+              }
+              return m
+            }),
           })),
         }
       })

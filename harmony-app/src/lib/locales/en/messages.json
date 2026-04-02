@@ -2,6 +2,7 @@
   "sending": "Sending...",
   "edited": "(edited)",
   "deletedMessage": "[Message deleted]",
+  "deletedParentMessage": "[Original message was deleted]",
   "removedByModerator": "[Message removed by moderator]",
   "todayAt": "Today at {{time}}",
   "dateAt": "{{date}} at {{time}}",

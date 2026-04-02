@@ -316,12 +316,19 @@ function SystemMessageItem({ message, t }: { message: MessageResponse; t: TFunct
 
 // WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
 function ParentQuote({ parentMessage }: { parentMessage?: MessageResponse['parentMessage'] }) {
+  const { t } = useTranslation('messages')
   if (parentMessage === undefined || parentMessage === null) return null
 
   return (
     <div className="mb-1 border-l-2 border-default-300 pl-2 opacity-75">
-      <span className="text-xs font-medium">{parentMessage.authorUsername}</span>
-      <p className="truncate text-xs text-default-500">{parentMessage.contentPreview}</p>
+      {parentMessage.deleted === true ? (
+        <p className="text-xs italic text-default-400">{t('deletedParentMessage')}</p>
+      ) : (
+        <>
+          <span className="text-xs font-medium">{parentMessage.authorUsername}</span>
+          <p className="truncate text-xs text-default-500">{parentMessage.contentPreview}</p>
+        </>
+      )}
     </div>
   )
 }

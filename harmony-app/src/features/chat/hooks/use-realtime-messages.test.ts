@@ -272,6 +272,80 @@ describe('useRealtimeMessages', () => {
     })
   })
 
+  // -- message.deleted: marks parentMessage as deleted on child messages ------
+
+  it('marks parentMessage as deleted on child messages when parent is deleted', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const parentMsg = buildMessage({ id: 'msg-parent', authorId: 'user-42' })
+    const childMsg = buildMessage({
+      id: 'msg-child',
+      authorId: 'user-99',
+      parentMessage: {
+        id: 'msg-parent',
+        authorUsername: 'alice',
+        contentPreview: 'hello world',
+        deleted: false,
+      },
+    })
+    queryClient.setQueryData(messageKey, buildCacheData([parentMsg, childMsg]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('message.deleted', {
+        channelId: CHANNEL_ID,
+        messageId: 'msg-parent',
+      })
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const items = cacheData?.pages[0]?.items ?? []
+    expect(items).toHaveLength(2)
+    // Parent is soft-deleted
+    expect(items[0]).toMatchObject({ id: 'msg-parent', deletedBy: 'user-42' })
+    // Child's parentMessage is marked deleted with cleared content
+    expect(items[1]?.parentMessage).toMatchObject({
+      id: 'msg-parent',
+      deleted: true,
+      contentPreview: '',
+      authorUsername: '',
+    })
+  })
+
+  it('marks parentMessage as deleted on multiple child messages quoting the same parent', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const parentMsg = buildMessage({ id: 'msg-parent', authorId: 'user-42' })
+    const parentPreview = {
+      id: 'msg-parent',
+      authorUsername: 'alice',
+      contentPreview: 'hello',
+      deleted: false,
+    }
+    const childA = buildMessage({ id: 'msg-child-a', parentMessage: parentPreview })
+    const childB = buildMessage({ id: 'msg-child-b', parentMessage: parentPreview })
+    queryClient.setQueryData(messageKey, buildCacheData([parentMsg, childA, childB]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('message.deleted', {
+        channelId: CHANNEL_ID,
+        messageId: 'msg-parent',
+      })
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const items = cacheData?.pages[0]?.items ?? []
+    expect(items[1]?.parentMessage?.deleted).toBe(true)
+    expect(items[2]?.parentMessage?.deleted).toBe(true)
+  })
+
   // -- message.deleted: malformed payload logs error --------------------------
 
   it('logs error and does not update cache when message.deleted payload is malformed', () => {

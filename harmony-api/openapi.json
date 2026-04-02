@@ -4292,7 +4292,8 @@
         "required": [
           "id",
           "authorUsername",
-          "contentPreview"
+          "contentPreview",
+          "deleted"
         ],
         "properties": {
           "authorUsername": {
@@ -4301,6 +4302,10 @@
           "contentPreview": {
             "type": "string",
             "description": "First 100 characters of the parent message content."
+          },
+          "deleted": {
+            "type": "boolean",
+            "description": "WHY: When true, the parent message was soft-deleted. The frontend\nrenders \"[Original message was deleted]\" instead of the content.\n`author_username` and `content_preview` are empty when deleted\nto avoid leaking content or identity."
           },
           "id": {
             "$ref": "#/components/schemas/MessageId"

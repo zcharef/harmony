@@ -153,6 +153,8 @@ export function useRealtimeMessages(channelId: string) {
       // The SSE message.deleted event doesn't carry who deleted it,
       // so we use a sentinel value. The REST API will have the real
       // deletedBy on next full fetch.
+      // Also marks parentMessage as deleted on child messages that
+      // quote the deleted message, so the quote shows "[deleted]".
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
         queryKeys.messages.byChannel(parsed.data.channelId),
         (old) => {
@@ -161,9 +163,23 @@ export function useRealtimeMessages(channelId: string) {
             ...old,
             pages: old.pages.map((page) => ({
               ...page,
-              items: page.items.map((m) =>
-                m.id === parsed.data.messageId ? { ...m, deletedBy: m.authorId } : m,
-              ),
+              items: page.items.map((m) => {
+                if (m.id === parsed.data.messageId) {
+                  return { ...m, deletedBy: m.authorId }
+                }
+                if (m.parentMessage?.id === parsed.data.messageId) {
+                  return {
+                    ...m,
+                    parentMessage: {
+                      ...m.parentMessage,
+                      deleted: true,
+                      contentPreview: '',
+                      authorUsername: '',
+                    },
+                  }
+                }
+                return m
+              }),
             })),
           }
         },

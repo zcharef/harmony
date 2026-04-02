@@ -109,6 +109,53 @@ describe('useDeleteMessage', () => {
     expect(updated?.pages[0]?.items[0]?.deletedBy).toBe(CURRENT_USER_ID)
   })
 
+  it('marks parentMessage as deleted on child messages when parent is deleted', async () => {
+    vi.mocked(deleteMessage).mockResolvedValueOnce({ data: undefined } as never)
+
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const setDataSpy = vi.spyOn(queryClient, 'setQueryData')
+
+    const wrapper = createQueryWrapper(queryClient)
+    const { result } = renderHook(() => useDeleteMessage(CHANNEL_ID, CURRENT_USER_ID), { wrapper })
+
+    await act(async () => {
+      result.current.mutate('msg-42')
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    const mutationCall = setDataSpy.mock.calls.find(
+      (call) =>
+        JSON.stringify(call[0]) === JSON.stringify(messageKey) && typeof call[1] === 'function',
+    )
+    const updater = mutationCall?.[1] as
+      | ((
+          old: InfiniteData<MessageListResponse> | undefined,
+        ) => InfiniteData<MessageListResponse> | undefined)
+      | undefined
+
+    const parentMsg = buildMessage({ id: 'msg-42' })
+    const childMsg = buildMessage({
+      id: 'msg-child',
+      parentMessage: {
+        id: 'msg-42',
+        authorUsername: 'alice',
+        contentPreview: 'hello',
+        deleted: false,
+      },
+    })
+    const updated = updater?.(buildCacheData([parentMsg, childMsg]))
+
+    expect(updated?.pages[0]?.items[0]?.deletedBy).toBe(CURRENT_USER_ID)
+    expect(updated?.pages[0]?.items[1]?.parentMessage).toMatchObject({
+      id: 'msg-42',
+      deleted: true,
+      contentPreview: '',
+      authorUsername: '',
+    })
+  })
+
   it('calls logger.error on mutation failure', async () => {
     vi.mocked(deleteMessage).mockRejectedValueOnce(new Error('Not Found'))
 

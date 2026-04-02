@@ -60,4 +60,9 @@ pub struct ParentMessagePreview {
     pub author_username: String,
     /// First 100 characters of the parent message content.
     pub content_preview: String,
+    /// WHY: When true, the parent message was soft-deleted. The frontend
+    /// renders "[Original message was deleted]" instead of the content.
+    /// `author_username` and `content_preview` are empty when deleted
+    /// to avoid leaking content or identity.
+    pub deleted: bool,
 }
