@@ -114,6 +114,94 @@ describe('useRealtimeMessages', () => {
     expect(items[1]?.id).toBe('existing-1')
   })
 
+  // -- message.created: builds parentMessage from cache -------------------------
+
+  it('enriches a reply with parentMessage built from cached parent on message.created', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const parentMsg = buildMessage({
+      id: 'msg-parent',
+      content: 'parent content',
+      authorUsername: 'alice',
+    })
+    queryClient.setQueryData(messageKey, buildCacheData([parentMsg]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent(
+        'message.created',
+        buildMessageEvent({ id: 'msg-reply', parentMessageId: 'msg-parent' }),
+      )
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const reply = cacheData?.pages[0]?.items[0]
+    expect(reply?.id).toBe('msg-reply')
+    expect(reply?.parentMessage).toMatchObject({
+      id: 'msg-parent',
+      authorUsername: 'alice',
+      contentPreview: 'parent content',
+      deleted: false,
+    })
+  })
+
+  it('builds parentMessage with deleted=true when parent is soft-deleted in cache', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const deletedParent = buildMessage({
+      id: 'msg-parent',
+      content: 'secret',
+      authorUsername: 'alice',
+      deletedBy: 'user-42',
+    })
+    queryClient.setQueryData(messageKey, buildCacheData([deletedParent]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent(
+        'message.created',
+        buildMessageEvent({ id: 'msg-reply', parentMessageId: 'msg-parent' }),
+      )
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const reply = cacheData?.pages[0]?.items[0]
+    expect(reply?.parentMessage).toMatchObject({
+      id: 'msg-parent',
+      authorUsername: '',
+      contentPreview: '',
+      deleted: true,
+    })
+  })
+
+  it('leaves parentMessage undefined when parent is not in cache', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    queryClient.setQueryData(messageKey, buildCacheData([buildMessage({ id: 'unrelated' })]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent(
+        'message.created',
+        buildMessageEvent({ id: 'msg-reply', parentMessageId: 'msg-gc-parent' }),
+      )
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const reply = cacheData?.pages[0]?.items[0]
+    expect(reply?.id).toBe('msg-reply')
+    expect(reply?.parentMessage).toBeUndefined()
+  })
+
   // -- message.created dedup: duplicate ID is not inserted --------------------
 
   it('does not insert a duplicate message on message.created with existing ID', () => {
@@ -215,6 +303,49 @@ describe('useRealtimeMessages', () => {
       id: 'msg-edit',
       content: 'edited content',
       editedAt: '2026-03-16T02:00:00.000Z',
+    })
+  })
+
+  // -- message.updated: preserves parentMessage from cache ---------------------
+
+  it('preserves existing parentMessage on message.updated', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const replyMsg = buildMessage({
+      id: 'msg-reply',
+      content: 'original reply',
+      parentMessage: {
+        id: 'msg-parent',
+        authorUsername: 'alice',
+        contentPreview: 'parent content',
+        deleted: false,
+      },
+    })
+    queryClient.setQueryData(messageKey, buildCacheData([replyMsg]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent(
+        'message.updated',
+        buildMessageEvent({
+          id: 'msg-reply',
+          content: 'edited reply',
+          editedAt: '2026-03-16T02:00:00.000Z',
+        }),
+      )
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const updated = cacheData?.pages[0]?.items[0]
+    expect(updated?.content).toBe('edited reply')
+    expect(updated?.parentMessage).toMatchObject({
+      id: 'msg-parent',
+      authorUsername: 'alice',
+      contentPreview: 'parent content',
+      deleted: false,
     })
   })
 

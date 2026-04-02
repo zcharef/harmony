@@ -7,6 +7,7 @@ import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 import { toast } from '@/lib/toast'
+import { buildParentPreview } from './build-parent-preview'
 
 export interface SendMessageEncryption {
   /** WHY: Async function that encrypts plaintext and returns the ciphertext envelope + deviceId. */
@@ -91,6 +92,13 @@ export function useSendMessage(
 
       const optimisticId = `temp-${crypto.randomUUID()}`
 
+      // WHY: Build parentMessage preview from cached messages so the ParentQuote
+      // renders immediately in the optimistic entry, not only after invalidation.
+      const parentMessage =
+        input.parentMessageId !== undefined && previousData !== undefined
+          ? buildParentPreview(previousData, input.parentMessageId)
+          : undefined
+
       const optimisticMessage = {
         id: optimisticId,
         channelId: channelId,
@@ -107,6 +115,7 @@ export function useSendMessage(
         messageType: 'default',
         reactions: [],
         parentMessageId: input.parentMessageId,
+        parentMessage,
       } satisfies MessageResponse
 
       // WHY page 0: useInfiniteQuery stores pages newest-first — same pattern
@@ -159,7 +168,11 @@ export function useSendMessage(
 
         const updated: DmListItem = {
           ...match,
-          lastMessage: { content: realMessage.content, createdAt: realMessage.createdAt },
+          lastMessage: {
+            content: realMessage.content,
+            createdAt: realMessage.createdAt,
+            encrypted: realMessage.encrypted,
+          },
         }
         return [updated, ...old.slice(0, idx), ...old.slice(idx + 1)]
       })

@@ -7,6 +7,7 @@ import type { MessageListResponse, MessageResponse } from '@/lib/api'
 import { messagePayloadSchema } from '@/lib/event-types'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { buildParentPreview } from './build-parent-preview'
 
 /** WHY: message.created and message.updated carry the full message payload. */
 const messageEventSchema = z.object({
@@ -93,9 +94,16 @@ export function useRealtimeMessages(channelId: string) {
           const alreadyExists = firstPage.items.some((m) => m.id === message.id)
           if (alreadyExists) return old
 
+          // WHY: Build parentMessage from cache so ParentQuote renders immediately.
+          // Falls back to undefined if parent was garbage-collected (next REST fetch fixes it).
+          const enriched =
+            message.parentMessageId !== undefined && message.parentMessageId !== null
+              ? { ...message, parentMessage: buildParentPreview(old, message.parentMessageId) }
+              : message
+
           return {
             ...old,
-            pages: [{ ...firstPage, items: [message, ...firstPage.items] }, ...old.pages.slice(1)],
+            pages: [{ ...firstPage, items: [enriched, ...firstPage.items] }, ...old.pages.slice(1)],
           }
         },
       )
@@ -126,7 +134,13 @@ export function useRealtimeMessages(channelId: string) {
             ...old,
             pages: old.pages.map((page) => ({
               ...page,
-              items: page.items.map((m) => (m.id === message.id ? message : m)),
+              items: page.items.map((m) => {
+                if (m.id !== message.id) return m
+                // WHY: Preserve the existing parentMessage from the cache entry.
+                // The SSE update payload doesn't carry it, so re-use what was
+                // already resolved (from REST or from a prior buildParentPreview).
+                return { ...message, parentMessage: m.parentMessage }
+              }),
             })),
           }
         },
