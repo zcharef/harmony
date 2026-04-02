@@ -56,7 +56,7 @@ jobs:
       # ── Node / pnpm ──────────────────────────────────────
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.9
 
       - uses: actions/setup-node@v4
         with:
@@ -97,7 +97,7 @@ jobs:
       # ── Rust toolchain (shared cache from CI rust-quality job) ─
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9
         with:
           workspaces: harmony-api
           shared-key: harmony-api
@@ -105,7 +105,7 @@ jobs:
       # ── Supabase Cloud: apply pending migrations ─────────
       # WHY pinned: `latest` causes non-deterministic CI failures when Supabase
       # ships breaking changes. Bump deliberately via Dependabot or manually.
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v1.6
         with:
           version: 2.84.2
 
@@ -283,7 +283,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v1.6
         with:
           version: 2.84.2
 
@@ -340,7 +340,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.9
 
       - uses: actions/setup-node@v4
         with:
@@ -367,7 +367,7 @@ jobs:
         run: pnpm build
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v3.14
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

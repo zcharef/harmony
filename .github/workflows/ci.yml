@@ -91,7 +91,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.9
 
       - uses: actions/setup-node@v4
         with:
@@ -152,7 +152,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9
         with:
           workspaces: harmony-api
           shared-key: harmony-api
@@ -208,7 +208,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.71
         with:
           tool: cargo-audit,cargo-deny
 
@@ -242,7 +242,7 @@ jobs:
       # Swatinem/rust-cache only saves on the first job that finishes — if both
       # jobs share a key, the faster one "wins" and the other recompiles from
       # scratch on the next run.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9
         with:
           workspaces: harmony-app/src-tauri
           shared-key: harmony-tauri
