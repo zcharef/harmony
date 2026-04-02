@@ -35,6 +35,12 @@ pub struct MessagePayload {
     /// System event key (e.g. `member_join`). Only present for system messages.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_event_key: Option<String>,
+    /// When `AutoMod` flagged this message. Content is already masked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moderated_at: Option<DateTime<Utc>>,
+    /// Why `AutoMod` flagged this message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moderation_reason: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -54,6 +60,8 @@ impl From<MessageWithAuthor> for MessagePayload {
             parent_message_id: m.parent_message_id,
             message_type: m.message_type,
             system_event_key: m.system_event_key,
+            moderated_at: m.moderated_at,
+            moderation_reason: m.moderation_reason,
             created_at: m.created_at,
         }
     }
@@ -391,6 +399,8 @@ mod tests {
                         parent_message_id: None,
                         message_type: crate::domain::models::MessageType::Default,
                         system_event_key: None,
+                        moderated_at: None,
+                        moderation_reason: None,
                         created_at: Utc::now(),
                     },
                 },

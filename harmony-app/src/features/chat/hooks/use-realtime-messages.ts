@@ -39,6 +39,8 @@ function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): Messa
     createdAt: payload.createdAt,
     messageType: payload.messageType,
     systemEventKey: payload.systemEventKey ?? undefined,
+    moderatedAt: payload.moderatedAt ?? undefined,
+    moderationReason: payload.moderationReason ?? undefined,
     reactions: [],
   }
 }

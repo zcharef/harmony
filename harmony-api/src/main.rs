@@ -137,11 +137,25 @@ async fn init_app_state(config: &Config) -> AppState {
             Arc::new(infra::AlwaysAllowedChecker)
         };
 
+    // Content moderation filter (AutoMod)
+    let content_filter: Arc<domain::services::ContentFilter> = if config.content_moderation_enabled
+    {
+        tracing::info!("Content moderation ENABLED");
+        Arc::new(domain::services::ContentFilter::new())
+    } else {
+        tracing::info!("Content moderation DISABLED (self-hosted mode)");
+        Arc::new(domain::services::ContentFilter::noop())
+    };
+
     // Construct domain services (injected with repository ports)
-    let profile_service = Arc::new(domain::services::ProfileService::new(profile_repo.clone()));
+    let profile_service = Arc::new(domain::services::ProfileService::new(
+        profile_repo.clone(),
+        content_filter.clone(),
+    ));
     let server_service = Arc::new(domain::services::ServerService::new(
         server_repo.clone(),
         plan_limit_checker.clone(),
+        content_filter.clone(),
     ));
     let message_service = Arc::new(domain::services::MessageService::new(
         message_repo,
@@ -149,6 +163,7 @@ async fn init_app_state(config: &Config) -> AppState {
         member_repo.clone(),
         plan_limit_checker.clone(),
         reaction_repo.clone(),
+        content_filter.clone(),
     ));
     let invite_service = Arc::new(domain::services::InviteService::new(
         invite_repo,
@@ -160,6 +175,7 @@ async fn init_app_state(config: &Config) -> AppState {
     let channel_service = Arc::new(domain::services::ChannelService::new(
         channel_repo.clone(),
         plan_limit_checker.clone(),
+        content_filter,
     ));
     let moderation_service = Arc::new(domain::services::ModerationService::new(
         server_repo.clone(),
@@ -190,6 +206,12 @@ async fn init_app_state(config: &Config) -> AppState {
     let notification_settings_service = Arc::new(
         domain::services::NotificationSettingsService::new(notification_settings_repo),
     );
+    let user_preferences_repo = Arc::new(infra::postgres::PgUserPreferencesRepository::new(
+        pool.clone(),
+    ));
+    let user_preferences_service = Arc::new(domain::services::UserPreferencesService::new(
+        user_preferences_repo,
+    ));
 
     // Initialize in-process event bus for SSE real-time delivery
     let event_bus: Arc<dyn domain::ports::EventBus> = Arc::new(infra::BroadcastEventBus::new());
@@ -215,6 +237,7 @@ async fn init_app_state(config: &Config) -> AppState {
         reaction_service,
         read_state_service,
         notification_settings_service,
+        user_preferences_service,
         member_repo,
         ban_repo,
         plan_limit_checker,

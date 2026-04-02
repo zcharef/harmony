@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                m.id,\n                m.channel_id,\n                m.author_id,\n                m.content,\n                m.edited_at,\n                m.deleted_at,\n                m.deleted_by,\n                m.encrypted,\n                m.sender_device_id,\n                m.message_type as \"message_type!: String\",\n                m.system_event_key,\n                m.parent_message_id,\n                m.created_at,\n                p.username AS \"author_username?\",\n                p.avatar_url AS \"author_avatar_url?\",\n                parent_p.username AS \"parent_author_username?\",\n                LEFT(parent_m.content, 100) AS \"parent_content_preview?\",\n                (parent_m.deleted_at IS NOT NULL) AS \"parent_deleted?\"\n            FROM messages m\n            LEFT JOIN profiles p ON p.id = m.author_id\n            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id\n            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id\n            WHERE m.channel_id = $1\n              AND m.deleted_at IS NULL\n              AND ($2::timestamptz IS NULL OR m.created_at < $2)\n            ORDER BY m.created_at DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                id,\n                channel_id,\n                author_id,\n                content,\n                edited_at,\n                deleted_at,\n                deleted_by,\n                encrypted,\n                sender_device_id,\n                message_type as \"message_type!: String\",\n                system_event_key,\n                parent_message_id,\n                moderated_at,\n                moderation_reason,\n                original_content,\n                created_at\n            FROM messages\n            WHERE id = $1 AND deleted_at IS NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -75,40 +75,28 @@
       },
       {
         "ordinal": 12,
-        "name": "created_at",
+        "name": "moderated_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 13,
-        "name": "author_username?",
+        "name": "moderation_reason",
         "type_info": "Text"
       },
       {
         "ordinal": 14,
-        "name": "author_avatar_url?",
+        "name": "original_content",
         "type_info": "Text"
       },
       {
         "ordinal": 15,
-        "name": "parent_author_username?",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 16,
-        "name": "parent_content_preview?",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 17,
-        "name": "parent_deleted?",
-        "type_info": "Bool"
+        "name": "created_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Timestamptz",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -124,13 +112,11 @@
       false,
       true,
       true,
-      false,
-      false,
       true,
-      false,
-      null,
-      null
+      true,
+      true,
+      false
     ]
   },
-  "hash": "7684f387d47bc1459d68f0ce64dde3a0ea4e21519c24599d2cb83e305fb18b71"
+  "hash": "f3fba4bf1eafc57b9d22044f6f4027ca296af18e3f344f896fe4bff788519b9e"
 }

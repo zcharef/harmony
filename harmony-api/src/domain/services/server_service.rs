@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Server, ServerId, UserId};
 use crate::domain::ports::{PlanLimitChecker, ServerRepository};
+use crate::domain::services::content_filter::ContentFilter;
 
 /// Maximum length for a server name.
 const MAX_SERVER_NAME_LENGTH: usize = 100;
@@ -14,6 +15,7 @@ const MAX_SERVER_NAME_LENGTH: usize = 100;
 pub struct ServerService {
     repo: Arc<dyn ServerRepository>,
     plan_checker: Arc<dyn PlanLimitChecker>,
+    content_filter: Arc<ContentFilter>,
 }
 
 /// Validate a server name: 1-100 chars after trim, no control characters.
@@ -48,8 +50,16 @@ fn validate_server_name(name: &str) -> Result<String, DomainError> {
 
 impl ServerService {
     #[must_use]
-    pub fn new(repo: Arc<dyn ServerRepository>, plan_checker: Arc<dyn PlanLimitChecker>) -> Self {
-        Self { repo, plan_checker }
+    pub fn new(
+        repo: Arc<dyn ServerRepository>,
+        plan_checker: Arc<dyn PlanLimitChecker>,
+        content_filter: Arc<ContentFilter>,
+    ) -> Self {
+        Self {
+            repo,
+            plan_checker,
+            content_filter,
+        }
     }
 
     /// Create a new server with default setup (member + `#general` channel).
@@ -63,6 +73,7 @@ impl ServerService {
         owner_id: UserId,
     ) -> Result<Server, DomainError> {
         let validated_name = validate_server_name(&name)?;
+        self.content_filter.check_hard(&validated_name)?;
 
         // WHY: TOCTOU race exists between this limit check and create_with_defaults below.
         // Acceptable: same pattern as channel/member limits. Plan limits are billing
@@ -130,7 +141,11 @@ impl ServerService {
         name: Option<String>,
     ) -> Result<Server, DomainError> {
         let validated_name = match name {
-            Some(raw) => Some(validate_server_name(&raw)?),
+            Some(raw) => {
+                let v = validate_server_name(&raw)?;
+                self.content_filter.check_hard(&v)?;
+                Some(v)
+            }
             None => None,
         };
 

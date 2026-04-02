@@ -12,6 +12,7 @@ use crate::domain::ports::{
 use crate::domain::services::{
     ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
     NotificationSettingsService, ProfileService, ReactionService, ReadStateService, ServerService,
+    UserPreferencesService,
 };
 use crate::infra::PresenceTracker;
 
@@ -51,6 +52,8 @@ pub struct AppState {
     read_state_service: Arc<ReadStateService>,
     /// Notification settings domain service (per-channel notification preferences).
     notification_settings_service: Arc<NotificationSettingsService>,
+    /// User preferences domain service (DND mode, user-controlled settings).
+    user_preferences_service: Arc<UserPreferencesService>,
     /// Member repository (accessed directly for simple queries; invite logic lives in `InviteService`).
     member_repository: Arc<dyn MemberRepository>,
     /// Ban repository (accessed directly by moderation handlers).
@@ -87,6 +90,7 @@ impl std::fmt::Debug for AppState {
                 "notification_settings_service",
                 &self.notification_settings_service,
             )
+            .field("user_preferences_service", &self.user_preferences_service)
             .field("member_repository", &self.member_repository)
             .field("ban_repository", &self.ban_repository)
             .field("plan_limit_checker", &self.plan_limit_checker)
@@ -118,6 +122,7 @@ impl AppState {
         reaction_service: Arc<ReactionService>,
         read_state_service: Arc<ReadStateService>,
         notification_settings_service: Arc<NotificationSettingsService>,
+        user_preferences_service: Arc<UserPreferencesService>,
         member_repository: Arc<dyn MemberRepository>,
         ban_repository: Arc<dyn BanRepository>,
         plan_limit_checker: Arc<dyn PlanLimitChecker>,
@@ -142,6 +147,7 @@ impl AppState {
             reaction_service,
             read_state_service,
             notification_settings_service,
+            user_preferences_service,
             member_repository,
             ban_repository,
             plan_limit_checker,
@@ -216,6 +222,12 @@ impl AppState {
     #[must_use]
     pub fn notification_settings_service(&self) -> &NotificationSettingsService {
         &self.notification_settings_service
+    }
+
+    /// Access the user preferences domain service.
+    #[must_use]
+    pub fn user_preferences_service(&self) -> &UserPreferencesService {
+        &self.user_preferences_service
     }
 
     /// Access the member repository directly (simple queries; invite logic in `InviteService`).

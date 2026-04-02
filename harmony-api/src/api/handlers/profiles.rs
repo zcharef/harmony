@@ -48,6 +48,7 @@ const RESERVED_USERNAMES: &[&str] = &[
     security(("bearer_auth" = [])),
     responses(
         (status = 200, description = "Profile synced successfully", body = ProfileResponse),
+        (status = 400, description = "Username contains prohibited language", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
         (status = 409, description = "Username reserved", body = ProblemDetails),
     )

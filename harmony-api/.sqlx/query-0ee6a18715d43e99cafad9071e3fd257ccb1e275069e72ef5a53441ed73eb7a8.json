@@ -1,0 +1,154 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                m.id,\n                m.channel_id,\n                m.author_id,\n                m.content,\n                m.edited_at,\n                m.deleted_at,\n                m.deleted_by,\n                m.encrypted,\n                m.sender_device_id,\n                m.message_type as \"message_type!: String\",\n                m.system_event_key,\n                m.parent_message_id,\n                m.moderated_at,\n                m.moderation_reason,\n                m.original_content,\n                m.created_at,\n                p.username AS \"author_username?\",\n                p.avatar_url AS \"author_avatar_url?\",\n                parent_p.username AS \"parent_author_username?\",\n                LEFT(parent_m.content, 100) AS \"parent_content_preview?\",\n                (parent_m.deleted_at IS NOT NULL) AS \"parent_deleted?\"\n            FROM messages m\n            LEFT JOIN profiles p ON p.id = m.author_id\n            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id\n            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id\n            WHERE m.channel_id = $1\n              AND m.deleted_at IS NULL\n              AND ($2::timestamptz IS NULL OR m.created_at < $2)\n            ORDER BY m.created_at DESC\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "author_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "edited_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "deleted_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "encrypted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "sender_device_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "message_type!: String",
+        "type_info": {
+          "Custom": {
+            "name": "message_type",
+            "kind": {
+              "Enum": [
+                "default",
+                "system"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "system_event_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "parent_message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "moderated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "moderation_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "original_content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "author_username?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "author_avatar_url?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "parent_author_username?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "parent_content_preview?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "parent_deleted?",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "0ee6a18715d43e99cafad9071e3fd257ccb1e275069e72ef5a53441ed73eb7a8"
+}

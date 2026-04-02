@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT user_id, dnd_enabled, hide_profanity, created_at, updated_at\n            FROM user_preferences\n            WHERE user_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "dnd_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "hide_profanity",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d0bbd27072157ae7ae0e090ef03eaca6dc08eb6b03b22743fc2a3f5f3c26c277"
+}

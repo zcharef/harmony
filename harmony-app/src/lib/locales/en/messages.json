@@ -1,4 +1,5 @@
 {
+  "statusOnline": "Online",
   "sending": "Sending...",
   "edited": "(edited)",
   "deletedMessage": "[Message deleted]",
@@ -13,6 +14,16 @@
     "memberKick": "{{username}} was kicked from the server",
     "memberBan": "{{username}} was banned from the server",
     "unknown": "[System message]"
+  },
+  "preferences": {
+    "dndDescription": "Mutes all notification sounds and desktop alerts",
+    "dndEnabled": "Do Not Disturb",
+    "setStatus": "Set Status",
+    "statusPickerLabel": "Status picker",
+    "updateFailed": "Failed to update preferences",
+    "hideProfanity": "Hide Profanity",
+    "hideProfanityDescription": "Mask mild profanity (swear words) in messages",
+    "contentFiltering": "Content Filtering"
   },
   "externalLink": {
     "title": "You're leaving Harmony",

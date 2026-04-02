@@ -9,6 +9,7 @@ use crate::domain::models::{Channel, ChannelId, MessageId, MessageWithAuthor, Ro
 use crate::domain::ports::{
     ChannelRepository, MemberRepository, MessageRepository, PlanLimitChecker, ReactionRepository,
 };
+use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
 
 /// Service for message-related business logic.
 #[derive(Debug)]
@@ -18,6 +19,7 @@ pub struct MessageService {
     member_repo: Arc<dyn MemberRepository>,
     plan_checker: Arc<dyn PlanLimitChecker>,
     reaction_repo: Arc<dyn ReactionRepository>,
+    content_filter: Arc<ContentFilter>,
 }
 
 /// Maximum message length (DB ceiling — self-hosted max).
@@ -42,6 +44,7 @@ impl MessageService {
         member_repo: Arc<dyn MemberRepository>,
         plan_checker: Arc<dyn PlanLimitChecker>,
         reaction_repo: Arc<dyn ReactionRepository>,
+        content_filter: Arc<ContentFilter>,
     ) -> Self {
         Self {
             repo,
@@ -49,6 +52,7 @@ impl MessageService {
             member_repo,
             plan_checker,
             reaction_repo,
+            content_filter,
         }
     }
 
@@ -199,14 +203,40 @@ impl MessageService {
             ));
         }
 
+        // WHY: Skip content moderation for encrypted messages — ciphertext is
+        // opaque, we can't inspect it. Also skip for system messages (handled
+        // by create_system_message which bypasses this method entirely).
+        let (final_content, mod_at, mod_reason, orig_content) = if encrypted {
+            (content, None, None, None)
+        } else {
+            match self.content_filter.check_soft(&content) {
+                ModerationVerdict::Clean => (content, None, None, None),
+                ModerationVerdict::Flagged {
+                    masked_content,
+                    reason,
+                } => {
+                    tracing::warn!(channel_id = %channel_id, "Message auto-moderated");
+                    (
+                        masked_content,
+                        Some(Utc::now()),
+                        Some(reason),
+                        Some(content),
+                    )
+                }
+            }
+        };
+
         self.repo
             .send_to_channel(
                 channel_id,
                 author_id,
-                content,
+                final_content,
                 encrypted,
                 sender_device_id,
                 parent_message_id,
+                mod_at,
+                mod_reason,
+                orig_content,
             )
             .await
     }
@@ -324,7 +354,31 @@ impl MessageService {
             )));
         }
 
-        self.repo.update_content(message_id, content).await
+        // WHY: Re-check content moderation on edits — a user could send a clean
+        // message then edit it to add banned words. Skip for encrypted messages.
+        let (final_content, mod_at, mod_reason, orig_content) = if message.encrypted {
+            (content, None, None, None)
+        } else {
+            match self.content_filter.check_soft(&content) {
+                ModerationVerdict::Clean => (content, None, None, None),
+                ModerationVerdict::Flagged {
+                    masked_content,
+                    reason,
+                } => {
+                    tracing::warn!(message_id = %message_id, "Edited message auto-moderated");
+                    (
+                        masked_content,
+                        Some(Utc::now()),
+                        Some(reason),
+                        Some(content),
+                    )
+                }
+            }
+        };
+
+        self.repo
+            .update_content(message_id, final_content, mod_at, mod_reason, orig_content)
+            .await
     }
 
     /// Soft-delete a message. The author or moderator+ can delete (ADR-038).
@@ -531,6 +585,9 @@ mod tests {
             message_type: crate::domain::models::MessageType::Default,
             system_event_key: None,
             parent_message_id: None,
+            moderated_at: None,
+            moderation_reason: None,
+            original_content: None,
             created_at: Utc::now(),
         };
 

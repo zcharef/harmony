@@ -46,6 +46,14 @@ pub struct Message {
     pub system_event_key: Option<String>,
     /// Parent message ID for reply threading. `None` for top-level messages.
     pub parent_message_id: Option<MessageId>,
+    /// When `AutoMod` flagged this message. `Some` = content was masked.
+    pub moderated_at: Option<DateTime<Utc>>,
+    /// Generic reason for moderation (never the matched word itself).
+    pub moderation_reason: Option<String>,
+    /// Original unmasked content before `AutoMod`. Only set when moderated.
+    /// NOT exposed through any API endpoint — reserved for future appeals.
+    #[serde(skip_serializing)]
+    pub original_content: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

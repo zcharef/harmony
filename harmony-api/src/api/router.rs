@@ -175,6 +175,12 @@ pub fn build_router(
             post(handlers::dms::create_dm).get(handlers::dms::list_dms),
         )
         .route("/v1/dms/{server_id}", delete(handlers::dms::close_dm))
+        // User Preferences
+        .route(
+            "/v1/preferences",
+            get(handlers::user_preferences::get_preferences)
+                .patch(handlers::user_preferences::update_preferences),
+        )
         // Presence
         .route("/v1/presence", post(handlers::presence::update_presence))
         // E2EE Key Distribution

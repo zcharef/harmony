@@ -10,6 +10,7 @@ use crate::domain::models::{ChannelId, Message, MessageId, MessageWithAuthor, Us
 #[async_trait]
 pub trait MessageRepository: Send + Sync + std::fmt::Debug {
     /// Send a new message to a channel.
+    #[allow(clippy::too_many_arguments)]
     async fn send_to_channel(
         &self,
         channel_id: &ChannelId,
@@ -18,6 +19,9 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         encrypted: bool,
         sender_device_id: Option<String>,
         parent_message_id: Option<MessageId>,
+        moderated_at: Option<DateTime<Utc>>,
+        moderation_reason: Option<String>,
+        original_content: Option<String>,
     ) -> Result<MessageWithAuthor, DomainError>;
 
     /// List messages in a channel with cursor-based pagination (ADR-036).
@@ -39,6 +43,9 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         &self,
         message_id: &MessageId,
         content: String,
+        moderated_at: Option<DateTime<Utc>>,
+        moderation_reason: Option<String>,
+        original_content: Option<String>,
     ) -> Result<MessageWithAuthor, DomainError>;
 
     /// Soft-delete a message (ADR-038). Sets `deleted_at=now()` and `deleted_by`.

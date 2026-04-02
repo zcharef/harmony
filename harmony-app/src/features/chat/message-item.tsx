@@ -9,8 +9,10 @@ import remarkGfm from 'remark-gfm'
 import { ExternalLinkWarning } from '@/components/shared/external-link-warning'
 import type { DecryptResult } from '@/features/crypto'
 import { EncryptedMessageContent } from '@/features/crypto'
+import { usePreferences } from '@/features/preferences'
 import type { MessageResponse } from '@/lib/api'
 import { isTauri } from '@/lib/platform'
+import { maskProfanity } from '@/lib/profanity-filter'
 
 interface MessageItemProps {
   message: MessageResponse
@@ -104,6 +106,8 @@ function MessageContent({
   const { t: tCrypto } = useTranslation('crypto')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [pendingUrl, setPendingUrl] = useState<string | null>(null)
+  const { data: prefs } = usePreferences()
+  const hideProfanity = prefs?.hideProfanity ?? true
 
   const handleLinkClick = useCallback((e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
     e.preventDefault()
@@ -256,6 +260,10 @@ function MessageContent({
               {children}
             </blockquote>
           ),
+          // WHY: Prevent `*****` (AutoMod masked content) from rendering as a
+          // CommonMark thematic break (<hr>). Defense-in-depth — backend now
+          // escapes `*` as `\*`, but old messages in DB may still have unescaped `*`.
+          hr: () => <span className="text-default-400">*****</span>,
           a: ({ href, children }) => (
             <a
               href={href}
@@ -269,7 +277,7 @@ function MessageContent({
           ),
         }}
       >
-        {message.content}
+        {hideProfanity ? maskProfanity(message.content) : message.content}
       </ReactMarkdown>
       {message.editedAt !== undefined && message.editedAt !== null && (
         <span className="ml-1 text-xs text-default-400" data-test="message-edited-indicator">

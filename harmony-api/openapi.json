@@ -229,6 +229,16 @@
               }
             }
           },
+          "400": {
+            "description": "Username contains prohibited language",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized",
             "content": {
@@ -1614,6 +1624,91 @@
         "responses": {
           "204": {
             "description": "Keys uploaded"
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/preferences": {
+      "get": {
+        "tags": [
+          "UserPreferences"
+        ],
+        "summary": "Get the authenticated user's preferences.",
+        "description": "Returns default preferences (`dndEnabled: false`) when no explicit setting exists.\n\n# Errors\nReturns `ApiError` on repository error.",
+        "operationId": "get_preferences",
+        "responses": {
+          "200": {
+            "description": "User preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferencesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "UserPreferences"
+        ],
+        "summary": "Update the authenticated user's preferences (partial patch).",
+        "description": "# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "operationId": "update_preferences",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserPreferencesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Preferences updated"
           },
           "400": {
             "description": "Validation error",
@@ -4193,6 +4288,21 @@
             "$ref": "#/components/schemas/MessageType",
             "description": "`default` for user messages, `system` for announcements."
           },
+          "moderatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When `AutoMod` flagged this message. Content is already masked."
+          },
+          "moderationReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why `AutoMod` flagged this message."
+          },
           "parentMessage": {
             "oneOf": [
               {
@@ -4780,6 +4890,25 @@
         },
         "additionalProperties": false
       },
+      "UpdateUserPreferencesRequest": {
+        "type": "object",
+        "description": "Request body for updating user preferences (partial patch).",
+        "properties": {
+          "dndEnabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "hideProfanity": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "UploadOneTimeKeysRequest": {
         "type": "object",
         "description": "Request body for uploading one-time keys for a device.",
@@ -4807,6 +4936,27 @@
         "format": "uuid",
         "description": "Unique identifier for a user (Supabase auth.users UUID).",
         "example": "550e8400-e29b-41d4-a716-446655440000"
+      },
+      "UserPreferencesResponse": {
+        "type": "object",
+        "description": "Response for user preferences.",
+        "required": [
+          "dndEnabled",
+          "hideProfanity",
+          "updatedAt"
+        ],
+        "properties": {
+          "dndEnabled": {
+            "type": "boolean"
+          },
+          "hideProfanity": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "UserStatus": {
         "type": "string",
@@ -4884,6 +5034,10 @@
     {
       "name": "Keys",
       "description": "E2EE key distribution (device keys, pre-key bundles)"
+    },
+    {
+      "name": "UserPreferences",
+      "description": "User preferences (DND mode, settings)"
     },
     {
       "name": "Presence",

@@ -1,0 +1,11 @@
+Word lists in this directory are derived from:
+
+1. https://github.com/Hesham-Elbadawi/list-of-banned-words
+   License: CC-BY-4.0 (Creative Commons Attribution 4.0 International)
+   Copyright: Shutterstock
+
+2. https://github.com/zautumnz/profane-words
+   License: MIT
+
+Lists have been curated and categorized (abuse vs profanity) using LLM-assisted review.
+See *_curation_log.md files for categorization decisions.

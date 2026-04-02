@@ -19,6 +19,7 @@ mod read_state;
 pub mod role;
 mod server;
 pub mod server_event;
+mod user_preferences;
 
 pub use ban::ServerBan;
 pub use channel::{Channel, ChannelType};
@@ -40,3 +41,4 @@ pub use read_state::ChannelReadState;
 pub use role::Role;
 pub use server::Server;
 pub use server_event::ServerEvent;
+pub use user_preferences::UserPreferences;

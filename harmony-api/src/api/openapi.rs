@@ -99,6 +99,9 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         handlers::keys::list_devices,
         handlers::keys::remove_device,
         handlers::keys::get_key_count,
+        // User Preferences
+        handlers::user_preferences::get_preferences,
+        handlers::user_preferences::update_preferences,
         // Presence
         handlers::presence::update_presence,
         // Desktop Auth (PKCE exchange)
@@ -191,6 +194,9 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             CreateDesktopAuthResponse,
             RedeemDesktopAuthRequest,
             RedeemDesktopAuthResponse,
+            // User Preferences DTOs
+            super::dto::user_preferences::UserPreferencesResponse,
+            super::dto::user_preferences::UpdateUserPreferencesRequest,
             // Presence DTOs
             super::handlers::presence::UpdatePresenceRequest,
             // Key Distribution DTOs
@@ -219,6 +225,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         (name = "NotificationSettings", description = "Per-channel notification preferences"),
         (name = "DirectMessages", description = "Direct message conversations"),
         (name = "Keys", description = "E2EE key distribution (device keys, pre-key bundles)"),
+        (name = "UserPreferences", description = "User preferences (DND mode, settings)"),
         (name = "Presence", description = "User presence status updates"),
         (name = "Events", description = "Server-Sent Events for real-time updates"),
     ),

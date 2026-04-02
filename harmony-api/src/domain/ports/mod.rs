@@ -18,6 +18,7 @@ mod profile_repository;
 mod reaction_repository;
 mod read_state_repository;
 mod server_repository;
+mod user_preferences_repository;
 
 pub use ban_repository::BanRepository;
 pub use channel_repository::ChannelRepository;
@@ -35,3 +36,4 @@ pub use profile_repository::ProfileRepository;
 pub use reaction_repository::ReactionRepository;
 pub use read_state_repository::ReadStateRepository;
 pub use server_repository::ServerRepository;
+pub use user_preferences_repository::{UpdatePreferences, UserPreferencesRepository};

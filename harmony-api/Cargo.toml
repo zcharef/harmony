@@ -68,6 +68,9 @@ rand = "0.9"
 time = "0.3"
 http = "1"
 
+# Content Moderation (unicode normalization for bypass resistance)
+unicode-normalization = "0.1"
+
 # Rate Limiting
 governor = "0.10"
 

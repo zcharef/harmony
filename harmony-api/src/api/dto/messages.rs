@@ -74,6 +74,12 @@ pub struct MessageResponse {
     /// Preview of the parent message (author + content snippet).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_message: Option<ParentMessagePreview>,
+    /// When `AutoMod` flagged this message. Content is already masked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moderated_at: Option<DateTime<Utc>>,
+    /// Why `AutoMod` flagged this message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moderation_reason: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -96,6 +102,8 @@ impl From<MessageWithAuthor> for MessageResponse {
             reactions: mwa.reactions,
             parent_message_id: m.parent_message_id,
             parent_message: mwa.parent_message,
+            moderated_at: m.moderated_at,
+            moderation_reason: m.moderation_reason,
             created_at: m.created_at,
         }
     }

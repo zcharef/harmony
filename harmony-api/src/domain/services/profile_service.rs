@@ -5,17 +5,22 @@ use std::sync::Arc;
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Profile, UserId};
 use crate::domain::ports::ProfileRepository;
+use crate::domain::services::content_filter::ContentFilter;
 
 /// Service for profile-related business logic.
 #[derive(Debug)]
 pub struct ProfileService {
     repo: Arc<dyn ProfileRepository>,
+    content_filter: Arc<ContentFilter>,
 }
 
 impl ProfileService {
     #[must_use]
-    pub fn new(repo: Arc<dyn ProfileRepository>) -> Self {
-        Self { repo }
+    pub fn new(repo: Arc<dyn ProfileRepository>, content_filter: Arc<ContentFilter>) -> Self {
+        Self {
+            repo,
+            content_filter,
+        }
     }
 
     /// Create or update a profile from auth provider data.
@@ -28,6 +33,7 @@ impl ProfileService {
         email: String,
         username: String,
     ) -> Result<Profile, DomainError> {
+        self.content_filter.check_hard(&username)?;
         self.repo.upsert_from_auth(user_id, email, username).await
     }
 
@@ -93,14 +99,16 @@ impl ProfileService {
                     "Display name must be 1-32 characters".to_string(),
                 ));
             }
+            self.content_filter.check_hard(name)?;
         }
 
-        if let Some(ref status) = custom_status
-            && status.len() > 128
-        {
-            return Err(DomainError::ValidationError(
-                "Custom status must be at most 128 characters".to_string(),
-            ));
+        if let Some(ref status) = custom_status {
+            if status.len() > 128 {
+                return Err(DomainError::ValidationError(
+                    "Custom status must be at most 128 characters".to_string(),
+                ));
+            }
+            self.content_filter.check_hard(status)?;
         }
 
         self.repo
@@ -163,10 +171,13 @@ mod tests {
 
     // ── Async service methods requiring repos ────────────────────
     //
-    // ProfileService methods are thin repository pass-throughs:
-    // - upsert_from_auth: delegates entirely to repo
+    // The following business rules are enforced in async methods that
+    // require repository trait objects (banned by ADR-018: no mocks):
+    //
+    // - upsert_from_auth: content filter on username, then repo upsert
+    // - update_profile: length validation + content filter on display_name
+    //   and custom_status, HTTPS-only avatar_url, then repo update
     // - get_by_id: delegates to repo + maps None to NotFound
     //
-    // No domain validation exists to unit-test. Integration tests
-    // with real Postgres cover the actual behavior (ADR-018).
+    // These are covered by integration tests with real Postgres.
 }

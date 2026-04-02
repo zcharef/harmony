@@ -49,4 +49,8 @@ export const queryKeys = {
     keyCount: (deviceId: string) => ['crypto', 'keyCount', deviceId] as const,
     devices: (userId: string) => ['crypto', 'devices', userId] as const,
   },
+  preferences: {
+    all: ['preferences'] as const,
+    me: () => ['preferences', 'me'] as const,
+  },
 } as const

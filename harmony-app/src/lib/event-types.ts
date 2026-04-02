@@ -59,6 +59,8 @@ export const messagePayloadSchema = z.object({
   parentMessageId: z.string().nullable().optional(),
   messageType: z.enum(['default', 'system'] satisfies [MessageType, ...MessageType[]]),
   systemEventKey: z.string().nullable().optional(),
+  moderatedAt: z.string().nullable().optional(),
+  moderationReason: z.string().nullable().optional(),
   createdAt: z.string(),
 })
 

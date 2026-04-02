@@ -56,6 +56,9 @@ struct MessageRow {
     message_type: String,
     system_event_key: Option<String>,
     parent_message_id: Option<Uuid>,
+    moderated_at: Option<DateTime<Utc>>,
+    moderation_reason: Option<String>,
+    original_content: Option<String>,
     created_at: DateTime<Utc>,
 }
 
@@ -74,6 +77,9 @@ impl MessageRow {
             message_type: parse_message_type(&self.message_type),
             system_event_key: self.system_event_key,
             parent_message_id: self.parent_message_id.map(MessageId::new),
+            moderated_at: self.moderated_at,
+            moderation_reason: self.moderation_reason,
+            original_content: self.original_content,
             created_at: self.created_at,
         }
     }
@@ -96,6 +102,9 @@ struct MessageWithAuthorRow {
     message_type: String,
     system_event_key: Option<String>,
     parent_message_id: Option<Uuid>,
+    moderated_at: Option<DateTime<Utc>>,
+    moderation_reason: Option<String>,
+    original_content: Option<String>,
     created_at: DateTime<Utc>,
     // Author profile fields from JOIN.
     author_username: Option<String>,
@@ -146,6 +155,9 @@ impl MessageWithAuthorRow {
             message_type: parse_message_type(&self.message_type),
             system_event_key: self.system_event_key,
             parent_message_id: self.parent_message_id.map(MessageId::new),
+            moderated_at: self.moderated_at,
+            moderation_reason: self.moderation_reason,
+            original_content: self.original_content,
             created_at: self.created_at,
         };
 
@@ -176,16 +188,22 @@ impl MessageRepository for PgMessageRepository {
         encrypted: bool,
         sender_device_id: Option<String>,
         parent_message_id: Option<MessageId>,
+        moderated_at: Option<DateTime<Utc>>,
+        moderation_reason: Option<String>,
+        original_content: Option<String>,
     ) -> Result<MessageWithAuthor, DomainError> {
         let cid = channel_id.0;
         let aid = author_id.0;
         let pmid = parent_message_id.map(|id| id.0);
+        let mod_at = moderated_at;
+        let mod_reason = moderation_reason;
+        let orig_content = original_content;
 
         let row = sqlx::query!(
             r#"
             WITH inserted AS (
-                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id, moderated_at, moderation_reason, original_content)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 RETURNING
                     id,
                     channel_id,
@@ -199,6 +217,9 @@ impl MessageRepository for PgMessageRepository {
                     message_type,
                     system_event_key,
                     parent_message_id,
+                    moderated_at,
+                    moderation_reason,
+                    original_content,
                     created_at
             )
             SELECT
@@ -214,6 +235,9 @@ impl MessageRepository for PgMessageRepository {
                 i.message_type as "message_type!: String",
                 i.system_event_key,
                 i.parent_message_id,
+                i.moderated_at,
+                i.moderation_reason,
+                i.original_content,
                 i.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?",
@@ -231,6 +255,9 @@ impl MessageRepository for PgMessageRepository {
             encrypted,
             sender_device_id,
             pmid,
+            mod_at,
+            mod_reason,
+            orig_content,
         )
         .fetch_one(&self.pool)
         .await
@@ -249,6 +276,9 @@ impl MessageRepository for PgMessageRepository {
             message_type: row.message_type,
             system_event_key: row.system_event_key,
             parent_message_id: row.parent_message_id,
+            moderated_at: row.moderated_at,
+            moderation_reason: row.moderation_reason,
+            original_content: row.original_content,
             created_at: row.created_at,
             author_username: row.author_username,
             author_avatar_url: row.author_avatar_url,
@@ -285,6 +315,9 @@ impl MessageRepository for PgMessageRepository {
                 m.message_type as "message_type!: String",
                 m.system_event_key,
                 m.parent_message_id,
+                m.moderated_at,
+                m.moderation_reason,
+                m.original_content,
                 m.created_at,
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?",
@@ -325,6 +358,9 @@ impl MessageRepository for PgMessageRepository {
                     message_type: r.message_type,
                     system_event_key: r.system_event_key,
                     parent_message_id: r.parent_message_id,
+                    moderated_at: r.moderated_at,
+                    moderation_reason: r.moderation_reason,
+                    original_content: r.original_content,
                     created_at: r.created_at,
                     author_username: r.author_username,
                     author_avatar_url: r.author_avatar_url,
@@ -357,6 +393,9 @@ impl MessageRepository for PgMessageRepository {
                 message_type as "message_type!: String",
                 system_event_key,
                 parent_message_id,
+                moderated_at,
+                moderation_reason,
+                original_content,
                 created_at
             FROM messages
             WHERE id = $1 AND deleted_at IS NULL
@@ -381,6 +420,9 @@ impl MessageRepository for PgMessageRepository {
                 message_type: r.message_type,
                 system_event_key: r.system_event_key,
                 parent_message_id: r.parent_message_id,
+                moderated_at: r.moderated_at,
+                moderation_reason: r.moderation_reason,
+                original_content: r.original_content,
                 created_at: r.created_at,
             }
             .into_message()
@@ -391,14 +433,20 @@ impl MessageRepository for PgMessageRepository {
         &self,
         message_id: &MessageId,
         content: String,
+        moderated_at: Option<DateTime<Utc>>,
+        moderation_reason: Option<String>,
+        original_content: Option<String>,
     ) -> Result<MessageWithAuthor, DomainError> {
         let mid = message_id.0;
+        let mod_at = moderated_at;
+        let mod_reason = moderation_reason;
+        let orig_content = original_content;
 
         let row = sqlx::query!(
             r#"
             WITH updated AS (
                 UPDATE messages
-                SET content = $2, is_edited = true, edited_at = now()
+                SET content = $2, is_edited = true, edited_at = now(), moderated_at = $3, moderation_reason = $4, original_content = $5
                 WHERE id = $1 AND deleted_at IS NULL
                 RETURNING
                     id,
@@ -413,6 +461,9 @@ impl MessageRepository for PgMessageRepository {
                     message_type,
                     system_event_key,
                     parent_message_id,
+                    moderated_at,
+                    moderation_reason,
+                    original_content,
                     created_at
             )
             SELECT
@@ -428,6 +479,9 @@ impl MessageRepository for PgMessageRepository {
                 u.message_type as "message_type!: String",
                 u.system_event_key,
                 u.parent_message_id,
+                u.moderated_at,
+                u.moderation_reason,
+                u.original_content,
                 u.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?",
@@ -441,6 +495,9 @@ impl MessageRepository for PgMessageRepository {
             "#,
             mid,
             content,
+            mod_at,
+            mod_reason,
+            orig_content,
         )
         .fetch_optional(&self.pool)
         .await
@@ -463,6 +520,9 @@ impl MessageRepository for PgMessageRepository {
             message_type: row.message_type,
             system_event_key: row.system_event_key,
             parent_message_id: row.parent_message_id,
+            moderated_at: row.moderated_at,
+            moderation_reason: row.moderation_reason,
+            original_content: row.original_content,
             created_at: row.created_at,
             author_username: row.author_username,
             author_avatar_url: row.author_avatar_url,
@@ -561,6 +621,9 @@ impl MessageRepository for PgMessageRepository {
                     message_type,
                     system_event_key,
                     parent_message_id,
+                    moderated_at,
+                    moderation_reason,
+                    original_content,
                     created_at
             )
             SELECT
@@ -576,6 +639,9 @@ impl MessageRepository for PgMessageRepository {
                 i.message_type as "message_type!: String",
                 i.system_event_key,
                 i.parent_message_id,
+                i.moderated_at,
+                i.moderation_reason,
+                i.original_content,
                 i.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.avatar_url AS "author_avatar_url?"
@@ -603,6 +669,9 @@ impl MessageRepository for PgMessageRepository {
             message_type: row.message_type,
             system_event_key: row.system_event_key,
             parent_message_id: row.parent_message_id,
+            moderated_at: row.moderated_at,
+            moderation_reason: row.moderation_reason,
+            original_content: row.original_content,
             created_at: row.created_at,
             author_username: row.author_username,
             author_avatar_url: row.author_avatar_url,

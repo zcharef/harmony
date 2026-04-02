@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Channel, ChannelId, ChannelType, ServerId, UserId};
 use crate::domain::ports::{ChannelRepository, PlanLimitChecker};
+use crate::domain::services::content_filter::ContentFilter;
 
 /// Maximum length for a channel name (lowercase slug).
 const MAX_CHANNEL_NAME_LENGTH: usize = 100;
@@ -18,6 +19,7 @@ const MAX_CHANNEL_TOPIC_LENGTH: usize = 4096;
 pub struct ChannelService {
     repo: Arc<dyn ChannelRepository>,
     plan_checker: Arc<dyn PlanLimitChecker>,
+    content_filter: Arc<ContentFilter>,
 }
 
 /// Validate that a channel name matches `^[a-z0-9-]{1,100}$`.
@@ -82,8 +84,16 @@ impl ChannelService {
     pub const TEST_MAX_CHANNEL_TOPIC_LENGTH: usize = MAX_CHANNEL_TOPIC_LENGTH;
 
     #[must_use]
-    pub fn new(repo: Arc<dyn ChannelRepository>, plan_checker: Arc<dyn PlanLimitChecker>) -> Self {
-        Self { repo, plan_checker }
+    pub fn new(
+        repo: Arc<dyn ChannelRepository>,
+        plan_checker: Arc<dyn PlanLimitChecker>,
+        content_filter: Arc<ContentFilter>,
+    ) -> Self {
+        Self {
+            repo,
+            plan_checker,
+            content_filter,
+        }
     }
 
     /// Create a new channel in a server.
@@ -100,6 +110,7 @@ impl ChannelService {
     ) -> Result<Channel, DomainError> {
         let normalized = name.trim().to_lowercase();
         validate_channel_name(&normalized)?;
+        self.content_filter.check_hard(&normalized)?;
 
         // WHY: TOCTOU race exists between this limit check and the insert below.
         // Two concurrent requests could both pass, exceeding the limit by one.
@@ -186,6 +197,7 @@ impl ChannelService {
             Some(raw) => {
                 let normalized = raw.trim().to_lowercase();
                 validate_channel_name(&normalized)?;
+                self.content_filter.check_hard(&normalized)?;
                 Some(normalized)
             }
             None => None,
@@ -196,6 +208,7 @@ impl ChannelService {
         // validate_channel_topic checks the DB ceiling (4096); the plan limit is stricter.
         if let Some(Some(ref t)) = topic {
             validate_channel_topic(t)?;
+            self.content_filter.check_hard(t)?;
             let limits = self.plan_checker.get_server_plan_limits(server_id).await?;
             #[allow(clippy::cast_possible_truncation)] // WHY: max is 4096, fits in usize
             let max_topic = limits.max_channel_topic_chars as usize;

@@ -44,6 +44,13 @@ pub struct Config {
     #[serde(default = "default_plan_enforcement")]
     pub plan_enforcement_enabled: bool,
 
+    /// Enable content moderation / `AutoMod` (default: true).
+    /// Self-hosted deployments should set `CONTENT_MODERATION_ENABLED=false`.
+    /// When true, [`ContentFilter`] checks all user-generated text for banned words.
+    /// When false, `ContentFilter::noop()` is used (no filtering).
+    #[serde(default = "default_content_moderation")]
+    pub content_moderation_enabled: bool,
+
     /// Comma-separated CIDRs of trusted reverse proxies (e.g. `"172.16.0.0/12,10.0.0.0/8"`).
     /// Only when the TCP peer IP matches a trusted proxy CIDR will `X-Forwarded-For` /
     /// `X-Real-IP` headers be used for rate limiting. When unset, proxy headers are ignored.
@@ -72,6 +79,10 @@ fn default_otel_service_name() -> Option<String> {
 }
 
 fn default_plan_enforcement() -> bool {
+    true
+}
+
+fn default_content_moderation() -> bool {
     true
 }
 
@@ -122,6 +133,10 @@ impl std::fmt::Debug for Config {
             )
             .field("otel_service_name", &self.otel_service_name)
             .field("plan_enforcement_enabled", &self.plan_enforcement_enabled)
+            .field(
+                "content_moderation_enabled",
+                &self.content_moderation_enabled,
+            )
             .field("trusted_proxies", &self.trusted_proxies)
             .field("rate_limit_per_minute", &self.rate_limit_per_minute)
             .finish()
