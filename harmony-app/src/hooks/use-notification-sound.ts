@@ -1,7 +1,7 @@
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef } from 'react'
 import { z } from 'zod'
-import type { NotificationSettingsResponse, ServerResponse } from '@/lib/api'
+import type { DmListItem, NotificationSettingsResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 import { useServerEvent } from './use-server-event'
@@ -59,12 +59,16 @@ function shouldSuppressSound(
   return false
 }
 
-/** WHY: Checks the servers cache to determine if a serverId belongs to a DM. */
+/**
+ * WHY: DM servers are NOT in the servers list cache (queryKeys.servers.list()).
+ * They live in the DMs cache (queryKeys.dms.list()) where each DmListItem has
+ * a serverId. Matching against this cache is the only reliable way to detect
+ * whether an incoming message belongs to a DM conversation.
+ */
 function isDmServer(serverId: string, queryClient: QueryClient): boolean {
-  const servers = queryClient.getQueryData<ServerResponse[]>(queryKeys.servers.list())
-  if (servers === undefined) return false
-  const server = servers.find((s) => s.id === serverId)
-  return server?.isDm === true
+  const dms = queryClient.getQueryData<DmListItem[]>(queryKeys.dms.list())
+  if (dms === undefined) return false
+  return dms.some((dm) => dm.serverId === serverId)
 }
 
 function playSound(audio: HTMLAudioElement): void {
