@@ -41,6 +41,7 @@ sentry = "0.42"
 tauri-plugin-sentry = "0.5"
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-notification = "2"
 
 [dev-dependencies]
 tempfile = "3"

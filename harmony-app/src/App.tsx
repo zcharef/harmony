@@ -6,6 +6,9 @@ import { UpdateNotification } from '@/components/shared/update-notification'
 import { AuthProvider, DesktopAuthRedirect, LoginPage, useAuthStore } from '@/features/auth'
 import { CryptoProvider } from '@/features/crypto'
 import { useAppUpdater } from '@/hooks/use-app-updater'
+import { useDockBadge } from '@/hooks/use-dock-badge'
+import { useDocumentTitle } from '@/hooks/use-document-title'
+import { useFaviconBadge } from '@/hooks/use-favicon-badge'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,6 +23,18 @@ const queryClient = new QueryClient({
     },
   },
 })
+
+// WHY: Extracted into a component so hooks are only mounted after login.
+// React hook rules forbid conditional calls, but conditional rendering of a
+// component that calls hooks achieves the same effect. This matches the
+// useAppUpdater(isLoggedIn) pattern — badge hooks should not set up canvas
+// infrastructure or Tauri badge calls on the login page.
+function UnreadBadges() {
+  useDocumentTitle()
+  useFaviconBadge()
+  useDockBadge()
+  return null
+}
 
 function AppContent() {
   const { session, isLoading } = useAuthStore()
@@ -54,6 +69,7 @@ function AppContent() {
 
   return (
     <>
+      <UnreadBadges />
       <MainLayout />
       {readyUpdate !== null && (
         <UpdateNotification

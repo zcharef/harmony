@@ -50,6 +50,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_keyring::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(CryptoState::new(OlmAccountManager::new()))
         .manage(MessageCacheState::new(MessageCache::new()))
         .manage(MegolmState::new(MegolmSessionManager::new()))

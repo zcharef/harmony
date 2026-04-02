@@ -24,5 +24,6 @@
   "updateVersionTransition": "v{{from}} → v{{to}}",
   "updateAction": "Restart now",
   "updateDismiss": "Not now",
-  "restartFailed": "Failed to restart — please restart manually"
+  "restartFailed": "Failed to restart — please restart manually",
+  "newEncryptedMessage": "New encrypted message"
 }

@@ -10,6 +10,7 @@ import { useAuthStore } from '@/features/auth'
 import {
   ChannelSidebar,
   useChannels,
+  useDesktopNotifications,
   useRealtimeChannels,
   useRealtimeUnread,
   useUnreadSync,
@@ -26,10 +27,12 @@ import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, useSettingsUiStore } from '@/features/settings'
 import { useFetchSSE } from '@/hooks/use-fetch-sse'
+import { useNotificationSound } from '@/hooks/use-notification-sound'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import { type ConnectionStatus, useConnectionStatus } from '@/lib/connection-store'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
+import { NAVIGATE_EVENT, navigateDetailSchema } from '@/lib/navigation-events'
 import { supabase } from '@/lib/supabase'
 import { AboutPage } from './about-page'
 import { ConnectionBanner } from './connection-banner'
@@ -210,6 +213,38 @@ function useSelectionPersistence(
   }, [view, selectedServerId, selectedChannelId])
 }
 
+// WHY: Handles navigation triggered by clicking a desktop notification.
+// The notification hook dispatches a CustomEvent(NAVIGATE_EVENT) on `window`
+// with { serverId, channelId } detail. Uses direct addEventListener instead
+// of useServerEvent because useServerEvent hardcodes an `sse:` prefix
+// (use-server-event.ts:17) making it unsuitable for non-SSE custom events.
+function useNotificationNavigation(
+  servers: { id: string; isDm: boolean }[] | undefined,
+  setView: (view: ViewMode) => void,
+  setSelectedServerId: (id: string | null) => void,
+  setSelectedChannelId: (id: string | null) => void,
+) {
+  useEffect(() => {
+    function handleNavigate(e: Event) {
+      if (!(e instanceof CustomEvent)) return
+      const parsed = navigateDetailSchema.safeParse(e.detail)
+      if (!parsed.success) return
+
+      const { serverId, channelId } = parsed.data
+      const isDm = servers?.find((s) => s.id === serverId)?.isDm === true
+
+      setView(isDm ? 'dms' : 'servers')
+      setSelectedServerId(serverId)
+      setSelectedChannelId(channelId)
+    }
+
+    window.addEventListener(NAVIGATE_EVENT, handleNavigate)
+    return () => {
+      window.removeEventListener(NAVIGATE_EVENT, handleNavigate)
+    }
+  }, [servers, setView, setSelectedServerId, setSelectedChannelId])
+}
+
 // WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
 function ServersErrorView({
   onSelectServer,
@@ -362,6 +397,13 @@ export function MainLayout() {
   // WHY: Handles the SSE unread.sync snapshot on connect/reconnect.
   // Replaces N per-server REST calls with a single SSE initial event.
   useUnreadSync(userId)
+  // WHY: Fires native desktop notifications for incoming messages. Needs
+  // selectedChannelId to skip the active channel, userId to filter self-messages.
+  useDesktopNotifications(selectedChannelId, userId)
+  // WHY: Plays notification sounds (different for DMs vs server channels).
+  // Suppression differs from desktop notifications: sound plays when focused
+  // on a different channel, desktop notifications suppress on focus alone.
+  useNotificationSound(selectedChannelId, userId)
   const { data: channels } = useChannels(selectedServerId)
 
   // WHY: DM list needed to derive chat header info (recipient name) when in DM view
@@ -416,6 +458,7 @@ export function MainLayout() {
 
   useChannelAutoSelect(view, selectedServerId, selectedChannelId, channels, setSelectedChannelId)
   useSelectionPersistence(view, selectedServerId, selectedChannelId)
+  useNotificationNavigation(servers, setView, setSelectedServerId, setSelectedChannelId)
 
   const isDmView = view === 'dms'
   const showAboutPage = useAboutUiStore((s) => s.showAboutPage)

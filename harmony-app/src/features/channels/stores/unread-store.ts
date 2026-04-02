@@ -27,3 +27,13 @@ export const useUnreadStore = create<UnreadStore>((set) => ({
     })),
   sync: (channels) => set({ counts: channels }),
 }))
+
+/**
+ * Derived selector: total unread count across all channels.
+ *
+ * WHY: Badge hooks (document title, favicon, dock badge) all need the total.
+ * Returns a number primitive so Zustand skips re-renders when the sum is unchanged.
+ */
+export function useTotalUnread(): number {
+  return useUnreadStore((s) => Object.values(s.counts).reduce((sum, count) => sum + count, 0))
+}
