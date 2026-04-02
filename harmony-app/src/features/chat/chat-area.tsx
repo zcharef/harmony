@@ -1039,7 +1039,7 @@ export function ChatArea({
   const virtualizer = useVirtualizer({
     count: virtualItems.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => (virtualItems[index]?.type === 'date' ? 36 : 52),
+    estimateSize: (index) => (virtualItems[index]?.type === 'date' ? 36 : 56),
     overscan: 10,
   })
 

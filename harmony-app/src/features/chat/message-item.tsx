@@ -305,7 +305,7 @@ function SystemMessageItem({ message, t }: { message: MessageResponse; t: TFunct
       data-test="message-item"
       data-test-system="true"
       data-message-id={message.id}
-      className="flex items-center gap-2 px-4 py-1 text-sm text-default-500"
+      className="flex items-center gap-2 px-4 pt-3 pb-0.5 text-sm text-default-500"
     >
       <ArrowRight className="h-4 w-4 shrink-0" />
       <span>{text}</span>
@@ -468,7 +468,7 @@ export const MessageItem = memo(function MessageItem({
     <div
       data-test="message-item"
       data-message-id={message.id}
-      className={`group relative flex gap-4 px-4 hover:bg-default-200/50${isPending ? ' opacity-60' : ''}${isGrouped ? ' py-0.5' : ' py-1'}`}
+      className={`group relative flex gap-4 px-4 hover:bg-default-200/50${isPending ? ' opacity-60' : ''}${isGrouped ? ' py-0.5' : ' pt-3 pb-0.5'}`}
     >
       {isGrouped ? (
         <div className="w-10 shrink-0" />
