@@ -188,11 +188,12 @@ export function useSendMessage(
       })
       // WHY: 429 = slow mode. Sync client countdown from server's remaining time,
       // and always show toast (essential post-refresh when client has no countdown).
-      const status =
-        typeof error === 'object' && error !== null && 'status' in error
-          ? (error as Record<string, unknown>).status
-          : undefined
-      if (status === 429) {
+      const is429 =
+        typeof error === 'object' &&
+        error !== null &&
+        'status' in error &&
+        Object.getOwnPropertyDescriptor(error, 'status')?.value === 429
+      if (is429) {
         const detail = getApiErrorDetail(error, '')
         const waitMatch = detail.match(/wait (\d+) second/)
         if (waitMatch !== null && onRateLimited !== undefined) {

@@ -1,6 +1,6 @@
 [package]
 name = "harmony-app"
-version = "0.5.0"
+version = "0.6.0"
 description = "Harmony — open-source, privacy-first group communication"
 authors = ["Harmony Contributors"]
 license = "AGPL-3.0"
