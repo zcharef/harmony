@@ -119,13 +119,14 @@ function deriveChatProps<R>(
   isDmView: boolean,
   selectedChannelId: string | null,
   dmRecipientRaw: R | undefined,
-  selectedChannel: { isReadOnly: boolean; encrypted: boolean } | undefined,
+  selectedChannel: { isReadOnly: boolean; encrypted: boolean; slowModeSeconds: number } | undefined,
 ) {
   const isDm = isDmView && selectedChannelId !== null
   const dmRecipient: R | null = dmRecipientRaw ?? null
   const isReadOnly = selectedChannel !== undefined ? selectedChannel.isReadOnly : false
   const isChannelEncrypted = selectedChannel !== undefined ? selectedChannel.encrypted : false
-  return { isDm, dmRecipient, isReadOnly, isChannelEncrypted }
+  const slowModeSeconds = selectedChannel !== undefined ? selectedChannel.slowModeSeconds : 0
+  return { isDm, dmRecipient, isReadOnly, isChannelEncrypted, slowModeSeconds }
 }
 
 // WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
@@ -566,6 +567,7 @@ export function MainLayout() {
               dmRecipient={chatProps.dmRecipient}
               isReadOnly={chatProps.isReadOnly}
               isChannelEncrypted={chatProps.isChannelEncrypted}
+              slowModeSeconds={chatProps.slowModeSeconds}
             />
           </FeatureErrorBoundary>
         </Panel>

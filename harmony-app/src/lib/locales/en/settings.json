@@ -33,6 +33,8 @@
   "channelsDescription": "Configure channel settings and permissions.",
   "private": "Private",
   "readOnly": "Read-Only",
+  "slowMode": "Slow mode",
+  "slowModeTooltip": "Slow mode — minimum time between messages",
   "privateChannel": "Private channel toggle",
   "readOnlyChannel": "Read-only channel toggle",
   "announcementChannel": "Announcement Channel (Read-Only)",

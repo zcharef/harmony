@@ -60,6 +60,7 @@ import { useRealtimeReactions } from './hooks/use-realtime-reactions'
 import { useRemoveReaction } from './hooks/use-remove-reaction'
 import type { SendMessageEncryption } from './hooks/use-send-message'
 import { useSendMessage } from './hooks/use-send-message'
+import { useSlowMode } from './hooks/use-slow-mode'
 import { useTypingIndicator } from './hooks/use-typing-indicator'
 import { useUpdateNotificationSettings } from './hooks/use-update-notification-settings'
 import { MessageItem } from './message-item'
@@ -127,6 +128,8 @@ interface ChatAreaProps {
   isReadOnly?: boolean
   /** WHY: When true, messages are Megolm-encrypted. Derived from channel.encrypted in parent. */
   isChannelEncrypted?: boolean
+  /** WHY: Minimum seconds between messages per user. 0 = disabled. Drives useSlowMode hook. */
+  slowModeSeconds?: number
 }
 
 /**
@@ -732,6 +735,7 @@ function ChatInputSection({
   inputPlaceholder,
   messageContent,
   isDmInitFailed,
+  slowModeRemainingSeconds,
   onValueChange,
   onKeyDown,
   onSendTyping,
@@ -742,6 +746,8 @@ function ChatInputSection({
   messageContent: string
   /** WHY: When true, E2EE init failed and this is a DM — warn that messages will be plaintext. */
   isDmInitFailed: boolean
+  /** WHY: Shows countdown indicator above the input when > 0. Passed from useSlowMode. */
+  slowModeRemainingSeconds: number
   onValueChange: (value: string) => void
   onKeyDown: (e: React.KeyboardEvent) => void
   onSendTyping: () => void
@@ -760,6 +766,7 @@ function ChatInputSection({
           {tCrypto('blockedCannotSend')}
         </div>
       )}
+      <SlowModeIndicator remainingSeconds={slowModeRemainingSeconds} />
       <MessageInput
         isInputDisabled={isInputDisabled}
         placeholder={isBlocked ? tCrypto('blockedCannotSend') : inputPlaceholder}
@@ -926,6 +933,19 @@ function ChatPlaceholder({ isDm }: { isDm: boolean }) {
   )
 }
 
+// WHY extracted: Reduces ChatArea cognitive complexity below Biome's limit of 15.
+function SlowModeIndicator({ remainingSeconds }: { remainingSeconds: number }) {
+  const { t } = useTranslation('chat')
+
+  if (remainingSeconds === 0) return null
+
+  return (
+    <div className="px-4 py-1 text-xs text-warning">
+      {t('slowModeCooldown', { seconds: remainingSeconds })}
+    </div>
+  )
+}
+
 // WHY extracted: Derives input disabled/blocked state from multiple conditions.
 // Reduces ChatArea cognitive complexity below Biome's limit of 15.
 function useChatInputState(
@@ -963,6 +983,7 @@ export function ChatArea({
   dmRecipient = null,
   isReadOnly = false,
   isChannelEncrypted = false,
+  slowModeSeconds = 0,
 }: ChatAreaProps) {
   const currentUser = useCurrentUser()
 
@@ -1057,13 +1078,20 @@ export function ChatArea({
     channelName,
   )
 
+  // WHY: Client-side slow mode countdown. Admins are exempt (server-side + hook).
+  const isAdmin = ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.admin
+  const { isInCooldown, remainingSeconds, startCooldown } = useSlowMode(slowModeSeconds, isAdmin)
+
   function handleSend() {
     const trimmed = messageContent.trim()
-    if (trimmed.length === 0 || channelId === null) return
+    if (trimmed.length === 0 || channelId === null || isInCooldown) return
     const parentId = replyingTo?.id
     setMessageContent('')
     setReplyingTo(null)
     sendMessage.mutate({ content: trimmed, parentMessageId: parentId })
+    // WHY: Start cooldown optimistically right after sending. If the send fails
+    // with 429, the timer is already running. Matches Discord's behavior.
+    startCooldown()
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -1185,6 +1213,7 @@ export function ChatArea({
         inputPlaceholder={inputPlaceholder}
         messageContent={messageContent}
         isDmInitFailed={isDmInitFailed}
+        slowModeRemainingSeconds={remainingSeconds}
         onValueChange={setMessageContent}
         onKeyDown={handleKeyDown}
         onSendTyping={() => sendTyping(currentUser.username)}

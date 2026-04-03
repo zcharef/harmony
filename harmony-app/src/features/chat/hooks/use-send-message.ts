@@ -183,7 +183,16 @@ export function useSendMessage(
         channelId,
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('chat:sendMessageFailed')))
+      // WHY: 429 = slow mode rate limit. The SlowModeIndicator countdown in
+      // ChatArea already provides visible feedback, so suppress the toast.
+      const is429 =
+        typeof error === 'object' &&
+        error !== null &&
+        'status' in error &&
+        (error as Record<string, unknown>).status === 429
+      if (!is429) {
+        toast.error(getApiErrorDetail(error, i18n.t('chat:sendMessageFailed')))
+      }
 
       // WHY rollback: Restore the exact cache state from before the mutation
       // so the user does not see a ghost message that never reached the server

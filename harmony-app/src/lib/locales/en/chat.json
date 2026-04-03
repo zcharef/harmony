@@ -25,6 +25,7 @@
   "emojiPicker": "Emoji Picker",
   "replyingTo": "Replying to",
   "reply": "Reply",
+  "slowModeCooldown": "Slow mode: {{seconds}}s",
   "notificationLevel": {
     "all": "All Messages",
     "mentions": "@Mentions Only",
