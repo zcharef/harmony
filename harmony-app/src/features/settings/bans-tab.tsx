@@ -69,7 +69,7 @@ export function BansTab({ serverId, callerRole }: BansTabProps) {
           return (
             <div
               key={ban.userId}
-              className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-default-100"
+              className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-default-50"
               data-test="ban-row"
               data-user-id={ban.userId}
             >

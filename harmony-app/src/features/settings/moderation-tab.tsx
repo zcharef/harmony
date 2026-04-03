@@ -133,7 +133,7 @@ export function ModerationTab({ serverId, isOwner }: ModerationTabProps) {
             return (
               <div
                 key={category}
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-default-100"
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-default-50"
                 data-test={`tier2-category-${category}`}
               >
                 <div className="flex-1">

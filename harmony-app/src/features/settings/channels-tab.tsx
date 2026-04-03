@@ -293,7 +293,7 @@ function ChannelRow({
     <div data-test="settings-channel-row" data-channel-id={channel.id}>
       <button
         type="button"
-        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-default-100"
+        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-default-50"
         onClick={canManage ? onToggle : undefined}
         aria-expanded={canManage ? isExpanded : undefined}
       >

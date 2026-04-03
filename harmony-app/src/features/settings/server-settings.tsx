@@ -60,7 +60,7 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
   return (
     <div data-test="server-settings" className="flex h-screen bg-background">
       {/* Left sidebar with tab navigation */}
-      <div className="flex w-56 flex-col border-r border-divider bg-default-50">
+      <div className="flex w-56 flex-col border-r border-divider bg-default-100">
         <div className="flex h-12 items-center border-b border-divider px-4">
           <span className="truncate text-sm font-semibold text-foreground">{server.name}</span>
         </div>
@@ -74,7 +74,7 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
                 'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                 activeTab === key
                   ? 'bg-default-200 text-foreground'
-                  : 'text-default-500 hover:bg-default-100 hover:text-foreground',
+                  : 'text-default-500 hover:bg-default-200 hover:text-foreground',
               )}
               data-test={`settings-tab-${key}`}
             >

@@ -85,7 +85,7 @@ function MemberRoleRow({
 
   return (
     <div
-      className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-default-100"
+      className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-default-50"
       data-test="roles-member-row"
       data-user-id={member.userId}
     >

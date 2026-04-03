@@ -52,8 +52,11 @@ function buildResponse(status: number, headers?: Record<string, string>): Respon
   return new Response(null, { status, headers })
 }
 
-function buildOptions(fetchFn?: typeof globalThis.fetch) {
-  return { fetch: fetchFn }
+function buildOptions(
+  fetchFn?: typeof globalThis.fetch,
+  body?: { serializedBody?: string; body?: BodyInit | null },
+) {
+  return { fetch: fetchFn, ...body }
 }
 
 // -- Tests --------------------------------------------------------------------
@@ -223,6 +226,44 @@ describe('responseInterceptor', () => {
         url: 'http://localhost:3000/v1/messages',
       })
     })
+
+    it('retries POST requests with body via rebuildRequest (not new Request(request))', async () => {
+      const retryResponse = buildResponse(200)
+      const mockFetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(retryResponse)
+
+      vi.mocked(supabase.auth.refreshSession).mockResolvedValue({
+        data: { session: null, user: null },
+        error: null,
+      })
+      vi.mocked(supabase.auth.getSession).mockResolvedValue({
+        data: { session: { access_token: 'fresh-token' } as never },
+        error: null,
+      })
+
+      // WHY: POST with body — same consumed-body scenario as the 429 test.
+      const serializedBody = JSON.stringify({ content: 'hello' })
+      const request = buildRequest({
+        method: 'POST',
+        headers: { Authorization: 'Bearer stale-token', 'Content-Type': 'application/json' },
+        body: serializedBody,
+      })
+      const response = buildResponse(401)
+
+      const result = await responseInterceptor(
+        response,
+        request,
+        buildOptions(mockFetch, { serializedBody }),
+      )
+
+      expect(mockFetch).toHaveBeenCalledOnce()
+
+      const retriedRequest = mockFetch.mock.calls[0]?.[0] as Request
+      expect(retriedRequest.headers.get('Authorization')).toBe('Bearer fresh-token')
+      expect(retriedRequest.method).toBe('POST')
+      const retriedBody = await retriedRequest.text()
+      expect(retriedBody).toBe(serializedBody)
+      expect(result).toBe(retryResponse)
+    })
   })
 
   // -- 429: rate limit retry --------------------------------------------------
@@ -306,6 +347,38 @@ describe('responseInterceptor', () => {
       expect(result).toBe(retryResponse)
 
       globalThis.fetch = originalFetch
+    })
+
+    it('retries POST requests with body via rebuildRequest (not request.clone)', async () => {
+      vi.useFakeTimers()
+
+      const retryResponse = buildResponse(200)
+      const mockFetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(retryResponse)
+
+      // WHY: Simulate a POST request whose body was consumed by the original fetch.
+      // In production, fetch() sets bodyUsed = true, making request.clone() throw.
+      // The interceptor must reconstruct the request from opts.serializedBody.
+      const serializedBody = JSON.stringify({ content: 'hello' })
+      const request = buildRequest({ method: 'POST', body: serializedBody })
+      const response = buildResponse(429, { 'Retry-After': '1' })
+
+      const resultPromise = responseInterceptor(
+        response,
+        request,
+        buildOptions(mockFetch, { serializedBody }),
+      )
+      await vi.advanceTimersByTimeAsync(1000)
+
+      const result = await resultPromise
+
+      expect(mockFetch).toHaveBeenCalledOnce()
+      expect(result).toBe(retryResponse)
+
+      // Verify the retried request preserved the body
+      const retriedRequest = mockFetch.mock.calls[0]?.[0] as Request
+      expect(retriedRequest.method).toBe('POST')
+      const retriedBody = await retriedRequest.text()
+      expect(retriedBody).toBe(serializedBody)
     })
   })
 

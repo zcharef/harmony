@@ -44,6 +44,36 @@ function delay(ms: number): Promise<void> {
   })
 }
 
+/** WHY: The @hey-api client passes the full resolved options object as the
+ * third argument to response interceptors. After fetch() consumes the Request
+ * body (bodyUsed = true), request.clone() and new Request(request) both throw
+ * TypeError. We need `serializedBody` from opts to reconstruct the request. */
+interface InterceptorOptions {
+  fetch?: typeof globalThis.fetch
+  serializedBody?: string
+  body?: BodyInit | null
+}
+
+/**
+ * Rebuild a Request from its still-readable metadata + the original body from opts.
+ *
+ * WHY not request.clone(): fetch() marks bodyUsed = true on the original Request.
+ * Cloning a consumed Request throws TypeError. The request's url/method/headers
+ * are still readable, and the body is preserved in opts.serializedBody by the
+ * @hey-api client (set before fetch is called).
+ */
+function rebuildRequest(
+  request: Request,
+  opts: InterceptorOptions,
+  headerOverrides?: Headers,
+): Request {
+  return new Request(request.url, {
+    method: request.method,
+    headers: headerOverrides ?? new Headers(request.headers),
+    body: opts.serializedBody ?? opts.body,
+  })
+}
+
 /**
  * Response interceptor — handles 401 and 429 transparently.
  *
@@ -58,7 +88,7 @@ function delay(ms: number): Promise<void> {
 export async function responseInterceptor(
   response: Response,
   request: Request,
-  options: { fetch?: typeof globalThis.fetch },
+  options: InterceptorOptions,
 ): Promise<Response> {
   // --- Structured breadcrumb for ALL non-2xx responses ---
   if (!response.ok) {
@@ -88,14 +118,11 @@ export async function responseInterceptor(
       return response
     }
 
-    // WHY: Request headers are immutable after construction, so we clone with
-    // the updated Authorization header for the retry.
     const retryHeaders = new Headers(request.headers)
     retryHeaders.set('Authorization', `Bearer ${newToken}`)
-    const retryRequest = new Request(request, { headers: retryHeaders })
 
     const _fetch = options.fetch ?? globalThis.fetch
-    return _fetch(retryRequest)
+    return _fetch(rebuildRequest(request, options, retryHeaders))
   }
 
   // --- 429 Rate Limited: transparent single retry ---
@@ -107,7 +134,7 @@ export async function responseInterceptor(
     await delay(waitMs)
 
     const _fetch = options.fetch ?? globalThis.fetch
-    return _fetch(request.clone())
+    return _fetch(rebuildRequest(request, options))
   }
 
   return response
