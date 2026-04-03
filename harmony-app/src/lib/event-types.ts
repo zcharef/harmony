@@ -89,6 +89,7 @@ const channelPayloadSchema = z.object({
   isPrivate: z.boolean(),
   isReadOnly: z.boolean(),
   encrypted: z.boolean(),
+  slowModeSeconds: z.number(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

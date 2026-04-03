@@ -23,6 +23,7 @@ const channelPayloadSchema = z.object({
   isPrivate: z.boolean(),
   isReadOnly: z.boolean(),
   encrypted: z.boolean(),
+  slowModeSeconds: z.number(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -58,6 +59,7 @@ function toChannelResponse(
     name: payload.name,
     position: payload.position,
     serverId,
+    slowModeSeconds: payload.slowModeSeconds,
     topic: payload.topic,
     updatedAt: payload.updatedAt,
   }

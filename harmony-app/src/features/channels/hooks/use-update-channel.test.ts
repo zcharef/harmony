@@ -34,6 +34,7 @@ const mockUpdatedChannel: ChannelResponse = {
   isPrivate: false,
   isReadOnly: false,
   encrypted: false,
+  slowModeSeconds: 0,
   createdAt: '2026-03-16T00:00:00.000Z',
   updatedAt: '2026-03-16T01:00:00.000Z',
 }
