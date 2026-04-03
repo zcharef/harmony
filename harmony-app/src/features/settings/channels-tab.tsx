@@ -1,5 +1,5 @@
-import { Button, Select, SelectItem, Spinner, Switch, Tooltip } from '@heroui/react'
-import { Hash, Lock, Plus, Trash2, Volume2 } from 'lucide-react'
+import { Button, Chip, Divider, Select, SelectItem, Spinner, Switch } from '@heroui/react'
+import { ChevronDown, Clock, Hash, Lock, Plus, Trash2, Volume2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -47,17 +47,35 @@ async function createAndRegisterMegolmSession(channelId: string): Promise<void> 
   })
 }
 
-function ChannelRow({
+/** WHY: Reusable row layout matching moderation-tab.tsx pattern — label + description left, control right. */
+function SettingRow({
+  label,
+  description,
+  children,
+}: {
+  label: string
+  description: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-foreground">{label}</p>
+        <p className="text-xs text-default-400">{description}</p>
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  )
+}
+
+function ChannelSettingsCard({
   channel,
   serverId,
-  canManage,
   isOwner,
   onDelete,
 }: {
   channel: ChannelResponse
   serverId: string
-  canManage: boolean
-  /** WHY: Only the server owner can enable E2EE (one-way toggle). */
   isOwner: boolean
   onDelete: () => void
 }) {
@@ -126,117 +144,190 @@ function ChannelRow({
 
   /** WHY: E2EE toggle is only shown to owner, on desktop, with crypto initialized. */
   const canEnableEncryption = isOwner && isDesktop && isInitialized
+  const showSlowModeActive = channel.slowModeSeconds > 0
 
   return (
     <div
-      className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-default-100"
-      data-test="settings-channel-row"
+      className="rounded-lg border border-default-200 bg-default-50 p-4"
+      data-test="channel-settings-card"
       data-channel-id={channel.id}
     >
-      {channel.channelType === 'text' ? (
-        <Hash className="h-4 w-4 shrink-0 text-default-500" />
-      ) : (
-        <Volume2 className="h-4 w-4 shrink-0 text-default-500" />
-      )}
-      <div className="flex-1 overflow-hidden">
-        <div className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-medium text-foreground">{channel.name}</span>
-          {channel.encrypted && (
-            <Lock className="h-3 w-3 shrink-0 text-success" data-test="channel-encrypted-icon" />
+      {/* Section 1: Slow Mode */}
+      <div className="mb-1">
+        <div className="flex items-center gap-2">
+          <Clock className="h-4 w-4 text-default-500" />
+          <p className="text-sm font-medium text-foreground">{t('slowMode')}</p>
+          {showSlowModeActive && (
+            <Chip size="sm" variant="flat" color="primary">
+              {t(
+                SLOW_MODE_OPTIONS.find((o) => o.value === String(channel.slowModeSeconds))
+                  ?.labelKey ?? 'slowModeOff',
+              )}
+            </Chip>
           )}
         </div>
-        {channel.topic !== undefined && channel.topic !== null && (
-          <p className="truncate text-xs text-default-400">{channel.topic}</p>
-        )}
+        <p className="mb-3 mt-0.5 text-xs text-default-400">{t('slowModeTooltip')}</p>
+        <Select
+          aria-label={t('slowMode')}
+          size="sm"
+          className="max-w-xs"
+          selectedKeys={new Set([String(channel.slowModeSeconds)])}
+          onSelectionChange={(selection) => {
+            const first = [...selection][0]
+            if (first === undefined) return
+            updatePerms.mutate({ slowModeSeconds: Number(first) })
+          }}
+          data-test="channel-slowmode-select"
+        >
+          {SLOW_MODE_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value}>{t(opt.labelKey)}</SelectItem>
+          ))}
+        </Select>
       </div>
-      {canManage && (
-        <div className="flex items-center gap-4">
-          <Tooltip content={t('slowModeTooltip')} placement="top" delay={300}>
-            <div>
-              <Select
-                aria-label={t('slowMode')}
-                size="sm"
-                className="w-28"
-                selectedKeys={new Set([String(channel.slowModeSeconds)])}
-                onSelectionChange={(selection) => {
-                  const first = [...selection][0]
-                  if (first === undefined) return
-                  updatePerms.mutate({ slowModeSeconds: Number(first) })
-                }}
-                data-test="channel-slowmode-select"
-              >
-                {SLOW_MODE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value}>{t(opt.labelKey)}</SelectItem>
-                ))}
-              </Select>
-            </div>
-          </Tooltip>
-          {canEnableEncryption && (
-            <Tooltip
-              content={
-                channel.encrypted ? tCrypto('encryptionPermanent') : tCrypto('enableEncryption')
-              }
-              placement="top"
-              delay={300}
-            >
-              <div>
-                <Switch
-                  size="sm"
-                  isSelected={channel.encrypted}
-                  isDisabled={channel.encrypted || isEnabling}
-                  onValueChange={handleEncryptionToggle}
-                  aria-label={tCrypto('enableEncryption')}
-                  data-test="channel-encryption-toggle"
-                >
-                  <span className="text-xs text-default-500">{tCrypto('encrypted')}</span>
-                </Switch>
-              </div>
-            </Tooltip>
-          )}
-          {!canEnableEncryption && isOwner && !isDesktop && (
-            <Tooltip content={tCrypto('encryptionDesktopOnly')} placement="top" delay={300}>
-              <div>
-                <Switch
-                  size="sm"
-                  isSelected={channel.encrypted}
-                  isDisabled
-                  aria-label={tCrypto('enableEncryption')}
-                  data-test="channel-encryption-toggle-disabled"
-                >
-                  <span className="text-xs text-default-500">{tCrypto('encrypted')}</span>
-                </Switch>
-              </div>
-            </Tooltip>
-          )}
+
+      <Divider className="my-4" />
+
+      {/* Section 2: Channel Permissions */}
+      <div>
+        <SettingRow label={t('privateChannelLabel')} description={t('privateChannelHelp')}>
           <Switch
             size="sm"
             isSelected={channel.isPrivate}
             onValueChange={handlePrivateToggle}
             aria-label={t('privateChannel')}
             data-test="channel-private-toggle"
-          >
-            <span className="text-xs text-default-500">{t('private')}</span>
-          </Switch>
+          />
+        </SettingRow>
+
+        <SettingRow label={t('readOnlyChannelLabel')} description={t('readOnlyChannelHelp')}>
           <Switch
             size="sm"
             isSelected={channel.isReadOnly}
             onValueChange={handleReadOnlyToggle}
             aria-label={t('readOnlyChannel')}
             data-test="channel-readonly-toggle"
+          />
+        </SettingRow>
+
+        {canEnableEncryption && (
+          <SettingRow
+            label={tCrypto('enableEncryption')}
+            description={
+              channel.encrypted
+                ? tCrypto('encryptionPermanent')
+                : tCrypto('enableEncryptionConfirm', { channelName: channel.name })
+            }
           >
-            <span className="text-xs text-default-500">{t('readOnly')}</span>
-          </Switch>
-          <Button
-            variant="light"
-            isIconOnly
-            size="sm"
-            color="danger"
-            onPress={onDelete}
-            aria-label={t('channels:deleteChannel')}
-            data-test="channel-delete-button"
+            <Switch
+              size="sm"
+              isSelected={channel.encrypted}
+              isDisabled={channel.encrypted || isEnabling}
+              onValueChange={handleEncryptionToggle}
+              aria-label={tCrypto('enableEncryption')}
+              data-test="channel-encryption-toggle"
+            />
+          </SettingRow>
+        )}
+
+        {!canEnableEncryption && isOwner && !isDesktop && (
+          <SettingRow
+            label={tCrypto('enableEncryption')}
+            description={tCrypto('encryptionDesktopOnly')}
           >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+            <Switch
+              size="sm"
+              isSelected={channel.encrypted}
+              isDisabled
+              aria-label={tCrypto('enableEncryption')}
+              data-test="channel-encryption-toggle-disabled"
+            />
+          </SettingRow>
+        )}
+      </div>
+
+      <Divider className="my-4" />
+
+      {/* Section 3: Danger Zone */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-danger">{t('channels:deleteChannel')}</p>
+          <p className="text-xs text-default-400">
+            {t('channels:deleteConfirm', { channelName: channel.name })}
+          </p>
+        </div>
+        <Button
+          variant="flat"
+          size="sm"
+          color="danger"
+          onPress={onDelete}
+          aria-label={t('channels:deleteChannel')}
+          data-test="channel-delete-button"
+        >
+          <Trash2 className="h-4 w-4" />
+          {t('channels:deleteChannel')}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function ChannelRow({
+  channel,
+  serverId,
+  canManage,
+  isOwner,
+  isExpanded,
+  onToggle,
+  onDelete,
+}: {
+  channel: ChannelResponse
+  serverId: string
+  canManage: boolean
+  /** WHY: Only the server owner can enable E2EE (one-way toggle). */
+  isOwner: boolean
+  isExpanded: boolean
+  onToggle: () => void
+  onDelete: () => void
+}) {
+  return (
+    <div data-test="settings-channel-row" data-channel-id={channel.id}>
+      <button
+        type="button"
+        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-default-100"
+        onClick={canManage ? onToggle : undefined}
+        aria-expanded={canManage ? isExpanded : undefined}
+      >
+        {channel.channelType === 'text' ? (
+          <Hash className="h-4 w-4 shrink-0 text-default-500" />
+        ) : (
+          <Volume2 className="h-4 w-4 shrink-0 text-default-500" />
+        )}
+        <div className="flex-1 overflow-hidden">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-medium text-foreground">{channel.name}</span>
+            {channel.encrypted && (
+              <Lock className="h-3 w-3 shrink-0 text-success" data-test="channel-encrypted-icon" />
+            )}
+          </div>
+          {channel.topic !== undefined && channel.topic !== null && (
+            <p className="truncate text-xs text-default-400">{channel.topic}</p>
+          )}
+        </div>
+        {canManage && (
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 text-default-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+          />
+        )}
+      </button>
+
+      {canManage && isExpanded && (
+        <div className="px-3 pb-3 pt-1">
+          <ChannelSettingsCard
+            channel={channel}
+            serverId={serverId}
+            isOwner={isOwner}
+            onDelete={onDelete}
+          />
         </div>
       )}
     </div>
@@ -255,12 +346,17 @@ export function ChannelsTab({ serverId, callerRole, isOwner }: ChannelsTabProps)
   const { data: channels, isPending } = useChannels(serverId)
   const deleteChannel = useDeleteChannel(serverId)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [expandedChannelId, setExpandedChannelId] = useState<string | null>(null)
   const canManage = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
 
   function handleDeleteChannel(channel: ChannelResponse) {
     if (window.confirm(t('channels:deleteConfirm', { channelName: channel.name }))) {
       deleteChannel.mutate(channel.id)
     }
+  }
+
+  function handleToggleExpand(channelId: string) {
+    setExpandedChannelId((prev) => (prev === channelId ? null : channelId))
   }
 
   if (isPending) {
@@ -298,6 +394,8 @@ export function ChannelsTab({ serverId, callerRole, isOwner }: ChannelsTabProps)
             serverId={serverId}
             canManage={canManage}
             isOwner={isOwner}
+            isExpanded={expandedChannelId === channel.id}
+            onToggle={() => handleToggleExpand(channel.id)}
             onDelete={() => handleDeleteChannel(channel)}
           />
         ))}
