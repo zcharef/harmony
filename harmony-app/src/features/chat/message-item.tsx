@@ -449,7 +449,9 @@ export const MessageItem = memo(function MessageItem({
 }: MessageItemProps) {
   const { t } = useTranslation('messages')
   // WHY: useState must be called before any conditional returns (React rules of hooks).
-  const [editContent, setEditContent] = useState(message.content)
+  // WHY: AutoMod stores `\*` (markdown-escaped asterisks) in the DB so ReactMarkdown
+  // renders literal `*`. The edit textarea is plain text, so we unescape before editing.
+  const [editContent, setEditContent] = useState(message.content.replace(/\\\*/g, '*'))
 
   // WHY: System messages have a completely different layout — early return.
   if (message.messageType === 'system') {
