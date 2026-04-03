@@ -51,7 +51,7 @@ function delay(ms: number): Promise<void> {
 interface InterceptorOptions {
   fetch?: typeof globalThis.fetch
   serializedBody?: string
-  body?: BodyInit | null
+  body?: unknown
 }
 
 /**
@@ -67,10 +67,16 @@ function rebuildRequest(
   opts: InterceptorOptions,
   headerOverrides?: Headers,
 ): Request {
+  // WHY: opts.body is typed `unknown` to match the SDK's ResolvedRequestOptions.
+  // serializedBody is always a string (preferred). body fallback is narrowed to
+  // BodyInit | null | undefined — the only types the Request constructor accepts.
+  const body =
+    opts.serializedBody ??
+    (opts.body instanceof Blob || typeof opts.body === 'string' ? opts.body : null)
   return new Request(request.url, {
     method: request.method,
     headers: headerOverrides ?? new Headers(request.headers),
-    body: opts.serializedBody ?? opts.body,
+    body,
   })
 }
 
