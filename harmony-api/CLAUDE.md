@@ -54,6 +54,13 @@ just env                # Copy .env.example → .env
   Bearer-only auth — no session cookies.
 - **Observability:** Structured JSON logs via `tracing`. Propagate Trace IDs
   (OpenTelemetry) (ADR-017).
+- **Tracing Severity (Sentry-aware, ADR-046):** `ERROR` = Sentry alert (crashes,
+  config failures, exhausted retries, safety-critical failures). `WARN` = Sentry
+  breadcrumb (individual retry attempts, expected rejections, graceful
+  degradation). Never use `ERROR` for expected business logic (4xx from users,
+  rate limits, validation). External service adapters must classify errors as
+  retryable vs non-retryable: non-retryable (401, 403) → `error!` immediately;
+  retryable (5xx, 429) → `warn!` per attempt, `error!` after exhaustion.
 - **Compile-Time SQL:** All queries use `sqlx::query!` or `sqlx::query_as!`.
   Runtime `sqlx::query(` is forbidden (ADR-016).
 - **PostgreSQL Aggregates:** `SUM(bigint)` returns NUMERIC — always cast

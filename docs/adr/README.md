@@ -51,6 +51,7 @@ An ADR is a document that captures an important architectural decision made alon
 | [043](./043-supabase-deterministic-workflow.md) | Supabase Deterministic Workflow — Migrations as SSoT | Accepted |
 | [044](./044-heroui-component-library.md) | HeroUI Component Library — Single UI Primitive Source | Accepted |
 | [045](./045-no-usestate-shadow-realtime-data.md) | No useState Shadow for Real-Time Data | Accepted |
+| [046](./046-tracing-severity-sentry-contract.md) | Tracing Severity as Sentry Contract | Accepted |
 
 ## Template
 
