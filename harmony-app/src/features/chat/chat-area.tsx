@@ -271,9 +271,16 @@ function useMessageActions(
   currentUserId: string,
   currentUsername: string,
   encryption?: SendMessageEncryption,
+  onRateLimited?: (remainingSeconds: number) => void,
 ) {
   const safeChannelId = channelId ?? ''
-  const sendMessage = useSendMessage(safeChannelId, currentUserId, currentUsername, encryption)
+  const sendMessage = useSendMessage(
+    safeChannelId,
+    currentUserId,
+    currentUsername,
+    encryption,
+    onRateLimited,
+  )
   const editMessageMutation = useEditMessage(safeChannelId)
   const deleteMessageMutation = useDeleteMessage(safeChannelId, currentUserId)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
@@ -1017,6 +1024,14 @@ export function ChatArea({
     refetch,
     isRefetching,
   } = useMessages(channelId)
+  // WHY: useSlowMode must be called before useMessageActions so syncFromServer
+  // can be passed as the onRateLimited callback for 429 handling.
+  const isAdmin = ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.admin
+  const { isInCooldown, remainingSeconds, startCooldown, syncFromServer } = useSlowMode(
+    slowModeSeconds,
+    isAdmin,
+  )
+
   const {
     sendMessage,
     editingMessageId,
@@ -1024,7 +1039,13 @@ export function ChatArea({
     handleCancelEdit,
     handleSaveEdit,
     handleDelete,
-  } = useMessageActions(channelId, currentUser.id, currentUser.username, activeEncryption)
+  } = useMessageActions(
+    channelId,
+    currentUser.id,
+    currentUser.username,
+    activeEncryption,
+    syncFromServer,
+  )
   const [messageContent, setMessageContent] = useState('')
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null)
   const [isVerifyOpen, setIsVerifyOpen] = useState(false)
@@ -1077,10 +1098,6 @@ export function ChatArea({
     dmRecipient,
     channelName,
   )
-
-  // WHY: Client-side slow mode countdown. Admins are exempt (server-side + hook).
-  const isAdmin = ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.admin
-  const { isInCooldown, remainingSeconds, startCooldown } = useSlowMode(slowModeSeconds, isAdmin)
 
   function handleSend() {
     const trimmed = messageContent.trim()

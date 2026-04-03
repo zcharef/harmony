@@ -32,6 +32,9 @@ export function useSendMessage(
   userId: string,
   username: string,
   encryption?: SendMessageEncryption,
+  /** WHY: Called with remaining seconds when the server returns 429 (slow mode).
+   * Allows ChatArea to sync the client-side countdown timer with server state. */
+  onRateLimited?: (remainingSeconds: number) => void,
 ) {
   const queryClient = useQueryClient()
   const messageQueryKey = queryKeys.messages.byChannel(channelId)
@@ -183,16 +186,20 @@ export function useSendMessage(
         channelId,
         error: error instanceof Error ? error.message : String(error),
       })
-      // WHY: 429 = slow mode rate limit. The SlowModeIndicator countdown in
-      // ChatArea already provides visible feedback, so suppress the toast.
-      const is429 =
-        typeof error === 'object' &&
-        error !== null &&
-        'status' in error &&
-        (error as Record<string, unknown>).status === 429
-      if (!is429) {
-        toast.error(getApiErrorDetail(error, i18n.t('chat:sendMessageFailed')))
+      // WHY: 429 = slow mode. Sync client countdown from server's remaining time,
+      // and always show toast (essential post-refresh when client has no countdown).
+      const status =
+        typeof error === 'object' && error !== null && 'status' in error
+          ? (error as Record<string, unknown>).status
+          : undefined
+      if (status === 429) {
+        const detail = getApiErrorDetail(error, '')
+        const waitMatch = detail.match(/wait (\d+) second/)
+        if (waitMatch !== null && onRateLimited !== undefined) {
+          onRateLimited(Number(waitMatch[1]))
+        }
       }
+      toast.error(getApiErrorDetail(error, i18n.t('chat:sendMessageFailed')))
 
       // WHY rollback: Restore the exact cache state from before the mutation
       // so the user does not see a ghost message that never reached the server
