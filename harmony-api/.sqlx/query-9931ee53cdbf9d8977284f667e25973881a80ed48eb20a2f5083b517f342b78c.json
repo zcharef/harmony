@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT created_at\n            FROM messages\n            WHERE channel_id = $1\n              AND author_id = $2\n              AND deleted_at IS NULL\n              AND message_type = 'default'\n            ORDER BY created_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9931ee53cdbf9d8977284f667e25973881a80ed48eb20a2f5083b517f342b78c"
+}

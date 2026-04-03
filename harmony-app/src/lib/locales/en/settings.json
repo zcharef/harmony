@@ -52,5 +52,18 @@
   "announcementPlaceholder": "This is an announcement channel",
 
   "insufficientPermissions": "You do not have permission to view this section.",
-  "readOnlyOverviewDescription": "Only admins can edit server settings."
+  "readOnlyOverviewDescription": "Only admins can edit server settings.",
+
+  "slowModeOff": "Off",
+  "slowMode5s": "5s",
+  "slowMode10s": "10s",
+  "slowMode15s": "15s",
+  "slowMode30s": "30s",
+  "slowMode1m": "1m",
+  "slowMode2m": "2m",
+  "slowMode5m": "5m",
+  "slowMode10m": "10m",
+  "slowMode30m": "30m",
+  "slowMode1h": "1h",
+  "slowMode6h": "6h"
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Channel, ChannelId, ChannelType, ServerId, UserId};
-use crate::domain::ports::{ChannelRepository, PlanLimitChecker};
+use crate::domain::ports::{ChannelRepository, PlanLimitChecker, ServerRepository};
 use crate::domain::services::content_filter::ContentFilter;
 
 /// Maximum length for a channel name (lowercase slug).
@@ -18,6 +18,7 @@ const MAX_CHANNEL_TOPIC_LENGTH: usize = 4096;
 #[derive(Debug)]
 pub struct ChannelService {
     repo: Arc<dyn ChannelRepository>,
+    server_repo: Arc<dyn ServerRepository>,
     plan_checker: Arc<dyn PlanLimitChecker>,
     content_filter: Arc<ContentFilter>,
 }
@@ -41,6 +42,38 @@ fn validate_channel_name(name: &str) -> Result<(), DomainError> {
         ));
     }
 
+    Ok(())
+}
+
+/// Guard against setting slow mode on DM channels.
+///
+/// WHY: Extracted from `update_channel` so that unit tests can verify the
+/// DM slow-mode guard without requiring a `ServerRepository`.
+pub(crate) fn check_slow_mode_dm(
+    is_dm: bool,
+    slow_mode_seconds: Option<i32>,
+) -> Result<(), DomainError> {
+    if let Some(secs) = slow_mode_seconds
+        && is_dm
+        && secs > 0
+    {
+        return Err(DomainError::ValidationError(
+            "Slow mode cannot be set on DM channels".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Validate slow mode seconds range. 0 = disabled, max 6 hours (21600s).
+///
+/// WHY: Extracted from `update_channel` so that unit tests can verify the
+/// range check without requiring a `ChannelRepository`.
+fn validate_slow_mode_seconds(seconds: i32) -> Result<(), DomainError> {
+    if !(0..=21600).contains(&seconds) {
+        return Err(DomainError::ValidationError(
+            "slow_mode_seconds must be between 0 and 21600 (6 hours)".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -86,11 +119,13 @@ impl ChannelService {
     #[must_use]
     pub fn new(
         repo: Arc<dyn ChannelRepository>,
+        server_repo: Arc<dyn ServerRepository>,
         plan_checker: Arc<dyn PlanLimitChecker>,
         content_filter: Arc<ContentFilter>,
     ) -> Self {
         Self {
             repo,
+            server_repo,
             plan_checker,
             content_filter,
         }
@@ -168,7 +203,8 @@ impl ChannelService {
     ///
     /// # Errors
     /// Returns `DomainError::ValidationError` if the new name or topic is invalid,
-    /// or if attempting to disable encryption on an already-encrypted channel.
+    /// if attempting to disable encryption on an already-encrypted channel,
+    /// or if attempting to set slow mode on a DM channel.
     /// Returns `DomainError::Forbidden` if the channel does not belong to `server_id`.
     /// Returns `DomainError::NotFound` if the channel does not exist.
     #[allow(clippy::too_many_arguments)]
@@ -193,6 +229,23 @@ impl ChannelService {
         }
 
         check_encryption_toggle(channel.encrypted, encrypted)?;
+
+        // WHY: DM channels are 1:1 conversations; slow mode is a server-level
+        // moderation tool that has no meaning in DMs. We fetch the parent server
+        // only when slow_mode_seconds > 0 to avoid unnecessary DB calls.
+        if let Some(secs) = slow_mode_seconds
+            && secs > 0
+        {
+            let server = self
+                .server_repo
+                .get_by_id(server_id)
+                .await?
+                .ok_or_else(|| DomainError::NotFound {
+                    resource_type: "Server",
+                    id: server_id.to_string(),
+                })?;
+            check_slow_mode_dm(server.is_dm, slow_mode_seconds)?;
+        }
 
         let validated_name = match name {
             Some(raw) => {
@@ -221,13 +274,8 @@ impl ChannelService {
             }
         }
 
-        // WHY: Validate slow mode range. 0 = disabled, max 6 hours (21600s).
-        if let Some(secs) = slow_mode_seconds
-            && !(0..=21600).contains(&secs)
-        {
-            return Err(DomainError::ValidationError(
-                "slow_mode_seconds must be between 0 and 21600 (6 hours)".to_string(),
-            ));
+        if let Some(secs) = slow_mode_seconds {
+            validate_slow_mode_seconds(secs)?;
         }
 
         self.repo
@@ -412,5 +460,88 @@ mod tests {
     fn encryption_toggle_false_to_false_allowed() {
         // WHY: "Disabling" when already disabled is a no-op, not an error.
         assert!(check_encryption_toggle(false, Some(false)).is_ok());
+    }
+
+    // ── slow mode DM guard ───────────────────────────────────────────
+
+    #[test]
+    fn slow_mode_on_dm_rejected() {
+        let result = check_slow_mode_dm(true, Some(10));
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DomainError::ValidationError(msg) => {
+                assert_eq!(msg, "Slow mode cannot be set on DM channels");
+            }
+            other => panic!("Expected ValidationError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn slow_mode_on_non_dm_allowed() {
+        assert!(check_slow_mode_dm(false, Some(10)).is_ok());
+        assert!(check_slow_mode_dm(false, Some(21600)).is_ok());
+    }
+
+    #[test]
+    fn slow_mode_zero_on_dm_allowed() {
+        // WHY: 0 = disabled. Disabling slow mode on a DM is a no-op, not an error.
+        assert!(check_slow_mode_dm(true, Some(0)).is_ok());
+    }
+
+    #[test]
+    fn slow_mode_none_on_dm_allowed() {
+        // WHY: None means "don't change" — should succeed regardless of is_dm.
+        assert!(check_slow_mode_dm(true, None).is_ok());
+        assert!(check_slow_mode_dm(false, None).is_ok());
+    }
+
+    // ── validate_slow_mode_seconds ────────────────────────────────
+
+    #[test]
+    fn slow_mode_zero_is_valid() {
+        // WHY: 0 means slow mode is disabled — must be accepted.
+        assert!(validate_slow_mode_seconds(0).is_ok());
+    }
+
+    #[test]
+    fn slow_mode_max_is_valid() {
+        // WHY: 21600 (6 hours) is the upper boundary — must be accepted.
+        assert!(validate_slow_mode_seconds(21600).is_ok());
+    }
+
+    #[test]
+    fn slow_mode_negative_rejected() {
+        let result = validate_slow_mode_seconds(-1);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DomainError::ValidationError(msg) => {
+                assert_eq!(
+                    msg,
+                    "slow_mode_seconds must be between 0 and 21600 (6 hours)"
+                );
+            }
+            other => panic!("Expected ValidationError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn slow_mode_above_max_rejected() {
+        let result = validate_slow_mode_seconds(21601);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DomainError::ValidationError(msg) => {
+                assert_eq!(
+                    msg,
+                    "slow_mode_seconds must be between 0 and 21600 (6 hours)"
+                );
+            }
+            other => panic!("Expected ValidationError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn slow_mode_typical_value_valid() {
+        // WHY: 30s is a common slow mode setting — sanity check for mid-range values.
+        assert!(validate_slow_mode_seconds(30).is_ok());
     }
 }

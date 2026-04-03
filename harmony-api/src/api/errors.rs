@@ -145,6 +145,16 @@ impl IntoResponse for ApiError {
         response
             .headers_mut()
             .insert(header::CONTENT_TYPE, HeaderValue::from_static(PROBLEM_JSON));
+
+        // WHY: RFC 9110 Section 10.5.9 — 429 responses SHOULD include a
+        // Retry-After header so clients know when to retry.
+        if self.status == StatusCode::TOO_MANY_REQUESTS {
+            let seconds = parse_retry_seconds(&self.problem.detail);
+            if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+                response.headers_mut().insert(header::RETRY_AFTER, value);
+            }
+        }
+
         response
     }
 }
@@ -180,4 +190,19 @@ impl From<DomainError> for ApiError {
             DomainError::RateLimited(msg) => ApiError::too_many_requests(msg),
         }
     }
+}
+
+/// Extract seconds from rate-limit messages like "wait 42 seconds".
+/// Falls back to a sensible default when no number is present (e.g. flood
+/// mutes, duplicate detection, DM rate limits).
+fn parse_retry_seconds(detail: &str) -> u64 {
+    // WHY: Only the slow-mode message embeds a precise "wait N seconds" value.
+    // All other RateLimited variants lack a number, so we fall back to 5s —
+    // long enough to deter spam, short enough not to frustrate legitimate users.
+    const DEFAULT_RETRY_SECS: u64 = 5;
+
+    detail
+        .split_whitespace()
+        .find_map(|token| token.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_RETRY_SECS)
 }

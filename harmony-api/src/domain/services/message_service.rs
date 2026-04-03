@@ -200,24 +200,14 @@ impl MessageService {
             ));
         }
 
-        // WHY: Slow mode enforces a minimum interval between messages per user.
-        if channel.slow_mode_seconds > 0 && !is_admin {
-            let last_msg_time = self
-                .repo
-                .get_last_message_time(channel_id, author_id)
-                .await?;
-
-            if let Some(last_at) = last_msg_time {
-                let elapsed = (Utc::now() - last_at).num_seconds();
-                if elapsed < i64::from(channel.slow_mode_seconds) {
-                    let remaining = i64::from(channel.slow_mode_seconds) - elapsed;
-                    return Err(DomainError::RateLimited(format!(
-                        "Slow mode active — wait {} seconds before sending another message",
-                        remaining
-                    )));
-                }
-            }
-        }
+        // WHY: Slow mode enforcement is done atomically inside send_to_channel
+        // using pg_advisory_xact_lock to prevent TOCTOU double-send races. Pass
+        // 0 when slow mode doesn't apply (disabled or admin bypass).
+        let effective_slow_mode = if channel.slow_mode_seconds > 0 && !is_admin {
+            channel.slow_mode_seconds
+        } else {
+            0
+        };
 
         // WHY: If replying, verify the parent message exists, is not deleted,
         // and belongs to the same channel (can't reply across channels).
@@ -311,6 +301,7 @@ impl MessageService {
                 mod_at,
                 mod_reason,
                 orig_content,
+                effective_slow_mode,
             )
             .await?;
 

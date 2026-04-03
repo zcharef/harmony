@@ -223,6 +223,7 @@ async fn init_app_state(config: &Config) -> AppState {
     ));
     let channel_service = Arc::new(domain::services::ChannelService::new(
         channel_repo.clone(),
+        server_repo.clone(),
         plan_limit_checker.clone(),
         content_filter,
     ));

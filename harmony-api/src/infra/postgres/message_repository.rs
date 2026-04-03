@@ -191,6 +191,7 @@ impl MessageRepository for PgMessageRepository {
         moderated_at: Option<DateTime<Utc>>,
         moderation_reason: Option<String>,
         original_content: Option<String>,
+        slow_mode_seconds: i32,
     ) -> Result<MessageWithAuthor, DomainError> {
         let cid = channel_id.0;
         let aid = author_id.0;
@@ -199,6 +200,156 @@ impl MessageRepository for PgMessageRepository {
         let mod_reason = moderation_reason;
         let orig_content = original_content;
 
+        // WHY: When slow_mode_seconds > 0, we must atomically check the user's last
+        // message time AND insert in the same transaction, using pg_advisory_xact_lock
+        // to serialize concurrent sends from the same (user, channel) pair. Without
+        // this, two concurrent requests can both pass the elapsed check before either
+        // INSERT commits — a TOCTOU race that bypasses slow mode entirely.
+        if slow_mode_seconds > 0 {
+            let mut tx = self.pool.begin().await.map_err(super::db_err)?;
+
+            // WHY: hashtext(user_id || channel_id) produces a stable int4 hash.
+            // pg_advisory_xact_lock serializes only sends from the SAME user to
+            // the SAME channel — zero contention for different user/channel pairs.
+            // The lock auto-releases when the transaction commits or rolls back.
+            sqlx::query!(
+                r#"SELECT pg_advisory_xact_lock(hashtext($1 || $2))"#,
+                aid.to_string(),
+                cid.to_string(),
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(super::db_err)?;
+
+            // WHY: Re-check last message time INSIDE the lock. Any concurrent
+            // request from the same user+channel is blocked until this tx commits,
+            // so the SELECT and INSERT are effectively atomic.
+            // Matches get_last_message_time: only count 'default' messages (system
+            // messages like join/leave announcements should not trigger slow mode).
+            let last_msg = sqlx::query!(
+                r#"
+            SELECT created_at
+            FROM messages
+            WHERE channel_id = $1
+              AND author_id = $2
+              AND deleted_at IS NULL
+              AND message_type = 'default'
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+                cid,
+                aid,
+            )
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(super::db_err)?;
+
+            if let Some(last) = last_msg {
+                let elapsed = (Utc::now() - last.created_at).num_seconds();
+                if elapsed < i64::from(slow_mode_seconds) {
+                    let remaining = i64::from(slow_mode_seconds) - elapsed;
+                    // WHY: tx is dropped here, which rolls back and releases the lock.
+                    return Err(DomainError::RateLimited(format!(
+                        "Slow mode active — wait {} seconds before sending another message",
+                        remaining
+                    )));
+                }
+            }
+
+            let row = sqlx::query!(
+            r#"
+            WITH inserted AS (
+                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id, moderated_at, moderation_reason, original_content)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                RETURNING
+                    id,
+                    channel_id,
+                    author_id,
+                    content,
+                    edited_at,
+                    deleted_at,
+                    deleted_by,
+                    encrypted,
+                    sender_device_id,
+                    message_type,
+                    system_event_key,
+                    parent_message_id,
+                    moderated_at,
+                    moderation_reason,
+                    original_content,
+                    created_at
+            )
+            SELECT
+                i.id as "id!",
+                i.channel_id as "channel_id!",
+                i.author_id as "author_id!",
+                i.content,
+                i.edited_at,
+                i.deleted_at,
+                i.deleted_by,
+                i.encrypted as "encrypted!",
+                i.sender_device_id,
+                i.message_type as "message_type!: String",
+                i.system_event_key,
+                i.parent_message_id,
+                i.moderated_at,
+                i.moderation_reason,
+                i.original_content,
+                i.created_at as "created_at!",
+                p.username AS "author_username?",
+                p.avatar_url AS "author_avatar_url?",
+                parent_p.username AS "parent_author_username?",
+                LEFT(parent_m.content, 100) AS "parent_content_preview?",
+                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
+            FROM inserted i
+            LEFT JOIN profiles p ON p.id = i.author_id
+            LEFT JOIN messages parent_m ON parent_m.id = i.parent_message_id
+            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
+            "#,
+                cid,
+                aid,
+                content,
+                encrypted,
+                sender_device_id,
+                pmid,
+                mod_at,
+                mod_reason,
+                orig_content,
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(super::db_err)?;
+
+            tx.commit().await.map_err(super::db_err)?;
+
+            let msg = MessageWithAuthorRow {
+                id: row.id,
+                channel_id: row.channel_id,
+                author_id: row.author_id,
+                content: row.content,
+                edited_at: row.edited_at,
+                deleted_at: row.deleted_at,
+                deleted_by: row.deleted_by,
+                encrypted: row.encrypted,
+                sender_device_id: row.sender_device_id,
+                message_type: row.message_type,
+                system_event_key: row.system_event_key,
+                parent_message_id: row.parent_message_id,
+                moderated_at: row.moderated_at,
+                moderation_reason: row.moderation_reason,
+                original_content: row.original_content,
+                created_at: row.created_at,
+                author_username: row.author_username,
+                author_avatar_url: row.author_avatar_url,
+                parent_author_username: row.parent_author_username,
+                parent_content_preview: row.parent_content_preview,
+                parent_deleted: row.parent_deleted,
+            };
+
+            return Ok(msg.into_message_with_author());
+        }
+
+        // Fast path: no slow mode — direct INSERT, no transaction overhead.
         let row = sqlx::query!(
             r#"
             WITH inserted AS (
@@ -638,6 +789,7 @@ impl MessageRepository for PgMessageRepository {
             WHERE channel_id = $1
               AND author_id = $2
               AND deleted_at IS NULL
+              AND message_type = 'default'
             ORDER BY created_at DESC
             LIMIT 1
             "#,

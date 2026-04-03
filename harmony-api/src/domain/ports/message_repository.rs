@@ -10,6 +10,12 @@ use crate::domain::models::{ChannelId, Message, MessageId, MessageWithAuthor, Us
 #[async_trait]
 pub trait MessageRepository: Send + Sync + std::fmt::Debug {
     /// Send a new message to a channel.
+    ///
+    /// When `slow_mode_seconds > 0`, the implementation atomically checks the
+    /// user's last message time inside the same transaction as the INSERT,
+    /// using `pg_advisory_xact_lock` to prevent TOCTOU double-send races.
+    /// Returns `DomainError::RateLimited` if the cooldown has not elapsed.
+    /// When `slow_mode_seconds == 0`, the check is skipped (no tx overhead).
     #[allow(clippy::too_many_arguments)]
     async fn send_to_channel(
         &self,
@@ -22,6 +28,7 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         moderated_at: Option<DateTime<Utc>>,
         moderation_reason: Option<String>,
         original_content: Option<String>,
+        slow_mode_seconds: i32,
     ) -> Result<MessageWithAuthor, DomainError>;
 
     /// List messages in a channel with cursor-based pagination (ADR-036).
@@ -74,7 +81,9 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
 
     /// Get the timestamp of the last non-deleted message by this author in this channel.
     ///
-    /// Used for slow mode enforcement in `MessageService::create`.
+    /// NOTE: Slow mode enforcement now uses an atomic check inside `send_to_channel`
+    /// (with `pg_advisory_xact_lock`) to prevent TOCTOU races. This method remains
+    /// available for read-only queries that don't need transactional guarantees.
     async fn get_last_message_time(
         &self,
         channel_id: &ChannelId,

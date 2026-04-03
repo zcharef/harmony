@@ -46,6 +46,7 @@ export function useUpdateChannel(serverId: string, channelId: string) {
             ...(input.encrypted != null && { encrypted: input.encrypted }),
             ...(input.name != null && { name: input.name }),
             ...(input.topic !== undefined && { topic: input.topic }),
+            ...(input.slowModeSeconds != null && { slowModeSeconds: input.slowModeSeconds }),
           }
         })
       })

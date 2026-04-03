@@ -19,18 +19,18 @@ import { toast } from '@/lib/toast'
 
 /** WHY: Static presets matching Discord's slow mode options. */
 const SLOW_MODE_OPTIONS = [
-  { value: '0', label: 'Off' },
-  { value: '5', label: '5s' },
-  { value: '10', label: '10s' },
-  { value: '15', label: '15s' },
-  { value: '30', label: '30s' },
-  { value: '60', label: '1m' },
-  { value: '120', label: '2m' },
-  { value: '300', label: '5m' },
-  { value: '600', label: '10m' },
-  { value: '1800', label: '30m' },
-  { value: '3600', label: '1h' },
-  { value: '21600', label: '6h' },
+  { value: '0', labelKey: 'slowModeOff' },
+  { value: '5', labelKey: 'slowMode5s' },
+  { value: '10', labelKey: 'slowMode10s' },
+  { value: '15', labelKey: 'slowMode15s' },
+  { value: '30', labelKey: 'slowMode30s' },
+  { value: '60', labelKey: 'slowMode1m' },
+  { value: '120', labelKey: 'slowMode2m' },
+  { value: '300', labelKey: 'slowMode5m' },
+  { value: '600', labelKey: 'slowMode10m' },
+  { value: '1800', labelKey: 'slowMode30m' },
+  { value: '3600', labelKey: 'slowMode1h' },
+  { value: '21600', labelKey: 'slowMode6h' },
 ] as const
 
 /**
@@ -166,7 +166,7 @@ function ChannelRow({
                 data-test="channel-slowmode-select"
               >
                 {SLOW_MODE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value}>{opt.label}</SelectItem>
+                  <SelectItem key={opt.value}>{t(opt.labelKey)}</SelectItem>
                 ))}
               </Select>
             </div>
