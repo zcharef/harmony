@@ -97,18 +97,7 @@ pub async fn create_channel(
     let receivers = state.event_bus().publish(ServerEvent::ChannelCreated {
         sender_id: user_id,
         server_id: server_id.clone(),
-        channel: ChannelPayload {
-            id: channel.id.clone(),
-            name: channel.name.clone(),
-            topic: channel.topic.clone(),
-            channel_type: channel.channel_type.clone(),
-            position: channel.position,
-            is_private: channel.is_private,
-            is_read_only: channel.is_read_only,
-            encrypted: channel.encrypted,
-            created_at: channel.created_at,
-            updated_at: channel.updated_at,
-        },
+        channel: ChannelPayload::from(&channel),
     });
     tracing::debug!(
         server_id = %server_id,
@@ -180,24 +169,14 @@ pub async fn update_channel(
             req.is_private,
             req.is_read_only,
             req.encrypted,
+            req.slow_mode_seconds,
         )
         .await?;
 
     let receivers = state.event_bus().publish(ServerEvent::ChannelUpdated {
         sender_id: user_id,
         server_id: params.id.clone(),
-        channel: ChannelPayload {
-            id: channel.id.clone(),
-            name: channel.name.clone(),
-            topic: channel.topic.clone(),
-            channel_type: channel.channel_type.clone(),
-            position: channel.position,
-            is_private: channel.is_private,
-            is_read_only: channel.is_read_only,
-            encrypted: channel.encrypted,
-            created_at: channel.created_at,
-            updated_at: channel.updated_at,
-        },
+        channel: ChannelPayload::from(&channel),
     });
     tracing::debug!(
         server_id = %params.id,

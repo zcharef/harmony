@@ -2,6 +2,7 @@ import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import { useCallback, useEffect, useRef } from 'react'
 import { z } from 'zod'
+import { usePreferences } from '@/features/preferences'
 import { useServerEvent } from '@/hooks/use-server-event'
 import type { NotificationSettingsResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
@@ -85,7 +86,10 @@ function shouldSuppressNotification(
   userId: string | null,
   queryClient: QueryClient,
   cooldownMap: Map<string, number>,
+  dndEnabled: boolean,
 ): boolean {
+  if (dndEnabled) return true
+
   const { senderId, channelId, message } = event
 
   if (message.messageType === 'system') return true
@@ -151,6 +155,8 @@ export function useDesktopNotifications(
   userId: string | null,
 ): void {
   const queryClient = useQueryClient()
+  const preferences = usePreferences()
+  const dndEnabled = preferences.data?.dndEnabled === true
   const permissionRef = useRef<PermissionStatus>('unknown')
   const cooldownMap = useRef(new Map<string, number>())
 
@@ -207,13 +213,20 @@ export function useDesktopNotifications(
 
       const event = parsed.data
       if (
-        shouldSuppressNotification(event, activeChannelId, userId, queryClient, cooldownMap.current)
+        shouldSuppressNotification(
+          event,
+          activeChannelId,
+          userId,
+          queryClient,
+          cooldownMap.current,
+          dndEnabled,
+        )
       )
         return
 
       void fireNotification(event, permissionRef)
     },
-    [activeChannelId, userId, queryClient],
+    [activeChannelId, userId, queryClient, dndEnabled],
   )
 
   useServerEvent('message.created', handleMessageCreated)

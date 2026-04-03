@@ -25,6 +25,8 @@ pub struct ChannelResponse {
     pub is_read_only: bool,
     /// Whether Megolm E2EE is enabled on this channel.
     pub encrypted: bool,
+    /// Minimum seconds between messages per user. 0 = disabled.
+    pub slow_mode_seconds: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -42,6 +44,7 @@ impl From<Channel> for ChannelResponse {
             is_private: c.is_private,
             is_read_only: c.is_read_only,
             encrypted: c.encrypted,
+            slow_mode_seconds: c.slow_mode_seconds,
             created_at: c.created_at,
             updated_at: c.updated_at,
         }
@@ -99,6 +102,9 @@ pub struct UpdateChannelRequest {
     /// Enable Megolm E2EE (one-way toggle: once true, cannot be set back to false).
     #[serde(default)]
     pub encrypted: Option<bool>,
+    /// Minimum seconds between messages per user. 0 = disable slow mode. Admin+ only.
+    #[serde(default)]
+    pub slow_mode_seconds: Option<i32>,
 }
 
 /// Request body for registering a Megolm session on a channel.

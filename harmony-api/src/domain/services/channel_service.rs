@@ -181,6 +181,7 @@ impl ChannelService {
         is_private: Option<bool>,
         is_read_only: Option<bool>,
         encrypted: Option<bool>,
+        slow_mode_seconds: Option<i32>,
     ) -> Result<Channel, DomainError> {
         // WHY: Prevents cross-server IDOR — an admin on Server A must not
         // be able to update channels on Server B by crafting the channel_id.
@@ -220,6 +221,15 @@ impl ChannelService {
             }
         }
 
+        // WHY: Validate slow mode range. 0 = disabled, max 6 hours (21600s).
+        if let Some(secs) = slow_mode_seconds
+            && !(0..=21600).contains(&secs)
+        {
+            return Err(DomainError::ValidationError(
+                "slow_mode_seconds must be between 0 and 21600 (6 hours)".to_string(),
+            ));
+        }
+
         self.repo
             .update_channel(
                 channel_id,
@@ -228,6 +238,7 @@ impl ChannelService {
                 is_private,
                 is_read_only,
                 encrypted,
+                slow_mode_seconds,
             )
             .await
     }

@@ -1,6 +1,7 @@
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef } from 'react'
 import { z } from 'zod'
+import { usePreferences } from '@/features/preferences'
 import type { DmListItem, NotificationSettingsResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
@@ -37,7 +38,10 @@ function shouldSuppressSound(
   userId: string | null,
   queryClient: QueryClient,
   cooldownMap: Map<string, number>,
+  dndEnabled: boolean,
 ): boolean {
+  if (dndEnabled) return true
+
   const { senderId, channelId, message } = event
 
   if (message.messageType === 'system') return true
@@ -98,6 +102,8 @@ function playSound(audio: HTMLAudioElement): void {
  */
 export function useNotificationSound(activeChannelId: string | null, userId: string | null): void {
   const queryClient = useQueryClient()
+  const preferences = usePreferences()
+  const dndEnabled = preferences.data?.dndEnabled === true
   const cooldownMap = useRef(new Map<string, number>())
   const dmAudioRef = useRef<HTMLAudioElement | null>(null)
   const channelAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -113,7 +119,16 @@ export function useNotificationSound(activeChannelId: string | null, userId: str
       }
 
       const event = parsed.data
-      if (shouldSuppressSound(event, activeChannelId, userId, queryClient, cooldownMap.current)) {
+      if (
+        shouldSuppressSound(
+          event,
+          activeChannelId,
+          userId,
+          queryClient,
+          cooldownMap.current,
+          dndEnabled,
+        )
+      ) {
         return
       }
 
@@ -131,7 +146,7 @@ export function useNotificationSound(activeChannelId: string | null, userId: str
         playSound(channelAudioRef.current)
       }
     },
-    [activeChannelId, userId, queryClient],
+    [activeChannelId, userId, queryClient, dndEnabled],
   )
 
   useServerEvent('message.created', handleMessageCreated)

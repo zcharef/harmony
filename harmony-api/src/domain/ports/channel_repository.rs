@@ -24,11 +24,13 @@ pub trait ChannelRepository: Send + Sync + std::fmt::Debug {
     /// Create a new channel. Returns the created channel.
     async fn create_channel(&self, channel: &Channel) -> Result<Channel, DomainError>;
 
-    /// Update a channel's name, topic, permission flags, and/or encryption toggle.
+    /// Update a channel's name, topic, permission flags, encryption toggle, and/or slow mode.
     ///
     /// `topic` uses `Option<Option<String>>`: outer = "was field provided?",
     /// inner = "null (clear) or a value". Follows JSON PATCH semantics.
     /// `is_private` / `is_read_only` / `encrypted` use `Option<bool>`: `None` = no change.
+    /// `slow_mode_seconds` uses `Option<i32>`: `None` = no change, `Some(0)` = disable.
+    #[allow(clippy::too_many_arguments)]
     async fn update_channel(
         &self,
         channel_id: &ChannelId,
@@ -37,6 +39,7 @@ pub trait ChannelRepository: Send + Sync + std::fmt::Debug {
         is_private: Option<bool>,
         is_read_only: Option<bool>,
         encrypted: Option<bool>,
+        slow_mode_seconds: Option<i32>,
     ) -> Result<Channel, DomainError>;
 
     /// Delete a channel by ID, unless it is the last channel in its server.

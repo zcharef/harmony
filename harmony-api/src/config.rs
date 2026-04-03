@@ -60,6 +60,14 @@ pub struct Config {
     /// Set to 0 to disable rate limiting (dev/CI environments).
     #[serde(default = "default_rate_limit_per_minute")]
     pub rate_limit_per_minute: u32,
+
+    /// `OpenAI` API key for the Moderation API (optional).
+    /// When absent, async content moderation is disabled (graceful degradation).
+    pub openai_api_key: Option<SecretString>,
+
+    /// Google Safe Browsing API v4 key (optional).
+    /// When set, URLs in messages are checked against Google's threat lists.
+    pub safe_browsing_api_key: Option<SecretString>,
 }
 
 fn default_port() -> u16 {
@@ -139,6 +147,14 @@ impl std::fmt::Debug for Config {
             )
             .field("trusted_proxies", &self.trusted_proxies)
             .field("rate_limit_per_minute", &self.rate_limit_per_minute)
+            .field(
+                "openai_api_key",
+                &self.openai_api_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "safe_browsing_api_key",
+                &self.safe_browsing_api_key.as_ref().map(|_| "[REDACTED]"),
+            )
             .finish()
     }
 }

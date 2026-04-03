@@ -33,6 +33,8 @@ pub struct Channel {
     pub is_read_only: bool,
     /// Whether Megolm E2EE is enabled. One-way toggle: once true, cannot be set back to false.
     pub encrypted: bool,
+    /// Minimum seconds between messages per user. 0 = disabled. Admin+ bypass.
+    pub slow_mode_seconds: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -60,6 +62,7 @@ impl Channel {
             is_private,
             is_read_only,
             encrypted: false,
+            slow_mode_seconds: 0,
             created_at: now,
             updated_at: now,
         }
@@ -80,6 +83,7 @@ impl Channel {
             is_private: false,
             is_read_only: false,
             encrypted: false,
+            slow_mode_seconds: 0,
             created_at: now,
             updated_at: now,
         }

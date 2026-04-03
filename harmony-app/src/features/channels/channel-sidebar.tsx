@@ -25,6 +25,7 @@ import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { EncryptedChannelBadge } from '@/features/crypto'
 import { ROLE_HIERARCHY, useLeaveServer, useMyMemberRole } from '@/features/members'
+import { StatusPicker } from '@/features/preferences'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { CreateInviteDialog } from '@/features/server-nav'
 import { useSettingsUiStore } from '@/features/settings'
@@ -326,28 +327,30 @@ export function ChannelSidebar({
       {/* User control panel */}
       <div
         data-test="user-control-panel"
-        className="flex items-center gap-2 border-t border-divider bg-content1 p-2"
+        className="flex items-center border-t border-divider bg-content1"
       >
-        <div className="relative">
-          <Avatar
-            name={username}
-            size="sm"
-            color="primary"
-            showFallback
-            classNames={{
-              base: 'h-8 w-8',
-              name: 'text-xs text-primary-foreground',
-            }}
-          />
-          <div className="absolute -bottom-0.5 -right-0.5">
-            <StatusIndicator status={status} size="lg" />
+        <StatusPicker>
+          <div className="relative">
+            <Avatar
+              name={username}
+              size="sm"
+              color="primary"
+              showFallback
+              classNames={{
+                base: 'h-8 w-8',
+                name: 'text-xs text-primary-foreground',
+              }}
+            />
+            <div className="absolute -bottom-0.5 -right-0.5">
+              <StatusIndicator status={status} size="lg" />
+            </div>
           </div>
-        </div>
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <span className="truncate text-sm font-medium text-foreground">{username}</span>
-          <span className="truncate text-xs text-default-500">{statusLabels[status]}</span>
-        </div>
-        <div className="flex items-center">
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <span className="truncate text-sm font-medium text-foreground">{username}</span>
+            <span className="truncate text-xs text-default-500">{statusLabels[status]}</span>
+          </div>
+        </StatusPicker>
+        <div className="flex items-center pr-2">
           <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
             <Mic className="h-4 w-4 text-default-500" />
           </Button>
