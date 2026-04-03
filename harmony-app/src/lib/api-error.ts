@@ -11,7 +11,7 @@
  * Checks whether an unknown value looks like an RFC 9457 ProblemDetails object
  * with the fields we need (status + detail).
  */
-function isProblemDetails(value: unknown): value is { status: number; detail: string } {
+export function isProblemDetails(value: unknown): value is { status: number; detail: string } {
   return (
     typeof value === 'object' &&
     value !== null &&

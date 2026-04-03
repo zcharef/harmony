@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import type { DmListItem, MessageListResponse, MessageResponse } from '@/lib/api'
 import { sendMessage } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
+import { getApiErrorDetail, isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 import { toast } from '@/lib/toast'
@@ -188,14 +188,8 @@ export function useSendMessage(
       })
       // WHY: 429 = slow mode. Sync client countdown from server's remaining time,
       // and always show toast (essential post-refresh when client has no countdown).
-      const is429 =
-        typeof error === 'object' &&
-        error !== null &&
-        'status' in error &&
-        Object.getOwnPropertyDescriptor(error, 'status')?.value === 429
-      if (is429) {
-        const detail = getApiErrorDetail(error, '')
-        const waitMatch = detail.match(/wait (\d+) second/)
+      if (isProblemDetails(error) && error.status === 429) {
+        const waitMatch = error.detail.match(/wait (\d+) second/)
         if (waitMatch !== null && onRateLimited !== undefined) {
           onRateLimited(Number(waitMatch[1]))
         }
