@@ -13,8 +13,11 @@
     "windows": [
       {
         "title": "Harmony — Alpha",
-        "width": 800,
-        "height": 600
+        "width": 940,
+        "height": 500,
+        "minWidth": 940,
+        "minHeight": 500,
+        "maximized": true
       }
     ],
     "security": {

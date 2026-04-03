@@ -86,6 +86,15 @@ pub fn run() {
             crypto::megolm::megolm_decrypt,
             crypto::megolm::megolm_get_session_key,
         ])
+        .setup(|app| {
+            // WHY: After relaunch() from the updater plugin, macOS may start the
+            // new process in the background. Explicitly focusing the main window
+            // ensures the app comes to the foreground after an update restart.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
