@@ -29,6 +29,7 @@ export const SSE_EVENT_NAMES = [
   'channel.created',
   'channel.updated',
   'channel.deleted',
+  'server.moderation_settings_updated',
   'server.updated',
   'dm.created',
   'typing.started',
@@ -189,6 +190,12 @@ export const serverEventSchema = z.discriminatedUnion('type', [
   }),
 
   // Server
+  z.object({
+    type: z.literal('moderationSettingsUpdated'),
+    senderId: z.string(),
+    serverId: z.string(),
+    categories: z.record(z.string(), z.boolean()),
+  }),
   z.object({
     type: z.literal('serverUpdated'),
     senderId: z.string(),

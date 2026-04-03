@@ -1,5 +1,5 @@
 import { Button, Spinner } from '@heroui/react'
-import { Ban, Hash, Info, Shield, X } from 'lucide-react'
+import { Ban, Hash, Info, Shield, ShieldCheck, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/features/auth'
@@ -8,16 +8,18 @@ import { useServers } from '@/features/server-nav'
 import { cn } from '@/lib/utils'
 import { BansTab } from './bans-tab'
 import { ChannelsTab } from './channels-tab'
+import { ModerationTab } from './moderation-tab'
 import { OverviewTab } from './overview-tab'
 import { RolesTab } from './roles-tab'
 import { useSettingsUiStore } from './stores/settings-ui-store'
 
-type SettingsTab = 'overview' | 'roles' | 'channels' | 'bans'
+type SettingsTab = 'overview' | 'roles' | 'channels' | 'moderation' | 'bans'
 
 const TABS: Array<{ key: SettingsTab; icon: typeof Info; labelKey: string }> = [
   { key: 'overview', icon: Info, labelKey: 'tabOverview' },
   { key: 'roles', icon: Shield, labelKey: 'tabRoles' },
   { key: 'channels', icon: Hash, labelKey: 'tabChannels' },
+  { key: 'moderation', icon: ShieldCheck, labelKey: 'tabModeration' },
   { key: 'bans', icon: Ban, labelKey: 'tabBans' },
 ]
 
@@ -112,6 +114,7 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
           {activeTab === 'channels' && (
             <ChannelsTab serverId={serverId} callerRole={callerRole} isOwner={isOwner} />
           )}
+          {activeTab === 'moderation' && <ModerationTab serverId={serverId} isOwner={isOwner} />}
           {activeTab === 'bans' && <BansTab serverId={serverId} callerRole={callerRole} />}
         </div>
       </div>
