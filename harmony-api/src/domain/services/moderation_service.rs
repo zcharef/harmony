@@ -3,6 +3,7 @@
 //! WHY: Centralizes authorization logic for ban/kick/unban/role operations.
 //! Handlers become thin pass-throughs; all permission checks live here.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -10,6 +11,7 @@ use chrono::{DateTime, Utc};
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Role, Server, ServerBan, ServerId, UserId};
 use crate::domain::ports::{BanRepository, MemberRepository, ServerRepository};
+use crate::domain::services::content_moderation::{TIER1_CATEGORIES, TIER2_CATEGORIES};
 
 /// Maximum length for a ban reason. Validated in `ban_user`.
 const MAX_BAN_REASON_LENGTH: usize = 512;
@@ -405,6 +407,99 @@ impl ModerationService {
                 id: server_id.to_string(),
             })
     }
+
+    /// Fetch the server's Tier 2 moderation category settings.
+    /// Any member can read these (needed to display UI toggles).
+    ///
+    /// # Errors
+    /// - `DomainError::NotFound` if the server doesn't exist or caller is not a member.
+    /// - `DomainError::Forbidden` if the caller is not a member.
+    pub async fn get_moderation_categories(
+        &self,
+        server_id: &ServerId,
+        caller_id: &UserId,
+    ) -> Result<HashMap<String, bool>, DomainError> {
+        self.require_role(server_id, caller_id, Role::Member)
+            .await?;
+
+        let categories = self
+            .server_repo
+            .get_moderation_categories(server_id)
+            .await?;
+        Ok(filter_stale_categories(categories))
+    }
+
+    /// Update the server's Tier 2 moderation category settings.
+    /// Only the owner can change these. Tier 1 categories cannot be modified.
+    ///
+    /// # Errors
+    /// - `DomainError::Forbidden` if the caller is not the owner.
+    /// - `DomainError::ValidationError` if the server is a DM, or categories contain
+    ///   Tier 1 keys or unknown keys.
+    pub async fn update_moderation_categories(
+        &self,
+        server_id: &ServerId,
+        caller_id: &UserId,
+        categories: HashMap<String, bool>,
+    ) -> Result<HashMap<String, bool>, DomainError> {
+        let server = self.require_owner(server_id, caller_id).await?;
+
+        if server.is_dm {
+            return Err(DomainError::ValidationError(
+                "Cannot configure moderation settings for DM conversations".to_string(),
+            ));
+        }
+
+        validate_moderation_categories(&categories)?;
+
+        self.server_repo
+            .update_moderation_categories(server_id, categories)
+            .await?;
+
+        let categories = self
+            .server_repo
+            .get_moderation_categories(server_id)
+            .await?;
+        Ok(filter_stale_categories(categories))
+    }
+}
+
+/// Strip JSONB keys that are not current Tier 2 categories.
+///
+/// WHY: If `OpenAI` removes a category, servers that had it enabled retain the
+/// stale key in their JSONB column. Without filtering, the GET response would
+/// expose ghost toggles for non-existent categories in the UI.
+fn filter_stale_categories(categories: HashMap<String, bool>) -> HashMap<String, bool> {
+    categories
+        .into_iter()
+        .filter(|(key, _)| TIER2_CATEGORIES.contains(&key.as_str()))
+        .collect()
+}
+
+/// Validate that all keys in `categories` are valid Tier 2 categories.
+///
+/// Rejects Tier 1 keys (always enforced, not configurable) and unknown keys.
+/// Pure function: testable without repositories.
+///
+/// # Errors
+/// - `DomainError::ValidationError` if any key is a Tier 1 category or unknown.
+fn validate_moderation_categories(categories: &HashMap<String, bool>) -> Result<(), DomainError> {
+    for key in categories.keys() {
+        if TIER1_CATEGORIES.contains(&key.as_str()) {
+            return Err(DomainError::ValidationError(format!(
+                "Cannot modify Tier 1 safety category: {key}. These are always enforced."
+            )));
+        }
+
+        if !TIER2_CATEGORIES.contains(&key.as_str()) {
+            return Err(DomainError::ValidationError(format!(
+                "Unknown moderation category: {key}. Valid categories: {}",
+                TIER2_CATEGORIES.join(", ")
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 /// Verify that the caller's role strictly outranks the target's role.
@@ -507,6 +602,122 @@ mod tests {
     // - kick_member: rejects DM servers, self-kick, kicking owner
     // - assign_role: rejects Owner assignment, self-role-change, hierarchy violations
     // - transfer_ownership: rejects self-transfer, non-member targets
+    // - get/update_moderation_categories: auth + DM guard + category validation
     //
     // These are covered by integration tests with real Postgres.
+
+    // ── validate_moderation_categories (pure validation) ────────
+
+    #[test]
+    fn valid_tier2_categories_pass() {
+        let mut categories = HashMap::new();
+        for &cat in TIER2_CATEGORIES {
+            categories.insert(cat.to_string(), true);
+        }
+        assert!(validate_moderation_categories(&categories).is_ok());
+    }
+
+    #[test]
+    fn tier1_key_rejected() {
+        for &cat in TIER1_CATEGORIES {
+            let categories = HashMap::from([(cat.to_string(), true)]);
+            let result = validate_moderation_categories(&categories);
+            match result {
+                Err(DomainError::ValidationError(msg)) => {
+                    assert!(
+                        msg.contains("Cannot modify Tier 1 safety category"),
+                        "Expected Tier 1 rejection message, got: {msg}"
+                    );
+                    assert!(
+                        msg.contains(cat),
+                        "Message should contain category name '{cat}', got: {msg}"
+                    );
+                }
+                other => panic!("Expected ValidationError for Tier 1 key '{cat}', got: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_key_rejected() {
+        let categories = HashMap::from([("totally-made-up".to_string(), true)]);
+        let result = validate_moderation_categories(&categories);
+        match result {
+            Err(DomainError::ValidationError(msg)) => {
+                assert!(
+                    msg.contains("Unknown moderation category"),
+                    "Expected unknown category message, got: {msg}"
+                );
+                assert!(
+                    msg.contains("totally-made-up"),
+                    "Message should contain the invalid key, got: {msg}"
+                );
+            }
+            other => panic!("Expected ValidationError for unknown key, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_categories_valid() {
+        let categories = HashMap::new();
+        assert!(validate_moderation_categories(&categories).is_ok());
+    }
+
+    // ── filter_stale_categories (pure filtering) ─────────────────
+
+    #[test]
+    fn filter_keeps_valid_tier2_keys() {
+        let input = HashMap::from([
+            ("violence".to_string(), true),
+            ("harassment".to_string(), false),
+        ]);
+        let result = filter_stale_categories(input);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result.get("violence"), Some(&true));
+        assert_eq!(result.get("harassment"), Some(&false));
+    }
+
+    #[test]
+    fn filter_removes_stale_unknown_keys() {
+        let input = HashMap::from([
+            ("violence".to_string(), true),
+            ("nonexistent".to_string(), true),
+            ("deprecated/old-category".to_string(), false),
+        ]);
+        let result = filter_stale_categories(input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result.get("violence"), Some(&true));
+        assert!(!result.contains_key("nonexistent"));
+        assert!(!result.contains_key("deprecated/old-category"));
+    }
+
+    #[test]
+    fn filter_removes_tier1_keys_from_response() {
+        // WHY: Tier 1 keys should never appear in the Tier 2 settings response,
+        // even if they somehow ended up in the JSONB column.
+        let input = HashMap::from([
+            ("violence".to_string(), true),
+            ("sexual/minors".to_string(), true),
+            ("self-harm/intent".to_string(), true),
+        ]);
+        let result = filter_stale_categories(input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result.get("violence"), Some(&true));
+    }
+
+    #[test]
+    fn filter_empty_input_returns_empty() {
+        let result = filter_stale_categories(HashMap::new());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_all_stale_returns_empty() {
+        let input = HashMap::from([
+            ("totally-fake".to_string(), true),
+            ("also-fake".to_string(), false),
+        ]);
+        let result = filter_stale_categories(input);
+        assert!(result.is_empty());
+    }
 }

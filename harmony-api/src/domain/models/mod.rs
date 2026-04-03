@@ -12,6 +12,7 @@ mod megolm_session;
 mod member;
 mod message;
 mod message_with_author;
+mod moderation;
 mod plan;
 mod profile;
 mod reaction;
@@ -27,13 +28,14 @@ pub use crypto::{ClaimedKey, DeviceKey, OneTimeKey, PreKeyBundle};
 pub use desktop_auth::DesktopAuthCode;
 pub use ids::{
     CategoryId, ChannelId, DeviceId, DeviceKeyId, InviteCode, MegolmSessionId, MessageId,
-    OneTimeKeyId, RoleId, ServerId, UserId,
+    ModerationRetryId, OneTimeKeyId, RoleId, SYSTEM_MODERATOR_ID, ServerId, UserId,
 };
 pub use invite::Invite;
 pub use megolm_session::MegolmSession;
 pub use member::ServerMember;
 pub use message::{Message, MessageType, ParentMessagePreview};
 pub use message_with_author::MessageWithAuthor;
+pub use moderation::{ModerationRetry, ServerModerationSettings};
 pub use plan::{Plan, PlanLimits, ResourceKind};
 pub use profile::{Profile, UserStatus};
 pub use reaction::ReactionSummary;

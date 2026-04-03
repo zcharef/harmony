@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                server_id,\n                name,\n                topic,\n                channel_type as \"channel_type!: String\",\n                position,\n                is_private,\n                is_read_only,\n                encrypted,\n                created_at,\n                updated_at\n            FROM channels\n            WHERE id = $1\n            ",
+  "query": "\n            SELECT\n                c.id,\n                c.server_id,\n                c.name,\n                c.topic,\n                c.channel_type as \"channel_type!: String\",\n                c.position,\n                c.is_private,\n                c.is_read_only,\n                c.encrypted,\n                c.slowmode_seconds,\n                c.created_at,\n                c.updated_at\n            FROM channels c\n            WHERE c.server_id = $1\n              AND (\n                  c.is_private = false\n                  OR EXISTS (\n                      SELECT 1 FROM server_members sm\n                      WHERE sm.server_id = c.server_id\n                        AND sm.user_id = $2\n                        AND (\n                            sm.role IN ($3, $4)\n                            OR EXISTS (\n                                SELECT 1 FROM channel_role_access cra\n                                WHERE cra.channel_id = c.id AND cra.role = sm.role\n                            )\n                        )\n                  )\n              )\n            ORDER BY c.position\n            ",
   "describe": {
     "columns": [
       {
@@ -61,18 +61,26 @@
       },
       {
         "ordinal": 9,
+        "name": "slowmode_seconds",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -86,8 +94,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "0a7dbb2514e58fc999d21b6f525ec1f59f36cb8db516cdbc250a35db0566ca6a"
+  "hash": "385dd9cef31bcb8a3f4de43c417a2193974ee491ed57d029c80d57fbcdbfab5d"
 }

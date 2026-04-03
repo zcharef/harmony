@@ -179,6 +179,7 @@ fn api_handlers_use_ports_not_concrete_types() {
         "PgServerRepository",
         "PgChannelRepository",
         "PgMessageRepository",
+        "PgModerationRetryRepository",
         "PgMemberRepository",
         "PgBanRepository",
         "PgInviteRepository",

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE messages\n            SET deleted_at = now(), deleted_by = $2\n            WHERE id = $1\n              AND deleted_at IS NULL\n              AND ($3::timestamptz IS NULL OR COALESCE(edited_at, created_at) = $3)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c0993bc2adff24a413696393396a830eea941d5a6d8e5ff8ac2b27cb5f2df9ab"
+}

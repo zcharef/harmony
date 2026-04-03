@@ -312,6 +312,39 @@ impl From<String> for InviteCode {
     }
 }
 
+/// Unique identifier for a moderation retry record (dead-letter queue).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "ee0e8400-e29b-41d4-a716-446655440009")]
+#[serde(transparent)]
+pub struct ModerationRetryId(pub Uuid);
+
+impl ModerationRetryId {
+    #[must_use]
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for ModerationRetryId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for ModerationRetryId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+/// Well-known UUID for system-initiated moderation deletions.
+/// WHY: Distinguishes "user deleted their message" from "system moderated"
+/// in the `deleted_by` column. Required for legal audit (CSAM reporting).
+/// Uses a non-v4 UUID format, making collision with Supabase Auth's
+/// `gen_random_uuid()` (v4-only) impossible by specification.
+pub const SYSTEM_MODERATOR_ID: UserId =
+    UserId(Uuid::from_u128(0x00000000_0000_0000_0000_000000000001));
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

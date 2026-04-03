@@ -49,10 +49,17 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
     ) -> Result<MessageWithAuthor, DomainError>;
 
     /// Soft-delete a message (ADR-038). Sets `deleted_at=now()` and `deleted_by`.
+    ///
+    /// When `checked_at` is `Some(ts)`, the UPDATE includes an atomic stale-content
+    /// guard: `AND COALESCE(edited_at, created_at) = ts`. If the message was edited
+    /// after `ts`, the UPDATE matches zero rows and the method returns `Ok(())`
+    /// (stale moderation result — skip silently). When `checked_at` is `None`,
+    /// the guard is skipped (user-initiated deletes always proceed).
     async fn soft_delete(
         &self,
         message_id: &MessageId,
         deleted_by: &UserId,
+        checked_at: Option<DateTime<Utc>>,
     ) -> Result<(), DomainError>;
 
     /// Count non-deleted messages by an author in a channel within the last `window_secs` seconds.
@@ -64,6 +71,15 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         author_id: &UserId,
         window_secs: i64,
     ) -> Result<i64, DomainError>;
+
+    /// Get the timestamp of the last non-deleted message by this author in this channel.
+    ///
+    /// Used for slow mode enforcement in `MessageService::create`.
+    async fn get_last_message_time(
+        &self,
+        channel_id: &ChannelId,
+        author_id: &UserId,
+    ) -> Result<Option<DateTime<Utc>>, DomainError>;
 
     /// Create a system message (e.g. join announcement).
     ///

@@ -538,6 +538,7 @@ impl MessageRepository for PgMessageRepository {
         &self,
         message_id: &MessageId,
         deleted_by: &UserId,
+        checked_at: Option<DateTime<Utc>>,
     ) -> Result<(), DomainError> {
         let mid = message_id.0;
         let dby = deleted_by.0;
@@ -546,16 +547,44 @@ impl MessageRepository for PgMessageRepository {
             r#"
             UPDATE messages
             SET deleted_at = now(), deleted_by = $2
-            WHERE id = $1 AND deleted_at IS NULL
+            WHERE id = $1
+              AND deleted_at IS NULL
+              AND ($3::timestamptz IS NULL OR COALESCE(edited_at, created_at) = $3)
             "#,
             mid,
             dby,
+            checked_at,
         )
         .execute(&self.pool)
         .await
         .map_err(super::db_err)?;
 
         if result.rows_affected() == 0 {
+            // WHY: When checked_at is Some, zero rows could mean either
+            // "already deleted" or "edited since moderation check" (stale).
+            // For stale moderation, return Ok(()) — the content changed,
+            // so the moderation verdict no longer applies.
+            if checked_at.is_some() {
+                // Distinguish stale-edit from already-deleted by checking existence.
+                let exists = sqlx::query_scalar!(
+                    r#"SELECT EXISTS(SELECT 1 FROM messages WHERE id = $1 AND deleted_at IS NULL) AS "exists!""#,
+                    mid,
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(super::db_err)?;
+
+                if exists {
+                    // Message exists but COALESCE(edited_at, created_at) != checked_at
+                    // → content was edited after moderation captured it. Skip silently.
+                    tracing::info!(
+                        message_id = %message_id,
+                        "Stale moderation delete skipped — message was edited since check"
+                    );
+                    return Ok(());
+                }
+            }
+
             return Err(DomainError::NotFound {
                 resource_type: "Message",
                 id: message_id.to_string(),
@@ -592,6 +621,34 @@ impl MessageRepository for PgMessageRepository {
         .map_err(super::db_err)?;
 
         Ok(row.count)
+    }
+
+    async fn get_last_message_time(
+        &self,
+        channel_id: &ChannelId,
+        author_id: &UserId,
+    ) -> Result<Option<DateTime<Utc>>, DomainError> {
+        let cid = channel_id.0;
+        let aid = author_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            SELECT created_at
+            FROM messages
+            WHERE channel_id = $1
+              AND author_id = $2
+              AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+            cid,
+            aid,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|r| r.created_at))
     }
 
     async fn create_system(

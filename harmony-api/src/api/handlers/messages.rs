@@ -5,16 +5,25 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use serde::Deserialize;
 
+use tokio::time::{Duration, timeout};
+
 use crate::api::dto::{
     EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, SendMessageRequest,
 };
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
+use crate::domain::errors::DomainError;
 use crate::domain::models::server_event::MessagePayload;
 use crate::domain::models::{
-    ChannelId, MessageId, MessageWithAuthor, ServerEvent, ServerId, UserId,
+    ChannelId, MessageId, MessageWithAuthor, SYSTEM_MODERATOR_ID, ServerEvent, ServerId,
 };
+use crate::domain::services::content_moderation::{
+    ModerationDecision, SCORE_THRESHOLD, evaluate_moderation,
+};
+
+/// Maximum time to wait for a moderation semaphore permit before dead-lettering.
+const SEMAPHORE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Default message page size.
 const DEFAULT_MESSAGE_LIMIT: i64 = 50;
@@ -75,7 +84,7 @@ pub async fn send_message(
     // B4: Async content moderation (unencrypted only, ADR-027 compliant).
     // Message is already delivered; background task checks and soft-deletes if flagged.
     if !encrypted {
-        spawn_async_moderation(&state, &message, &channel_id, &channel.server_id, &user_id);
+        spawn_async_moderation(&state, &message, &channel_id, &channel.server_id);
     }
 
     Ok((StatusCode::CREATED, Json(MessageResponse::from(message))))
@@ -204,13 +213,7 @@ pub async fn edit_message(
 
     // B4: Async moderation on edits too (prevent edit-in-bypass).
     if !encrypted {
-        spawn_async_moderation(
-            &state,
-            &message,
-            &path.channel_id,
-            &channel.server_id,
-            &user_id,
-        );
+        spawn_async_moderation(&state, &message, &path.channel_id, &channel.server_id);
     }
 
     Ok((StatusCode::OK, Json(MessageResponse::from(message))))
@@ -280,7 +283,6 @@ fn spawn_async_moderation(
     message: &MessageWithAuthor,
     channel_id: &ChannelId,
     server_id: &ServerId,
-    sender_id: &UserId,
 ) {
     let moderator = state.content_moderator().cloned();
     let safe_browsing = state.safe_browsing().cloned();
@@ -302,71 +304,156 @@ fn spawn_async_moderation(
         .unwrap_or_else(|| message.message.content.clone());
     let channel_id = channel_id.clone();
     let server_id = server_id.clone();
-    let sender_id = sender_id.clone();
+    // C2: Capture edit timestamp at spawn time for stale-content guard.
+    let checked_at = message
+        .message
+        .edited_at
+        .unwrap_or(message.message.created_at);
     let repo = state.message_repository_for_moderation().clone();
+    let server_repo = state.server_repository_for_moderation().clone();
     let event_bus = state.event_bus_arc().clone();
+    // H2: Acquire semaphore inside the spawned task, not before spawn.
+    let semaphore = state.moderation_semaphore().clone();
+    // C3: Dead-letter queue for failed Tier 1 moderation checks.
+    let retry_repo = state.moderation_retry_repository().clone();
 
     tokio::spawn(async move {
+        // H2: Bound concurrent moderation tasks via semaphore permit.
+        // P4: Timeout prevents unbounded queueing when all permits are held
+        // (e.g. sustained OpenAI 429s holding permits for the full retry window).
+        let _permit = match timeout(SEMAPHORE_TIMEOUT, semaphore.acquire_owned()).await {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_closed)) => {
+                // Semaphore closed (shutdown) — skip moderation
+                tracing::warn!(
+                    message_id = %msg_id,
+                    "Moderation semaphore closed — skipping moderation"
+                );
+                return;
+            }
+            Err(_elapsed) => {
+                // Timeout — queue for retry instead of blocking indefinitely
+                tracing::warn!(
+                    message_id = %msg_id,
+                    timeout_secs = SEMAPHORE_TIMEOUT.as_secs(),
+                    "Moderation semaphore timeout — queueing for retry"
+                );
+                if let Err(e) = retry_repo
+                    .insert(
+                        &msg_id,
+                        &server_id,
+                        &channel_id,
+                        &content,
+                        "semaphore_timeout",
+                    )
+                    .await
+                {
+                    tracing::error!(
+                        message_id = %msg_id,
+                        error = %e,
+                        "Failed to insert moderation retry after semaphore timeout"
+                    );
+                }
+                return;
+            }
+        };
+
+        // M1: Fetch server moderation categories inside the spawned task,
+        // not in the handler hot path.
+        let server_categories = match server_repo.get_moderation_categories(&server_id).await {
+            Ok(cats) => cats,
+            Err(e) => {
+                tracing::warn!(
+                    message_id = %msg_id,
+                    server_id = %server_id,
+                    error = %e,
+                    "Failed to fetch server moderation categories — using empty (Tier 2 OFF)"
+                );
+                std::collections::HashMap::new()
+            }
+        };
+
         let mut should_delete = false;
         let mut reason = String::new();
 
         // B4: AI text moderation (OpenAI) — runs concurrently with B3
         let ai_check = async {
-            if let Some(ref moderator) = moderator {
-                match moderator.check_text(&content).await {
-                    Ok(result) if result.flagged => Some(result.reason),
-                    Ok(_) => None,
-                    Err(e) => {
-                        tracing::warn!(
-                            message_id = %msg_id,
-                            error = %e,
-                            "Async AI moderation failed — message unmoderated"
-                        );
-                        None
+            let moderator = moderator.as_ref()?;
+            match moderator.check_text(&content).await {
+                Ok(result) => {
+                    // 7: Use tiered evaluate_moderation instead of raw `result.flagged`.
+                    let decision = evaluate_moderation(
+                        &result.category_scores,
+                        &result.category_flags,
+                        &server_categories,
+                        SCORE_THRESHOLD,
+                    );
+                    match decision {
+                        ModerationDecision::Delete { reason, is_tier1 } => Some((reason, is_tier1)),
+                        ModerationDecision::Pass => None,
                     }
                 }
-            } else {
-                None
+                Err(e) => {
+                    // C3: Insert into dead-letter queue so background sweep
+                    // retries Tier 1 checks. The message passes unmoderated
+                    // for now but will be re-evaluated.
+                    tracing::warn!(
+                        message_id = %msg_id,
+                        error = %e,
+                        "Async AI moderation failed — queueing for retry"
+                    );
+                    if let Err(insert_err) = retry_repo
+                        .insert(&msg_id, &server_id, &channel_id, &content, &e.to_string())
+                        .await
+                    {
+                        // WHY: Failed to persist the retry record. The message
+                        // remains unmoderated AND we have no retry path.
+                        // This is a safety-critical failure for Tier 1 content.
+                        tracing::error!(
+                            message_id = %msg_id,
+                            error = %insert_err,
+                            "Failed to insert moderation retry — message unmoderated with no retry path"
+                        );
+                    }
+                    None
+                }
             }
         };
 
         // B3: URL scanning (Google Safe Browsing) — runs concurrently with B4
         let url_check = async {
-            if let Some(ref client) = safe_browsing {
-                let urls = crate::infra::safe_browsing::extract_urls(&content);
-                if urls.is_empty() {
-                    return None;
+            let client = safe_browsing.as_ref()?;
+            let urls = crate::infra::safe_browsing::extract_urls(&content);
+            if urls.is_empty() {
+                return None;
+            }
+            match client.check_urls(&urls).await {
+                Ok(result) if result.has_threats => {
+                    Some(format!("dangerous URL: {}", result.threat_types.join(", ")))
                 }
-                match client.check_urls(&urls).await {
-                    Ok(result) if result.has_threats => {
-                        Some(format!("dangerous URL: {}", result.threat_types.join(", ")))
-                    }
-                    Ok(_) => None,
-                    Err(e) => {
-                        tracing::warn!(
-                            message_id = %msg_id,
-                            error = %e,
-                            "Safe Browsing URL check failed — URLs unscanned"
-                        );
-                        None
-                    }
+                Ok(_) => None,
+                Err(e) => {
+                    tracing::warn!(
+                        message_id = %msg_id,
+                        error = %e,
+                        "Safe Browsing URL check failed — URLs unscanned"
+                    );
+                    None
                 }
-            } else {
-                None
             }
         };
 
         // WHY: Run both checks concurrently — they're independent HTTP calls.
         let (ai_result, url_result) = tokio::join!(ai_check, url_check);
 
-        if let Some(ai_reason) = ai_result {
+        if let Some((ai_reason, _is_tier1)) = &ai_result {
             should_delete = true;
-            reason = ai_reason;
+            reason = ai_reason.clone();
         }
-        if let Some(url_reason) = url_result {
+        if let Some(url_reason) = &url_result {
             should_delete = true;
             if reason.is_empty() {
-                reason = url_reason;
+                reason = url_reason.clone();
             } else {
                 reason = format!("{reason}; {url_reason}");
             }
@@ -376,17 +463,32 @@ fn spawn_async_moderation(
             return;
         }
 
+        // M6: Log verdict BEFORE attempting soft_delete to ensure audit trail
+        // exists even if the DB call fails.
+        let tier_label = if ai_result.as_ref().is_some_and(|(_, t1)| *t1) {
+            "tier1"
+        } else {
+            "tier2"
+        };
         tracing::info!(
             message_id = %msg_id,
+            server_id = %server_id,
+            tier = tier_label,
             reason = %reason,
-            "Message flagged by async moderation — soft-deleting"
+            "Message flagged by async moderation — attempting soft-delete"
         );
 
-        if let Err(e) = repo.soft_delete(&msg_id, &sender_id).await {
-            // WHY: NotFound means the user already deleted the message before
-            // moderation completed — this is a benign race, not a failure.
-            // Other errors (DB connectivity) = flagged content remains visible.
-            if e.to_string().contains("not found") {
+        // C2: Atomic stale-content guard — the checked_at timestamp is passed
+        // into soft_delete's SQL WHERE clause so the read+delete is a single
+        // atomic UPDATE. No TOCTOU race between find_by_id and soft_delete.
+        // M5: Use SYSTEM_MODERATOR_ID for deleted_by (distinguishes user-delete
+        // from system moderation in audit trail).
+        if let Err(e) = repo
+            .soft_delete(&msg_id, &SYSTEM_MODERATOR_ID, Some(checked_at))
+            .await
+        {
+            // H4: Typed error matching instead of `e.to_string().contains("not found")`.
+            if matches!(e, DomainError::NotFound { .. }) {
                 tracing::debug!(
                     message_id = %msg_id,
                     "Moderated message already deleted by user — no action needed"
@@ -403,8 +505,10 @@ fn spawn_async_moderation(
             return;
         }
 
+        // M5: Use SYSTEM_MODERATOR_ID as sender_id in the SSE event so clients
+        // know this deletion was by the moderation system, not a user.
         let event = ServerEvent::MessageDeleted {
-            sender_id: sender_id.clone(),
+            sender_id: SYSTEM_MODERATOR_ID,
             server_id,
             channel_id,
             message_id: msg_id.clone(),

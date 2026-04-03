@@ -1,5 +1,7 @@
 //! `PostgreSQL` adapter for server persistence.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
@@ -261,5 +263,74 @@ impl ServerRepository for PgServerRepository {
             }
             .into_server()
         }))
+    }
+
+    async fn get_moderation_categories(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<HashMap<String, bool>, DomainError> {
+        let sid = server_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            SELECT moderation_categories
+            FROM servers
+            WHERE id = $1
+            "#,
+            sid,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        let row = row.ok_or_else(|| DomainError::NotFound {
+            resource_type: "Server",
+            id: server_id.to_string(),
+        })?;
+
+        let json_value = row.moderation_categories;
+
+        // WHY: Corrupted JSONB should not take down the endpoint. Log and degrade
+        // gracefully by returning empty (= all Tier 2 categories OFF).
+        serde_json::from_value::<HashMap<String, bool>>(json_value).or_else(|e| {
+            tracing::error!(
+                server_id = %server_id,
+                error = %e,
+                "Corrupted moderation_categories JSONB, returning empty"
+            );
+            Ok(HashMap::new())
+        })
+    }
+
+    async fn update_moderation_categories(
+        &self,
+        server_id: &ServerId,
+        categories: HashMap<String, bool>,
+    ) -> Result<(), DomainError> {
+        let sid = server_id.0;
+        let json_value = serde_json::to_value(categories)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize categories: {e}")))?;
+
+        let result = sqlx::query!(
+            r#"
+            UPDATE servers
+            SET moderation_categories = $1, updated_at = now()
+            WHERE id = $2
+            "#,
+            json_value,
+            sid,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        if result.rows_affected() == 0 {
+            return Err(DomainError::NotFound {
+                resource_type: "Server",
+                id: server_id.to_string(),
+            });
+        }
+
+        Ok(())
     }
 }

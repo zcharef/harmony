@@ -66,8 +66,10 @@ async fn main() {
         );
     }
 
-    // 6. Background task: sweep stale presence entries every 60s
+    // 6. Background tasks: sweep stale presence entries + expired mutes every 60s
     spawn_presence_sweep(state.clone());
+    spawn_spam_guard_sweep(state.spam_guard().clone());
+    spawn_moderation_retry_sweep(state.clone());
 
     // 7. Build router with middleware stack
     let app = build_router(state, trusted_proxies, config.rate_limit_per_minute);
@@ -157,6 +159,52 @@ async fn init_app_state(config: &Config) -> AppState {
         plan_limit_checker.clone(),
         content_filter.clone(),
     ));
+    let spam_guard = Arc::new(domain::services::SpamGuard::new());
+    // WHY: Clone before message_repo is moved into MessageService.
+    // Needed for async moderation soft-delete in the handler layer.
+    let message_repo_for_moderation: Arc<dyn domain::ports::MessageRepository> =
+        message_repo.clone();
+    // WHY: Clone before server_repo is moved into DmService.
+    // Needed for fetching moderation categories inside `tokio::spawn`.
+    let server_repo_for_moderation: Arc<dyn domain::ports::ServerRepository> = server_repo.clone();
+
+    // WHY: Construct OpenAI moderator only when API key is configured.
+    // When None, async content moderation is disabled (graceful degradation).
+    // WHY: Filter empty strings — an empty OPENAI_API_KEY="" would create a
+    // moderator that always fails with 401, wasting 7s of retries per message.
+    let content_moderator: Option<Arc<dyn domain::ports::ContentModerator>> = config
+        .openai_api_key
+        .as_ref()
+        .filter(|key| !key.expose_secret().is_empty())
+        .map(|key| {
+            tracing::info!("OpenAI Moderation API enabled");
+            Arc::new(infra::OpenAiModerator::new(key.clone()))
+                as Arc<dyn domain::ports::ContentModerator>
+        });
+
+    // WHY: Construct Safe Browsing client only when API key is configured.
+    let safe_browsing: Option<Arc<infra::safe_browsing::SafeBrowsingClient>> = config
+        .safe_browsing_api_key
+        .as_ref()
+        .filter(|key| !key.expose_secret().is_empty())
+        .and_then(
+            |key| match infra::safe_browsing::SafeBrowsingClient::new(key.clone()) {
+                Ok(client) => {
+                    tracing::info!("Google Safe Browsing API enabled");
+                    Some(Arc::new(client))
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to initialize Safe Browsing client");
+                    None
+                }
+            },
+        );
+
+    // C3: Dead-letter queue for failed AI moderation checks (Tier 1 safety).
+    let moderation_retry_repo = Arc::new(infra::postgres::PgModerationRetryRepository::new(
+        pool.clone(),
+    ));
+
     let message_service = Arc::new(domain::services::MessageService::new(
         message_repo,
         channel_repo.clone(),
@@ -164,6 +212,7 @@ async fn init_app_state(config: &Config) -> AppState {
         plan_limit_checker.clone(),
         reaction_repo.clone(),
         content_filter.clone(),
+        spam_guard.clone(),
     ));
     let invite_service = Arc::new(domain::services::InviteService::new(
         invite_repo,
@@ -245,6 +294,12 @@ async fn init_app_state(config: &Config) -> AppState {
         presence_tracker,
         megolm_session_repo,
         desktop_auth_repo,
+        spam_guard,
+        content_moderator,
+        safe_browsing,
+        message_repo_for_moderation,
+        server_repo_for_moderation,
+        moderation_retry_repo,
     )
 }
 
@@ -283,6 +338,238 @@ fn spawn_presence_sweep(state: api::AppState) {
                     status: UserStatus::Offline,
                 };
                 state.event_bus().publish(event);
+            }
+        }
+    });
+}
+
+/// Spawn a background task that sweeps expired `SpamGuard` state every 60s.
+///
+/// Cleans up expired mutes, stale duplicate hashes, and stale flood counters
+/// to prevent unbounded memory growth.
+fn spawn_spam_guard_sweep(spam_guard: std::sync::Arc<domain::services::SpamGuard>) {
+    const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(SWEEP_INTERVAL);
+        loop {
+            interval.tick().await;
+            // WHY: catch_unwind prevents a panic in sweep logic from killing
+            // the background task permanently (ADR-027: no silent failures).
+            // sweep_expired is a sync function, so std::panic::catch_unwind works.
+            if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                spam_guard.sweep_expired();
+            })) {
+                tracing::error!(error = ?e, "SpamGuard sweep panicked — will retry next interval");
+            }
+        }
+    });
+}
+
+/// Spawn a background task that retries failed AI moderation checks every 60s (C3).
+///
+/// Fetches pending retries from the dead-letter queue and re-runs the `OpenAI`
+/// moderation check. If flagged: soft-delete + emit `MessageDeleted`. If clean:
+/// remove from queue. If error: increment retry count. After 5 failures,
+/// `tracing::error!` fires a Sentry alert for operator investigation.
+fn spawn_moderation_retry_sweep(state: api::AppState) {
+    use domain::models::{SYSTEM_MODERATOR_ID, ServerEvent};
+    use domain::services::content_moderation::{SCORE_THRESHOLD, evaluate_moderation};
+
+    const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+    /// Maximum retries per record before alerting operators.
+    const MAX_RETRIES: i32 = 5;
+    /// Maximum records to process per sweep cycle.
+    const BATCH_LIMIT: i64 = 10;
+
+    // WHY: Skip sweep entirely when no moderator is configured (self-hosted).
+    // The dead-letter queue can only be populated when a moderator exists,
+    // so sweeping without one would be a no-op.
+    let moderator = match state.content_moderator().cloned() {
+        Some(m) => m,
+        None => return,
+    };
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(SWEEP_INTERVAL);
+        loop {
+            interval.tick().await;
+
+            let retry_repo = state.moderation_retry_repository();
+            let message_repo = state.message_repository_for_moderation();
+            let server_repo = state.server_repository_for_moderation();
+            let event_bus = state.event_bus_arc();
+
+            let pending = match retry_repo.list_pending(BATCH_LIMIT).await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to fetch pending moderation retries"
+                    );
+                    continue;
+                }
+            };
+
+            if pending.is_empty() {
+                continue;
+            }
+
+            tracing::debug!(count = pending.len(), "Processing moderation retry batch");
+
+            for retry in pending {
+                // Re-attempt AI moderation
+                match moderator.check_text(&retry.content).await {
+                    Ok(result) => {
+                        // Fetch server moderation categories for tiered evaluation
+                        let server_categories = match server_repo
+                            .get_moderation_categories(&retry.server_id)
+                            .await
+                        {
+                            Ok(cats) => cats,
+                            Err(e) => {
+                                tracing::warn!(
+                                    retry_id = %retry.id,
+                                    server_id = %retry.server_id,
+                                    error = %e,
+                                    "Failed to fetch server moderation categories during retry"
+                                );
+                                std::collections::HashMap::new()
+                            }
+                        };
+
+                        let decision = evaluate_moderation(
+                            &result.category_scores,
+                            &result.category_flags,
+                            &server_categories,
+                            SCORE_THRESHOLD,
+                        );
+
+                        match decision {
+                            domain::services::ModerationDecision::Delete { reason, is_tier1 } => {
+                                // Stale-content guard: skip if message was edited since retry was created
+                                let current_msg = match message_repo
+                                    .find_by_id(&retry.message_id)
+                                    .await
+                                {
+                                    Ok(Some(msg)) => msg,
+                                    Ok(None) => {
+                                        // Message already deleted — clean up retry record
+                                        tracing::debug!(message_id = %retry.message_id, "Retried message already deleted");
+                                        let _ = retry_repo.delete(&retry.id).await;
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(error = %e, "Failed to read message for stale guard");
+                                        continue;
+                                    }
+                                };
+
+                                let msg_timestamp =
+                                    current_msg.edited_at.unwrap_or(current_msg.created_at);
+                                if msg_timestamp > retry.created_at {
+                                    tracing::info!(
+                                        message_id = %retry.message_id,
+                                        "Message edited after retry was created — skipping moderation, content changed"
+                                    );
+                                    let _ = retry_repo.delete(&retry.id).await;
+                                    continue;
+                                }
+
+                                let tier_label = if is_tier1 { "tier1" } else { "tier2" };
+                                tracing::info!(
+                                    retry_id = %retry.id,
+                                    message_id = %retry.message_id,
+                                    tier = tier_label,
+                                    reason = %reason,
+                                    "Retry sweep flagged message — soft-deleting"
+                                );
+
+                                // WHY: None = skip atomic stale-content guard. The retry
+                                // sweep already does its own stale check above (lines
+                                // 465-473) by comparing msg_timestamp > retry.created_at.
+                                if let Err(e) = message_repo
+                                    .soft_delete(&retry.message_id, &SYSTEM_MODERATOR_ID, None)
+                                    .await
+                                {
+                                    if matches!(e, domain::errors::DomainError::NotFound { .. }) {
+                                        tracing::debug!(
+                                            message_id = %retry.message_id,
+                                            "Retried message already deleted — removing from queue"
+                                        );
+                                    } else {
+                                        tracing::error!(
+                                            message_id = %retry.message_id,
+                                            error = %e,
+                                            "Failed to soft-delete message during retry sweep — flagged content remains visible"
+                                        );
+                                    }
+                                } else {
+                                    let event = ServerEvent::MessageDeleted {
+                                        sender_id: SYSTEM_MODERATOR_ID,
+                                        server_id: retry.server_id.clone(),
+                                        channel_id: retry.channel_id.clone(),
+                                        message_id: retry.message_id.clone(),
+                                    };
+                                    event_bus.publish(event);
+                                }
+
+                                // Remove from retry queue regardless of soft_delete outcome
+                                if let Err(e) = retry_repo.delete(&retry.id).await {
+                                    tracing::warn!(
+                                        retry_id = %retry.id,
+                                        error = %e,
+                                        "Failed to delete moderation retry after successful moderation"
+                                    );
+                                }
+                            }
+                            domain::services::ModerationDecision::Pass => {
+                                // Content is clean — remove from retry queue
+                                if let Err(e) = retry_repo.delete(&retry.id).await {
+                                    tracing::warn!(
+                                        retry_id = %retry.id,
+                                        error = %e,
+                                        "Failed to delete clean moderation retry"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Still failing — increment retry count
+                        match retry_repo.increment_retry(&retry.id, &e.to_string()).await {
+                            Ok(new_count) if new_count >= MAX_RETRIES => {
+                                // WHY: 5 consecutive failures means the external
+                                // service is persistently broken for this message.
+                                // Escalate to operators via Sentry (tracing::error!).
+                                tracing::error!(
+                                    retry_id = %retry.id,
+                                    message_id = %retry.message_id,
+                                    server_id = %retry.server_id,
+                                    retry_count = new_count,
+                                    last_error = %e,
+                                    "Moderation retry exhausted — message remains unmoderated, operator action required"
+                                );
+                            }
+                            Ok(new_count) => {
+                                tracing::warn!(
+                                    retry_id = %retry.id,
+                                    message_id = %retry.message_id,
+                                    retry_count = new_count,
+                                    error = %e,
+                                    "Moderation retry failed — will retry next sweep"
+                                );
+                            }
+                            Err(inc_err) => {
+                                tracing::error!(
+                                    retry_id = %retry.id,
+                                    error = %inc_err,
+                                    "Failed to increment moderation retry count"
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
     });

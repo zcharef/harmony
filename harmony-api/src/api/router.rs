@@ -130,6 +130,12 @@ pub fn build_router(
             "/v1/servers/{id}/bans/{user_id}",
             delete(handlers::bans::unban_member),
         )
+        // Moderation Settings
+        .route(
+            "/v1/servers/{id}/moderation",
+            get(handlers::moderation_settings::get_moderation_settings)
+                .patch(handlers::moderation_settings::update_moderation_settings),
+        )
         // Megolm sessions (E2EE channel encryption)
         .route(
             "/v1/channels/{id}/megolm-sessions",

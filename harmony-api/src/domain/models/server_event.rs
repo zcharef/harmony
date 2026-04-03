@@ -4,9 +4,12 @@
 //! Events carry full payload data so the client never needs to
 //! resolve IDs from cache (ADR-SSE-003).
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use super::Channel;
 use super::ChannelType;
 use super::MessageWithAuthor;
 use super::UserStatus;
@@ -100,8 +103,27 @@ pub struct ChannelPayload {
     pub is_private: bool,
     pub is_read_only: bool,
     pub encrypted: bool,
+    pub slow_mode_seconds: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl From<&Channel> for ChannelPayload {
+    fn from(c: &Channel) -> Self {
+        Self {
+            id: c.id.clone(),
+            name: c.name.clone(),
+            topic: c.topic.clone(),
+            channel_type: c.channel_type.clone(),
+            position: c.position,
+            is_private: c.is_private,
+            is_read_only: c.is_read_only,
+            encrypted: c.encrypted,
+            slow_mode_seconds: c.slow_mode_seconds,
+            created_at: c.created_at,
+            updated_at: c.updated_at,
+        }
+    }
 }
 
 /// Server payload embedded in `ServerUpdated`.
@@ -206,6 +228,11 @@ pub enum ServerEvent {
         server_id: ServerId,
         server: ServerPayload,
     },
+    ModerationSettingsUpdated {
+        sender_id: UserId,
+        server_id: ServerId,
+        categories: HashMap<String, bool>,
+    },
 
     // ── DMs (user-scoped, not server-scoped) ─────────────────
     DmCreated {
@@ -272,6 +299,7 @@ impl ServerEvent {
             Self::ChannelUpdated { .. } => "channel.updated",
             Self::ChannelDeleted { .. } => "channel.deleted",
             Self::ServerUpdated { .. } => "server.updated",
+            Self::ModerationSettingsUpdated { .. } => "server.moderation_settings_updated",
             Self::DmCreated { .. } => "dm.created",
             Self::TypingStarted { .. } => "typing.started",
             Self::PresenceChanged { .. } => "presence.changed",
@@ -297,6 +325,7 @@ impl ServerEvent {
             | Self::ChannelUpdated { sender_id, .. }
             | Self::ChannelDeleted { sender_id, .. }
             | Self::ServerUpdated { sender_id, .. }
+            | Self::ModerationSettingsUpdated { sender_id, .. }
             | Self::DmCreated { sender_id, .. }
             | Self::TypingStarted { sender_id, .. }
             | Self::PresenceChanged { sender_id, .. }
@@ -322,6 +351,7 @@ impl ServerEvent {
             | Self::ChannelUpdated { server_id, .. }
             | Self::ChannelDeleted { server_id, .. }
             | Self::ServerUpdated { server_id, .. }
+            | Self::ModerationSettingsUpdated { server_id, .. }
             | Self::TypingStarted { server_id, .. }
             | Self::ReactionAdded { server_id, .. }
             | Self::ReactionRemoved { server_id, .. }
@@ -348,6 +378,7 @@ impl ServerEvent {
             | Self::ChannelUpdated { .. }
             | Self::ChannelDeleted { .. }
             | Self::ServerUpdated { .. }
+            | Self::ModerationSettingsUpdated { .. }
             | Self::TypingStarted { .. }
             | Self::PresenceChanged { .. }
             | Self::ReactionAdded { .. }

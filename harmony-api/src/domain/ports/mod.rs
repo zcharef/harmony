@@ -4,6 +4,7 @@
 
 mod ban_repository;
 mod channel_repository;
+mod content_moderator;
 mod desktop_auth_repository;
 pub mod dm_repository;
 mod event_bus;
@@ -12,6 +13,7 @@ mod key_repository;
 mod megolm_session_repository;
 mod member_repository;
 mod message_repository;
+mod moderation_retry_repository;
 mod notification_settings_repository;
 mod plan_limit_checker;
 mod profile_repository;
@@ -22,6 +24,7 @@ mod user_preferences_repository;
 
 pub use ban_repository::BanRepository;
 pub use channel_repository::ChannelRepository;
+pub use content_moderator::{ContentModerator, ModerationResult};
 pub use desktop_auth_repository::DesktopAuthRepository;
 pub use dm_repository::DmRepository;
 pub use event_bus::EventBus;
@@ -30,6 +33,7 @@ pub use key_repository::KeyRepository;
 pub use megolm_session_repository::MegolmSessionRepository;
 pub use member_repository::MemberRepository;
 pub use message_repository::MessageRepository;
+pub use moderation_retry_repository::ModerationRetryRepository;
 pub use notification_settings_repository::{NotificationLevel, NotificationSettingsRepository};
 pub use plan_limit_checker::PlanLimitChecker;
 pub use profile_repository::ProfileRepository;

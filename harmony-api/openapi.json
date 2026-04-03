@@ -74,7 +74,7 @@
           "Auth"
         ],
         "summary": "Check whether a username is available for registration.",
-        "description": "Public endpoint (no auth required) — used during signup to give instant feedback.\nValidates format, checks reserved list, and queries the database.\n\n# Errors\nReturns `ApiError` on database failure.",
+        "description": "Public endpoint (no auth required) — used during signup to give instant feedback.\nValidates format, checks reserved list, content filter, and queries the database.\n\n# Errors\nReturns `ApiError` on database failure.",
         "operationId": "check_username",
         "parameters": [
           {
@@ -216,7 +216,7 @@
           "Auth"
         ],
         "summary": "Sync (get or create) the authenticated user's profile.",
-        "description": "Called after Supabase login. Creates a profile row if this is the first login,\nor returns the existing one.\n\nUsername resolution order:\n1. `user_metadata.username` from the JWT (set during signup)\n2. Fallback: derived from the email prefix\n\n# Errors\nReturns `ApiError` if the JWT lacks an email claim, the username is reserved,\nor the upsert fails.",
+        "description": "Called after Supabase login. Creates a profile row if this is the first login,\nor returns the existing one.\n\nUsername resolution order:\n1. `user_metadata.username` from the JWT (set during signup)\n2. Fallback: derived from the email prefix\n\nAll username policy (reserved names, content filter, safe fallback for\nsystem-derived names) is handled by `ProfileService::upsert_from_auth`.\n\n# Errors\nReturns `ApiError` if the JWT lacks an email claim, the username is reserved\nor offensive (user-chosen only), or the upsert fails.",
         "operationId": "sync_profile",
         "responses": {
           "200": {
@@ -3160,6 +3160,160 @@
         ]
       }
     },
+    "/v1/servers/{id}/moderation": {
+      "get": {
+        "tags": [
+          "Moderation"
+        ],
+        "summary": "Get moderation settings for a server.",
+        "description": "Returns current Tier 2 category toggles and informational tier lists.\nAny server member can read settings.\n\n# Errors\nReturns `ApiError` on authorization failure or repository error.",
+        "operationId": "get_moderation_settings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Moderation settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModerationSettingsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a server member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Moderation"
+        ],
+        "summary": "Update moderation settings for a server.",
+        "description": "Replaces Tier 2 category toggles. Requires server owner role.\n\n# Errors\nReturns `ApiError` on validation failure, authorization failure, or repository error.",
+        "operationId": "update_moderation_settings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateModerationSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Moderation settings updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModerationSettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a server owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/servers/{id}/transfer-ownership": {
       "post": {
         "tags": [
@@ -3423,6 +3577,7 @@
           "isPrivate",
           "isReadOnly",
           "encrypted",
+          "slowModeSeconds",
           "createdAt",
           "updatedAt"
         ],
@@ -3466,6 +3621,11 @@
           },
           "serverId": {
             "$ref": "#/components/schemas/ServerId"
+          },
+          "slowModeSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Minimum seconds between messages per user. 0 = disabled."
           },
           "topic": {
             "type": [
@@ -4356,6 +4516,45 @@
           "system"
         ]
       },
+      "ModerationSettingsResponse": {
+        "type": "object",
+        "description": "Response for server moderation settings.",
+        "required": [
+          "serverId",
+          "categories",
+          "tier1Categories",
+          "tier2Available"
+        ],
+        "properties": {
+          "categories": {
+            "type": "object",
+            "description": "Current Tier 2 category toggles for this server.",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "serverId": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "tier1Categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Informational: always-enforced Tier 1 categories (non-disableable)."
+          },
+          "tier2Available": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Available Tier 2 categories the admin can toggle."
+          }
+        }
+      },
       "NotificationLevel": {
         "type": "string",
         "description": "Notification level for a channel.",
@@ -4811,12 +5010,40 @@
             ],
             "description": "New channel name (if provided)."
           },
+          "slowModeSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Minimum seconds between messages per user. 0 = disable slow mode. Admin+ only."
+          },
           "topic": {
             "type": [
               "string",
               "null"
             ],
             "description": "New channel topic (if provided; null clears it)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateModerationSettingsRequest": {
+        "type": "object",
+        "description": "Request body for updating server moderation settings (replace semantics).",
+        "required": [
+          "categories"
+        ],
+        "properties": {
+          "categories": {
+            "type": "object",
+            "description": "Full desired state of Tier 2 category toggles.",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           }
         },
         "additionalProperties": false

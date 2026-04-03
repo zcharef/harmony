@@ -1,5 +1,7 @@
 //! Port: server persistence.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 
 use crate::domain::errors::DomainError;
@@ -36,4 +38,19 @@ pub trait ServerRepository: Send + Sync + std::fmt::Debug {
         server_id: &ServerId,
         name: String,
     ) -> Result<Option<Server>, DomainError>;
+
+    /// Fetch the server's Tier 2 moderation category settings.
+    /// Returns empty `HashMap` if no settings configured (= all Tier 2 OFF).
+    async fn get_moderation_categories(
+        &self,
+        server_id: &ServerId,
+    ) -> Result<HashMap<String, bool>, DomainError>;
+
+    /// Replace the server's Tier 2 moderation category settings.
+    /// WHY replace (not merge): The PATCH endpoint sends the full desired state.
+    async fn update_moderation_categories(
+        &self,
+        server_id: &ServerId,
+        categories: HashMap<String, bool>,
+    ) -> Result<(), DomainError>;
 }

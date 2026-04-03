@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                server_id,\n                name,\n                topic,\n                channel_type as \"channel_type!: String\",\n                position,\n                is_private,\n                is_read_only,\n                encrypted,\n                created_at,\n                updated_at\n            FROM channels\n            WHERE server_id = $1\n            ORDER BY position ASC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT\n                id,\n                server_id,\n                name,\n                topic,\n                channel_type as \"channel_type!: String\",\n                position,\n                is_private,\n                is_read_only,\n                encrypted,\n                slowmode_seconds,\n                created_at,\n                updated_at\n            FROM channels\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -61,11 +61,16 @@
       },
       {
         "ordinal": 9,
+        "name": "slowmode_seconds",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -86,8 +91,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "71909c58c5f837b11fd28585b1769c6bc1b804f006c7cb33842460e1201de7bf"
+  "hash": "7fc211545f2af0164a8e5741918e3563112505c734d0277f24eec6f4d7eb698e"
 }

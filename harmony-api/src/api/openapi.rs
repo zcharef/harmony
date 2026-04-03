@@ -73,6 +73,9 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         handlers::bans::list_bans,
         handlers::bans::ban_member,
         handlers::bans::unban_member,
+        // Moderation Settings
+        handlers::moderation_settings::get_moderation_settings,
+        handlers::moderation_settings::update_moderation_settings,
         // Messages
         handlers::messages::send_message,
         handlers::messages::list_messages,
@@ -179,6 +182,9 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             super::dto::notification_settings::UpdateNotificationSettingsRequest,
             super::dto::notification_settings::NotificationSettingsResponse,
             super::dto::notification_settings::NotificationLevel,
+            // Moderation Settings DTOs
+            super::dto::moderation_settings::ModerationSettingsResponse,
+            super::dto::moderation_settings::UpdateModerationSettingsRequest,
             // Read State DTOs
             MarkReadRequest,
             // DM DTOs

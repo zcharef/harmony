@@ -10,6 +10,7 @@ use crate::domain::ports::{
     ChannelRepository, MemberRepository, MessageRepository, PlanLimitChecker, ReactionRepository,
 };
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
+use crate::domain::services::spam_guard::{self, SpamGuard};
 
 /// Service for message-related business logic.
 #[derive(Debug)]
@@ -20,6 +21,7 @@ pub struct MessageService {
     plan_checker: Arc<dyn PlanLimitChecker>,
     reaction_repo: Arc<dyn ReactionRepository>,
     content_filter: Arc<ContentFilter>,
+    spam_guard: Arc<SpamGuard>,
 }
 
 /// Maximum message length (DB ceiling — self-hosted max).
@@ -45,6 +47,7 @@ impl MessageService {
         plan_checker: Arc<dyn PlanLimitChecker>,
         reaction_repo: Arc<dyn ReactionRepository>,
         content_filter: Arc<ContentFilter>,
+        spam_guard: Arc<SpamGuard>,
     ) -> Self {
         Self {
             repo,
@@ -53,6 +56,7 @@ impl MessageService {
             plan_checker,
             reaction_repo,
             content_filter,
+            spam_guard,
         }
     }
 
@@ -115,26 +119,19 @@ impl MessageService {
             .verify_channel_membership(channel_id, author_id)
             .await?;
 
-        // WHY: The API uses service_role which bypasses the RLS
-        // messages_insert_member policy that checks is_read_only.
-        // We must enforce read-only at the service layer.
-        if channel.is_read_only {
-            let caller_role = self
-                .member_repo
-                .get_member_role(&channel.server_id, author_id)
-                .await?
-                .unwrap_or(Role::Member);
-
-            if caller_role.level() < Role::Admin.level() {
-                return Err(DomainError::Forbidden(
-                    "This channel is read-only".to_string(),
-                ));
-            }
+        // WHY: A client sending encrypted=true on a plaintext channel would bypass
+        // ALL content moderation (word filter, invite blocking, AI moderation, URL
+        // scanning, duplicate detection, mention limits). The server must enforce that
+        // encrypted messages are only accepted on encrypted channels.
+        if encrypted && !channel.encrypted {
+            return Err(DomainError::ValidationError(
+                "Cannot send encrypted messages in a non-encrypted channel".to_string(),
+            ));
         }
 
         // WHY: sender_device_id is required when encrypted = true so recipients can
         // look up the Olm session for decryption. Without it, encrypted messages are
-        // unreadable. Documented in dto/messages.rs:17.
+        // unreadable. Documented on `SendMessageRequest::sender_device_id`.
         if encrypted && sender_device_id.is_none() {
             return Err(DomainError::ValidationError(
                 "sender_device_id is required when encrypted is true".to_string(),
@@ -167,6 +164,59 @@ impl MessageService {
                 "Message content must not exceed {} characters on this plan",
                 max_chars
             )));
+        }
+
+        // WHY: Role needed by is_read_only, slow_mode, and flood mute admin bypass.
+        // Single DB lookup for all three checks.
+        let caller_role = self
+            .member_repo
+            .get_member_role(&channel.server_id, author_id)
+            .await?
+            .unwrap_or_else(|| {
+                // WHY: Member was verified above, so None indicates a data
+                // inconsistency (member row exists but role column is missing).
+                tracing::warn!(
+                    user_id = %author_id,
+                    server_id = %channel.server_id,
+                    "Role lookup returned None after membership verification — defaulting to Member"
+                );
+                Role::Member
+            });
+        let is_admin = caller_role.level() >= Role::Admin.level();
+
+        // A3: Check if user is currently auto-muted for flooding.
+        // WHY: Admin+ bypass prevents admins from being locked out of their
+        // own servers during active moderation (e.g., cleaning up a raid).
+        if !is_admin {
+            self.spam_guard.check_muted(author_id, &channel.server_id)?;
+        }
+
+        // WHY: The API uses service_role which bypasses the RLS
+        // messages_insert_member policy that checks is_read_only.
+        // We must enforce read-only at the service layer.
+        if channel.is_read_only && !is_admin {
+            return Err(DomainError::Forbidden(
+                "This channel is read-only".to_string(),
+            ));
+        }
+
+        // WHY: Slow mode enforces a minimum interval between messages per user.
+        if channel.slow_mode_seconds > 0 && !is_admin {
+            let last_msg_time = self
+                .repo
+                .get_last_message_time(channel_id, author_id)
+                .await?;
+
+            if let Some(last_at) = last_msg_time {
+                let elapsed = (Utc::now() - last_at).num_seconds();
+                if elapsed < i64::from(channel.slow_mode_seconds) {
+                    let remaining = i64::from(channel.slow_mode_seconds) - elapsed;
+                    return Err(DomainError::RateLimited(format!(
+                        "Slow mode active — wait {} seconds before sending another message",
+                        remaining
+                    )));
+                }
+            }
         }
 
         // WHY: If replying, verify the parent message exists, is not deleted,
@@ -203,12 +253,35 @@ impl MessageService {
             ));
         }
 
+        // A1: Duplicate detection (skip for encrypted — Megolm ratchet means
+        // identical plaintext produces different ciphertext).
+        // WHY: Save original content for record_message below. After content
+        // moderation, the stored content may be masked (e.g., "h***o"), so the
+        // hash would differ. We must hash the same content in both check and record.
+        let content_for_dedup = content.clone();
+        self.spam_guard
+            .check_duplicate(author_id, channel_id, &content, encrypted)?;
+
+        // A3: Mention limit (unencrypted only — can't inspect ciphertext).
+        if !encrypted {
+            let mention_count = spam_guard::count_mentions(&content);
+            if mention_count > spam_guard::MAX_MENTIONS {
+                return Err(DomainError::ValidationError(format!(
+                    "Too many mentions (max {})",
+                    spam_guard::MAX_MENTIONS
+                )));
+            }
+        }
+
         // WHY: Skip content moderation for encrypted messages — ciphertext is
         // opaque, we can't inspect it. Also skip for system messages (handled
         // by create_system_message which bypasses this method entirely).
         let (final_content, mod_at, mod_reason, orig_content) = if encrypted {
             (content, None, None, None)
         } else {
+            // B5: Block competitor invite links (sync, pre-send).
+            self.content_filter.check_invite_links(&content)?;
+
             match self.content_filter.check_soft(&content) {
                 ModerationVerdict::Clean => (content, None, None, None),
                 ModerationVerdict::Flagged {
@@ -226,7 +299,8 @@ impl MessageService {
             }
         };
 
-        self.repo
+        let message = self
+            .repo
             .send_to_channel(
                 channel_id,
                 author_id,
@@ -238,7 +312,29 @@ impl MessageService {
                 mod_reason,
                 orig_content,
             )
-            .await
+            .await?;
+
+        // A1+A3: Record message for duplicate detection + flood tracking.
+        // Runs AFTER successful DB write. Admin+ bypass: admins don't accumulate
+        // flood counts and can't be auto-muted (matches mute check bypass above).
+        if !is_admin
+            && let Err(e) = self.spam_guard.record_message(
+                author_id,
+                channel_id,
+                &channel.server_id,
+                &content_for_dedup,
+                encrypted,
+            )
+        {
+            tracing::warn!(
+                user_id = %author_id,
+                channel_id = %channel_id,
+                error = %e,
+                "Flood threshold exceeded — user auto-muted for future messages"
+            );
+        }
+
+        Ok(message)
     }
 
     /// List messages in a channel with cursor-based pagination.
@@ -359,6 +455,9 @@ impl MessageService {
         let (final_content, mod_at, mod_reason, orig_content) = if message.encrypted {
             (content, None, None, None)
         } else {
+            // B5: Block competitor invite links on edits too (prevent edit-in-bypass).
+            self.content_filter.check_invite_links(&content)?;
+
             match self.content_filter.check_soft(&content) {
                 ModerationVerdict::Clean => (content, None, None, None),
                 ModerationVerdict::Flagged {
@@ -431,7 +530,9 @@ impl MessageService {
             }
         }
 
-        self.repo.soft_delete(message_id, user_id).await
+        // WHY: None = skip stale-content guard. User/moderator deletes should
+        // always proceed regardless of edits (they're intentional human actions).
+        self.repo.soft_delete(message_id, user_id, None).await
     }
 
     /// Post a system message (e.g. join announcement).

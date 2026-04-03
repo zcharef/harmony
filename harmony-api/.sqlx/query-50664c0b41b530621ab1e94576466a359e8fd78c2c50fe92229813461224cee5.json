@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO channels (id, server_id, name, topic, channel_type, position, is_private, is_read_only, encrypted, created_at)\n            VALUES ($1, $2, $3, $4, $5::text::channel_type, $6, $7, $8, $9, $10)\n            RETURNING\n                id,\n                server_id,\n                name,\n                topic,\n                channel_type as \"channel_type!: String\",\n                position,\n                is_private,\n                is_read_only,\n                encrypted,\n                created_at,\n                updated_at\n            ",
+  "query": "\n            SELECT\n                id,\n                server_id,\n                name,\n                topic,\n                channel_type as \"channel_type!: String\",\n                position,\n                is_private,\n                is_read_only,\n                encrypted,\n                slowmode_seconds,\n                created_at,\n                updated_at\n            FROM channels\n            WHERE server_id = $1\n            ORDER BY position ASC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -61,27 +61,23 @@
       },
       {
         "ordinal": 9,
+        "name": "slowmode_seconds",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Int4",
-        "Bool",
-        "Bool",
-        "Bool",
-        "Timestamptz"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -95,8 +91,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "b367837c82be4dc0b5c4d4306789720a29c2212b3a5ce9e2d990ae4a8ab9a2a3"
+  "hash": "50664c0b41b530621ab1e94576466a359e8fd78c2c50fe92229813461224cee5"
 }

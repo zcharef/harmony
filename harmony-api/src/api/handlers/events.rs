@@ -263,14 +263,15 @@ pub async fn sse_events(
         // let it through (presence is global). The client filters by
         // displayed server.
 
-        // ── Filter: sender exclusion (message events only) ────────
-        // WHY: The sender already has optimistic UI. Receiving their own
-        // event would cause duplicate renders.
-        let is_message_event = matches!(
-            event.event_name(),
-            "message.created" | "message.updated" | "message.deleted"
-        );
-        if is_message_event && *event.sender_id() == user_id {
+        // ── Filter: sender exclusion (create/update only) ──────────
+        // WHY: The sender already has optimistic UI for create and update.
+        // message.deleted is NOT suppressed because moderation-triggered
+        // deletions use the message author as sender_id — suppressing them
+        // would prevent the author from seeing their message disappear.
+        // The frontend handler (handleMessageDeleted) is idempotent, so
+        // user-initiated deletes arriving twice (optimistic + SSE) are harmless.
+        let is_self_echo = matches!(event.event_name(), "message.created" | "message.updated");
+        if is_self_echo && *event.sender_id() == user_id {
             return None;
         }
 

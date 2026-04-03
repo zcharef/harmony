@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE moderation_retries\n            SET retry_count = retry_count + 1,\n                last_error = $2,\n                updated_at = now()\n            WHERE id = $1\n            RETURNING retry_count\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "retry_count",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "67c156e74e9df19f79511710adec80a71f61fc8be37ee901509e6572390e3724"
+}

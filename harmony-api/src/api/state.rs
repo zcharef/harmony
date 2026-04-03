@@ -4,17 +4,25 @@ use std::sync::Arc;
 
 use jsonwebtoken::DecodingKey;
 use sqlx::PgPool;
+use tokio::sync::Semaphore;
 
 use crate::domain::ports::{
-    BanRepository, DesktopAuthRepository, EventBus, MegolmSessionRepository, MemberRepository,
-    PlanLimitChecker,
+    BanRepository, ContentModerator, DesktopAuthRepository, EventBus, MegolmSessionRepository,
+    MemberRepository, MessageRepository, ModerationRetryRepository, PlanLimitChecker,
+    ServerRepository,
 };
 use crate::domain::services::{
     ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
     NotificationSettingsService, ProfileService, ReactionService, ReadStateService, ServerService,
-    UserPreferencesService,
+    SpamGuard, UserPreferencesService,
 };
 use crate::infra::PresenceTracker;
+use crate::infra::safe_browsing::SafeBrowsingClient;
+
+/// Maximum concurrent async moderation tasks (`OpenAI` + Safe Browsing).
+/// WHY: Prevents unbounded `tokio::spawn` from overwhelming external APIs
+/// or exhausting memory under message floods.
+const MAX_CONCURRENT_MODERATIONS: usize = 50;
 
 /// Application state shared across all handlers.
 ///
@@ -68,6 +76,20 @@ pub struct AppState {
     megolm_session_repository: Arc<dyn MegolmSessionRepository>,
     /// Desktop auth repository (PKCE exchange codes).
     desktop_auth_repository: Arc<dyn DesktopAuthRepository>,
+    /// In-memory anti-spam guard (duplicate detection, flood muting).
+    spam_guard: Arc<SpamGuard>,
+    /// Async content moderator (`OpenAI` Moderation API). None = disabled.
+    content_moderator: Option<Arc<dyn ContentModerator>>,
+    /// Google Safe Browsing URL scanner. None = disabled.
+    safe_browsing: Option<Arc<SafeBrowsingClient>>,
+    /// Message repository for async moderation soft-delete.
+    message_repository: Arc<dyn MessageRepository>,
+    /// Server repository for fetching moderation categories inside `tokio::spawn`.
+    server_repository: Arc<dyn ServerRepository>,
+    /// Bounds concurrent async moderation tasks to avoid overwhelming external APIs.
+    moderation_semaphore: Arc<Semaphore>,
+    /// Dead-letter queue for failed AI moderation checks (Tier 1 safety).
+    moderation_retry_repository: Arc<dyn ModerationRetryRepository>,
 }
 
 // WHY: Manual Debug because `dyn MemberRepository` needs explicit impl through Arc.
@@ -98,6 +120,15 @@ impl std::fmt::Debug for AppState {
             .field("presence_tracker", &self.presence_tracker)
             .field("megolm_session_repository", &self.megolm_session_repository)
             .field("desktop_auth_repository", &self.desktop_auth_repository)
+            .field("spam_guard", &self.spam_guard)
+            .field("content_moderator", &self.content_moderator.is_some())
+            .field("safe_browsing", &self.safe_browsing.is_some())
+            .field("server_repository", &self.server_repository)
+            .field("moderation_semaphore", &self.moderation_semaphore)
+            .field(
+                "moderation_retry_repository",
+                &self.moderation_retry_repository,
+            )
             .finish()
     }
 }
@@ -130,6 +161,12 @@ impl AppState {
         presence_tracker: Arc<PresenceTracker>,
         megolm_session_repository: Arc<dyn MegolmSessionRepository>,
         desktop_auth_repository: Arc<dyn DesktopAuthRepository>,
+        spam_guard: Arc<SpamGuard>,
+        content_moderator: Option<Arc<dyn ContentModerator>>,
+        safe_browsing: Option<Arc<SafeBrowsingClient>>,
+        message_repository_for_moderation: Arc<dyn MessageRepository>,
+        server_repository_for_moderation: Arc<dyn ServerRepository>,
+        moderation_retry_repository: Arc<dyn ModerationRetryRepository>,
     ) -> Self {
         Self {
             pool,
@@ -155,6 +192,13 @@ impl AppState {
             presence_tracker,
             megolm_session_repository,
             desktop_auth_repository,
+            spam_guard,
+            content_moderator,
+            safe_browsing,
+            message_repository: message_repository_for_moderation,
+            server_repository: server_repository_for_moderation,
+            moderation_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_MODERATIONS)),
+            moderation_retry_repository,
         }
     }
 
@@ -254,6 +298,12 @@ impl AppState {
         &*self.event_bus
     }
 
+    /// Access the event bus as a cloneable `Arc` (for `tokio::spawn` captures).
+    #[must_use]
+    pub fn event_bus_arc(&self) -> &Arc<dyn EventBus> {
+        &self.event_bus
+    }
+
     /// Access the in-memory presence tracker.
     #[must_use]
     pub fn presence_tracker(&self) -> &PresenceTracker {
@@ -270,6 +320,48 @@ impl AppState {
     #[must_use]
     pub fn desktop_auth_repository(&self) -> &dyn DesktopAuthRepository {
         &*self.desktop_auth_repository
+    }
+
+    /// Access the in-memory anti-spam guard (duplicate detection, flood muting).
+    #[must_use]
+    pub fn spam_guard(&self) -> &Arc<SpamGuard> {
+        &self.spam_guard
+    }
+
+    /// Access the async content moderator (`OpenAI`). None = disabled.
+    #[must_use]
+    pub fn content_moderator(&self) -> Option<&Arc<dyn ContentModerator>> {
+        self.content_moderator.as_ref()
+    }
+
+    /// Access the Safe Browsing URL scanner. None = disabled.
+    #[must_use]
+    pub fn safe_browsing(&self) -> Option<&Arc<SafeBrowsingClient>> {
+        self.safe_browsing.as_ref()
+    }
+
+    /// Access the message repository for async moderation soft-delete.
+    #[must_use]
+    pub fn message_repository_for_moderation(&self) -> &Arc<dyn MessageRepository> {
+        &self.message_repository
+    }
+
+    /// Access the server repository for fetching moderation categories inside `tokio::spawn`.
+    #[must_use]
+    pub fn server_repository_for_moderation(&self) -> &Arc<dyn ServerRepository> {
+        &self.server_repository
+    }
+
+    /// Access the semaphore that bounds concurrent async moderation tasks.
+    #[must_use]
+    pub fn moderation_semaphore(&self) -> &Arc<Semaphore> {
+        &self.moderation_semaphore
+    }
+
+    /// Access the moderation retry repository (dead-letter queue for failed AI checks).
+    #[must_use]
+    pub fn moderation_retry_repository(&self) -> &Arc<dyn ModerationRetryRepository> {
+        &self.moderation_retry_repository
     }
 
     /// Access the Postgres connection pool.
