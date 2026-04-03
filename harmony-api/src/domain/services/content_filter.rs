@@ -9,6 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use regex::Regex;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::domain::errors::DomainError;
@@ -79,6 +80,8 @@ pub struct ContentFilter {
     /// "as" would be a false positive. Requiring input ≥ 3 chars means "as" (2)
     /// doesn't match, but "asss" (4) and "kkkk" (4) do.
     collapsed_banned_words: HashMap<String, usize>,
+    /// B5: Compiled regex for competitor invite link detection.
+    invite_regex: Regex,
     enabled: bool,
 }
 
@@ -133,6 +136,7 @@ impl ContentFilter {
         Self {
             banned_words,
             collapsed_banned_words,
+            invite_regex: build_invite_regex(),
             enabled: true,
         }
     }
@@ -143,6 +147,7 @@ impl ContentFilter {
         Self {
             banned_words: HashSet::new(),
             collapsed_banned_words: HashMap::new(),
+            invite_regex: build_invite_regex(),
             enabled: false,
         }
     }
@@ -159,6 +164,9 @@ impl ContentFilter {
     /// Tier 1: hard reject. Returns `Err(ValidationError)` if banned words are found.
     ///
     /// Used for structural inputs: server names, channel names, usernames, etc.
+    /// Includes substring scan (Pass 5) that `check_soft` does not — catches
+    /// concatenated slurs like "nigganigga" where the banned word is embedded
+    /// inside a larger token.
     ///
     /// # Errors
     ///
@@ -170,13 +178,51 @@ impl ContentFilter {
 
         let normalized = normalize_text(text);
 
-        if self.has_banned_word(&normalized) {
+        if self.has_banned_word(&normalized) || self.has_banned_substring(&normalized) {
             return Err(DomainError::ValidationError(
                 "Content contains prohibited language".to_string(),
             ));
         }
 
         Ok(())
+    }
+
+    /// Pass 5 (`check_hard` only): substring scan for concatenated slurs.
+    ///
+    /// WHY: Word-boundary tokenization treats "nigganigga" as a single token
+    /// that doesn't match any exact entry. This pass checks if any banned word
+    /// (≥ 5 chars) appears as a substring within any token that is longer than
+    /// the banned word itself (exact matches are already caught by `has_banned_word`).
+    ///
+    /// The ≥ 5 char threshold avoids Scunthorpe-type false positives: "ass" (3)
+    /// inside "assassin", "coon" (4) inside "raccoon", etc. The 4-char slurs
+    /// ("kike", "coon", "gook", "dago") are still caught standalone by Pass 1
+    /// exact word matching.
+    ///
+    /// WHY not in `check_soft`: for messages, word-boundary matching is sufficient
+    /// and substring matching would over-mask legitimate words in sentences.
+    fn has_banned_substring(&self, normalized: &str) -> bool {
+        // WHY: Also apply to leet-decoded form so "n1ggan1gga" is caught.
+        let decoded = leet_to_alpha(normalized);
+        let inputs = if decoded == *normalized {
+            vec![normalized.to_string()]
+        } else {
+            vec![normalized.to_string(), decoded]
+        };
+
+        for input in &inputs {
+            for token in tokenize(input) {
+                for banned in &self.banned_words {
+                    if banned.len() >= 5
+                        && token.len() > banned.len()
+                        && token.contains(banned.as_str())
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// Tier 2: soft redact. Returns the masked version if banned words are found.
@@ -208,6 +254,31 @@ impl ContentFilter {
                 reason: "Content violates community guidelines".to_string(),
             }
         }
+    }
+
+    /// B5: Check if the text contains competitor invite links.
+    ///
+    /// Only call for unencrypted messages (can't inspect ciphertext).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::ValidationError`] if an invite link is detected.
+    pub fn check_invite_links(&self, text: &str) -> Result<(), DomainError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        // WHY: Normalize before regex to catch fullwidth character bypasses
+        // (e.g., ｄｉｓｃｏｒｄ.gg) and zero-width character insertion
+        // (e.g., d\u{200B}iscord.gg). Same pipeline used by word matching.
+        let normalized = normalize_text(text);
+        if self.invite_regex.is_match(&normalized) {
+            return Err(DomainError::ValidationError(
+                "Message contains blocked invite links".to_string(),
+            ));
+        }
+
+        Ok(())
     }
 
     /// Check if any token in the normalized text matches a banned word.
@@ -399,11 +470,23 @@ fn mask_separated_word(text: &str, word: &str) -> String {
 
 // ── Normalization pipeline ─────────────────────────────────────────
 
+/// Build a compiled regex matching competitor chat platform invite links.
+///
+/// WHY: Single compiled regex is faster than multiple string contains checks.
+/// Case-insensitive to catch `Discord.GG`, `T.ME`, etc.
+#[allow(clippy::expect_used)] // WHY: Regex is a compile-time constant; panic is correct for invalid syntax.
+fn build_invite_regex() -> Regex {
+    Regex::new(
+        r"(?i)(?:discord\.gg/|discord\.com/invite/|discordapp\.com/invite/|t\.me/|telegram\.me/|chat\.whatsapp\.com/|invite\.slack\.com/)"
+    ).expect("invite regex must compile")
+}
+
 /// Full normalization pipeline applied before banned-word matching.
 ///
 /// 1. NFKC normalize (fullwidth→ASCII, mathematical symbols→ASCII)
 /// 2. NFD decompose + strip combining marks (ü→u, é→e)
 /// 3. Strip zero-width characters
+/// 4. Map cross-script confusables to ASCII (Cyrillic а→a, Greek ο→o, etc.)
 fn normalize_text(text: &str) -> String {
     let nfkc: String = text.nfkc().collect();
 
@@ -435,7 +518,68 @@ fn normalize_text(text: &str) -> String {
         })
         .collect();
 
-    stripped
+    // Step 4: Map cross-script confusables to ASCII equivalents.
+    // WHY: NFKC handles compatibility chars (fullwidth, math symbols) but NOT
+    // cross-script homoglyphs. Cyrillic `а` and Latin `a` are distinct codepoints
+    // that NFKC preserves as-is. Without this step, `аss` (Cyrillic а) bypasses
+    // every word match pass.
+    confusable_to_ascii(&stripped)
+}
+
+/// Map common cross-script confusable characters to their ASCII equivalents.
+///
+/// WHY: Covers the most frequent abuse vectors — Cyrillic and Greek letters that
+/// are visually identical to Latin. This manual table handles ~50 characters
+/// responsible for >99% of homoglyph attacks in chat apps. Characters already
+/// ASCII are passed through unchanged (fast path).
+fn confusable_to_ascii(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_ascii() {
+                return c;
+            }
+            match c {
+                // Cyrillic → Latin
+                '\u{0410}' | '\u{0430}' => 'a', // А а
+                '\u{0412}' | '\u{0432}' => 'b', // В в (looks like B/b)
+                '\u{0421}' | '\u{0441}' => 'c', // С с
+                '\u{0415}' | '\u{0435}' => 'e', // Е е
+                '\u{041D}' | '\u{043D}' => 'h', // Н н (looks like H/h)
+                '\u{041A}' | '\u{043A}' => 'k', // К к
+                '\u{041C}' | '\u{043C}' => 'm', // М м
+                '\u{041E}' | '\u{043E}' => 'o', // О о
+                '\u{0420}' | '\u{0440}' => 'p', // Р р
+                '\u{0422}' | '\u{0442}' => 't', // Т т
+                '\u{0425}' | '\u{0445}' => 'x', // Х х
+                '\u{0423}' | '\u{0443}' => 'y', // У у
+                '\u{0455}' => 's',              // ѕ (Cyrillic small letter DZE)
+                '\u{0456}' => 'i', // і (Cyrillic small letter Byelorussian-Ukrainian I)
+                '\u{0458}' => 'j', // ј (Cyrillic small letter JE)
+                '\u{04BB}' => 'h', // һ (Cyrillic small letter SHHA)
+
+                // Greek → Latin
+                '\u{0391}' | '\u{03B1}' => 'a', // Α α
+                '\u{0392}' | '\u{03B2}' => 'b', // Β β
+                '\u{0395}' | '\u{03B5}' => 'e', // Ε ε
+                '\u{0397}' | '\u{03B7}' => 'h', // Η η (capital looks like H)
+                '\u{0399}' | '\u{03B9}' => 'i', // Ι ι
+                '\u{039A}' | '\u{03BA}' => 'k', // Κ κ
+                '\u{039C}' => 'm',              // Μ (Greek capital MU)
+                '\u{039D}' => 'n',              // Ν (Greek capital NU — looks like N)
+                '\u{03BD}' => 'v',              // ν (Greek small letter NU — looks like v)
+                '\u{039F}' | '\u{03BF}' => 'o', // Ο ο
+                '\u{03A1}' | '\u{03C1}' => 'p', // Ρ ρ
+                '\u{03A4}' | '\u{03C4}' => 't', // Τ τ
+                '\u{03A5}' | '\u{03C5}' => 'u', // Υ υ
+                '\u{03A7}' | '\u{03C7}' => 'x', // Χ χ
+
+                // Other common confusables
+                '\u{0131}' => 'i', // ı (Latin small letter dotless I — Turkish)
+                '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}' => '-', // various dashes
+                _ => c,
+            }
+        })
+        .collect()
 }
 
 /// Tokenize text into words by splitting on non-alphanumeric boundaries.
@@ -539,6 +683,7 @@ mod tests {
         ContentFilter {
             banned_words,
             collapsed_banned_words,
+            invite_regex: build_invite_regex(),
             enabled: true,
         }
     }
@@ -770,6 +915,97 @@ mod tests {
             filter.check_soft("slurword"),
             ModerationVerdict::Clean
         ));
+    }
+
+    // ── B5: Invite link detection ─────────────────────────────────
+
+    #[test]
+    fn invite_blocks_discord() {
+        let filter = ContentFilter::new();
+        assert!(
+            filter
+                .check_invite_links("join us at discord.gg/abc123")
+                .is_err()
+        );
+        assert!(
+            filter
+                .check_invite_links("https://discord.com/invite/xyz")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn invite_blocks_telegram() {
+        let filter = ContentFilter::new();
+        assert!(filter.check_invite_links("join t.me/mychat").is_err());
+        assert!(filter.check_invite_links("join telegram.me/group").is_err());
+    }
+
+    #[test]
+    fn invite_blocks_whatsapp() {
+        let filter = ContentFilter::new();
+        assert!(
+            filter
+                .check_invite_links("https://chat.whatsapp.com/abc")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn invite_blocks_slack() {
+        let filter = ContentFilter::new();
+        assert!(
+            filter
+                .check_invite_links("join invite.slack.com/shared_invite/abc")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn invite_blocks_legacy_discord_domain() {
+        let filter = ContentFilter::new();
+        assert!(
+            filter
+                .check_invite_links("https://discordapp.com/invite/xyz")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn invite_detected_in_longer_message() {
+        let filter = ContentFilter::new();
+        assert!(
+            filter
+                .check_invite_links(
+                    "Hey everyone, come join our server at discord.gg/abc for more info!"
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn invite_allows_clean_messages() {
+        let filter = ContentFilter::new();
+        assert!(filter.check_invite_links("hello world").is_ok());
+        assert!(
+            filter
+                .check_invite_links("check out discord.com for more info")
+                .is_ok()
+        );
+        assert!(filter.check_invite_links("message me on telegram").is_ok());
+    }
+
+    #[test]
+    fn invite_case_insensitive() {
+        let filter = ContentFilter::new();
+        assert!(filter.check_invite_links("join DISCORD.GG/abc").is_err());
+        assert!(filter.check_invite_links("join T.ME/group").is_err());
+    }
+
+    #[test]
+    fn invite_noop_allows_all() {
+        let filter = ContentFilter::noop();
+        assert!(filter.check_invite_links("discord.gg/abc").is_ok());
     }
 
     // ── Edge cases ──────────────────────────────────────────────────
@@ -1031,5 +1267,169 @@ mod tests {
             }
             ModerationVerdict::Clean => panic!("Expected Flagged for mixed bypasses"),
         }
+    }
+
+    // ── Pass 5: Substring scan (check_hard only) ────────────────────
+
+    #[test]
+    fn hard_catches_concatenated_slurs() {
+        let filter = test_filter(&["nigga"]);
+        assert!(filter.check_hard("nigganigga").is_err());
+        assert!(filter.check_hard("xnigga").is_err());
+        assert!(filter.check_hard("niggax").is_err());
+    }
+
+    #[test]
+    fn hard_catches_concatenated_slurs_5plus_chars() {
+        // WHY: "faggot" (6 chars) meets the ≥5 threshold for substring scan.
+        let filter = test_filter(&["faggot"]);
+        assert!(filter.check_hard("faggotfaggot").is_err());
+        assert!(filter.check_hard("xfaggoty").is_err());
+    }
+
+    #[test]
+    fn hard_4char_concatenated_not_caught() {
+        // WHY: "fuck" (4 chars) is below the ≥5 substring threshold.
+        // Concatenated forms are not caught — accepted trade-off.
+        let filter = test_filter(&["fuck"]);
+        assert!(filter.check_hard("fuckfuck").is_ok());
+        assert!(filter.check_hard("xfucky").is_ok());
+    }
+
+    #[test]
+    fn hard_catches_concatenated_leet_slurs() {
+        // WHY: "n1ggan1gga" → leet decode → "nigganigga" → substring "nigga"
+        let filter = test_filter(&["nigga"]);
+        assert!(filter.check_hard("n1ggan1gga").is_err());
+    }
+
+    #[test]
+    fn hard_substring_no_false_positive_short_words() {
+        // WHY: Banned words < 5 chars are excluded from substring scan.
+        // "ass" (3 chars) must NOT match inside "assassin" or "bassist".
+        let filter = test_filter(&["ass"]);
+        assert!(filter.check_hard("assassin").is_ok());
+        assert!(filter.check_hard("bassist").is_ok());
+    }
+
+    #[test]
+    fn hard_substring_no_false_positive_4char_scunthorpe() {
+        // WHY: "coon" (4 chars) is below the ≥5 substring threshold.
+        // "raccoonfan" and "scooner" must NOT be flagged by substring scan.
+        // "coon" standalone IS caught by Pass 1 exact word match.
+        let filter = test_filter(&["coon"]);
+        assert!(filter.check_hard("raccoonfan").is_ok());
+        assert!(filter.check_hard("scooner").is_ok());
+        // Standalone still caught by exact match (Pass 1)
+        assert!(filter.check_hard("coon").is_err());
+    }
+
+    #[test]
+    fn hard_substring_still_catches_5char_slurs() {
+        // WHY: "nigga" (5 chars) meets the ≥5 threshold, so substring scan
+        // still catches it embedded inside longer tokens.
+        let filter = test_filter(&["nigga"]);
+        assert!(filter.check_hard("niggax").is_err());
+        assert!(filter.check_hard("xnigga").is_err());
+    }
+
+    #[test]
+    fn hard_4char_standalone_still_caught_by_exact_match() {
+        // WHY: "kike" (4 chars) is below the substring threshold but
+        // Pass 1 exact word match catches it as a standalone token.
+        let filter = test_filter(&["kike"]);
+        assert!(filter.check_hard("kike").is_err());
+    }
+
+    #[test]
+    fn hard_4char_concatenated_not_caught_by_substring() {
+        // WHY: "kike" (4 chars) is below the ≥5 substring threshold.
+        // "kikekike" is a single token with no word boundary, so Pass 1
+        // exact match won't find "kike" either. This is an accepted
+        // trade-off to eliminate Scunthorpe false positives on 4-char words.
+        let filter = test_filter(&["kike"]);
+        assert!(filter.check_hard("kikekike").is_ok());
+    }
+
+    #[test]
+    fn hard_substring_skips_exact_matches() {
+        // WHY: Exact token matches are already caught by has_banned_word (Pass 1).
+        // Substring scan only triggers when token.len() > banned.len().
+        let filter = test_filter(&["nigga"]);
+        // Exact match — caught by Pass 1, not substring scan
+        assert!(filter.check_hard("nigga").is_err());
+    }
+
+    #[test]
+    fn soft_does_not_use_substring_scan() {
+        // WHY: Substring scan is check_hard only. check_soft should NOT flag
+        // concatenated words — it would over-mask legitimate sentences.
+        let filter = test_filter(&["fuck"]);
+        assert!(matches!(
+            filter.check_soft("fuckfuck"),
+            ModerationVerdict::Clean
+        ));
+    }
+
+    // ── Homoglyph / confusable detection ────────────────────────────
+
+    #[test]
+    fn confusable_to_ascii_cyrillic() {
+        // Cyrillic а (U+0430) → Latin a
+        assert_eq!(confusable_to_ascii("\u{0430}ss"), "ass");
+        // Cyrillic с (U+0441) → Latin c, е (U+0435) → Latin e
+        assert_eq!(confusable_to_ascii("fu\u{0441}k"), "fuck");
+    }
+
+    #[test]
+    fn confusable_to_ascii_greek() {
+        // Greek ο (U+03BF) → Latin o
+        assert_eq!(confusable_to_ascii("f\u{03BF}\u{03BF}l"), "fool");
+    }
+
+    #[test]
+    fn confusable_to_ascii_passthrough() {
+        // Pure ASCII is unchanged
+        assert_eq!(confusable_to_ascii("hello world"), "hello world");
+        // Non-confusable Unicode is preserved
+        assert_eq!(confusable_to_ascii("日本語"), "日本語");
+    }
+
+    #[test]
+    fn hard_catches_cyrillic_homoglyph() {
+        let filter = test_filter(&["ass"]);
+        // "\u{0430}ss" = Cyrillic а + Latin ss → normalized to "ass"
+        assert!(filter.check_hard("\u{0430}ss").is_err());
+    }
+
+    #[test]
+    fn hard_catches_mixed_script_slur() {
+        let filter = test_filter(&["nigga"]);
+        // Mix Cyrillic and Latin to spell the word
+        // n + і(U+0456) + g + g + а(U+0430)
+        assert!(filter.check_hard("n\u{0456}gg\u{0430}").is_err());
+    }
+
+    #[test]
+    fn soft_masks_homoglyph_bypass() {
+        let filter = test_filter(&["fuck"]);
+        // fu + Cyrillic с(U+0441) + k
+        match filter.check_soft("hello fu\u{0441}k world") {
+            ModerationVerdict::Flagged { masked_content, .. } => {
+                assert!(
+                    masked_content.contains(r"\*"),
+                    "homoglyph bypass should be masked: {}",
+                    masked_content
+                );
+            }
+            ModerationVerdict::Clean => panic!("Expected Flagged for homoglyph bypass"),
+        }
+    }
+
+    #[test]
+    fn normalize_maps_confusables() {
+        // Full pipeline: Cyrillic а → Latin a
+        let result = normalize_text("\u{0430}bc");
+        assert_eq!(result, "abc");
     }
 }

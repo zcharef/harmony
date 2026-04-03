@@ -10,24 +10,8 @@ use crate::api::dto::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, AuthUser};
 use crate::api::state::AppState;
+use crate::domain::services::ProfileService;
 use crate::infra::auth::AuthenticatedUser;
-
-/// WHY: Prevent confusion with system roles and @mention keywords.
-const RESERVED_USERNAMES: &[&str] = &[
-    "admin",
-    "administrator",
-    "system",
-    "everyone",
-    "here",
-    "moderator",
-    "mod",
-    "harmony",
-    "support",
-    "deleted",
-    "root",
-    "bot",
-    "official",
-];
 
 /// Sync (get or create) the authenticated user's profile.
 ///
@@ -38,9 +22,12 @@ const RESERVED_USERNAMES: &[&str] = &[
 /// 1. `user_metadata.username` from the JWT (set during signup)
 /// 2. Fallback: derived from the email prefix
 ///
+/// All username policy (reserved names, content filter, safe fallback for
+/// system-derived names) is handled by `ProfileService::upsert_from_auth`.
+///
 /// # Errors
-/// Returns `ApiError` if the JWT lacks an email claim, the username is reserved,
-/// or the upsert fails.
+/// Returns `ApiError` if the JWT lacks an email claim, the username is reserved
+/// or offensive (user-chosen only), or the upsert fails.
 #[utoipa::path(
     post,
     path = "/v1/auth/me",
@@ -63,7 +50,16 @@ pub async fn sync_profile(
         .email
         .ok_or_else(|| ApiError::bad_request("JWT must contain an email claim"))?;
 
-    // Extract username: prefer user_metadata.username, fall back to email-derived
+    // WHY: Grandfathered users (created before content filter / reserved-name
+    // checks existed) may have a username that now fails validation. Since the
+    // DB upsert is a no-op for existing profiles, skip the entire validation
+    // chain and return the existing profile directly.
+    if let Some(existing) = state.profile_service().get_by_id_optional(&user_id).await? {
+        return Ok((StatusCode::OK, Json(ProfileResponse::from(existing))));
+    }
+
+    // Extract username from JWT metadata. Format validation happens here because
+    // the JWT shape is an HTTP concern; all policy decisions live in the service.
     let username_from_meta: Option<String> = auth_user
         .user_metadata
         .as_ref()
@@ -71,29 +67,23 @@ pub async fn sync_profile(
         .and_then(serde_json::Value::as_str)
         .map(String::from);
 
-    let username = if let Some(ref meta_username) = username_from_meta {
+    let (username, is_user_chosen) = if let Some(ref meta_username) = username_from_meta {
         if !is_valid_username(meta_username) {
             tracing::warn!(
                 meta_username = %meta_username,
                 "user_metadata.username failed format validation, falling back to email-derived"
             );
-            derive_username_from_email(&email)
+            (derive_username_from_email(&email), false)
         } else {
-            meta_username.clone()
+            (meta_username.clone(), true)
         }
     } else {
-        derive_username_from_email(&email)
+        (derive_username_from_email(&email), false)
     };
-
-    // WHY: Check AFTER resolution so both user-chosen AND email-derived usernames
-    // are validated. An email like admin@example.com must not claim "admin".
-    if RESERVED_USERNAMES.contains(&username.as_str()) {
-        return Err(ApiError::conflict("This username is reserved"));
-    }
 
     let profile = state
         .profile_service()
-        .upsert_from_auth(user_id.clone(), email, username)
+        .upsert_from_auth(user_id.clone(), email, username, is_user_chosen)
         .await?;
 
     Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
@@ -164,7 +154,7 @@ pub async fn update_my_profile(
 /// Check whether a username is available for registration.
 ///
 /// Public endpoint (no auth required) — used during signup to give instant feedback.
-/// Validates format, checks reserved list, and queries the database.
+/// Validates format, checks reserved list, content filter, and queries the database.
 ///
 /// # Errors
 /// Returns `ApiError` on database failure.
@@ -184,7 +174,17 @@ pub async fn check_username(
 ) -> Result<impl IntoResponse, ApiError> {
     // WHY: Fast-reject invalid format and reserved names without hitting the DB.
     // From<bool> treats the bool as is_taken, so `true` → available: false.
-    if !is_valid_username(&query.username) || RESERVED_USERNAMES.contains(&query.username.as_str())
+    if !is_valid_username(&query.username) || ProfileService::is_username_reserved(&query.username)
+    {
+        return Ok(Json(CheckUsernameResponse::from(true)));
+    }
+
+    // WHY: Reject offensive usernames before hitting the DB. Treats "banned" the
+    // same as "taken" from the client's perspective — the frontend shows "unavailable".
+    if state
+        .profile_service()
+        .validate_username_content(&query.username)
+        .is_err()
     {
         return Ok(Json(CheckUsernameResponse::from(true)));
     }
@@ -254,17 +254,6 @@ mod tests {
         assert!(!is_valid_username("user@name"));
         // Empty
         assert!(!is_valid_username(""));
-    }
-
-    #[test]
-    fn reserved_usernames_list_is_lowercase() {
-        for name in RESERVED_USERNAMES {
-            assert_eq!(
-                *name,
-                name.to_lowercase(),
-                "reserved name must be lowercase"
-            );
-        }
     }
 
     #[test]
