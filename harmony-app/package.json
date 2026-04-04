@@ -29,6 +29,7 @@
     "@fontsource-variable/nunito": "^5.2.7",
     "@heroui/react": "^2.8.10",
     "@hookform/resolvers": "^5.2.2",
+    "@livekit/krisp-noise-filter": "^0.4.1",
     "@marsidev/react-turnstile": "^1.4.2",
     "@sentry/browser": "^10.46.0",
     "@supabase/supabase-js": "^2.99.3",

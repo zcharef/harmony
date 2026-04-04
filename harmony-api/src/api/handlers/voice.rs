@@ -67,6 +67,7 @@ pub async fn join_voice(
             channel_id: prev_channel_id.clone(),
             user_id: user_id.clone(),
             action: VoiceAction::Left,
+            display_name: String::new(),
         });
         tracing::debug!(
             server_id = %prev_server_id,
@@ -77,12 +78,28 @@ pub async fn join_voice(
         );
     }
 
+    // WHY: Resolve display name so SSE subscribers can render the participant
+    // immediately without a follow-up API call (prevents UUID flash in the UI).
+    let display_name = match state.profile_service().get_by_id_optional(&user_id).await {
+        Ok(Some(profile)) => profile.display_name.unwrap_or(profile.username),
+        Ok(None) => user_id.to_string(),
+        Err(e) => {
+            tracing::warn!(
+                user_id = %user_id,
+                error = ?e,
+                "Failed to fetch profile for voice join event — using user_id"
+            );
+            user_id.to_string()
+        }
+    };
+
     let receivers = state.event_bus().publish(ServerEvent::VoiceStateUpdate {
         sender_id: user_id.clone(),
         server_id: voice_token.server_id.clone(),
         channel_id: voice_token.channel_id.clone(),
         user_id: user_id.clone(),
         action: VoiceAction::Joined,
+        display_name,
     });
     tracing::debug!(
         server_id = %voice_token.server_id,
@@ -140,6 +157,7 @@ pub async fn leave_voice(
             channel_id: session.channel_id.clone(),
             user_id: user_id.clone(),
             action: VoiceAction::Left,
+            display_name: String::new(),
         });
         tracing::debug!(
             server_id = %session.server_id,

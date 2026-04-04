@@ -281,6 +281,9 @@ pub enum ServerEvent {
         channel_id: ChannelId,
         user_id: UserId,
         action: VoiceAction,
+        /// Human-readable name resolved from the user's profile.
+        /// Populated on `Joined` events; empty on `Left` events (unused by clients).
+        display_name: String,
     },
 
     // ── System ───────────────────────────────────────────────

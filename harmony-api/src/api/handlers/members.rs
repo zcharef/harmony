@@ -223,6 +223,7 @@ pub async fn kick_member(
                     channel_id: session.channel_id.clone(),
                     user_id: path.user_id.clone(),
                     action: VoiceAction::Left,
+                    display_name: String::new(),
                 });
                 tracing::debug!(
                     server_id = %session.server_id,

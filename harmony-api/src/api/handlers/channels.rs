@@ -245,6 +245,7 @@ pub async fn delete_channel(
             channel_id: session.channel_id.clone(),
             user_id: session.user_id.clone(),
             action: VoiceAction::Left,
+            display_name: String::new(),
         });
         tracing::debug!(
             server_id = %session.server_id,

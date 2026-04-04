@@ -23,6 +23,7 @@ const voiceStateUpdateSchema = z.object({
   channelId: z.string().uuid(),
   userId: z.string().uuid(),
   action: z.enum(['joined', 'left']),
+  displayName: z.string(),
 })
 
 type VoiceStateUpdate = z.infer<typeof voiceStateUpdateSchema>
@@ -37,14 +38,12 @@ function applyJoin(
   event: VoiceStateUpdate,
 ): VoiceParticipantResponse[] {
   if (list.some((p) => p.userId === event.userId)) return list
-  // WHY: SSE payload doesn't carry displayName/joinedAt — set placeholders.
-  // The next query refetch or the participant list component will resolve the full data.
   return [
     ...list,
     {
       channelId: event.channelId,
       userId: event.userId,
-      displayName: '',
+      displayName: event.displayName,
       joinedAt: new Date().toISOString(),
     },
   ]

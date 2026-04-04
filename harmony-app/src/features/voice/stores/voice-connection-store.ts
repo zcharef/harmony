@@ -6,8 +6,9 @@
  * read. Follows the same pattern as crypto-store.ts and presence-store.ts.
  */
 
+import type { KrispNoiseFilterProcessor } from '@livekit/krisp-noise-filter'
 import type { Participant, RoomOptions } from 'livekit-client'
-import { Room, RoomEvent } from 'livekit-client'
+import { LocalAudioTrack, Room, RoomEvent, Track } from 'livekit-client'
 import { create } from 'zustand'
 
 import { logger } from '@/lib/logger'
@@ -31,10 +32,15 @@ interface VoiceConnectionState {
   /** Set of participant identities currently speaking. */
   activeSpeakers: Set<string>
 
+  /** WHY: KRISP ML-based noise cancellation, enabled by default. Persists across
+   * channel switches within a session. */
+  isKrispEnabled: boolean
+
   connect: (channelId: string, serverId: string, token: string, url: string) => Promise<void>
   disconnect: () => Promise<void>
   toggleMute: () => void
   toggleDeafen: () => void
+  toggleKrisp: () => void
   /** WHY: PTT needs direct mic control without toggling the isMuted flag.
    * toggleMute is for the UI mute button; setPttMicEnabled is for transient
    * push-to-talk key presses that should not affect the mute toggle state. */
@@ -50,6 +56,7 @@ const INITIAL_STATE = {
   room: null,
   isMuted: false,
   isDeafened: false,
+  isKrispEnabled: true,
   error: null,
   activeSpeakers: new Set<string>(),
 }
@@ -64,12 +71,20 @@ let lastSpeakerUpdate = 0
 const DISCONNECT_IDLE_DELAY_MS = 3_000
 let disconnectIdleTimer: ReturnType<typeof setTimeout> | null = null
 
+/** WHY: Holds the active KRISP processor so toggleKrisp() can call
+ * setEnabled() without tearing down the WASM pipeline. Set on
+ * LocalTrackPublished, cleared on disconnect/reset. */
+let krispProcessorRef: KrispNoiseFilterProcessor | null = null
+
 /** WHY: Centralized room options — voice-only, no video tracks. */
 const ROOM_OPTIONS: RoomOptions = {
   adaptiveStream: false,
   dynacast: false,
   audioCaptureDefaults: {
-    noiseSuppression: true,
+    // WHY: Disabled — KRISP ML noise cancellation replaces browser noise suppression.
+    // Per LiveKit docs: "models are trained on raw audio and might produce unexpected
+    // results if the input has already been processed by a noise cancellation model."
+    noiseSuppression: false,
     echoCancellation: true,
     autoGainControl: true,
   },
@@ -90,106 +105,177 @@ function removeRoomListeners(room: Room): void {
   room.removeAllListeners(RoomEvent.ActiveSpeakersChanged)
   room.removeAllListeners(RoomEvent.MediaDevicesChanged)
   room.removeAllListeners(RoomEvent.AudioPlaybackStatusChanged)
+  room.removeAllListeners(RoomEvent.TrackSubscribed)
+  room.removeAllListeners(RoomEvent.TrackUnsubscribed)
+  room.removeAllListeners(RoomEvent.LocalTrackPublished)
+  room.removeAllListeners(RoomEvent.LocalTrackUnpublished)
+}
+
+function detachAllAudioTracks(room: Room): void {
+  for (const p of room.remoteParticipants.values()) {
+    for (const pub of p.trackPublications.values()) {
+      if (pub.track !== undefined && pub.track.kind === Track.Kind.Audio) {
+        for (const el of pub.track.detach()) {
+          el.remove()
+        }
+      }
+    }
+  }
+}
+
+type SetState = (partial: Partial<VoiceConnectionState>) => void
+type GetState = () => VoiceConnectionState
+
+/** WHY: Per LiveKit docs, KRISP attaches via LocalTrackPublished event on the
+ * mic track. Dynamic import keeps the WASM bundle out of the critical path. */
+async function attachKrispProcessor(track: LocalAudioTrack): Promise<void> {
+  const { KrispNoiseFilter, isKrispNoiseFilterSupported } = await import(
+    '@livekit/krisp-noise-filter'
+  )
+  if (!isKrispNoiseFilterSupported()) {
+    logger.warn('voice_krisp_not_supported')
+    return
+  }
+  const processor = KrispNoiseFilter()
+  await track.setProcessor(processor)
+  krispProcessorRef = processor
+  logger.info('voice_krisp_enabled')
+}
+
+/** WHY: Extracted to reduce connect() cognitive complexity below Biome's limit of 15. */
+function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
+  room.on(RoomEvent.Disconnected, () => {
+    if (get().room !== room) return
+    removeRoomListeners(room)
+    set({
+      status: 'disconnected',
+      room: null,
+      currentChannelId: null,
+      currentServerId: null,
+      activeSpeakers: new Set(),
+    })
+
+    if (disconnectIdleTimer !== null) clearTimeout(disconnectIdleTimer)
+    disconnectIdleTimer = setTimeout(() => {
+      disconnectIdleTimer = null
+      if (get().status === 'disconnected') {
+        const { isKrispEnabled } = get()
+        set({ ...INITIAL_STATE, activeSpeakers: new Set(), isKrispEnabled })
+      }
+    }, DISCONNECT_IDLE_DELAY_MS)
+  })
+
+  room.on(RoomEvent.Reconnecting, () => {
+    if (get().room === room) set({ status: 'reconnecting' })
+  })
+
+  room.on(RoomEvent.Reconnected, () => {
+    if (get().room === room) set({ status: 'connected' })
+  })
+
+  room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+    const now = Date.now()
+    if (now - lastSpeakerUpdate < SPEAKER_THROTTLE_MS) return
+    lastSpeakerUpdate = now
+
+    if (get().room !== room) return
+    const nextIdentities = new Set(speakers.map((s) => s.identity))
+    const current = get().activeSpeakers
+
+    if (
+      nextIdentities.size === current.size &&
+      [...nextIdentities].every((id) => current.has(id))
+    ) {
+      return
+    }
+
+    set({ activeSpeakers: nextIdentities })
+  })
+
+  room.on(RoomEvent.MediaDevicesChanged, () => {
+    logger.info('voice_media_devices_changed')
+  })
+
+  room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+    logger.info('voice_audio_playback_status_changed', {
+      canPlayback: room.canPlaybackAudio,
+    })
+  })
+
+  room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+    if (track.kind === Track.Kind.Audio) {
+      const el = track.attach()
+      el.id = `voice-audio-${participant.identity}`
+      document.body.appendChild(el)
+    }
+  })
+
+  room.on(RoomEvent.TrackUnsubscribed, (track) => {
+    if (track.kind === Track.Kind.Audio) {
+      for (const el of track.detach()) {
+        el.remove()
+      }
+    }
+  })
+
+  // WHY: Per LiveKit SDK README — clean up local track resources on unpublish.
+  room.on(RoomEvent.LocalTrackUnpublished, (trackPublication) => {
+    trackPublication.track?.detach()
+  })
+
+  // WHY: Per LiveKit docs, KRISP processor must be attached via
+  // LocalTrackPublished — this guarantees the track is fully ready.
+  // Dynamic import keeps the ~2MB WASM out of the initial bundle.
+  room.on(RoomEvent.LocalTrackPublished, (trackPublication) => {
+    if (
+      trackPublication.source === Track.Source.Microphone &&
+      trackPublication.track instanceof LocalAudioTrack &&
+      get().isKrispEnabled
+    ) {
+      attachKrispProcessor(trackPublication.track).catch((err: unknown) => {
+        logger.warn('voice_krisp_init_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      })
+    }
+  })
+}
+
+/** WHY: Extracted to reduce connect() cognitive complexity below Biome's limit of 15.
+ * Enables mic. KRISP attaches automatically via LocalTrackPublished event.
+ * Returns true if mic enablement failed. */
+async function enableMic(room: Room, channelId: string): Promise<boolean> {
+  try {
+    await room.localParticipant.setMicrophoneEnabled(true)
+    return false
+  } catch (err: unknown) {
+    logger.warn('voice_mic_enable_failed', {
+      error: err instanceof Error ? err.message : String(err),
+      channelId,
+    })
+    return true
+  }
 }
 
 export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get) => ({
   ...INITIAL_STATE,
 
   connect: async (channelId, serverId, token, url) => {
-    // WHY: Cancel any pending disconnected → idle timer if the user reconnects
-    // during the brief "Disconnected" feedback window.
     if (disconnectIdleTimer !== null) {
       clearTimeout(disconnectIdleTimer)
       disconnectIdleTimer = null
     }
 
-    const state = get()
-
-    // WHY: If already connected to a room, tear it down first (channel switch).
-    if (state.room !== null) {
+    if (get().room !== null) {
       await get().disconnect()
     }
 
     set({ status: 'connecting', error: null })
 
     const room = new Room(ROOM_OPTIONS)
-
-    // --- Register event handlers before connecting ---
-
-    room.on(RoomEvent.Disconnected, () => {
-      const current = get()
-      if (current.room === room) {
-        removeRoomListeners(room)
-        set({
-          status: 'disconnected',
-          room: null,
-          currentChannelId: null,
-          currentServerId: null,
-          activeSpeakers: new Set(),
-        })
-
-        // WHY: Auto-transition to idle after a brief delay so the UI can
-        // display "Disconnected" feedback before resetting to clean state.
-        if (disconnectIdleTimer !== null) {
-          clearTimeout(disconnectIdleTimer)
-        }
-        disconnectIdleTimer = setTimeout(() => {
-          disconnectIdleTimer = null
-          if (get().status === 'disconnected') {
-            set({ ...INITIAL_STATE, activeSpeakers: new Set() })
-          }
-        }, DISCONNECT_IDLE_DELAY_MS)
-      }
-    })
-
-    room.on(RoomEvent.Reconnecting, () => {
-      if (get().room === room) {
-        set({ status: 'reconnecting' })
-      }
-    })
-
-    room.on(RoomEvent.Reconnected, () => {
-      if (get().room === room) {
-        set({ status: 'connected' })
-      }
-    })
-
-    room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
-      // WHY: Throttle to 4 Hz — LiveKit fires this at up to 30 Hz.
-      const now = Date.now()
-      if (now - lastSpeakerUpdate < SPEAKER_THROTTLE_MS) return
-      lastSpeakerUpdate = now
-
-      if (get().room === room) {
-        const nextIdentities = new Set(speakers.map((s) => s.identity))
-        const current = get().activeSpeakers
-
-        // WHY: Skip update if the speaker set is identical — avoids unnecessary
-        // React re-renders from a new Set reference on every 4 Hz tick.
-        if (
-          nextIdentities.size === current.size &&
-          [...nextIdentities].every((id) => current.has(id))
-        ) {
-          return
-        }
-
-        set({ activeSpeakers: nextIdentities })
-      }
-    })
-
-    room.on(RoomEvent.MediaDevicesChanged, () => {
-      logger.info('voice_media_devices_changed')
-    })
-
-    room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
-      // WHY: Logged only — a separate UI component will handle the autoplay prompt.
-      logger.info('voice_audio_playback_status_changed', {
-        canPlayback: room.canPlaybackAudio,
-      })
-    })
+    registerRoomEvents(room, get, set)
 
     try {
-      // TODO(e2ee): Pass E2EE options when room-level voice encryption is implemented.
       await room.connect(url, token)
     } catch (err: unknown) {
       removeRoomListeners(room)
@@ -199,18 +285,15 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       return
     }
 
-    // WHY: Mic enablement is separate from room connection. Users without a
-    // microphone (or who deny permission) should still join to listen.
-    let micFailed = false
-    try {
-      await room.localParticipant.setMicrophoneEnabled(true)
-    } catch (err: unknown) {
-      micFailed = true
-      logger.warn('voice_mic_enable_failed', {
+    // WHY: Ensure the AudioContext is running so remote audio can play.
+    // TrackSubscribed handles attaching audio elements — no manual iteration needed.
+    room.startAudio().catch((err: unknown) => {
+      logger.warn('voice_start_audio_failed', {
         error: err instanceof Error ? err.message : String(err),
-        channelId,
       })
-    }
+    })
+
+    const micFailed = await enableMic(room, channelId)
 
     set({
       status: 'connected',
@@ -224,7 +307,9 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
 
   disconnect: async () => {
     const { room } = get()
+    krispProcessorRef = null
     if (room !== null) {
+      detachAllAudioTracks(room)
       removeRoomListeners(room)
       try {
         await room.disconnect()
@@ -276,6 +361,36 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     set({ isDeafened: nextDeafened })
   },
 
+  toggleKrisp: () => {
+    const { room, isKrispEnabled } = get()
+    if (room === null) return
+    const nextEnabled = !isKrispEnabled
+
+    if (krispProcessorRef !== null) {
+      // WHY: setEnabled() toggles KRISP without tearing down the WASM pipeline,
+      // per LiveKit docs. Much faster than stopProcessor/setProcessor cycle.
+      krispProcessorRef.setEnabled(nextEnabled).catch((err: unknown) => {
+        logger.warn('voice_krisp_toggle_failed', {
+          error: err instanceof Error ? err.message : String(err),
+          enabled: nextEnabled,
+        })
+      })
+    } else if (nextEnabled) {
+      // WHY: Processor was never initialized (e.g., user toggled off before
+      // joining, then toggled back on mid-call). Attach fresh.
+      const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
+      if (micPub?.track instanceof LocalAudioTrack) {
+        attachKrispProcessor(micPub.track).catch((err: unknown) => {
+          logger.warn('voice_krisp_enable_failed', {
+            error: err instanceof Error ? err.message : String(err),
+          })
+        })
+      }
+    }
+
+    set({ isKrispEnabled: nextEnabled })
+  },
+
   setPttMicEnabled: (enabled) => {
     const { room } = get()
     if (room === null) return
@@ -292,8 +407,10 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       clearTimeout(disconnectIdleTimer)
       disconnectIdleTimer = null
     }
+    krispProcessorRef = null
     const { room } = get()
     if (room !== null) {
+      detachAllAudioTracks(room)
       removeRoomListeners(room)
       room.disconnect().catch((err: unknown) => {
         logger.warn('voice_reset_disconnect_failed', {

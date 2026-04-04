@@ -667,6 +667,7 @@ fn spawn_voice_session_sweep(state: api::AppState) {
                             channel_id: session.channel_id.clone(),
                             user_id: session.user_id,
                             action: VoiceAction::Left,
+                            display_name: String::new(),
                         };
                         state.event_bus().publish(event);
                     }

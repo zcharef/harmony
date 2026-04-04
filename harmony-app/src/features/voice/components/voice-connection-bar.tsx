@@ -16,7 +16,7 @@
  */
 
 import { Button, Spinner, Tooltip } from '@heroui/react'
-import { HeadphoneOff, Headphones, Mic, MicOff, PhoneOff } from 'lucide-react'
+import { AudioWaveform, HeadphoneOff, Headphones, Mic, MicOff, PhoneOff } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useVoiceConnection } from '../hooks/use-voice-connection'
 import { useVoiceConnectionStore } from '../stores/voice-connection-store'
@@ -72,8 +72,10 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
   const isMuted = useVoiceConnectionStore((s) => s.isMuted)
   const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
   const error = useVoiceConnectionStore((s) => s.error)
+  const isKrispEnabled = useVoiceConnectionStore((s) => s.isKrispEnabled)
   const toggleMute = useVoiceConnectionStore((s) => s.toggleMute)
   const toggleDeafen = useVoiceConnectionStore((s) => s.toggleDeafen)
+  const toggleKrisp = useVoiceConnectionStore((s) => s.toggleKrisp)
   // WHY: Use the hook's leaveVoice instead of store.disconnect so the API
   // DELETE /voice/leave is called. Without this, the server-side session
   // persists for up to 45s (until sweep), showing a "ghost" participant.
@@ -154,6 +156,25 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
                     ) : (
                       <Headphones className="h-4 w-4 text-default-500" />
                     )}
+                  </Button>
+                </Tooltip>
+
+                <Tooltip
+                  content={isKrispEnabled ? 'Noise Suppression: On' : 'Noise Suppression: Off'}
+                  placement="top"
+                  delay={300}
+                >
+                  <Button
+                    variant="light"
+                    isIconOnly
+                    size="sm"
+                    className="h-8 w-8"
+                    onPress={toggleKrisp}
+                    data-test="voice-krisp-btn"
+                  >
+                    <AudioWaveform
+                      className={`h-4 w-4 ${isKrispEnabled ? 'text-success' : 'text-default-500'}`}
+                    />
                   </Button>
                 </Tooltip>
 
