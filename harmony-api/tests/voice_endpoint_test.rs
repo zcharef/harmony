@@ -478,6 +478,14 @@ async fn join_voice_channel_returns_200_with_token() {
     let json = body_json(response).await;
     assert!(json.get("token").is_some(), "response must contain 'token'");
     assert!(json.get("url").is_some(), "response must contain 'url'");
+    assert!(
+        json.get("ttlSecs").is_some(),
+        "response must contain 'ttlSecs'"
+    );
+    assert!(
+        json["ttlSecs"].as_u64().unwrap_or(0) > 0,
+        "ttlSecs must be positive"
+    );
 
     cleanup_fixture(&pool, &fixture).await;
 }

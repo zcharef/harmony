@@ -68,6 +68,10 @@ export function useVoiceConnection() {
   // can read the latest value without needing it as a parameter each time.
   const ttlSecsRef = useRef<number>(FALLBACK_TOKEN_TTL_SECS)
 
+  // WHY (F3): Tracks consecutive token refresh failures for capped backoff.
+  // Reset to 0 on success; after 5 failures, stop retrying entirely.
+  const refreshRetryCountRef = useRef(0)
+
   const clearTokenRefreshTimer = useCallback(() => {
     if (tokenRefreshTimerRef.current !== null) {
       clearTimeout(tokenRefreshTimerRef.current)
@@ -78,47 +82,71 @@ export function useVoiceConnection() {
   // WHY (P1-2): Extracted to a named function so the token refresh can
   // re-schedule itself after each successful cycle instead of being one-shot.
   // Uses ttlSecsRef so the timer duration tracks the server's dynamic TTL.
-  const scheduleTokenRefresh = useCallback(() => {
-    clearTokenRefreshTimer()
-    const refreshAtMs = ttlSecsRef.current * 1_000 * 0.8
-    tokenRefreshTimerRef.current = setTimeout(() => {
-      const refreshChannelId = channelIdRef.current
-      const refreshServerId = serverIdRef.current
-      if (refreshChannelId === null || refreshServerId === null) return
+  // WHY (F3): Accepts optional delayMs override for backoff scheduling on failure.
+  const scheduleTokenRefresh = useCallback(
+    (delayMs?: number) => {
+      clearTokenRefreshTimer()
+      // WHY (P2-a): Floor guard prevents a 0 or near-0 TTL from causing
+      // an infinite immediate-fire loop (minimum 48s refresh interval).
+      const safeTtlSecs = Math.max(ttlSecsRef.current, 60)
+      const refreshAtMs = delayMs ?? safeTtlSecs * 1_000 * 0.8
+      tokenRefreshTimerRef.current = setTimeout(() => {
+        const refreshChannelId = channelIdRef.current
+        const refreshServerId = serverIdRef.current
+        if (refreshChannelId === null || refreshServerId === null) return
 
-      joinVoice({ path: { id: refreshChannelId }, throwOnError: true })
-        .then(async ({ data: refreshData }) => {
-          const store = useVoiceConnectionStore.getState()
-          // WHY: Only reconnect if still in the same channel. If the user
-          // switched channels or disconnected, skip the refresh.
-          if (store.currentChannelId === refreshChannelId && store.room !== null) {
-            await storeConnect(
-              refreshChannelId,
-              refreshServerId,
-              refreshData.token,
-              refreshData.url,
-            )
-            sessionIdRef.current = refreshData.sessionId
-            // WHY: Update TTL from the fresh response so the next cycle
-            // uses the server's latest value (may change across plans).
-            ttlSecsRef.current = refreshData.ttlSecs ?? FALLBACK_TOKEN_TTL_SECS
-            logger.info('voice_token_refreshed', { channelId: refreshChannelId })
+        joinVoice({ path: { id: refreshChannelId }, throwOnError: true })
+          .then(async ({ data: refreshData }) => {
+            const store = useVoiceConnectionStore.getState()
+            // WHY: Only reconnect if still in the same channel. If the user
+            // switched channels or disconnected, skip the refresh.
+            if (store.currentChannelId === refreshChannelId && store.room !== null) {
+              await storeConnect(
+                refreshChannelId,
+                refreshServerId,
+                refreshData.token,
+                refreshData.url,
+              )
+              sessionIdRef.current = refreshData.sessionId
+              // WHY: Update TTL from the fresh response so the next cycle
+              // uses the server's latest value (may change across plans).
+              ttlSecsRef.current = refreshData.ttlSecs ?? FALLBACK_TOKEN_TTL_SECS
+              // WHY (F3): Reset retry counter on success so the next failure
+              // starts backoff from scratch.
+              refreshRetryCountRef.current = 0
+              logger.info('voice_token_refreshed', { channelId: refreshChannelId })
 
-            // WHY (P1-2): Re-schedule for the next TTL cycle. Without this,
-            // the token refresh is one-shot and the session expires after 2x TTL.
-            scheduleTokenRefresh()
-          }
-        })
-        .catch((err: unknown) => {
-          // WHY: Background op — log only, no user feedback (ADR-028).
-          // The session will continue until the old token actually expires.
-          logger.warn('voice_token_refresh_failed', {
-            error: err instanceof Error ? err.message : String(err),
-            channelId: refreshChannelId,
+              // WHY (P1-2): Re-schedule for the next TTL cycle. Without this,
+              // the token refresh is one-shot and the session expires after 2x TTL.
+              scheduleTokenRefresh()
+            }
           })
-        })
-    }, refreshAtMs)
-  }, [storeConnect, clearTokenRefreshTimer])
+          .catch((err: unknown) => {
+            // WHY (F3): Re-schedule with capped exponential backoff so a
+            // single transient failure does not permanently kill the refresh loop.
+            const retries = refreshRetryCountRef.current
+            if (retries < 5) {
+              refreshRetryCountRef.current = retries + 1
+              const backoffMs = Math.min(30_000 * 2 ** retries, 300_000)
+              scheduleTokenRefresh(backoffMs)
+              logger.warn('voice_token_refresh_failed', {
+                error: err instanceof Error ? err.message : String(err),
+                channelId: refreshChannelId,
+                retryIn: backoffMs,
+                attempt: retries + 1,
+              })
+            } else {
+              logger.error('voice_token_refresh_exhausted', {
+                error: err instanceof Error ? err.message : String(err),
+                channelId: refreshChannelId,
+                attempts: retries,
+              })
+            }
+          })
+      }, refreshAtMs)
+    },
+    [storeConnect, clearTokenRefreshTimer],
+  )
 
   const handleJoinVoice = useCallback(
     async (channelId: string, serverId: string) => {

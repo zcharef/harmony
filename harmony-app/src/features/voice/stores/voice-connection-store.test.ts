@@ -26,6 +26,7 @@ interface MockRoom {
   >
   canPlaybackAudio: boolean
   on: Mock
+  off: Mock
   removeAllListeners: Mock
   __emit: (event: string, ...args: unknown[]) => void
 }
@@ -530,18 +531,171 @@ describe('useVoiceConnectionStore', () => {
     })
 
     it('rolls back isKrispEnabled on toggle failure', async () => {
-      await connectStore()
+      const room = await connectStore()
+      // WHY: Start with KRISP disabled so toggleKrisp() sets nextEnabled=true,
+      // entering the "re-attach" branch that calls attachKrispProcessor → KrispNoiseFilter().
+      useVoiceConnectionStore.setState({ isKrispEnabled: false })
 
-      const mockProcessor = {
-        setEnabled: vi.fn().mockRejectedValue(new Error('wasm crash')),
-      }
+      // WHY: getTrackPublication must return a LocalAudioTrack so the re-attach branch proceeds.
+      const { LocalAudioTrack } = await import('livekit-client')
+      // @ts-expect-error — mock class constructor takes no args
+      const mockTrack = Object.assign(new LocalAudioTrack(), { setProcessor: vi.fn() })
+      room.localParticipant.getTrackPublication = vi.fn().mockReturnValue({ track: mockTrack })
+
+      // WHY: Make KrispNoiseFilter throw so attachKrispProcessor rejects,
+      // triggering the .catch() rollback in toggleKrisp().
       const { KrispNoiseFilter } = await import('@livekit/krisp-noise-filter')
-      vi.mocked(KrispNoiseFilter).mockReturnValueOnce(mockProcessor as never)
+      vi.mocked(KrispNoiseFilter).mockImplementationOnce(() => {
+        throw new Error('wasm crash')
+      })
 
       useVoiceConnectionStore.getState().toggleKrisp()
 
-      // Optimistic: toggled to false
-      expect(useVoiceConnectionStore.getState().isKrispEnabled).toBe(false)
+      // Optimistic: toggled to true immediately
+      expect(useVoiceConnectionStore.getState().isKrispEnabled).toBe(true)
+
+      // After the promise rejects, isKrispEnabled should roll back to false
+      await vi.waitFor(() => {
+        expect(useVoiceConnectionStore.getState().isKrispEnabled).toBe(false)
+      })
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // togglePttMode()
+  // -------------------------------------------------------------------------
+  describe('togglePttMode', () => {
+    it('flips isPttMode from false to true', async () => {
+      await connectStore()
+      expect(useVoiceConnectionStore.getState().isPttMode).toBe(false)
+
+      useVoiceConnectionStore.getState().togglePttMode()
+
+      expect(useVoiceConnectionStore.getState().isPttMode).toBe(true)
+    })
+
+    it('mutes mic when toggled ON', async () => {
+      const room = await connectStore()
+      vi.clearAllMocks()
+
+      useVoiceConnectionStore.getState().togglePttMode()
+
+      // WHY: PTT ON → mic disabled so user must hold key to speak.
+      expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false)
+    })
+
+    it('unmutes mic when toggled OFF', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.setState({ isPttMode: true })
+      vi.clearAllMocks()
+
+      useVoiceConnectionStore.getState().togglePttMode()
+
+      expect(useVoiceConnectionStore.getState().isPttMode).toBe(false)
+      // WHY: PTT OFF → mic re-enabled for normal voice mode.
+      expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true)
+    })
+
+    it('rolls back isPttMode on setMicrophoneEnabled failure', async () => {
+      const room = await connectStore()
+      room.localParticipant.setMicrophoneEnabled = vi.fn().mockRejectedValue(new Error('mic error'))
+
+      useVoiceConnectionStore.getState().togglePttMode()
+
+      // Optimistic: isPttMode flipped to true immediately
+      expect(useVoiceConnectionStore.getState().isPttMode).toBe(true)
+
+      // After the promise rejects, isPttMode should roll back
+      await vi.waitFor(() => {
+        expect(useVoiceConnectionStore.getState().isPttMode).toBe(false)
+      })
+    })
+
+    it('is a no-op for mic when room is null', () => {
+      useVoiceConnectionStore.getState().togglePttMode()
+
+      // State flips (no SDK guard on the state update), but no SDK call.
+      expect(useVoiceConnectionStore.getState().isPttMode).toBe(true)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // LocalTrackPublished event (KRISP attachment)
+  // -------------------------------------------------------------------------
+  describe('LocalTrackPublished event', () => {
+    it('attaches KRISP processor when isKrispEnabled is true', async () => {
+      const room = await connectStore()
+      expect(useVoiceConnectionStore.getState().isKrispEnabled).toBe(true)
+
+      const { KrispNoiseFilter } = await import('@livekit/krisp-noise-filter')
+      vi.mocked(KrispNoiseFilter).mockClear()
+
+      const { LocalAudioTrack } = await import('livekit-client')
+      // @ts-expect-error — mock class constructor takes no args
+      const mockTrack = Object.assign(new LocalAudioTrack(), {
+        setProcessor: vi.fn().mockResolvedValue(undefined),
+      })
+      const mockPublication = {
+        source: 'microphone',
+        track: mockTrack,
+      }
+
+      room.__emit('localTrackPublished', mockPublication)
+
+      await vi.waitFor(() => {
+        expect(KrispNoiseFilter).toHaveBeenCalled()
+      })
+    })
+
+    it('skips KRISP when isKrispEnabled is false', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.setState({ isKrispEnabled: false })
+
+      const { KrispNoiseFilter } = await import('@livekit/krisp-noise-filter')
+      vi.mocked(KrispNoiseFilter).mockClear()
+
+      const { LocalAudioTrack } = await import('livekit-client')
+      // @ts-expect-error — mock class constructor takes no args
+      const mockTrack = Object.assign(new LocalAudioTrack(), {
+        setProcessor: vi.fn().mockResolvedValue(undefined),
+      })
+      const mockPublication = {
+        source: 'microphone',
+        track: mockTrack,
+      }
+
+      room.__emit('localTrackPublished', mockPublication)
+
+      // WHY: Give any async work a chance to settle, then verify KRISP was NOT called.
+      await vi.waitFor(() => {
+        expect(KrispNoiseFilter).not.toHaveBeenCalled()
+      })
+    })
+
+    it('rolls back isKrispEnabled on KRISP init failure', async () => {
+      const room = await connectStore()
+      expect(useVoiceConnectionStore.getState().isKrispEnabled).toBe(true)
+
+      const { KrispNoiseFilter } = await import('@livekit/krisp-noise-filter')
+      vi.mocked(KrispNoiseFilter).mockImplementationOnce(() => {
+        throw new Error('wasm init failed')
+      })
+
+      const { LocalAudioTrack } = await import('livekit-client')
+      // @ts-expect-error — mock class constructor takes no args
+      const mockTrack = Object.assign(new LocalAudioTrack(), {
+        setProcessor: vi.fn().mockResolvedValue(undefined),
+      })
+      const mockPublication = {
+        source: 'microphone',
+        track: mockTrack,
+      }
+
+      room.__emit('localTrackPublished', mockPublication)
+
+      await vi.waitFor(() => {
+        expect(useVoiceConnectionStore.getState().isKrispEnabled).toBe(false)
+      })
     })
   })
 
@@ -579,6 +733,8 @@ describe('useVoiceConnectionStore', () => {
 
     it('is a no-op when room is null', () => {
       useVoiceConnectionStore.getState().setPttMicEnabled(true)
+
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(false) // unchanged
     })
   })
 
@@ -623,6 +779,23 @@ describe('useVoiceConnectionStore', () => {
 
     it('does not throw when room is null', () => {
       expect(() => useVoiceConnectionStore.getState().reset()).not.toThrow()
+    })
+
+    it('preserves isKrispEnabled, isPttMode, and pttShortcut across reset', async () => {
+      await connectStore()
+      useVoiceConnectionStore.setState({
+        isKrispEnabled: false,
+        isPttMode: true,
+        pttShortcut: 'KeyV',
+      })
+
+      useVoiceConnectionStore.getState().reset()
+
+      const state = useVoiceConnectionStore.getState()
+      expect(state.isKrispEnabled).toBe(false)
+      expect(state.isPttMode).toBe(true)
+      expect(state.pttShortcut).toBe('KeyV')
+      expect(state.status).toBe('idle') // other state DID reset
     })
   })
 

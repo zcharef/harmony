@@ -1,5 +1,7 @@
 //! Voice channel handlers.
 
+use std::collections::HashMap;
+
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::api::dto::voice::{
@@ -214,32 +216,39 @@ pub async fn list_voice_participants(
     #[allow(clippy::cast_possible_wrap)] // WHY: participant count will never approach i64::MAX
     let total = sessions.len() as i64;
 
-    let mut items = Vec::with_capacity(sessions.len());
-    for session in sessions {
-        let display_name = match state
-            .profile_service()
-            .get_by_id_optional(&session.user_id)
-            .await
-        {
-            Ok(Some(profile)) => profile.username,
-            Ok(None) => session.user_id.to_string(),
-            Err(e) => {
-                tracing::warn!(
-                    user_id = %session.user_id,
-                    error = ?e,
-                    "Failed to fetch profile for voice participant — using user_id"
-                );
-                session.user_id.to_string()
-            }
-        };
+    // WHY: Single batch query instead of N+1 per-session lookups.
+    let user_ids: Vec<_> = sessions.iter().map(|s| s.user_id.clone()).collect();
+    let profiles_by_id: HashMap<_, _> = match state
+        .profile_service()
+        .get_profiles_by_ids(&user_ids)
+        .await
+    {
+        Ok(profiles) => profiles.into_iter().map(|p| (p.id.clone(), p)).collect(),
+        Err(e) => {
+            tracing::warn!(
+                error = ?e,
+                "Failed to batch-fetch profiles for voice participants — falling back to user_ids"
+            );
+            HashMap::new()
+        }
+    };
 
-        items.push(VoiceParticipantResponse {
-            user_id: session.user_id,
-            channel_id: session.channel_id,
-            display_name,
-            joined_at: session.joined_at,
-        });
-    }
+    let items: Vec<_> = sessions
+        .into_iter()
+        .map(|session| {
+            let display_name = profiles_by_id
+                .get(&session.user_id)
+                .map(|p| p.username.clone())
+                .unwrap_or_else(|| session.user_id.to_string());
+
+            VoiceParticipantResponse {
+                user_id: session.user_id,
+                channel_id: session.channel_id,
+                display_name,
+                joined_at: session.joined_at,
+            }
+        })
+        .collect();
 
     Ok((
         StatusCode::OK,

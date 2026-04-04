@@ -121,7 +121,15 @@ const ROOM_OPTIONS: RoomOptions = {
 /** WHY: Remove exactly the listeners we registered via onRoom(), preventing
  * leaks on disconnect without nuking third-party listeners. */
 function removeRoomListeners(): void {
-  for (const cleanup of roomEventCleanups) cleanup()
+  for (const cleanup of roomEventCleanups) {
+    try {
+      cleanup()
+    } catch (err) {
+      logger.warn('voice_listener_cleanup_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
   roomEventCleanups = []
 }
 
@@ -505,6 +513,7 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     // to speak. When toggled OFF, unmute to return to normal voice mode.
     if (room !== null) {
       room.localParticipant.setMicrophoneEnabled(!nextPttMode).catch((err: unknown) => {
+        set({ isPttMode: !nextPttMode })
         logger.warn('voice_ptt_mode_mic_toggle_failed', {
           error: err instanceof Error ? err.message : String(err),
           pttMode: nextPttMode,
