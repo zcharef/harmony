@@ -202,6 +202,11 @@ test.describe('Server Settings Role Gating', () => {
     const channelRow = channelList.locator('[data-test="settings-channel-row"]').first()
     await channelRow.waitFor({ timeout: 10_000 })
 
+    // WHY: Channels tab uses accordion layout — controls are inside ChannelSettingsCard
+    // which only renders when the row is expanded. Click to expand first.
+    await channelRow.click()
+    await channelRow.locator('[data-test="channel-settings-card"]').waitFor({ timeout: 5_000 })
+
     await expect(channelRow.locator('[data-test="channel-private-toggle"]')).toBeVisible()
     await expect(channelRow.locator('[data-test="channel-readonly-toggle"]')).toBeVisible()
     await expect(channelRow.locator('[data-test="channel-delete-button"]')).toBeVisible()

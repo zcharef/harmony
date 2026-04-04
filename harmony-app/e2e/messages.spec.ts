@@ -307,6 +307,10 @@ test.describe('Messaging', () => {
   // ── Pagination: scroll up to load older messages ──────────────────
 
   test('messages load with cursor pagination on scroll', async ({ page }) => {
+    // WHY: This test creates 60 messages across 3 batches with 5.5s rate-limit pauses (~11s).
+    // The default 45s timeout is too tight for CI runners under load. test.slow() doubles it.
+    test.slow()
+
     // WHY: Create a fresh channel and populate with >50 messages (default page size)
     // to trigger pagination. API default limit is 50.
     //

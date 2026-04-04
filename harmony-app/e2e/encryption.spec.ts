@@ -101,6 +101,10 @@ test.describe('Encryption UI', () => {
     )
     await plainRow.waitFor({ timeout: 10_000 })
 
+    // WHY: Accordion layout — expand the row to reveal ChannelSettingsCard controls.
+    await plainRow.click()
+    await plainRow.locator('[data-test="channel-settings-card"]').waitFor({ timeout: 5_000 })
+
     // WHY: On web, the toggle should be present but disabled (data-test="channel-encryption-toggle-disabled").
     const disabledToggle = plainRow.locator('[data-test="channel-encryption-toggle-disabled"]')
     await expect(disabledToggle).toBeVisible()
@@ -363,6 +367,10 @@ test.describe('Encryption UI', () => {
       `[data-test="settings-channel-row"][data-channel-id="${encryptedChannel.id}"]`,
     )
     await encRow.waitFor({ timeout: 10_000 })
+
+    // WHY: Accordion layout — expand the row to reveal ChannelSettingsCard controls.
+    await encRow.click()
+    await encRow.locator('[data-test="channel-settings-card"]').waitFor({ timeout: 5_000 })
 
     // WHY: On web, the disabled toggle variant is rendered for owner.
     // It should be checked (isSelected=true) and disabled.
