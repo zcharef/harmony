@@ -50,12 +50,15 @@ pub fn build_router(
                 HeaderValue::from_static("https://app.joinharmony.app"),
                 HeaderValue::from_static("https://joinharmony.app"),
                 // WHY: Tauri v2 webview origin differs by platform:
-                //   - macOS (WKWebView):  tauri://localhost
-                //   - Windows (WebView2): http://tauri.localhost
-                //   - Linux (WebKitGTK):  http://tauri.localhost
-                // WebView2/WebKitGTK don't support custom URI schemes for fetch/CORS,
-                // so Tauri maps them to http://tauri.localhost instead.
+                //   - macOS/Linux: tauri://localhost  (custom scheme)
+                //   - Windows:     https://tauri.localhost (secure context requirement)
+                // WebView2 uses https://tauri.localhost because it needs a secure context
+                // for Web APIs (crypto.subtle, fetch credentials, etc.) and custom URI
+                // schemes don't qualify on Windows. Both http:// and https:// variants
+                // are allowed because the exact scheme depends on the Tauri/WebView2 version.
+                // Ref: https://github.com/tauri-apps/tauri/issues/3007
                 HeaderValue::from_static("tauri://localhost"),
+                HeaderValue::from_static("https://tauri.localhost"),
                 HeaderValue::from_static("http://tauri.localhost"),
             ])
         } else {
@@ -175,6 +178,20 @@ pub fn build_router(
             get(handlers::notification_settings::get_notification_settings)
                 .patch(handlers::notification_settings::update_notification_settings),
         )
+        // Voice channels
+        .route(
+            "/v1/channels/{id}/voice/join",
+            post(handlers::voice::join_voice),
+        )
+        .route(
+            "/v1/channels/{id}/voice/leave",
+            post(handlers::voice::leave_voice),
+        )
+        .route(
+            "/v1/channels/{id}/voice/participants",
+            get(handlers::voice::list_voice_participants),
+        )
+        .route("/v1/voice/heartbeat", post(handlers::voice::voice_heartbeat))
         // Typing indicators
         .route(
             "/v1/channels/{id}/typing",
@@ -270,10 +287,14 @@ pub fn build_router(
 
     // WHY: CSP `default-src 'none'` blocks all resource loading (JS, CSS, fetch).
     // Swagger UI needs these in development mode. Only enforce in production.
+    // WHY connect-src: LiveKit voice requires WebSocket connections to
+    // *.livekit.cloud (production) and localhost:7880 (local dev).
     if is_production {
         router = router.layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("content-security-policy"),
-            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+            HeaderValue::from_static(
+                "default-src 'none'; frame-ancestors 'none'; connect-src 'self' wss://*.livekit.cloud ws://localhost:7880",
+            ),
         ));
     }
 
