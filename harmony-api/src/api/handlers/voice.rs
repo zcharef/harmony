@@ -5,12 +5,12 @@ use std::collections::HashMap;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::api::dto::voice::{
-    VoiceHeartbeatRequest, VoiceParticipantResponse, VoiceParticipantsResponse, VoiceTokenResponse,
+    VoiceHeartbeatRequest, VoiceParticipantsResponse, VoiceTokenResponse,
 };
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::{ChannelId, ServerEvent, VoiceAction};
+use crate::domain::models::{ChannelId, ServerEvent, VoiceAction, VoiceParticipant};
 
 /// Join a voice channel. Returns a `LiveKit` token for the client.
 ///
@@ -213,8 +213,6 @@ pub async fn list_voice_participants(
 
     // WHY: VoiceSession doesn't carry display_name. Resolve from profiles so
     // the participant list shows human-readable names instead of UUIDs.
-    #[allow(clippy::cast_possible_wrap)] // WHY: participant count will never approach i64::MAX
-    let total = sessions.len() as i64;
 
     // WHY: Single batch query instead of N+1 per-session lookups.
     let user_ids: Vec<_> = sessions.iter().map(|s| s.user_id.clone()).collect();
@@ -233,7 +231,7 @@ pub async fn list_voice_participants(
         }
     };
 
-    let items: Vec<_> = sessions
+    let participants: Vec<_> = sessions
         .into_iter()
         .map(|session| {
             let display_name = profiles_by_id
@@ -241,7 +239,7 @@ pub async fn list_voice_participants(
                 .map(|p| p.username.clone())
                 .unwrap_or_else(|| session.user_id.to_string());
 
-            VoiceParticipantResponse {
+            VoiceParticipant {
                 user_id: session.user_id,
                 channel_id: session.channel_id,
                 display_name,
@@ -252,7 +250,7 @@ pub async fn list_voice_participants(
 
     Ok((
         StatusCode::OK,
-        Json(VoiceParticipantsResponse { items, total }),
+        Json(VoiceParticipantsResponse::from_participants(participants)),
     ))
 }
 

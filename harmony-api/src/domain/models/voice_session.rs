@@ -29,6 +29,16 @@ pub struct NewVoiceSession {
     pub session_id: String,
 }
 
+/// A voice participant with resolved display name. Used by the handler
+/// to convert session + profile data into a response DTO via `From`.
+#[derive(Debug)]
+pub struct VoiceParticipant {
+    pub user_id: UserId,
+    pub channel_id: ChannelId,
+    pub display_name: String,
+    pub joined_at: DateTime<Utc>,
+}
+
 /// Voice channel action for SSE events.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]

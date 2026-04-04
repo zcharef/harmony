@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::models::{ChannelId, UserId, VoiceToken};
+use crate::domain::models::{ChannelId, UserId, VoiceParticipant, VoiceToken};
 
 /// Request body for the voice heartbeat endpoint.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -59,10 +59,32 @@ pub struct VoiceParticipantResponse {
     pub joined_at: DateTime<Utc>,
 }
 
+impl From<VoiceParticipant> for VoiceParticipantResponse {
+    fn from(p: VoiceParticipant) -> Self {
+        Self {
+            user_id: p.user_id,
+            channel_id: p.channel_id,
+            display_name: p.display_name,
+            joined_at: p.joined_at,
+        }
+    }
+}
+
 /// Envelope for a list of voice participants (ADR-036).
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceParticipantsResponse {
     pub items: Vec<VoiceParticipantResponse>,
     pub total: i64,
+}
+
+impl VoiceParticipantsResponse {
+    pub fn from_participants(participants: Vec<VoiceParticipant>) -> Self {
+        #[allow(clippy::cast_possible_wrap)]
+        let total = participants.len() as i64;
+        Self {
+            items: participants.into_iter().map(Into::into).collect(),
+            total,
+        }
+    }
 }
