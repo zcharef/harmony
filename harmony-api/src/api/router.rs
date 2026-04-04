@@ -49,9 +49,14 @@ pub fn build_router(
             AllowOrigin::list([
                 HeaderValue::from_static("https://app.joinharmony.app"),
                 HeaderValue::from_static("https://joinharmony.app"),
-                // WHY: Tauri v2 production builds send Origin: tauri://localhost
-                // from the webview. Without this, desktop auth redeem calls fail CORS.
+                // WHY: Tauri v2 webview origin differs by platform:
+                //   - macOS (WKWebView):  tauri://localhost
+                //   - Windows (WebView2): http://tauri.localhost
+                //   - Linux (WebKitGTK):  http://tauri.localhost
+                // WebView2/WebKitGTK don't support custom URI schemes for fetch/CORS,
+                // so Tauri maps them to http://tauri.localhost instead.
                 HeaderValue::from_static("tauri://localhost"),
+                HeaderValue::from_static("http://tauri.localhost"),
             ])
         } else {
             AllowOrigin::mirror_request()
