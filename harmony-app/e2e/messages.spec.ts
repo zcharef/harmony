@@ -309,35 +309,51 @@ test.describe('Messaging', () => {
   test('messages load with cursor pagination on scroll', async ({ page }) => {
     // WHY: Create a fresh channel and populate with >50 messages (default page size)
     // to trigger pagination. API default limit is 50.
-    // Rate limit is 5 msgs / 5s / user / channel, so we spread across all 3 users
-    // and send in batches with brief pauses between them.
+    //
+    // Two rate limits apply:
+    //   1. SpamGuard: 15 msgs / 30s per (user, server) — Admin/Owner bypass.
+    //   2. Per-plan DB rate limit: 5 msgs / 5s per (user, channel) — no bypass.
+    //
+    // Strategy: 4 users × 5 msgs per batch = 20 per batch, with 5.5s pauses
+    // between batches for the 5s rate-limit window to slide. 3 batches × 20 = 60.
+    // Per non-admin user: 15 msgs in 11s — at SpamGuard threshold (≥15 triggers
+    // mute but the 15th message itself is sent; no 16th batch needed).
+    // Owner bypasses SpamGuard regardless. Extra helper user created for this test.
     const paginationChannel = await createChannel(owner.token, server.id, 'pagination-test')
 
-    const users = [owner, moderator, member]
+    // WHY: 5 users × 4 msgs/batch × 3 batches = 60 msgs, 12 per user.
+    // Per-plan: 4 < 5/5s Free limit ✅. SpamGuard: 12 < 15/30s threshold ✅.
+    // Owner bypasses SpamGuard regardless. Extra users created for this test only.
+    const helper1 = await createTestUser('msg-helper1')
+    const helper2 = await createTestUser('msg-helper2')
+    await syncProfile(helper1.token)
+    await syncProfile(helper2.token)
+    const helperInvite = await createInvite(owner.token, server.id)
+    await joinServer(helper1.token, server.id, helperInvite.code)
+    const helperInvite2 = await createInvite(owner.token, server.id)
+    await joinServer(helper2.token, server.id, helperInvite2.code)
 
-    // WHY: Send 60 messages total (20 per user) in 4 batches of 5 per user.
-    // Each batch of 5 per user is within the rate limit window.
-    // Batches are separated by a pause to let the rate limit window slide.
-    // The last batch skips the trailing pause (no subsequent batch needs it).
-    //
-    // WHY hardcoded sleep: The API rate limiter (5 msgs / 5s / user / channel) has
-    // no query endpoint and no response header exposing remaining quota. The only
-    // reliable way to avoid 429s is to wait for the sliding window to expire.
-    // 5.5s > 5s window to account for clock skew between test runner and server.
+    const users = [owner, moderator, member, helper1, helper2]
+    const MSGS_PER_USER_PER_BATCH = 4
+    const TOTAL_BATCHES = 3
     const RATE_LIMIT_WINDOW_MS = 5_500
-    const totalBatches = 4
-    for (let batch = 0; batch < totalBatches; batch++) {
+
+    for (let batch = 0; batch < TOTAL_BATCHES; batch++) {
       const batchPromises: Promise<unknown>[] = []
       for (const user of users) {
-        for (let j = 0; j < 5; j++) {
-          const msgNum = batch * 15 + users.indexOf(user) * 5 + j + 1
+        for (let j = 0; j < MSGS_PER_USER_PER_BATCH; j++) {
+          const msgNum =
+            batch * users.length * MSGS_PER_USER_PER_BATCH +
+            users.indexOf(user) * MSGS_PER_USER_PER_BATCH +
+            j +
+            1
           batchPromises.push(
             sendMessage(user.token, paginationChannel.id, `Pagination msg ${msgNum}`),
           )
         }
       }
       await Promise.all(batchPromises)
-      const isLastBatch = batch === totalBatches - 1
+      const isLastBatch = batch === TOTAL_BATCHES - 1
       if (!isLastBatch) {
         await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_WINDOW_MS))
       }

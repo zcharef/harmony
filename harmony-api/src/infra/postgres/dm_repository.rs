@@ -135,10 +135,13 @@ impl DmRepository for PgDmRepository {
         let channel_id = channel_row.id;
 
         // 4. Add both users as members
+        // WHY: The DM creator (user_a) gets 'owner' role so they can manage the
+        // DM channel (e.g., enable encryption). Without this, neither participant
+        // can enable encryption because updateChannel requires Owner role.
         sqlx::query!(
             r#"
-            INSERT INTO server_members (server_id, user_id)
-            VALUES ($1, $2), ($1, $3)
+            INSERT INTO server_members (server_id, user_id, role)
+            VALUES ($1, $2, 'owner'), ($1, $3, 'member')
             "#,
             server_id,
             uid_a,

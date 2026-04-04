@@ -365,6 +365,11 @@ test.describe('Channel Encryption API', () => {
 
     dmData = await createDm(dmSender.token, dmReceiver.id)
 
+    // WHY: DM channels are created as plaintext by default. Encrypted messages
+    // are rejected on non-encrypted channels (message_service.rs:126). Enable
+    // encryption before sending encrypted messages.
+    await updateChannel(dmSender.token, dmData.serverId, dmData.channelId, { encrypted: true })
+
     // Encrypted message — simulates desktop sender
     encryptedMsgContent = `kx-encrypted-${Date.now()}`
     await sendEncryptedMessage(dmSender.token, dmData.channelId, encryptedMsgContent, 'kx-device-1')

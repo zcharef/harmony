@@ -582,6 +582,11 @@ test.describe('Cross-Platform DM Encryption', () => {
 
     dmData = await createDm(sender.token, receiver.id)
 
+    // WHY: DM channels are created as plaintext by default. Encrypted messages
+    // are rejected on non-encrypted channels (message_service.rs:126). Enable
+    // encryption before sending encrypted messages.
+    await updateChannel(sender.token, dmData.serverId, dmData.channelId, { encrypted: true })
+
     // Message A: encrypted DM — simulates desktop sender
     encryptedMsgA = `encrypted-desktop-A-${Date.now()}`
     await sendEncryptedMessage(sender.token, dmData.channelId, encryptedMsgA, 'desktop-device-1')

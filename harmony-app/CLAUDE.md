@@ -526,6 +526,19 @@ createDm.mutate(userId, {
 | `just gen-api` | OpenAPI client generation |
 | `just fix` | Biome auto-fix |
 
+### E2E Tests (Playwright)
+
+Run locally against local Supabase (requires `supabase start`, Rust API running, and `just dev`):
+
+```bash
+cd harmony-app
+npx playwright test --workers=1
+```
+
+**`--workers=1` is required** — multiple workers overwhelm the single Supabase instance,
+causing SSE connections to stall and tests to timeout. This is already set in `playwright.config.ts`
+but must be explicit when running from the CLI.
+
 ### Pre-commit (via Lefthook)
 
 - Biome check + auto-fix on staged files
