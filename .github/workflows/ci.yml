@@ -187,7 +187,7 @@ jobs:
           SUPABASE_URL: http://localhost:9999
           ENVIRONMENT: test
           SERVER_PORT: "3000"
-        run: cargo test --lib --test api_convention_test --test api_arch_test
+        run: cargo test --all-targets
 
       # WHY separate step: integration tests hit real CI Supabase Postgres.
       # Unit tests above use dummy env vars + SQLX_OFFLINE for speed.
