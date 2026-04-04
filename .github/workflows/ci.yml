@@ -128,7 +128,8 @@ jobs:
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Job 2: Rust API Quality Wall
-  # WHY no Postgres service: all steps use SQLX_OFFLINE=true with .sqlx/ cache.
+  # Unit tests use SQLX_OFFLINE=true with .sqlx/ cache (no Postgres needed).
+  # Integration tests (voice_endpoint_test) connect to CI Supabase Postgres.
   # WHY fail-fast ordering: fmt (<1s) → clippy (compile) → openapi (reuses
   # clippy build, near-instant) → tests (slowest, most informative last).
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -179,14 +180,25 @@ jobs:
             exit 1
           }
 
-      - name: Run tests
+      - name: Run unit + arch tests
         env:
           DATABASE_URL: postgres://unused:unused@localhost/unused
           SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           SUPABASE_URL: http://localhost:9999
           ENVIRONMENT: test
           SERVER_PORT: "3000"
-        run: cargo test --all-targets
+        run: cargo test --lib --test api_convention_test --test api_arch_test
+
+      # WHY separate step: integration tests hit real CI Supabase Postgres.
+      # Unit tests above use dummy env vars + SQLX_OFFLINE for speed.
+      - name: Run integration tests
+        env:
+          DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
+          SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
+          SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
+          ENVIRONMENT: test
+          SERVER_PORT: "3000"
+        run: cargo test --test voice_endpoint_test -- --ignored
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Job 3: Rust Security & License Audit
