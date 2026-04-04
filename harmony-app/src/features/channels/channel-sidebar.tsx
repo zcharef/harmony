@@ -29,6 +29,12 @@ import { StatusPicker } from '@/features/preferences'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { CreateInviteDialog } from '@/features/server-nav'
 import { useSettingsUiStore } from '@/features/settings'
+import {
+  AudioAutoplayPrompt,
+  useVoiceConnection,
+  VoiceConnectionBar,
+  VoiceParticipantList,
+} from '@/features/voice'
 import type { ChannelResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CreateChannelDialog } from './create-channel-dialog'
@@ -245,6 +251,7 @@ export function ChannelSidebar({
   const { data: profile } = useCurrentProfile()
   const status = useUserStatus(user?.id ?? '')
   const username = profile?.username ?? t('youFallback')
+  const { joinVoice, currentChannelId: voiceChannelId } = useVoiceConnection()
 
   const statusLabels = {
     online: t('statusOnline'),
@@ -305,24 +312,49 @@ export function ChannelSidebar({
           {channels !== undefined && channels.length > 0 && (
             <div className={isError ? 'opacity-70' : undefined}>
               {channels.map((channel) => (
-                <ChannelButton
-                  key={channel.id}
-                  channel={channel}
-                  isActive={channel.id === selectedChannelId}
-                  canManageChannels={canAccessSettings}
-                  onSelect={() => onSelectChannel(channel.id)}
-                  onEdit={() => setEditChannel(channel)}
-                  onDelete={() => {
-                    if (window.confirm(t('deleteConfirm', { channelName: channel.name }))) {
-                      deleteChannelMutation.mutate(channel.id)
+                <div key={channel.id}>
+                  <ChannelButton
+                    channel={channel}
+                    isActive={
+                      channel.channelType === 'voice'
+                        ? voiceChannelId === channel.id
+                        : channel.id === selectedChannelId
                     }
-                  }}
-                />
+                    canManageChannels={canAccessSettings}
+                    onSelect={() => {
+                      if (channel.channelType === 'voice' && serverId !== null) {
+                        void joinVoice(channel.id, serverId)
+                      } else {
+                        onSelectChannel(channel.id)
+                      }
+                    }}
+                    onEdit={() => setEditChannel(channel)}
+                    onDelete={() => {
+                      if (window.confirm(t('deleteConfirm', { channelName: channel.name }))) {
+                        deleteChannelMutation.mutate(channel.id)
+                      }
+                    }}
+                  />
+                  {channel.channelType === 'voice' && voiceChannelId === channel.id && (
+                    <VoiceParticipantList channelId={channel.id} />
+                  )}
+                </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Voice connection bar — shows mute/deafen/disconnect when in voice */}
+      <VoiceConnectionBar
+        channelName={channels?.find((c) => c.id === voiceChannelId)?.name ?? null}
+        onRetry={() => {
+          if (voiceChannelId !== null && serverId !== null) {
+            void joinVoice(voiceChannelId, serverId)
+          }
+        }}
+      />
+      <AudioAutoplayPrompt />
 
       {/* User control panel */}
       <div
