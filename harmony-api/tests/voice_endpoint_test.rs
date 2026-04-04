@@ -5,6 +5,10 @@
 //! Supabase Postgres) and `tower::ServiceExt::oneshot`. Auth is handled by
 //! signing test JWTs with the same HS256 secret used in config.
 //!
+//! WHY #[ignore]: These tests require a running Postgres instance (local
+//! Supabase). CI sets `DATABASE_URL` to a dummy value so `cargo test --all-targets`
+//! would panic on connection. Run locally with `cargo test --test voice_endpoint_test -- --ignored`.
+//!
 //! Test cases:
 //! 1. Join voice channel → 200 with token
 //! 2. Join text channel → 422 (not a voice channel)
@@ -453,6 +457,7 @@ async fn body_json(response: axum::response::Response) -> serde_json::Value {
 
 /// Test 1: POST /v1/channels/{id}/voice/join on a voice channel → 200 with token.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn join_voice_channel_returns_200_with_token() {
     let pool = test_pool().await;
     let fixture = seed_fixture(&pool).await;
@@ -492,6 +497,7 @@ async fn join_voice_channel_returns_200_with_token() {
 
 /// Test 2: POST /v1/channels/{id}/voice/join on a text channel → 422.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn join_text_channel_returns_422() {
     let pool = test_pool().await;
     let fixture = seed_fixture(&pool).await;
@@ -532,6 +538,7 @@ async fn join_text_channel_returns_422() {
 
 /// Test 3: POST /v1/channels/{id}/voice/leave → 204.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn leave_voice_channel_returns_204() {
     let pool = test_pool().await;
     let fixture = seed_fixture(&pool).await;
@@ -577,6 +584,7 @@ async fn leave_voice_channel_returns_204() {
 
 /// Test 4: GET /v1/channels/{id}/voice/participants → 200 with envelope.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn list_voice_participants_returns_200_with_envelope() {
     let pool = test_pool().await;
     let fixture = seed_fixture(&pool).await;
@@ -614,6 +622,7 @@ async fn list_voice_participants_returns_200_with_envelope() {
 
 /// Test 5a: POST /v1/channels/{id}/voice/join without auth → 401.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn join_voice_without_auth_returns_401() {
     let pool = test_pool().await;
     let state = app_state_with_voice(pool.clone()).await;
@@ -638,6 +647,7 @@ async fn join_voice_without_auth_returns_401() {
 
 /// Test 5b: POST /v1/channels/{id}/voice/leave without auth → 401.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn leave_voice_without_auth_returns_401() {
     let pool = test_pool().await;
     let state = app_state_with_voice(pool.clone()).await;
@@ -662,6 +672,7 @@ async fn leave_voice_without_auth_returns_401() {
 
 /// Test 5c: GET /v1/channels/{id}/voice/participants without auth → 401.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn list_participants_without_auth_returns_401() {
     let pool = test_pool().await;
     let state = app_state_with_voice(pool.clone()).await;
@@ -686,6 +697,7 @@ async fn list_participants_without_auth_returns_401() {
 
 /// Test 5d: POST /v1/voice/heartbeat without auth → 401.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn heartbeat_without_auth_returns_401() {
     let pool = test_pool().await;
     let state = app_state_with_voice(pool.clone()).await;
@@ -710,6 +722,7 @@ async fn heartbeat_without_auth_returns_401() {
 
 /// Test 6a: POST /v1/channels/{id}/voice/join with voice disabled → 503.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn join_voice_disabled_returns_503() {
     let pool = test_pool().await;
     let fixture = seed_fixture(&pool).await;
@@ -745,6 +758,7 @@ async fn join_voice_disabled_returns_503() {
 
 /// Test 6b: POST /v1/channels/{id}/voice/leave with voice disabled → 503.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn leave_voice_disabled_returns_503() {
     let pool = test_pool().await;
     let fixture = seed_fixture(&pool).await;
@@ -775,6 +789,7 @@ async fn leave_voice_disabled_returns_503() {
 
 /// Test 6c: GET /v1/channels/{id}/voice/participants with voice disabled → 503.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn list_participants_voice_disabled_returns_503() {
     let pool = test_pool().await;
     let fixture = seed_fixture(&pool).await;
@@ -805,6 +820,7 @@ async fn list_participants_voice_disabled_returns_503() {
 
 /// Test 6d: POST /v1/voice/heartbeat with voice disabled → 503.
 #[tokio::test]
+#[ignore = "requires local Supabase Postgres"]
 async fn heartbeat_voice_disabled_returns_503() {
     let pool = test_pool().await;
     let fixture = seed_fixture(&pool).await;
