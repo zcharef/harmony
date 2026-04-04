@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { joinVoice, leaveVoice, voiceHeartbeat } from '@/lib/api'
 import { isProblemDetails } from '@/lib/api-error'
+import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
+import { supabase } from '@/lib/supabase'
 import { useVoiceConnectionStore } from '../stores/voice-connection-store'
 import { usePushToTalk } from './use-push-to-talk'
 
 /** WHY: 15s heartbeat keeps the server-side voice session alive. */
 const HEARTBEAT_INTERVAL_MS = 15_000
+
+/** WHY: Cached auth token for the beforeunload handler. supabase.auth.getSession()
+ * is async and cannot be awaited in the synchronous beforeunload callback.
+ * Updated on every successful voice join. */
+let cachedAuthToken: string | null = null
 
 /** WHY: Fallback TTL (2h) used only if the API response is missing ttlSecs.
  * The server now returns ttlSecs in the join response — this is a defensive default. */
@@ -153,6 +160,12 @@ export function useVoiceConnection() {
       if (isJoiningRef.current) return
       isJoiningRef.current = true
       try {
+        // WHY: Cache auth token for beforeunload cleanup. getSession() reads
+        // from memory and resolves instantly, but is async so we can't call it
+        // inside the synchronous beforeunload handler.
+        const { data: sessionData } = await supabase.auth.getSession()
+        cachedAuthToken = sessionData.session?.access_token ?? null
+
         const { data } = await joinVoice({
           path: { id: channelId },
           throwOnError: true,
@@ -195,6 +208,7 @@ export function useVoiceConnection() {
 
     clearTokenRefreshTimer()
     sessionIdRef.current = null
+    cachedAuthToken = null
 
     // WHY: Disconnect from LiveKit first so the user sees instant feedback.
     await storeDisconnect()
@@ -248,6 +262,34 @@ export function useVoiceConnection() {
       clearInterval(intervalId)
     }
   }, [status, storeDisconnect])
+
+  // WHY: On page refresh (F5), the LiveKit room disconnects (disconnectOnPageLeave)
+  // but the server-side voice session stays alive until the heartbeat sweep (~45s).
+  // This causes a ghost participant: the user's name lingers in the channel while
+  // the voice UI resets to idle. Fire a best-effort leave request on beforeunload
+  // so the server cleans up immediately.
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const { currentChannelId: channelId } = useVoiceConnectionStore.getState()
+      if (channelId === null || cachedAuthToken === null) return
+
+      // WHY: keepalive tells the browser to complete this request even after
+      // the page's JS context is destroyed. This is the only reliable way to
+      // send an authenticated request during page unload.
+      fetch(`${env.VITE_API_URL}/v1/channels/${encodeURIComponent(channelId)}/voice/leave`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cachedAuthToken}` },
+        keepalive: true,
+      }).catch(() => {
+        // WHY: Best-effort — if it fails, the heartbeat sweep cleans up after ~45s.
+      })
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [])
 
   // WHY: Clean up the token refresh timer on unmount to prevent stale
   // callbacks firing after the component tree is torn down.

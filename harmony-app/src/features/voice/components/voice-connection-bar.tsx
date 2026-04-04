@@ -27,6 +27,7 @@ import {
   Settings2,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
+import { isTauri } from '@/lib/platform'
 import { useVoiceConnection } from '../hooks/use-voice-connection'
 import {
   useVoiceConnectionStore,
@@ -192,24 +193,28 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
                   </Button>
                 </Tooltip>
 
-                <Tooltip
-                  content={isPttMode ? `Push to Talk: On (${pttShortcut})` : 'Push to Talk: Off'}
-                  placement="top"
-                  delay={300}
-                >
-                  <Button
-                    variant="light"
-                    isIconOnly
-                    size="sm"
-                    className="h-8 w-8"
-                    onPress={togglePttMode}
-                    data-test="voice-ptt-btn"
+                {/* WHY: PTT relies on Tauri's global-shortcut plugin — not available in browsers.
+                 * Showing the button on web would let users toggle a mode that has no effect. */}
+                {isTauri() && (
+                  <Tooltip
+                    content={isPttMode ? `Push to Talk: On (${pttShortcut})` : 'Push to Talk: Off'}
+                    placement="top"
+                    delay={300}
                   >
-                    <Radio
-                      className={`h-4 w-4 ${isPttMode ? 'text-success' : 'text-default-500'}`}
-                    />
-                  </Button>
-                </Tooltip>
+                    <Button
+                      variant="light"
+                      isIconOnly
+                      size="sm"
+                      className="h-8 w-8"
+                      onPress={togglePttMode}
+                      data-test="voice-ptt-btn"
+                    >
+                      <Radio
+                        className={`h-4 w-4 ${isPttMode ? 'text-success' : 'text-default-500'}`}
+                      />
+                    </Button>
+                  </Tooltip>
+                )}
 
                 <Popover placement="top">
                   <Tooltip content="Audio Settings" placement="top" delay={300}>
