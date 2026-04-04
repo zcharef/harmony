@@ -42,6 +42,8 @@ pub enum VoiceAction {
 pub struct VoiceToken {
     pub token: String,
     pub url: String,
+    /// Token time-to-live in seconds. Frontend schedules refresh at 80% of this.
+    pub ttl_secs: u32,
     /// WHY: Clients send this back in heartbeats so the server can validate
     /// that the heartbeat belongs to the current session, not a stale device.
     pub session_id: String,

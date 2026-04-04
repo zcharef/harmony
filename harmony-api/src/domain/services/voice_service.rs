@@ -118,13 +118,19 @@ impl VoiceService {
 
         // 6. Generate LiveKit token.
         let room_name = format!("harmony_{}", channel_id);
+        #[allow(clippy::cast_sign_loss)] // WHY: voice_max_duration_hours is always positive
+        let plan_duration_secs = (limits.voice_max_duration_hours as u64).saturating_mul(3600);
         let grants = VoiceGrants {
             can_publish: true,
             can_subscribe: true,
             bitrate_kbps: limits.voice_bitrate_kbps,
-            #[allow(clippy::cast_sign_loss)] // WHY: voice_max_duration_hours is always positive
-            max_duration_secs: (limits.voice_max_duration_hours as u64).saturating_mul(3600),
+            max_duration_secs: plan_duration_secs,
         };
+        // WHY: Effective TTL = min(plan duration, infra cap). Must match the
+        // same logic used in LiveKitTokenService::generate_token so the
+        // frontend's 80%-refresh schedule aligns with the actual JWT expiry.
+        #[allow(clippy::cast_possible_truncation)] // WHY: TTL capped at 7200 — fits u32
+        let ttl_secs = plan_duration_secs.min(self.livekit.max_ttl_secs()) as u32;
         let token = self
             .livekit
             .generate_token(&room_name, user_id, display_name, grants)?;
@@ -159,6 +165,7 @@ impl VoiceService {
         Ok(VoiceToken {
             token,
             url,
+            ttl_secs,
             session_id: new_session.session_id.clone(),
             previous_channel_id,
             previous_server_id,
@@ -749,6 +756,10 @@ mod tests {
 
         fn livekit_url(&self) -> &str {
             "wss://livekit.test.local"
+        }
+
+        fn max_ttl_secs(&self) -> u64 {
+            7200
         }
     }
 

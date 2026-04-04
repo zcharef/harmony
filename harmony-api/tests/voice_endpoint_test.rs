@@ -70,6 +70,10 @@ impl LiveKitTokenGenerator for FakeLiveKitTokenGenerator {
     fn livekit_url(&self) -> &str {
         "wss://test.livekit.example.com"
     }
+
+    fn max_ttl_secs(&self) -> u64 {
+        7200
+    }
 }
 
 // ── Crypto provider ─────────────────────────────────────────────────────

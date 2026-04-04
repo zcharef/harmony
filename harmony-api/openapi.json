@@ -5615,6 +5615,7 @@
         "required": [
           "token",
           "url",
+          "ttlSecs",
           "sessionId"
         ],
         "properties": {
@@ -5636,6 +5637,13 @@
           "token": {
             "type": "string",
             "description": "`LiveKit` JWT token for the client to connect with."
+          },
+          "ttlSecs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Token time-to-live in seconds. Frontend schedules refresh at 80% of this.",
+            "example": 7200,
+            "minimum": 0
           },
           "url": {
             "type": "string",

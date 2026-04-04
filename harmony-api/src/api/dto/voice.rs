@@ -23,6 +23,9 @@ pub struct VoiceTokenResponse {
     pub token: String,
     /// `LiveKit` server URL to connect to.
     pub url: String,
+    /// Token time-to-live in seconds. Frontend schedules refresh at 80% of this.
+    #[schema(example = 7200)]
+    pub ttl_secs: u32,
     /// Opaque session identifier. Clients must send this back in heartbeats
     /// so the server can distinguish the current device from stale ones.
     pub session_id: String,
@@ -37,6 +40,7 @@ impl From<VoiceToken> for VoiceTokenResponse {
         Self {
             token: vt.token,
             url: vt.url,
+            ttl_secs: vt.ttl_secs,
             session_id: vt.session_id,
             previous_channel_id: vt.previous_channel_id,
         }

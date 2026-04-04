@@ -3,15 +3,14 @@ import { joinVoice, leaveVoice, voiceHeartbeat } from '@/lib/api'
 import { isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { useVoiceConnectionStore } from '../stores/voice-connection-store'
+import { usePushToTalk } from './use-push-to-talk'
 
 /** WHY: 15s heartbeat keeps the server-side voice session alive. */
 const HEARTBEAT_INTERVAL_MS = 15_000
 
-/** WHY: Token TTL assumed 2h (7_200_000ms). Refresh at 80% to avoid expiry
- * mid-session. Hardcoded because the API does not return TTL in the response —
- * if the server TTL changes, update this constant. */
-const TOKEN_TTL_MS = 2 * 60 * 60 * 1_000
-const TOKEN_REFRESH_AT_MS = TOKEN_TTL_MS * 0.8
+/** WHY: Fallback TTL (2h) used only if the API response is missing ttlSecs.
+ * The server now returns ttlSecs in the join response — this is a defensive default. */
+const FALLBACK_TOKEN_TTL_SECS = 2 * 60 * 60
 
 /**
  * Wraps the Zustand voice connection store with API integration.
@@ -38,6 +37,12 @@ export function useVoiceConnection() {
   const storeDisconnect = useVoiceConnectionStore((s) => s.disconnect)
   const toggleMute = useVoiceConnectionStore((s) => s.toggleMute)
   const toggleDeafen = useVoiceConnectionStore((s) => s.toggleDeafen)
+  const isPttMode = useVoiceConnectionStore((s) => s.isPttMode)
+  const pttShortcut = useVoiceConnectionStore((s) => s.pttShortcut)
+
+  // WHY: Mount PTT global hotkey — passing null disables the shortcut registration.
+  // When isPttMode is false, no shortcut is registered.
+  usePushToTalk(isPttMode ? pttShortcut : null)
 
   // WHY: Ref for channelId so the heartbeat interval closure always reads the
   // latest value without needing to restart the interval on channelId change.
@@ -59,6 +64,10 @@ export function useVoiceConnection() {
   // the server validates the heartbeat belongs to the current device session.
   const sessionIdRef = useRef<string | null>(null)
 
+  // WHY: Stores the server-provided TTL so the recursive scheduleTokenRefresh
+  // can read the latest value without needing it as a parameter each time.
+  const ttlSecsRef = useRef<number>(FALLBACK_TOKEN_TTL_SECS)
+
   const clearTokenRefreshTimer = useCallback(() => {
     if (tokenRefreshTimerRef.current !== null) {
       clearTimeout(tokenRefreshTimerRef.current)
@@ -68,8 +77,10 @@ export function useVoiceConnection() {
 
   // WHY (P1-2): Extracted to a named function so the token refresh can
   // re-schedule itself after each successful cycle instead of being one-shot.
+  // Uses ttlSecsRef so the timer duration tracks the server's dynamic TTL.
   const scheduleTokenRefresh = useCallback(() => {
     clearTokenRefreshTimer()
+    const refreshAtMs = ttlSecsRef.current * 1_000 * 0.8
     tokenRefreshTimerRef.current = setTimeout(() => {
       const refreshChannelId = channelIdRef.current
       const refreshServerId = serverIdRef.current
@@ -88,6 +99,9 @@ export function useVoiceConnection() {
               refreshData.url,
             )
             sessionIdRef.current = refreshData.sessionId
+            // WHY: Update TTL from the fresh response so the next cycle
+            // uses the server's latest value (may change across plans).
+            ttlSecsRef.current = refreshData.ttlSecs ?? FALLBACK_TOKEN_TTL_SECS
             logger.info('voice_token_refreshed', { channelId: refreshChannelId })
 
             // WHY (P1-2): Re-schedule for the next TTL cycle. Without this,
@@ -103,7 +117,7 @@ export function useVoiceConnection() {
             channelId: refreshChannelId,
           })
         })
-    }, TOKEN_REFRESH_AT_MS)
+    }, refreshAtMs)
   }, [storeConnect, clearTokenRefreshTimer])
 
   const handleJoinVoice = useCallback(
@@ -118,6 +132,9 @@ export function useVoiceConnection() {
 
         await storeConnect(channelId, serverId, data.token, data.url)
         sessionIdRef.current = data.sessionId
+        // WHY: Store the server-provided TTL so scheduleTokenRefresh uses the
+        // dynamic value instead of the hardcoded fallback.
+        ttlSecsRef.current = data.ttlSecs ?? FALLBACK_TOKEN_TTL_SECS
 
         // WHY: Schedule token refresh at 80% of TTL. When the timer fires,
         // we fetch a fresh token from the API and reconnect the LiveKit room.
@@ -219,6 +236,8 @@ export function useVoiceConnection() {
     currentChannelId,
     isMuted,
     isDeafened,
+    isPttMode,
+    pttShortcut,
     toggleMute,
     toggleDeafen,
     error,

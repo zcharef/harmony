@@ -15,14 +15,24 @@
  * (store selectors), channel-sidebar.tsx:L353-L362 (icon button styling).
  */
 
-import { Button, Spinner, Tooltip } from '@heroui/react'
-import { AudioWaveform, HeadphoneOff, Headphones, Mic, MicOff, PhoneOff } from 'lucide-react'
+import { Button, Popover, PopoverContent, PopoverTrigger, Spinner, Tooltip } from '@heroui/react'
+import {
+  AudioWaveform,
+  HeadphoneOff,
+  Headphones,
+  Mic,
+  MicOff,
+  PhoneOff,
+  Radio,
+  Settings2,
+} from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useVoiceConnection } from '../hooks/use-voice-connection'
 import {
   useVoiceConnectionStore,
   type VoiceConnectionStatus,
 } from '../stores/voice-connection-store'
+import { AudioDeviceSelector } from './audio-device-selector'
 
 interface VoiceConnectionBarProps {
   /** WHY: Channel name is passed as a prop because the voice store only holds the
@@ -74,6 +84,9 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
   const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
   const error = useVoiceConnectionStore((s) => s.error)
   const isKrispEnabled = useVoiceConnectionStore((s) => s.isKrispEnabled)
+  const isPttMode = useVoiceConnectionStore((s) => s.isPttMode)
+  const pttShortcut = useVoiceConnectionStore((s) => s.pttShortcut)
+  const togglePttMode = useVoiceConnectionStore((s) => s.togglePttMode)
   const toggleMute = useVoiceConnectionStore((s) => s.toggleMute)
   const toggleDeafen = useVoiceConnectionStore((s) => s.toggleDeafen)
   const toggleKrisp = useVoiceConnectionStore((s) => s.toggleKrisp)
@@ -178,6 +191,48 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
                     />
                   </Button>
                 </Tooltip>
+
+                <Tooltip
+                  content={isPttMode ? `Push to Talk: On (${pttShortcut})` : 'Push to Talk: Off'}
+                  placement="top"
+                  delay={300}
+                >
+                  <Button
+                    variant="light"
+                    isIconOnly
+                    size="sm"
+                    className="h-8 w-8"
+                    onPress={togglePttMode}
+                    data-test="voice-ptt-btn"
+                  >
+                    <Radio
+                      className={`h-4 w-4 ${isPttMode ? 'text-success' : 'text-default-500'}`}
+                    />
+                  </Button>
+                </Tooltip>
+
+                <Popover placement="top">
+                  <Tooltip content="Audio Settings" placement="top" delay={300}>
+                    <div>
+                      <PopoverTrigger>
+                        <Button
+                          variant="light"
+                          isIconOnly
+                          size="sm"
+                          className="h-8 w-8"
+                          data-test="voice-device-settings-btn"
+                        >
+                          <Settings2 className="h-4 w-4 text-default-500" />
+                        </Button>
+                      </PopoverTrigger>
+                    </div>
+                  </Tooltip>
+                  <PopoverContent>
+                    <div className="w-64 p-2">
+                      <AudioDeviceSelector />
+                    </div>
+                  </PopoverContent>
+                </Popover>
 
                 <Tooltip content="Disconnect" placement="top" delay={300}>
                   <Button

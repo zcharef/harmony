@@ -36,6 +36,11 @@ interface VoiceConnectionState {
    * channel switches within a session. */
   isKrispEnabled: boolean
 
+  isPttMode: boolean
+  /** WHY: Tauri global shortcut string for PTT. Default is Space —
+   * standard in gaming/voice apps. Only used when isPttMode is true. */
+  pttShortcut: string
+
   connect: (channelId: string, serverId: string, token: string, url: string) => Promise<void>
   disconnect: () => Promise<void>
   toggleMute: () => void
@@ -46,6 +51,8 @@ interface VoiceConnectionState {
    * push-to-talk key presses that should not affect the mute toggle state. */
   // TODO(e2ee): PTT key handling may need to be E2EE-aware
   setPttMicEnabled: (enabled: boolean) => void
+  togglePttMode: () => void
+  setPttShortcut: (shortcut: string) => void
   reset: () => void
 }
 
@@ -57,6 +64,8 @@ const INITIAL_STATE = {
   isMuted: false,
   isDeafened: false,
   isKrispEnabled: true,
+  isPttMode: false,
+  pttShortcut: 'Space',
   error: null,
   activeSpeakers: new Set<string>(),
 }
@@ -82,6 +91,12 @@ let krispProcessorRef: KrispNoiseFilterProcessor | null = null
  * completion and call setEnabled(false) to honour the user's intent. */
 let krispInitPromise: Promise<void> | null = null
 
+/** WHY: Stores per-listener cleanup functions so we can remove exactly
+ * the callbacks we registered, without nuking third-party listeners
+ * via removeAllListeners. Populated by onRoom() in registerRoomEvents,
+ * drained by removeRoomListeners(). */
+let roomEventCleanups: Array<() => void> = []
+
 /** WHY: Centralized room options — voice-only, no video tracks. */
 const ROOM_OPTIONS: RoomOptions = {
   adaptiveStream: false,
@@ -103,18 +118,11 @@ const ROOM_OPTIONS: RoomOptions = {
   disconnectOnPageLeave: true,
 }
 
-/** WHY: Remove all RoomEvent listeners we registered, preventing leaks on disconnect. */
-function removeRoomListeners(room: Room): void {
-  room.removeAllListeners(RoomEvent.Disconnected)
-  room.removeAllListeners(RoomEvent.Reconnecting)
-  room.removeAllListeners(RoomEvent.Reconnected)
-  room.removeAllListeners(RoomEvent.ActiveSpeakersChanged)
-  room.removeAllListeners(RoomEvent.MediaDevicesChanged)
-  room.removeAllListeners(RoomEvent.AudioPlaybackStatusChanged)
-  room.removeAllListeners(RoomEvent.TrackSubscribed)
-  room.removeAllListeners(RoomEvent.TrackUnsubscribed)
-  room.removeAllListeners(RoomEvent.LocalTrackPublished)
-  room.removeAllListeners(RoomEvent.LocalTrackUnpublished)
+/** WHY: Remove exactly the listeners we registered via onRoom(), preventing
+ * leaks on disconnect without nuking third-party listeners. */
+function removeRoomListeners(): void {
+  for (const cleanup of roomEventCleanups) cleanup()
+  roomEventCleanups = []
 }
 
 function detachAllAudioTracks(room: Room): void {
@@ -167,9 +175,17 @@ async function attachKrispProcessor(track: LocalAudioTrack): Promise<void> {
 
 /** WHY: Extracted to reduce connect() cognitive complexity below Biome's limit of 15. */
 function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
-  room.on(RoomEvent.Disconnected, () => {
+  /** WHY: Registers a listener and stores a cleanup closure so removeRoomListeners()
+   * can remove exactly our callback without nuking third-party listeners. */
+  // biome-ignore lint/suspicious/noExplicitAny: LiveKit EventEmitter requires `any` for callback args
+  function onRoom<E extends RoomEvent>(event: E, callback: (...args: any[]) => void) {
+    room.on(event, callback)
+    roomEventCleanups.push(() => room.off(event, callback))
+  }
+
+  onRoom(RoomEvent.Disconnected, () => {
     if (get().room !== room) return
-    removeRoomListeners(room)
+    removeRoomListeners()
     set({
       status: 'disconnected',
       room: null,
@@ -182,21 +198,21 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
     disconnectIdleTimer = setTimeout(() => {
       disconnectIdleTimer = null
       if (get().status === 'disconnected') {
-        const { isKrispEnabled } = get()
-        set({ ...INITIAL_STATE, activeSpeakers: new Set(), isKrispEnabled })
+        const { isKrispEnabled, isPttMode, pttShortcut } = get()
+        set({ ...INITIAL_STATE, activeSpeakers: new Set(), isKrispEnabled, isPttMode, pttShortcut })
       }
     }, DISCONNECT_IDLE_DELAY_MS)
   })
 
-  room.on(RoomEvent.Reconnecting, () => {
+  onRoom(RoomEvent.Reconnecting, () => {
     if (get().room === room) set({ status: 'reconnecting' })
   })
 
-  room.on(RoomEvent.Reconnected, () => {
+  onRoom(RoomEvent.Reconnected, () => {
     if (get().room === room) set({ status: 'connected' })
   })
 
-  room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+  onRoom(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
     const now = Date.now()
     if (now - lastSpeakerUpdate < SPEAKER_THROTTLE_MS) return
     lastSpeakerUpdate = now
@@ -215,17 +231,17 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
     set({ activeSpeakers: nextIdentities })
   })
 
-  room.on(RoomEvent.MediaDevicesChanged, () => {
+  onRoom(RoomEvent.MediaDevicesChanged, () => {
     logger.info('voice_media_devices_changed')
   })
 
-  room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+  onRoom(RoomEvent.AudioPlaybackStatusChanged, () => {
     logger.info('voice_audio_playback_status_changed', {
       canPlayback: room.canPlaybackAudio,
     })
   })
 
-  room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+  onRoom(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
     if (track.kind === Track.Kind.Audio) {
       const el = track.attach()
       el.id = `voice-audio-${participant.identity}`
@@ -245,7 +261,7 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
     }
   })
 
-  room.on(RoomEvent.TrackUnsubscribed, (track) => {
+  onRoom(RoomEvent.TrackUnsubscribed, (track) => {
     if (track.kind === Track.Kind.Audio) {
       for (const el of track.detach()) {
         el.remove()
@@ -254,14 +270,14 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
   })
 
   // WHY: Per LiveKit SDK README — clean up local track resources on unpublish.
-  room.on(RoomEvent.LocalTrackUnpublished, (trackPublication) => {
+  onRoom(RoomEvent.LocalTrackUnpublished, (trackPublication) => {
     trackPublication.track?.detach()
   })
 
   // WHY: Per LiveKit docs, KRISP processor must be attached via
   // LocalTrackPublished — this guarantees the track is fully ready.
   // Dynamic import keeps the ~2MB WASM out of the initial bundle.
-  room.on(RoomEvent.LocalTrackPublished, (trackPublication) => {
+  onRoom(RoomEvent.LocalTrackPublished, (trackPublication) => {
     if (
       trackPublication.source === Track.Source.Microphone &&
       trackPublication.track instanceof LocalAudioTrack &&
@@ -336,7 +352,7 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     try {
       await room.connect(url, token)
     } catch (err: unknown) {
-      removeRoomListeners(room)
+      removeRoomListeners()
       const message = err instanceof Error ? err.message : String(err)
       logger.error('voice_connect_failed', { error: message, channelId, serverId })
       set({ status: 'failed', error: message, room: null })
@@ -368,7 +384,7 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     krispProcessorRef = null
     if (room !== null) {
       detachAllAudioTracks(room)
-      removeRoomListeners(room)
+      removeRoomListeners()
       try {
         await room.disconnect()
       } catch (err: unknown) {
@@ -481,6 +497,26 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     })
   },
 
+  togglePttMode: () => {
+    const { room, isPttMode } = get()
+    const nextPttMode = !isPttMode
+    set({ isPttMode: nextPttMode })
+    // WHY: When PTT is toggled ON, mute the mic so the user must hold the key
+    // to speak. When toggled OFF, unmute to return to normal voice mode.
+    if (room !== null) {
+      room.localParticipant.setMicrophoneEnabled(!nextPttMode).catch((err: unknown) => {
+        logger.warn('voice_ptt_mode_mic_toggle_failed', {
+          error: err instanceof Error ? err.message : String(err),
+          pttMode: nextPttMode,
+        })
+      })
+    }
+  },
+
+  setPttShortcut: (shortcut) => {
+    set({ pttShortcut: shortcut })
+  },
+
   reset: () => {
     if (disconnectIdleTimer !== null) {
       clearTimeout(disconnectIdleTimer)
@@ -490,13 +526,14 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     const { room } = get()
     if (room !== null) {
       detachAllAudioTracks(room)
-      removeRoomListeners(room)
+      removeRoomListeners()
       room.disconnect().catch((err: unknown) => {
         logger.warn('voice_reset_disconnect_failed', {
           error: err instanceof Error ? err.message : String(err),
         })
       })
     }
-    set({ ...INITIAL_STATE, activeSpeakers: new Set() })
+    const { isKrispEnabled, isPttMode, pttShortcut } = get()
+    set({ ...INITIAL_STATE, activeSpeakers: new Set(), isKrispEnabled, isPttMode, pttShortcut })
   },
 }))

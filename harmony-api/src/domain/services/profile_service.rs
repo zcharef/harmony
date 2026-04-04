@@ -123,6 +123,17 @@ impl ProfileService {
         self.repo.is_username_taken(username).await
     }
 
+    /// Batch-fetch profiles by a list of user IDs.
+    ///
+    /// Returns only the profiles that exist — missing IDs are silently skipped.
+    /// Order is not guaranteed.
+    ///
+    /// # Errors
+    /// Returns a repository error on failure.
+    pub async fn get_profiles_by_ids(&self, ids: &[UserId]) -> Result<Vec<Profile>, DomainError> {
+        self.repo.get_profiles_by_ids(ids).await
+    }
+
     /// Get a profile by user ID if it exists, without treating absence as an error.
     ///
     /// WHY: Used by `sync_profile` to short-circuit validation for existing users.

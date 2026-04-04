@@ -105,6 +105,10 @@ impl LiveKitTokenGenerator for LiveKitTokenService {
     fn livekit_url(&self) -> &str {
         &self.url
     }
+
+    fn max_ttl_secs(&self) -> u64 {
+        self.max_ttl_secs
+    }
 }
 
 #[cfg(test)]

@@ -25,6 +25,12 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
     /// Check whether a username is already taken.
     async fn is_username_taken(&self, username: &str) -> Result<bool, DomainError>;
 
+    /// Batch-fetch profiles by a list of user IDs.
+    ///
+    /// Returns only the profiles that exist — missing IDs are silently skipped.
+    /// Order is not guaranteed.
+    async fn get_profiles_by_ids(&self, ids: &[UserId]) -> Result<Vec<Profile>, DomainError>;
+
     /// Update a user's profile fields. `None` means "don't change this field".
     async fn update(
         &self,

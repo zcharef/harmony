@@ -30,4 +30,8 @@ pub trait LiveKitTokenGenerator: Send + Sync + std::fmt::Debug {
 
     /// The `LiveKit` server URL clients connect to (e.g. `wss://livekit.example.com`).
     fn livekit_url(&self) -> &str;
+
+    /// Maximum token TTL in seconds configured for this `LiveKit` instance.
+    /// The effective TTL is `min(grants.max_duration_secs, max_ttl_secs)`.
+    fn max_ttl_secs(&self) -> u64;
 }

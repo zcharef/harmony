@@ -173,6 +173,52 @@ impl ProfileRepository for PgProfileRepository {
         }))
     }
 
+    async fn get_profiles_by_ids(&self, ids: &[UserId]) -> Result<Vec<Profile>, DomainError> {
+        // WHY: Empty array guard — skip DB call entirely.
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let uuids: Vec<Uuid> = ids.iter().map(|id| id.0).collect();
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                id,
+                username,
+                display_name,
+                avatar_url,
+                status,
+                custom_status,
+                created_at,
+                updated_at
+            FROM profiles
+            WHERE id = ANY($1::uuid[])
+            "#,
+            &uuids,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                ProfileRow {
+                    id: r.id,
+                    username: r.username,
+                    display_name: r.display_name,
+                    avatar_url: r.avatar_url,
+                    status: r.status,
+                    custom_status: r.custom_status,
+                    created_at: r.created_at,
+                    updated_at: r.updated_at,
+                }
+                .into_profile()
+            })
+            .collect())
+    }
+
     async fn update(
         &self,
         user_id: &UserId,
