@@ -31,6 +31,11 @@ use config::Config;
 
 #[tokio::main]
 async fn main() {
+    // WHY: livekit-api enables `rust_crypto` while harmony-api uses `aws_lc_rs`.
+    // Both features active causes jsonwebtoken v10 to panic. Explicitly selecting
+    // aws_lc_rs before any JWT operation prevents the conflict.
+    let _ = jsonwebtoken::crypto::aws_lc::DEFAULT_PROVIDER.install_default();
+
     // 1. Load configuration (fail-fast if invalid)
     let config = Config::init();
 
