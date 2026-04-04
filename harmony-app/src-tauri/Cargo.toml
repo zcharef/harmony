@@ -1,6 +1,6 @@
 [package]
 name = "harmony-app"
-version = "0.6.1"
+version = "0.6.2"
 description = "Harmony — open-source, privacy-first group communication"
 authors = ["Harmony Contributors"]
 license = "AGPL-3.0"
@@ -42,6 +42,9 @@ tauri-plugin-sentry = "0.5"
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-notification = "2"
+
+[target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
+tauri-plugin-global-shortcut = "2"
 
 [dev-dependencies]
 tempfile = "3"
