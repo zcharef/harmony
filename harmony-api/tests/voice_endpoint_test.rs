@@ -536,6 +536,23 @@ async fn leave_voice_channel_returns_204() {
     let pool = test_pool().await;
     let fixture = seed_fixture(&pool).await;
     let state = app_state_with_voice(pool.clone()).await;
+
+    // WHY: leave requires an active voice session. Seed one directly — oneshot
+    // consumes the router so we can't chain join → leave in two requests.
+    sqlx::query(
+        r#"
+        INSERT INTO voice_sessions (user_id, channel_id, server_id, session_id)
+        VALUES ($1, $2, $3, 'test-session-leave')
+        ON CONFLICT (user_id) DO NOTHING
+        "#,
+    )
+    .bind(fixture.user_id.0)
+    .bind(fixture.voice_channel_id.0)
+    .bind(fixture.server_id.0)
+    .execute(&pool)
+    .await
+    .expect("seed voice session for leave test");
+
     let app = voice_router(state);
 
     let response = app
