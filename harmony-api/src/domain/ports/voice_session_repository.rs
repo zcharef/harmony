@@ -32,6 +32,19 @@ pub trait VoiceSessionRepository: Send + Sync + std::fmt::Debug {
     /// Remove a voice session by `user_id`. Returns the removed session if it existed.
     async fn remove_by_user(&self, user_id: &UserId) -> Result<Option<VoiceSession>, DomainError>;
 
+    /// Atomically remove a voice session only if it belongs to `channel_id`.
+    /// Returns the removed session if the user was in that channel, `None` if
+    /// no matching row existed (user not in voice or in a different channel).
+    ///
+    /// WHY: Prevents TOCTOU race where a concurrent `join_voice` could move the
+    /// user to a new channel between a check and a delete, causing the delete
+    /// to remove the wrong session.
+    async fn remove_by_user_and_channel(
+        &self,
+        user_id: &UserId,
+        channel_id: &ChannelId,
+    ) -> Result<Option<VoiceSession>, DomainError>;
+
     /// List all voice sessions for a channel.
     async fn list_by_channel(
         &self,

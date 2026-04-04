@@ -19,7 +19,10 @@ import { Button, Spinner, Tooltip } from '@heroui/react'
 import { AudioWaveform, HeadphoneOff, Headphones, Mic, MicOff, PhoneOff } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useVoiceConnection } from '../hooks/use-voice-connection'
-import { useVoiceConnectionStore } from '../stores/voice-connection-store'
+import {
+  useVoiceConnectionStore,
+  type VoiceConnectionStatus,
+} from '../stores/voice-connection-store'
 
 interface VoiceConnectionBarProps {
   /** WHY: Channel name is passed as a prop because the voice store only holds the
@@ -29,14 +32,12 @@ interface VoiceConnectionBarProps {
   onRetry: () => void
 }
 
-type VoiceStatus = 'idle' | 'connecting' | 'reconnecting' | 'connected' | 'failed' | 'disconnected'
-
 function StatusText({
   status,
   channelName,
   error,
 }: {
-  status: VoiceStatus
+  status: VoiceConnectionStatus
   channelName: string | null
   error: string | null
 }) {

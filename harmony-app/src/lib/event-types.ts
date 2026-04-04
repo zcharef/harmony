@@ -269,9 +269,10 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     type: z.literal('voiceStateUpdate'),
     senderId: z.string(),
     serverId: z.string(),
-    channelId: z.string(),
-    userId: z.string(),
+    channelId: z.string().uuid(),
+    userId: z.string().uuid(),
     action: z.enum(['joined', 'left']),
+    displayName: z.string(),
   }),
 
   // System

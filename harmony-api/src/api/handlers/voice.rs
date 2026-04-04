@@ -78,10 +78,10 @@ pub async fn join_voice(
         );
     }
 
-    // WHY: Resolve display name so SSE subscribers can render the participant
+    // WHY: Resolve username so SSE subscribers can render the participant
     // immediately without a follow-up API call (prevents UUID flash in the UI).
     let display_name = match state.profile_service().get_by_id_optional(&user_id).await {
-        Ok(Some(profile)) => profile.display_name.unwrap_or(profile.username),
+        Ok(Some(profile)) => profile.username,
         Ok(None) => user_id.to_string(),
         Err(e) => {
             tracing::warn!(
@@ -221,7 +221,7 @@ pub async fn list_voice_participants(
             .get_by_id_optional(&session.user_id)
             .await
         {
-            Ok(Some(profile)) => profile.display_name.unwrap_or(profile.username),
+            Ok(Some(profile)) => profile.username,
             Ok(None) => session.user_id.to_string(),
             Err(e) => {
                 tracing::warn!(
@@ -282,6 +282,14 @@ pub async fn voice_heartbeat(
             "Voice channels are not available on this server. Configure LiveKit to enable voice.",
         )
     })?;
+
+    // WHY: session_id is a UUID v4 (36 chars). Cap at 64 to prevent DoS via
+    // oversized strings reaching the database layer.
+    if body.session_id.len() > 64 {
+        return Err(ApiError::bad_request(
+            "session_id must not exceed 64 characters",
+        ));
+    }
 
     voice_service.heartbeat(&user_id, &body.session_id).await?;
 

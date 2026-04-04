@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import { useCallback } from 'react'
 import { z } from 'zod'
+import { useVoiceConnectionStore } from '@/features/voice'
 import { useServerEvent } from '@/hooks/use-server-event'
 import type { ServerResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
@@ -103,6 +104,19 @@ export function useForceDisconnect(
       queryClient.invalidateQueries({ queryKey: queryKeys.servers.all })
       queryClient.removeQueries({ queryKey: queryKeys.servers.members(serverId) })
       queryClient.removeQueries({ queryKey: queryKeys.servers.channels(serverId) })
+
+      // WHY (P0-2): If the banned/kicked user is currently in a voice channel
+      // on this server, tear down the LiveKit room immediately. Without this,
+      // the user stays connected up to 2h (token TTL) after being banned.
+      const voiceState = useVoiceConnectionStore.getState()
+      if (voiceState.currentServerId === serverId) {
+        voiceState.disconnect().catch((err: unknown) => {
+          logger.warn('voice_force_disconnect_failed', {
+            error: err instanceof Error ? err.message : String(err),
+            serverId,
+          })
+        })
+      }
 
       // WHY: If the user is currently viewing the kicked server, clear selection
       // immediately. This gives instant feedback rather than waiting for the

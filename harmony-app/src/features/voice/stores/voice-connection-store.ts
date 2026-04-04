@@ -13,7 +13,7 @@ import { create } from 'zustand'
 
 import { logger } from '@/lib/logger'
 
-type VoiceConnectionStatus =
+export type VoiceConnectionStatus =
   | 'idle'
   | 'connecting'
   | 'connected'
@@ -76,6 +76,12 @@ let disconnectIdleTimer: ReturnType<typeof setTimeout> | null = null
  * LocalTrackPublished, cleared on disconnect/reset. */
 let krispProcessorRef: KrispNoiseFilterProcessor | null = null
 
+/** WHY: Guards against race between toggleKrisp() and the async
+ * attachKrispProcessor() init. If the user toggles KRISP off while
+ * the processor is still loading, we check isKrispEnabled after
+ * completion and call setEnabled(false) to honour the user's intent. */
+let krispInitPromise: Promise<void> | null = null
+
 /** WHY: Centralized room options — voice-only, no video tracks. */
 const ROOM_OPTIONS: RoomOptions = {
   adaptiveStream: false,
@@ -127,19 +133,36 @@ type SetState = (partial: Partial<VoiceConnectionState>) => void
 type GetState = () => VoiceConnectionState
 
 /** WHY: Per LiveKit docs, KRISP attaches via LocalTrackPublished event on the
- * mic track. Dynamic import keeps the WASM bundle out of the critical path. */
+ * mic track. Dynamic import keeps the WASM bundle out of the critical path.
+ * Sets krispInitPromise so toggleKrisp() can await ongoing init (P0-6). */
 async function attachKrispProcessor(track: LocalAudioTrack): Promise<void> {
-  const { KrispNoiseFilter, isKrispNoiseFilterSupported } = await import(
-    '@livekit/krisp-noise-filter'
-  )
-  if (!isKrispNoiseFilterSupported()) {
-    logger.warn('voice_krisp_not_supported')
-    return
+  const doAttach = async (): Promise<void> => {
+    const { KrispNoiseFilter, isKrispNoiseFilterSupported } = await import(
+      '@livekit/krisp-noise-filter'
+    )
+    if (!isKrispNoiseFilterSupported()) {
+      logger.warn('voice_krisp_not_supported')
+      return
+    }
+    const processor = KrispNoiseFilter()
+    await track.setProcessor(processor)
+    krispProcessorRef = processor
+    logger.info('voice_krisp_enabled')
+
+    // WHY: If the user toggled KRISP off while we were loading the WASM,
+    // honour their intent by disabling immediately after init completes.
+    const { isKrispEnabled } = useVoiceConnectionStore.getState()
+    if (!isKrispEnabled) {
+      await processor.setEnabled(false)
+      logger.info('voice_krisp_disabled_after_init')
+    }
   }
-  const processor = KrispNoiseFilter()
-  await track.setProcessor(processor)
-  krispProcessorRef = processor
-  logger.info('voice_krisp_enabled')
+
+  krispInitPromise = doAttach().finally(() => {
+    krispInitPromise = null
+  })
+
+  return krispInitPromise
 }
 
 /** WHY: Extracted to reduce connect() cognitive complexity below Biome's limit of 15. */
@@ -206,7 +229,19 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
     if (track.kind === Track.Kind.Audio) {
       const el = track.attach()
       el.id = `voice-audio-${participant.identity}`
+
+      // WHY (P2-1): On rapid reconnect, a previous audio element with the same
+      // id may still exist in the DOM. Remove it to prevent accumulation.
+      const existing = document.getElementById(el.id)
+      if (existing !== null) existing.remove()
+
       document.body.appendChild(el)
+
+      // WHY (P1-3): If the user is deafened, new participants who join after
+      // toggleDeafen must also be muted. Without this, late-joiners are audible.
+      if (get().isDeafened) {
+        participant.setVolume(0)
+      }
     }
   })
 
@@ -236,9 +271,32 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
         logger.warn('voice_krisp_init_failed', {
           error: err instanceof Error ? err.message : String(err),
         })
+        // WHY: If KRISP init fails, the UI must reflect that noise suppression
+        // is not active. Without this, the button stays green (misleading).
+        set({ isKrispEnabled: false })
       })
     }
   })
+}
+
+/** WHY: Extracted to reduce toggleDeafen() cognitive complexity below Biome's
+ * limit of 15. Sets volume for all remote participants. Per-participant
+ * try/catch (P0-5) so one failure does not stop the rest.
+ * Returns the count of participants that failed. */
+function setAllParticipantVolumes(room: Room, volume: number): number {
+  let failCount = 0
+  for (const participant of room.remoteParticipants.values()) {
+    try {
+      participant.setVolume(volume)
+    } catch (err: unknown) {
+      failCount += 1
+      logger.error('voice_deafen_participant_failed', {
+        error: err instanceof Error ? err.message : String(err),
+        participantIdentity: participant.identity,
+      })
+    }
+  }
+  return failCount
 }
 
 /** WHY: Extracted to reduce connect() cognitive complexity below Biome's limit of 15.
@@ -337,13 +395,17 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     const { room, isMuted } = get()
     if (room === null) return
     const nextMuted = !isMuted
+    set({ isMuted: nextMuted })
     // WHY: setMicrophoneEnabled(true) unmutes, setMicrophoneEnabled(false) mutes.
+    // Optimistic update above; rolled back on failure (P0-4).
     room.localParticipant.setMicrophoneEnabled(!nextMuted).catch((err: unknown) => {
       logger.error('voice_toggle_mute_failed', {
         error: err instanceof Error ? err.message : String(err),
       })
+      // WHY (P0-4): Roll back the optimistic isMuted update so the UI
+      // reflects the actual mic state after the SDK call failed.
+      set({ isMuted: !nextMuted })
     })
-    set({ isMuted: nextMuted })
   },
 
   toggleDeafen: () => {
@@ -354,8 +416,14 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     // WHY: Set volume to 0 for all remote participants when deafening,
     // restore to 1 when undeafening. setVolume is the official livekit-client API
     // for per-participant volume control (RemoteParticipant:L42-43).
-    for (const participant of room.remoteParticipants.values()) {
-      participant.setVolume(nextDeafened ? 0 : 1)
+    const failCount = setAllParticipantVolumes(room, nextDeafened ? 0 : 1)
+
+    // WHY (P0-5): If any participant volume change failed, roll back to
+    // avoid a half-deafened state where the UI says deafened but some
+    // participants are still audible (or vice versa).
+    if (failCount > 0) {
+      setAllParticipantVolumes(room, isDeafened ? 0 : 1)
+      return
     }
 
     set({ isDeafened: nextDeafened })
@@ -366,29 +434,40 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     if (room === null) return
     const nextEnabled = !isKrispEnabled
 
-    if (krispProcessorRef !== null) {
-      // WHY: setEnabled() toggles KRISP without tearing down the WASM pipeline,
-      // per LiveKit docs. Much faster than stopProcessor/setProcessor cycle.
-      krispProcessorRef.setEnabled(nextEnabled).catch((err: unknown) => {
-        logger.warn('voice_krisp_toggle_failed', {
-          error: err instanceof Error ? err.message : String(err),
-          enabled: nextEnabled,
-        })
-      })
-    } else if (nextEnabled) {
-      // WHY: Processor was never initialized (e.g., user toggled off before
-      // joining, then toggled back on mid-call). Attach fresh.
-      const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
-      if (micPub?.track instanceof LocalAudioTrack) {
-        attachKrispProcessor(micPub.track).catch((err: unknown) => {
-          logger.warn('voice_krisp_enable_failed', {
-            error: err instanceof Error ? err.message : String(err),
-          })
-        })
+    // WHY (P0-6): Set state first for instant UI feedback. The async work
+    // below will honour this value via the post-init check in attachKrispProcessor.
+    set({ isKrispEnabled: nextEnabled })
+
+    // WHY (P0-6): If KRISP WASM is still loading, await it before toggling.
+    // attachKrispProcessor already checks isKrispEnabled after init to
+    // reconcile, so we just need to wait for it to finish.
+    const doToggle = async (): Promise<void> => {
+      if (krispInitPromise !== null) {
+        await krispInitPromise
+      }
+
+      if (krispProcessorRef !== null) {
+        // WHY: setEnabled() toggles KRISP without tearing down the WASM pipeline,
+        // per LiveKit docs. Much faster than stopProcessor/setProcessor cycle.
+        await krispProcessorRef.setEnabled(nextEnabled)
+      } else if (nextEnabled) {
+        // WHY: Processor was never initialized (e.g., user toggled off before
+        // joining, then toggled back on mid-call). Attach fresh.
+        const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
+        if (micPub?.track instanceof LocalAudioTrack) {
+          await attachKrispProcessor(micPub.track)
+        }
       }
     }
 
-    set({ isKrispEnabled: nextEnabled })
+    doToggle().catch((err: unknown) => {
+      logger.warn('voice_krisp_toggle_failed', {
+        error: err instanceof Error ? err.message : String(err),
+        enabled: nextEnabled,
+      })
+      // WHY: Roll back optimistic update so the UI reflects actual state.
+      set({ isKrispEnabled: !nextEnabled })
+    })
   },
 
   setPttMicEnabled: (enabled) => {

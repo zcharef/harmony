@@ -280,6 +280,48 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
         }))
     }
 
+    async fn remove_by_user_and_channel(
+        &self,
+        user_id: &UserId,
+        channel_id: &ChannelId,
+    ) -> Result<Option<VoiceSession>, DomainError> {
+        let uid = user_id.0;
+        let cid = channel_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            DELETE FROM voice_sessions
+            WHERE user_id = $1 AND channel_id = $2
+            RETURNING
+                id,
+                user_id,
+                channel_id,
+                server_id,
+                session_id,
+                joined_at,
+                last_seen_at
+            "#,
+            uid,
+            cid,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|r| {
+            VoiceSessionRow {
+                id: r.id,
+                user_id: r.user_id,
+                channel_id: r.channel_id,
+                server_id: r.server_id,
+                session_id: r.session_id,
+                joined_at: r.joined_at,
+                last_seen_at: r.last_seen_at,
+            }
+            .into_voice_session()
+        }))
+    }
+
     async fn list_by_channel(
         &self,
         channel_id: &ChannelId,

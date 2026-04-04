@@ -79,7 +79,12 @@ async fn main() {
     spawn_voice_session_sweep(state.clone());
 
     // 7. Build router with middleware stack
-    let app = build_router(state, trusted_proxies, config.rate_limit_per_minute);
+    let app = build_router(
+        state,
+        trusted_proxies,
+        config.rate_limit_per_minute,
+        config.livekit_url.as_deref(),
+    );
 
     // 8. Start server with graceful shutdown
     let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
@@ -613,19 +618,23 @@ fn spawn_moderation_retry_sweep(state: api::AppState) {
 
 /// Spawn a background task that sweeps stale voice sessions every 30s.
 ///
-/// Sessions with `last_seen_at` older than 45s are removed and
+/// Sessions with `last_seen_at` older than 75s are removed and
 /// `VoiceStateUpdate { action: Left }` is emitted for each.
 ///
 /// WHY: Mirrors `spawn_presence_sweep` but for voice sessions.
-/// The 45s threshold gives a 15s buffer after the client heartbeat interval (30s).
-/// If a client disconnects without calling leave, the sweep cleans up within ~30–45s.
+/// The 75s threshold accommodates Chrome's background tab throttling (timers
+/// clamped to 1/min max). A 15s heartbeat interval can miss up to 5 beats
+/// when the tab is backgrounded: 15s * 5 = 75s.
 fn spawn_voice_session_sweep(state: api::AppState) {
     use domain::models::{ServerEvent, VoiceAction};
 
     /// How often the sweep runs.
     const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
     /// Sessions older than this are considered stale (disconnected).
-    const STALE_THRESHOLD_SECS: i64 = 45;
+    /// WHY 75s: 15s heartbeat * 5 missed = 75s. Chrome throttles background
+    /// tab timers to 1/min max, so 45s was too aggressive and killed sessions
+    /// in backgrounded tabs.
+    const STALE_THRESHOLD_SECS: i64 = 75;
 
     // WHY: Skip sweep entirely when voice is not enabled.
     // No voice service means no voice sessions can exist.

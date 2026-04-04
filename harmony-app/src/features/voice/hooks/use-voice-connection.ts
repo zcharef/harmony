@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { joinVoice, leaveVoice, voiceHeartbeat } from '@/lib/api'
+import { isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { useVoiceConnectionStore } from '../stores/voice-connection-store'
 
@@ -65,6 +66,46 @@ export function useVoiceConnection() {
     }
   }, [])
 
+  // WHY (P1-2): Extracted to a named function so the token refresh can
+  // re-schedule itself after each successful cycle instead of being one-shot.
+  const scheduleTokenRefresh = useCallback(() => {
+    clearTokenRefreshTimer()
+    tokenRefreshTimerRef.current = setTimeout(() => {
+      const refreshChannelId = channelIdRef.current
+      const refreshServerId = serverIdRef.current
+      if (refreshChannelId === null || refreshServerId === null) return
+
+      joinVoice({ path: { id: refreshChannelId }, throwOnError: true })
+        .then(async ({ data: refreshData }) => {
+          const store = useVoiceConnectionStore.getState()
+          // WHY: Only reconnect if still in the same channel. If the user
+          // switched channels or disconnected, skip the refresh.
+          if (store.currentChannelId === refreshChannelId && store.room !== null) {
+            await storeConnect(
+              refreshChannelId,
+              refreshServerId,
+              refreshData.token,
+              refreshData.url,
+            )
+            sessionIdRef.current = refreshData.sessionId
+            logger.info('voice_token_refreshed', { channelId: refreshChannelId })
+
+            // WHY (P1-2): Re-schedule for the next TTL cycle. Without this,
+            // the token refresh is one-shot and the session expires after 2x TTL.
+            scheduleTokenRefresh()
+          }
+        })
+        .catch((err: unknown) => {
+          // WHY: Background op — log only, no user feedback (ADR-028).
+          // The session will continue until the old token actually expires.
+          logger.warn('voice_token_refresh_failed', {
+            error: err instanceof Error ? err.message : String(err),
+            channelId: refreshChannelId,
+          })
+        })
+    }, TOKEN_REFRESH_AT_MS)
+  }, [storeConnect, clearTokenRefreshTimer])
+
   const handleJoinVoice = useCallback(
     async (channelId: string, serverId: string) => {
       if (isJoiningRef.current) return
@@ -81,47 +122,27 @@ export function useVoiceConnection() {
         // WHY: Schedule token refresh at 80% of TTL. When the timer fires,
         // we fetch a fresh token from the API and reconnect the LiveKit room.
         // This is a background op — failure is logged, not surfaced (ADR-028).
-        clearTokenRefreshTimer()
-        tokenRefreshTimerRef.current = setTimeout(() => {
-          const refreshChannelId = channelIdRef.current
-          const refreshServerId = serverIdRef.current
-          if (refreshChannelId === null || refreshServerId === null) return
-
-          joinVoice({ path: { id: refreshChannelId }, throwOnError: true })
-            .then(async ({ data: refreshData }) => {
-              const store = useVoiceConnectionStore.getState()
-              // WHY: Only reconnect if still in the same channel. If the user
-              // switched channels or disconnected, skip the refresh.
-              if (store.currentChannelId === refreshChannelId && store.room !== null) {
-                await storeConnect(
-                  refreshChannelId,
-                  refreshServerId,
-                  refreshData.token,
-                  refreshData.url,
-                )
-                sessionIdRef.current = refreshData.sessionId
-                logger.info('voice_token_refreshed', { channelId: refreshChannelId })
-              }
-            })
-            .catch((err: unknown) => {
-              // WHY: Background op — log only, no user feedback (ADR-028).
-              // The session will continue until the old token actually expires.
-              logger.warn('voice_token_refresh_failed', {
-                error: err instanceof Error ? err.message : String(err),
-                channelId: refreshChannelId,
-              })
-            })
-        }, TOKEN_REFRESH_AT_MS)
+        scheduleTokenRefresh()
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
         logger.error('voice_join_api_failed', { error: message, channelId, serverId })
         // WHY: Set store error for inline feedback (ADR-028). No toast.
         useVoiceConnectionStore.setState({ status: 'failed', error: message })
+
+        // WHY (P1-5): If storeConnect (room.connect()) failed, the server-side
+        // session created by joinVoice is still alive and will linger for 45s
+        // until the sweep. Fire a best-effort leaveVoice to clean it up.
+        leaveVoice({ path: { id: channelId }, throwOnError: true }).catch((leaveErr: unknown) => {
+          logger.warn('voice_join_cleanup_leave_failed', {
+            error: leaveErr instanceof Error ? leaveErr.message : String(leaveErr),
+            channelId,
+          })
+        })
       } finally {
         isJoiningRef.current = false
       }
     },
-    [storeConnect, clearTokenRefreshTimer],
+    [storeConnect, scheduleTokenRefresh],
   )
 
   const handleLeaveVoice = useCallback(async () => {
@@ -155,7 +176,23 @@ export function useVoiceConnection() {
       const sid = sessionIdRef.current
       if (sid === null) return
       voiceHeartbeat({ body: { sessionId: sid }, throwOnError: true }).catch((err: unknown) => {
-        // WHY: Background op — log only, no user feedback (ADR-028).
+        // WHY (P0-3): A 404 means the server-side session no longer exists
+        // (e.g., swept after timeout, or server restarted). Force a clean
+        // client teardown so the user does not stay in a ghost call.
+        if (isProblemDetails(err) && err.status === 404) {
+          logger.warn('voice_heartbeat_session_gone', {
+            sessionId: sid,
+          })
+          storeDisconnect().catch((disconnectErr: unknown) => {
+            logger.warn('voice_heartbeat_disconnect_failed', {
+              error: disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
+            })
+          })
+          return
+        }
+
+        // WHY: For 429/5xx, keep current behavior — log only, no user
+        // feedback (ADR-028). The session may still be alive.
         logger.warn('voice_heartbeat_failed', {
           error: err instanceof Error ? err.message : String(err),
         })
@@ -165,7 +202,7 @@ export function useVoiceConnection() {
     return () => {
       clearInterval(intervalId)
     }
-  }, [status])
+  }, [status, storeDisconnect])
 
   // WHY: Clean up the token refresh timer on unmount to prevent stale
   // callbacks firing after the component tree is torn down.

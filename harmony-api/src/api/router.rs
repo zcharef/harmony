@@ -40,6 +40,7 @@ pub fn build_router(
     state: AppState,
     trusted_proxies: Vec<IpNet>,
     rate_limit_per_minute: u32,
+    livekit_url: Option<&str>,
 ) -> Router {
     let is_production = state.is_production;
     let request_id_header = header::HeaderName::from_static("x-request-id");
@@ -292,15 +293,52 @@ pub fn build_router(
 
     // WHY: CSP `default-src 'none'` blocks all resource loading (JS, CSS, fetch).
     // Swagger UI needs these in development mode. Only enforce in production.
-    // WHY connect-src: LiveKit voice requires WebSocket connections to
-    // *.livekit.cloud (production) and localhost:7880 (local dev).
+    // WHY connect-src: LiveKit voice requires WebSocket connections. Instead of a
+    // wildcard `wss://*.livekit.cloud`, we derive the exact host from the configured
+    // LIVEKIT_URL. Dev gets `ws://localhost:7880`; production gets only the explicit host.
     if is_production {
-        router = router.layer(SetResponseHeaderLayer::overriding(
-            header::HeaderName::from_static("content-security-policy"),
-            HeaderValue::from_static(
-                "default-src 'none'; frame-ancestors 'none'; connect-src 'self' wss://*.livekit.cloud ws://localhost:7880",
-            ),
-        ));
+        let mut connect_src = String::from("'self'");
+
+        if let Some(url) = livekit_url
+            && let Some(host) = url
+                .strip_prefix("wss://")
+                .or_else(|| url.strip_prefix("ws://"))
+                .or_else(|| url.strip_prefix("https://"))
+                .or_else(|| url.strip_prefix("http://"))
+        {
+            let host = host.trim_end_matches('/').split('/').next().unwrap_or(host);
+            connect_src.push_str(&format!(" wss://{host}"));
+        }
+
+        let csp = format!("default-src 'none'; frame-ancestors 'none'; connect-src {connect_src}");
+        if let Ok(val) = HeaderValue::from_str(&csp) {
+            router = router.layer(SetResponseHeaderLayer::overriding(
+                header::HeaderName::from_static("content-security-policy"),
+                val,
+            ));
+        }
+    } else if let Some(url) = livekit_url {
+        // WHY: In development, add both the configured LiveKit host and localhost
+        // for local LiveKit dev server.
+        let mut connect_src = String::from("'self' ws://localhost:7880");
+
+        if let Some(host) = url
+            .strip_prefix("wss://")
+            .or_else(|| url.strip_prefix("ws://"))
+            .or_else(|| url.strip_prefix("https://"))
+            .or_else(|| url.strip_prefix("http://"))
+        {
+            let host = host.trim_end_matches('/').split('/').next().unwrap_or(host);
+            connect_src.push_str(&format!(" wss://{host}"));
+        }
+
+        let csp = format!("default-src 'none'; frame-ancestors 'none'; connect-src {connect_src}");
+        if let Ok(val) = HeaderValue::from_str(&csp) {
+            router = router.layer(SetResponseHeaderLayer::overriding(
+                header::HeaderName::from_static("content-security-policy"),
+                val,
+            ));
+        }
     }
 
     let mut router = router

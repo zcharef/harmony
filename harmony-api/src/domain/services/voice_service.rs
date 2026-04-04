@@ -181,15 +181,21 @@ impl VoiceService {
         expected_channel_id: Option<&ChannelId>,
     ) -> Result<Option<VoiceSession>, DomainError> {
         if let Some(expected) = expected_channel_id {
-            // WHY: Check which channel the user is in BEFORE removing, so we
-            // don't accidentally remove a session from a different channel.
-            let sessions = self.voice_repo.list_by_channel(expected).await?;
-            let in_channel = sessions.iter().any(|s| s.user_id == *user_id);
-            if !in_channel {
+            // WHY: Atomic check+delete in one SQL statement prevents TOCTOU
+            // race where a concurrent join_voice could move the user to a
+            // different channel between a read and a delete.
+            let removed = self
+                .voice_repo
+                .remove_by_user_and_channel(user_id, expected)
+                .await?;
+
+            if removed.is_none() {
                 return Err(DomainError::Conflict(
                     "You are not in the specified voice channel".to_string(),
                 ));
             }
+
+            return Ok(removed);
         }
 
         self.voice_repo.remove_by_user(user_id).await
@@ -558,6 +564,22 @@ mod tests {
             user_id: &UserId,
         ) -> Result<Option<VoiceSession>, DomainError> {
             Ok(self.sessions.lock().await.remove(user_id))
+        }
+
+        async fn remove_by_user_and_channel(
+            &self,
+            user_id: &UserId,
+            channel_id: &ChannelId,
+        ) -> Result<Option<VoiceSession>, DomainError> {
+            let mut sessions = self.sessions.lock().await;
+            if sessions
+                .get(user_id)
+                .is_some_and(|s| s.channel_id == *channel_id)
+            {
+                Ok(sessions.remove(user_id))
+            } else {
+                Ok(None)
+            }
         }
 
         async fn list_by_channel(
