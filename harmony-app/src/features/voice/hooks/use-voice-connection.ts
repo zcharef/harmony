@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { joinVoice, leaveVoice, voiceHeartbeat } from '@/lib/api'
 import { isProblemDetails } from '@/lib/api-error'
-import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
 import { supabase } from '@/lib/supabase'
+import { fireAndForgetVoiceLeave } from '@/lib/voice-cleanup'
 import { useVoiceConnectionStore } from '../stores/voice-connection-store'
 import { usePushToTalk } from './use-push-to-talk'
 
@@ -273,16 +273,7 @@ export function useVoiceConnection() {
       const { currentChannelId: channelId } = useVoiceConnectionStore.getState()
       if (channelId === null || cachedAuthToken === null) return
 
-      // WHY: keepalive tells the browser to complete this request even after
-      // the page's JS context is destroyed. This is the only reliable way to
-      // send an authenticated request during page unload.
-      fetch(`${env.VITE_API_URL}/v1/channels/${encodeURIComponent(channelId)}/voice/leave`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${cachedAuthToken}` },
-        keepalive: true,
-      }).catch(() => {
-        // WHY: Best-effort — if it fails, the heartbeat sweep cleans up after ~45s.
-      })
+      fireAndForgetVoiceLeave(channelId, cachedAuthToken)
     }
 
     window.addEventListener('beforeunload', handleBeforeUnload)

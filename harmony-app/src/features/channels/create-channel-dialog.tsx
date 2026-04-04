@@ -125,7 +125,9 @@ export function CreateChannelDialog({ serverId, isOpen, onClose }: CreateChannel
               label={t('channelType')}
               orientation="horizontal"
               value={channelType}
-              onValueChange={(v) => setChannelType(v as ChannelType)}
+              onValueChange={(v) => {
+                if (v === 'text' || v === 'voice') setChannelType(v)
+              }}
               size="sm"
               data-test="channel-type-selector"
             >
