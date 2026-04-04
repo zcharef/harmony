@@ -9,7 +9,7 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::ServerPayload;
-use crate::domain::models::{Role, ServerEvent, ServerId};
+use crate::domain::models::{Role, ServerEvent, ServerId, VoiceAction};
 
 /// Create a new server.
 ///
@@ -152,4 +152,70 @@ pub async fn update_server(
     );
 
     Ok((StatusCode::OK, Json(ServerResponse::from(server))))
+}
+
+/// Delete a server. Requires owner role.
+///
+/// # Errors
+/// Returns `ApiError` on insufficient role, not found, or repository error.
+#[utoipa::path(
+    delete,
+    path = "/v1/servers/{id}",
+    tag = "Servers",
+    security(("bearer_auth" = [])),
+    params(("id" = ServerId, Path, description = "Server ID")),
+    responses(
+        (status = 204, description = "Server deleted"),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Insufficient role", body = ProblemDetails),
+        (status = 404, description = "Server not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn delete_server(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(id): ApiPath<ServerId>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .moderation_service()
+        .require_role(&id, &user_id, Role::Owner)
+        .await?;
+
+    // WHY: ON DELETE CASCADE in voice_sessions will silently remove sessions
+    // when the server row is deleted. Snapshot them BEFORE deletion so we can
+    // emit VoiceStateUpdate(Left) events and prevent ghost participants on
+    // other clients.
+    let orphaned_voice_sessions = if let Some(voice_service) = state.voice_service() {
+        voice_service.list_server_sessions(&id).await?
+    } else {
+        vec![]
+    };
+
+    state.server_service().delete_server(&id).await?;
+
+    // Emit voice "left" events for sessions that were CASCADE-deleted.
+    for session in &orphaned_voice_sessions {
+        let receivers = state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+            sender_id: user_id.clone(),
+            server_id: session.server_id.clone(),
+            channel_id: session.channel_id.clone(),
+            user_id: session.user_id.clone(),
+            action: VoiceAction::Left,
+        });
+        tracing::debug!(
+            server_id = %session.server_id,
+            channel_id = %session.channel_id,
+            user_id = %session.user_id,
+            receivers,
+            "emitted voice.state_update (left, server cascade-deleted)"
+        );
+    }
+
+    tracing::debug!(
+        server_id = %id,
+        "server deleted"
+    );
+
+    Ok(StatusCode::NO_CONTENT)
 }

@@ -92,7 +92,9 @@ pub fn build_router(
         )
         .route(
             "/v1/servers/{id}",
-            get(handlers::servers::get_server).patch(handlers::servers::update_server),
+            get(handlers::servers::get_server)
+                .patch(handlers::servers::update_server)
+                .delete(handlers::servers::delete_server),
         )
         .route(
             "/v1/servers/{id}/channels",
@@ -191,7 +193,10 @@ pub fn build_router(
             "/v1/channels/{id}/voice/participants",
             get(handlers::voice::list_voice_participants),
         )
-        .route("/v1/voice/heartbeat", post(handlers::voice::voice_heartbeat))
+        .route(
+            "/v1/voice/heartbeat",
+            post(handlers::voice::voice_heartbeat),
+        )
         // Typing indicators
         .route(
             "/v1/channels/{id}/typing",

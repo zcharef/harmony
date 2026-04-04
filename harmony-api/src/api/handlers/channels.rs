@@ -11,7 +11,7 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::ChannelPayload;
-use crate::domain::models::{ChannelId, Role, ServerEvent, ServerId};
+use crate::domain::models::{ChannelId, Role, ServerEvent, ServerId, VoiceAction};
 
 /// List all channels in a server.
 ///
@@ -220,10 +220,40 @@ pub async fn delete_channel(
         .require_role(&params.id, &user_id, Role::Admin)
         .await?;
 
+    // WHY: ON DELETE CASCADE in voice_sessions will silently remove sessions
+    // when the channel row is deleted. Snapshot them BEFORE deletion so we can
+    // emit VoiceStateUpdate(Left) events and prevent ghost participants on
+    // other clients.
+    let orphaned_voice_sessions = if let Some(voice_service) = state.voice_service() {
+        voice_service
+            .list_participants(&params.channel_id, &user_id)
+            .await?
+    } else {
+        vec![]
+    };
+
     state
         .channel_service()
         .delete_channel(&params.id, &params.channel_id)
         .await?;
+
+    // Emit voice "left" events for sessions that were CASCADE-deleted.
+    for session in &orphaned_voice_sessions {
+        let receivers = state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+            sender_id: user_id.clone(),
+            server_id: session.server_id.clone(),
+            channel_id: session.channel_id.clone(),
+            user_id: session.user_id.clone(),
+            action: VoiceAction::Left,
+        });
+        tracing::debug!(
+            server_id = %session.server_id,
+            channel_id = %session.channel_id,
+            user_id = %session.user_id,
+            receivers,
+            "emitted voice.state_update (left, channel cascade-deleted)"
+        );
+    }
 
     let receivers = state.event_bus().publish(ServerEvent::ChannelDeleted {
         sender_id: user_id,

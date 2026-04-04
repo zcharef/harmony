@@ -134,6 +134,12 @@ mod tests {
     use super::*;
     use jsonwebtoken::{EncodingKey, Header};
 
+    /// WHY: Both `aws_lc_rs` and `rust_crypto` features are enabled. We must
+    /// pick one explicitly to avoid a panic in `jsonwebtoken` v10.
+    fn install_crypto_provider() {
+        let _ = jsonwebtoken::crypto::aws_lc::DEFAULT_PROVIDER.install_default();
+    }
+
     /// Test-only JWT secret. NOT a real secret.
     const TEST_SECRET: &str = "test-jwt-secret-for-unit-tests-only";
 
@@ -153,6 +159,7 @@ mod tests {
 
     /// Encode a JWT with HS256 using the test secret.
     fn encode_hs256(claims: &serde_json::Value) -> String {
+        install_crypto_provider();
         let header = Header::new(Algorithm::HS256);
         let key = EncodingKey::from_secret(TEST_SECRET.as_bytes());
         jsonwebtoken::encode(&header, claims, &key).unwrap()
@@ -307,6 +314,7 @@ mod tests {
 
     #[test]
     fn unsupported_algorithm_rejected() {
+        install_crypto_provider();
         let sub = Uuid::new_v4();
         let claims = base_claims(sub);
 
@@ -333,6 +341,7 @@ mod tests {
 
     #[test]
     fn completely_malformed_token_rejected() {
+        install_crypto_provider();
         let secret = test_secret();
         let result = verify_supabase_jwt("not.a.jwt.at.all", &secret, None);
         assert!(result.is_err());
@@ -349,6 +358,7 @@ mod tests {
 
     #[test]
     fn empty_token_rejected() {
+        install_crypto_provider();
         let secret = test_secret();
         let result = verify_supabase_jwt("", &secret, None);
         assert!(result.is_err());
@@ -362,6 +372,7 @@ mod tests {
 
     #[test]
     fn es256_token_without_configured_key_rejected() {
+        install_crypto_provider();
         // Craft a JWT header that claims ES256 but use HS256 encoding trick:
         // we can't easily sign a real ES256 in tests without a private key,
         // but we CAN test the "no JWKS key configured" branch by building

@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod broadcast_event_bus;
+pub mod livekit;
 pub mod openai_moderator;
 pub mod plan_always_allowed;
 pub mod postgres;

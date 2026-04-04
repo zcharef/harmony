@@ -460,4 +460,35 @@ impl ChannelRepository for PgChannelRepository {
             .into_channel()
         }))
     }
+
+    async fn has_private_channel_access(
+        &self,
+        channel_id: &ChannelId,
+        member_role: Role,
+    ) -> Result<bool, DomainError> {
+        // WHY: Admin/Owner always have access to private channels (same rule
+        // as list_for_server SQL). Only member/moderator need explicit grants.
+        if member_role == Role::Admin || member_role == Role::Owner {
+            return Ok(true);
+        }
+
+        let cid = channel_id.0;
+        let role_str = member_role.as_str();
+
+        let has_access = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM channel_role_access
+                WHERE channel_id = $1 AND role = $2
+            ) as "exists!"
+            "#,
+            cid,
+            role_str,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(has_access)
+    }
 }

@@ -162,6 +162,23 @@ impl ServerService {
                 id: server_id.to_string(),
             })
     }
+
+    /// Delete a server.
+    ///
+    /// # Errors
+    /// Returns `DomainError::NotFound` if the server does not exist.
+    pub async fn delete_server(&self, server_id: &ServerId) -> Result<(), DomainError> {
+        let deleted = self.repo.delete(server_id).await?;
+
+        if !deleted {
+            return Err(DomainError::NotFound {
+                resource_type: "Server",
+                id: server_id.to_string(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

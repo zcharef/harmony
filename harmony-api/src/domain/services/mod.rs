@@ -17,6 +17,7 @@ mod read_state_service;
 mod server_service;
 pub mod spam_guard;
 mod user_preferences_service;
+mod voice_service;
 
 pub use channel_service::ChannelService;
 pub use content_filter::ContentFilter;
@@ -35,3 +36,4 @@ pub use read_state_service::ReadStateService;
 pub use server_service::ServerService;
 pub use spam_guard::SpamGuard;
 pub use user_preferences_service::UserPreferencesService;
+pub use voice_service::VoiceService;

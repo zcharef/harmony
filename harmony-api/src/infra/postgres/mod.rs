@@ -17,6 +17,7 @@ mod reaction_repository;
 mod read_state_repository;
 mod server_repository;
 mod user_preferences_repository;
+mod voice_session_repository;
 
 pub use ban_repository::PgBanRepository;
 pub use channel_repository::PgChannelRepository;
@@ -35,6 +36,7 @@ pub use reaction_repository::PgReactionRepository;
 pub use read_state_repository::PgReadStateRepository;
 pub use server_repository::PgServerRepository;
 pub use user_preferences_repository::PgUserPreferencesRepository;
+pub use voice_session_repository::PgVoiceSessionRepository;
 
 use std::time::Duration;
 

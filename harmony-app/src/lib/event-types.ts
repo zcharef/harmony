@@ -38,6 +38,7 @@ export const SSE_EVENT_NAMES = [
   'unread.sync',
   'reaction.added',
   'reaction.removed',
+  'voice.state_update',
   'force.disconnect',
 ] as const
 
@@ -261,6 +262,16 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     messageId: z.string(),
     emoji: z.string(),
     userId: z.string(),
+  }),
+
+  // Voice
+  z.object({
+    type: z.literal('voiceStateUpdate'),
+    senderId: z.string(),
+    serverId: z.string(),
+    channelId: z.string(),
+    userId: z.string(),
+    action: z.enum(['joined', 'left']),
   }),
 
   // System

@@ -18,6 +18,7 @@ pub mod read_states;
 pub mod servers;
 pub mod typing;
 pub mod user_preferences;
+pub mod voice;
 
 use std::time::Instant;
 

@@ -4,6 +4,9 @@
 
 use utoipa::OpenApi;
 
+use super::dto::voice::{
+    VoiceHeartbeatRequest, VoiceParticipantResponse, VoiceParticipantsResponse, VoiceTokenResponse,
+};
 use super::dto::{
     AssignRoleRequest, BanListQuery, BanListResponse, BanResponse, BanUserRequest,
     ChannelListResponse, ChannelResponse, CheckUsernameQuery, CheckUsernameResponse,
@@ -22,7 +25,7 @@ use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
 use crate::domain::models::{
     CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MegolmSessionId,
-    MessageId, MessageType, OneTimeKeyId, ServerId, UserId, UserStatus,
+    MessageId, MessageType, OneTimeKeyId, ServerId, UserId, UserStatus, VoiceAction,
 };
 use crate::domain::models::{ParentMessagePreview, ReactionSummary};
 
@@ -53,6 +56,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         handlers::servers::list_servers,
         handlers::servers::get_server,
         handlers::servers::update_server,
+        handlers::servers::delete_server,
         // Channels
         handlers::channels::list_channels,
         handlers::channels::create_channel,
@@ -110,6 +114,11 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         // Desktop Auth (PKCE exchange)
         handlers::desktop_auth::create_desktop_auth_code,
         handlers::desktop_auth::redeem_desktop_auth_code,
+        // Voice
+        handlers::voice::join_voice,
+        handlers::voice::leave_voice,
+        handlers::voice::list_voice_participants,
+        handlers::voice::voice_heartbeat,
         // Events (SSE)
         handlers::events::sse_events,
     ),
@@ -205,6 +214,12 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             super::dto::user_preferences::UpdateUserPreferencesRequest,
             // Presence DTOs
             super::handlers::presence::UpdatePresenceRequest,
+            // Voice DTOs
+            VoiceHeartbeatRequest,
+            VoiceTokenResponse,
+            VoiceParticipantResponse,
+            VoiceParticipantsResponse,
+            VoiceAction,
             // Key Distribution DTOs
             RegisterDeviceRequest,
             UploadOneTimeKeysRequest,
@@ -233,6 +248,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         (name = "Keys", description = "E2EE key distribution (device keys, pre-key bundles)"),
         (name = "UserPreferences", description = "User preferences (DND mode, settings)"),
         (name = "Presence", description = "User presence status updates"),
+        (name = "Voice", description = "Voice channel management (LiveKit)"),
         (name = "Events", description = "Server-Sent Events for real-time updates"),
     ),
     modifiers(&SecurityAddon)

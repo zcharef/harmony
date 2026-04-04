@@ -265,6 +265,23 @@ impl ServerRepository for PgServerRepository {
         }))
     }
 
+    async fn delete(&self, server_id: &ServerId) -> Result<bool, DomainError> {
+        let sid = server_id.0;
+
+        let result = sqlx::query!(
+            r#"
+            DELETE FROM servers
+            WHERE id = $1
+            "#,
+            sid,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn get_moderation_categories(
         &self,
         server_id: &ServerId,

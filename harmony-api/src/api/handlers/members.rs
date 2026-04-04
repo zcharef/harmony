@@ -12,7 +12,7 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::{MemberPayload, ServerPayload};
-use crate::domain::models::{ServerEvent, ServerId, UserId};
+use crate::domain::models::{ServerEvent, ServerId, UserId, VoiceAction};
 
 /// Default member page size.
 const DEFAULT_MEMBER_LIMIT: i64 = 50;
@@ -211,6 +211,37 @@ pub async fn kick_member(
         reason: "kicked".to_string(),
     });
     tracing::debug!(server_id = %path.id, target_user_id = %path.user_id, receivers, "emitted force.disconnect");
+
+    // WHY: Best-effort voice cleanup — the kicked user's voice session has no FK
+    // to server_members, so removing membership alone won't disconnect them.
+    if let Some(voice_service) = state.voice_service() {
+        match voice_service.leave_voice(&path.user_id, None).await {
+            Ok(Some(session)) => {
+                state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+                    sender_id: path.user_id.clone(),
+                    server_id: session.server_id.clone(),
+                    channel_id: session.channel_id.clone(),
+                    user_id: path.user_id.clone(),
+                    action: VoiceAction::Left,
+                });
+                tracing::debug!(
+                    server_id = %session.server_id,
+                    channel_id = %session.channel_id,
+                    user_id = %path.user_id,
+                    "Kicked user removed from voice channel"
+                );
+            }
+            Ok(None) => {} // User was not in voice — nothing to clean up.
+            Err(e) => {
+                tracing::warn!(
+                    server_id = %path.id,
+                    user_id = %path.user_id,
+                    error = ?e,
+                    "Failed to remove kicked user from voice (best-effort)"
+                );
+            }
+        }
+    }
 
     // WHY: Best-effort system message — announce the kick in the default channel.
     // Must never fail the kick itself.

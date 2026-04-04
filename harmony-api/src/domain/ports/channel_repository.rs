@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Channel, ChannelId, ServerId, UserId};
+use crate::domain::models::{Channel, ChannelId, Role, ServerId, UserId};
 
 /// Intent-based repository for channels.
 #[async_trait]
@@ -60,4 +60,18 @@ pub trait ChannelRepository: Send + Sync + std::fmt::Debug {
         &self,
         server_id: &ServerId,
     ) -> Result<Option<Channel>, DomainError>;
+
+    /// Check if a member's role grants access to a private channel.
+    ///
+    /// Returns `true` if:
+    /// - The role is admin or owner (always have access), OR
+    /// - The role has an explicit entry in `channel_role_access`.
+    ///
+    /// WHY: `list_for_server` bakes this logic into SQL, but single-channel
+    /// access checks (e.g. join voice) need a standalone method.
+    async fn has_private_channel_access(
+        &self,
+        channel_id: &ChannelId,
+        member_role: Role,
+    ) -> Result<bool, DomainError>;
 }

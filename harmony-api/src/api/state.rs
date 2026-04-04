@@ -14,7 +14,7 @@ use crate::domain::ports::{
 use crate::domain::services::{
     ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
     NotificationSettingsService, ProfileService, ReactionService, ReadStateService, ServerService,
-    SpamGuard, UserPreferencesService,
+    SpamGuard, UserPreferencesService, VoiceService,
 };
 use crate::infra::PresenceTracker;
 use crate::infra::safe_browsing::SafeBrowsingClient;
@@ -90,6 +90,8 @@ pub struct AppState {
     moderation_semaphore: Arc<Semaphore>,
     /// Dead-letter queue for failed AI moderation checks (Tier 1 safety).
     moderation_retry_repository: Arc<dyn ModerationRetryRepository>,
+    /// Voice domain service. None = `LiveKit` not configured.
+    voice_service: Option<Arc<VoiceService>>,
 }
 
 // WHY: Manual Debug because `dyn MemberRepository` needs explicit impl through Arc.
@@ -129,6 +131,7 @@ impl std::fmt::Debug for AppState {
                 "moderation_retry_repository",
                 &self.moderation_retry_repository,
             )
+            .field("voice_service", &self.voice_service.is_some())
             .finish()
     }
 }
@@ -167,6 +170,7 @@ impl AppState {
         message_repository_for_moderation: Arc<dyn MessageRepository>,
         server_repository_for_moderation: Arc<dyn ServerRepository>,
         moderation_retry_repository: Arc<dyn ModerationRetryRepository>,
+        voice_service: Option<Arc<VoiceService>>,
     ) -> Self {
         Self {
             pool,
@@ -199,6 +203,7 @@ impl AppState {
             server_repository: server_repository_for_moderation,
             moderation_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_MODERATIONS)),
             moderation_retry_repository,
+            voice_service,
         }
     }
 
@@ -362,6 +367,12 @@ impl AppState {
     #[must_use]
     pub fn moderation_retry_repository(&self) -> &Arc<dyn ModerationRetryRepository> {
         &self.moderation_retry_repository
+    }
+
+    /// Access the voice domain service. None = `LiveKit` not configured.
+    #[must_use]
+    pub fn voice_service(&self) -> Option<&Arc<VoiceService>> {
+        self.voice_service.as_ref()
     }
 
     /// Access the Postgres connection pool.

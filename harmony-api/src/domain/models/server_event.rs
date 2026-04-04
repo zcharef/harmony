@@ -16,6 +16,7 @@ use super::UserStatus;
 use super::ids::{ChannelId, MessageId, ServerId, UserId};
 use super::message::MessageType;
 use super::role::Role;
+use super::voice_session::VoiceAction;
 
 // ── Payload structs ──────────────────────────────────────────────
 
@@ -273,6 +274,15 @@ pub enum ServerEvent {
         user_id: UserId,
     },
 
+    // ── Voice ────────────────────────────────────────────────
+    VoiceStateUpdate {
+        sender_id: UserId,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        user_id: UserId,
+        action: VoiceAction,
+    },
+
     // ── System ───────────────────────────────────────────────
     /// Tells a specific user to disconnect from a server (kicked/banned).
     ForceDisconnect {
@@ -305,6 +315,7 @@ impl ServerEvent {
             Self::PresenceChanged { .. } => "presence.changed",
             Self::ReactionAdded { .. } => "reaction.added",
             Self::ReactionRemoved { .. } => "reaction.removed",
+            Self::VoiceStateUpdate { .. } => "voice.state_update",
             Self::ForceDisconnect { .. } => "force.disconnect",
         }
     }
@@ -331,6 +342,7 @@ impl ServerEvent {
             | Self::PresenceChanged { sender_id, .. }
             | Self::ReactionAdded { sender_id, .. }
             | Self::ReactionRemoved { sender_id, .. }
+            | Self::VoiceStateUpdate { sender_id, .. }
             | Self::ForceDisconnect { sender_id, .. } => sender_id,
         }
     }
@@ -355,6 +367,7 @@ impl ServerEvent {
             | Self::TypingStarted { server_id, .. }
             | Self::ReactionAdded { server_id, .. }
             | Self::ReactionRemoved { server_id, .. }
+            | Self::VoiceStateUpdate { server_id, .. }
             | Self::ForceDisconnect { server_id, .. } => Some(server_id),
             Self::DmCreated { .. } | Self::PresenceChanged { .. } => None,
         }
@@ -382,7 +395,8 @@ impl ServerEvent {
             | Self::TypingStarted { .. }
             | Self::PresenceChanged { .. }
             | Self::ReactionAdded { .. }
-            | Self::ReactionRemoved { .. } => None,
+            | Self::ReactionRemoved { .. }
+            | Self::VoiceStateUpdate { .. } => None,
         }
     }
 }

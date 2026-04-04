@@ -68,6 +68,23 @@ pub struct Config {
     /// Google Safe Browsing API v4 key (optional).
     /// When set, URLs in messages are checked against Google's threat lists.
     pub safe_browsing_api_key: Option<SecretString>,
+
+    /// `LiveKit` server URL (e.g., `wss://my-project.livekit.cloud`).
+    /// Voice channels are disabled when absent.
+    pub livekit_url: Option<String>,
+
+    /// `LiveKit` API key for token generation (optional).
+    /// Voice channels are disabled when absent.
+    pub livekit_api_key: Option<SecretString>,
+
+    /// `LiveKit` API secret for token signing (optional).
+    /// Voice channels are disabled when absent.
+    pub livekit_api_secret: Option<SecretString>,
+
+    /// `LiveKit` token TTL in seconds (default: 7200 = 2 hours).
+    /// Controls the maximum lifetime of voice channel JWTs.
+    #[serde(default = "default_livekit_token_ttl_secs")]
+    pub livekit_token_ttl_secs: u64,
 }
 
 fn default_port() -> u16 {
@@ -98,6 +115,10 @@ fn default_rate_limit_per_minute() -> u32 {
     60
 }
 
+fn default_livekit_token_ttl_secs() -> u64 {
+    7200
+}
+
 impl Config {
     /// Initialize configuration from environment variables.
     ///
@@ -119,6 +140,14 @@ impl Config {
     #[must_use]
     pub fn is_production(&self) -> bool {
         self.environment == "production"
+    }
+
+    /// Returns `true` only when all three `LiveKit` fields are `Some`.
+    #[must_use]
+    pub fn livekit_enabled(&self) -> bool {
+        self.livekit_url.is_some()
+            && self.livekit_api_key.is_some()
+            && self.livekit_api_secret.is_some()
     }
 }
 
@@ -155,6 +184,17 @@ impl std::fmt::Debug for Config {
                 "safe_browsing_api_key",
                 &self.safe_browsing_api_key.as_ref().map(|_| "[REDACTED]"),
             )
+            .field("livekit_url", &self.livekit_url)
+            .field(
+                "livekit_api_key",
+                &self.livekit_api_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "livekit_api_secret",
+                &self.livekit_api_secret.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("livekit_token_ttl_secs", &self.livekit_token_ttl_secs)
+            .field("livekit_enabled", &self.livekit_enabled())
             .finish()
     }
 }

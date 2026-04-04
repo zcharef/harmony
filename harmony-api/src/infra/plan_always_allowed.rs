@@ -37,6 +37,10 @@ impl PlanLimitChecker for AlwaysAllowedChecker {
         Ok(())
     }
 
+    async fn check_voice_concurrent(&self, _server_id: &ServerId) -> Result<(), DomainError> {
+        Ok(())
+    }
+
     async fn check_invite_limit(&self, _server_id: &ServerId) -> Result<(), DomainError> {
         Ok(())
     }

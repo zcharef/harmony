@@ -337,6 +337,31 @@ impl From<Uuid> for ModerationRetryId {
     }
 }
 
+/// Unique identifier for a voice session record.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "ff0e8400-e29b-41d4-a716-44665544000a")]
+#[serde(transparent)]
+pub struct VoiceSessionId(pub Uuid);
+
+impl VoiceSessionId {
+    #[must_use]
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for VoiceSessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for VoiceSessionId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
 /// Well-known UUID for system-initiated moderation deletions.
 /// WHY: Distinguishes "user deleted their message" from "system moderated"
 /// in the `deleted_by` column. Required for legal audit (CSAM reporting).

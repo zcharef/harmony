@@ -181,6 +181,24 @@ impl PlanLimitChecker for PgPlanLimitChecker {
             .await
     }
 
+    async fn check_voice_concurrent(&self, server_id: &ServerId) -> Result<(), DomainError> {
+        let sid = server_id.0;
+
+        // WHY: COUNT active voice sessions in this server.
+        // voice_sessions rows are removed on disconnect, so all rows are active.
+        let count = sqlx::query_scalar!(
+            r#"SELECT COALESCE(COUNT(*)::BIGINT, 0) as "count!" FROM voice_sessions WHERE server_id = $1"#,
+            sid
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_err)?;
+
+        #[allow(clippy::cast_sign_loss)] // WHY: COALESCE guarantees non-negative
+        self.check_limit(server_id, ResourceKind::VoiceConcurrent, count as u64)
+            .await
+    }
+
     async fn check_invite_limit(&self, server_id: &ServerId) -> Result<(), DomainError> {
         let sid = server_id.0;
 

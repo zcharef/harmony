@@ -125,6 +125,14 @@ impl ApiError {
         }
     }
 
+    pub fn service_unavailable(title: impl Into<String>, detail: impl Into<String>) -> Self {
+        let status = StatusCode::SERVICE_UNAVAILABLE;
+        Self {
+            status,
+            problem: ProblemDetails::new(status, title, detail),
+        }
+    }
+
     /// Converts a domain error to an API error.
     /// Useful in `map_err` closures where `From` trait can't be used directly.
     #[must_use]
@@ -188,6 +196,10 @@ impl From<DomainError> for ApiError {
             DomainError::Internal(_) => ApiError::internal("An internal error occurred"),
             DomainError::ExternalService(msg) => ApiError::bad_gateway(msg),
             DomainError::RateLimited(msg) => ApiError::too_many_requests(msg),
+            DomainError::VoiceDisabled => ApiError::service_unavailable(
+                "Voice Not Configured",
+                "Voice channels are not available on this server. Configure LiveKit to enable voice.",
+            ),
         }
     }
 }

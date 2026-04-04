@@ -8,6 +8,7 @@
 // WHY: main.rs is the composition root — process::exit on fatal startup errors is acceptable.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+use harmony_api::domain::ports::VoiceSessionRepository as _;
 use harmony_api::{api, config, domain, infra};
 
 use std::net::SocketAddr;
@@ -70,6 +71,7 @@ async fn main() {
     spawn_presence_sweep(state.clone());
     spawn_spam_guard_sweep(state.spam_guard().clone());
     spawn_moderation_retry_sweep(state.clone());
+    spawn_voice_session_sweep(state.clone());
 
     // 7. Build router with middleware stack
     let app = build_router(state, trusted_proxies, config.rate_limit_per_minute);
@@ -269,6 +271,33 @@ async fn init_app_state(config: &Config) -> AppState {
     // Initialize in-memory presence tracker
     let presence_tracker = Arc::new(infra::PresenceTracker::new());
 
+    // WHY: Construct voice service only when all three LiveKit env vars are set.
+    // When None, voice endpoints return DomainError::VoiceDisabled (graceful degradation).
+    let voice_service: Option<Arc<domain::services::VoiceService>> = if config.livekit_enabled() {
+        let livekit_url = config.livekit_url.as_deref().unwrap().to_string();
+        let livekit_key = config.livekit_api_key.clone().unwrap();
+        let livekit_secret = config.livekit_api_secret.clone().unwrap();
+        let livekit_service = Arc::new(infra::livekit::LiveKitTokenService::new(
+            livekit_url,
+            livekit_key,
+            livekit_secret,
+            config.livekit_token_ttl_secs,
+        ));
+        let voice_repo = Arc::new(infra::postgres::PgVoiceSessionRepository::new(pool.clone()));
+
+        tracing::info!("Voice channels ENABLED (LiveKit configured)");
+        Some(Arc::new(domain::services::VoiceService::new(
+            voice_repo,
+            channel_repo.clone(),
+            member_repo.clone(),
+            plan_limit_checker.clone(),
+            livekit_service,
+        )))
+    } else {
+        tracing::info!("Voice channels DISABLED (LiveKit not configured)");
+        None
+    };
+
     tracing::info!("Domain services initialized");
 
     AppState::new(
@@ -301,6 +330,7 @@ async fn init_app_state(config: &Config) -> AppState {
         message_repo_for_moderation,
         server_repo_for_moderation,
         moderation_retry_repo,
+        voice_service,
     )
 }
 
@@ -571,6 +601,72 @@ fn spawn_moderation_retry_sweep(state: api::AppState) {
                         }
                     }
                 }
+            }
+        }
+    });
+}
+
+/// Spawn a background task that sweeps stale voice sessions every 30s.
+///
+/// Sessions with `last_seen_at` older than 45s are removed and
+/// `VoiceStateUpdate { action: Left }` is emitted for each.
+///
+/// WHY: Mirrors `spawn_presence_sweep` but for voice sessions.
+/// The 45s threshold gives a 15s buffer after the client heartbeat interval (30s).
+/// If a client disconnects without calling leave, the sweep cleans up within ~30–45s.
+fn spawn_voice_session_sweep(state: api::AppState) {
+    use domain::models::{ServerEvent, VoiceAction};
+
+    /// How often the sweep runs.
+    const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+    /// Sessions older than this are considered stale (disconnected).
+    const STALE_THRESHOLD_SECS: i64 = 45;
+
+    // WHY: Skip sweep entirely when voice is not enabled.
+    // No voice service means no voice sessions can exist.
+    let voice_service = match state.voice_service().cloned() {
+        Some(s) => s,
+        None => return,
+    };
+
+    // WHY: We need the VoiceSessionRepository directly for delete_stale,
+    // but VoiceService doesn't expose it. Use a separate repo instance
+    // constructed from the pool (same pattern as message_repo_for_moderation).
+    // However, delete_stale is on VoiceSessionRepository which is inside
+    // VoiceService. Instead, we construct a separate repo from the pool.
+    let pool = state.pool().clone();
+    let voice_repo = infra::postgres::PgVoiceSessionRepository::new(pool);
+
+    tokio::spawn(async move {
+        // WHY: Suppress unused variable warning — voice_service is held to prove
+        // voice is enabled, but the sweep uses voice_repo directly.
+        let _voice_enabled = voice_service;
+
+        let mut interval = tokio::time::interval(SWEEP_INTERVAL);
+        loop {
+            interval.tick().await;
+
+            let threshold = chrono::Utc::now() - chrono::Duration::seconds(STALE_THRESHOLD_SECS);
+            match voice_repo.delete_stale(threshold).await {
+                Ok(stale) => {
+                    if stale.is_empty() {
+                        continue;
+                    }
+
+                    tracing::info!(count = stale.len(), "Swept stale voice sessions");
+
+                    for session in stale {
+                        let event = ServerEvent::VoiceStateUpdate {
+                            sender_id: session.user_id.clone(),
+                            server_id: session.server_id.clone(),
+                            channel_id: session.channel_id.clone(),
+                            user_id: session.user_id,
+                            action: VoiceAction::Left,
+                        };
+                        state.event_bus().publish(event);
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "Voice session sweep failed"),
             }
         }
     });

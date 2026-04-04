@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(COUNT(*)::BIGINT, 0) as \"count!\"\n            FROM (\n                SELECT 1 FROM voice_sessions\n                WHERE server_id = $1 AND user_id != $2\n                FOR UPDATE\n            ) locked\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2f243fc935a784f65b9a22a62c681c533dcfe3ce0351b8b1315b25db6ada8685"
+}

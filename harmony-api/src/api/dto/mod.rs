@@ -15,6 +15,7 @@ pub mod profiles;
 pub mod read_states;
 pub mod servers;
 pub mod user_preferences;
+pub mod voice;
 
 pub use bans::{BanListQuery, BanListResponse, BanResponse, BanUserRequest};
 pub use channels::{

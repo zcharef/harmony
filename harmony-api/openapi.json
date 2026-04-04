@@ -1041,6 +1041,233 @@
         ]
       }
     },
+    "/v1/channels/{id}/voice/join": {
+      "post": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "Join a voice channel. Returns a `LiveKit` token for the client.",
+        "description": "If the user is already in another voice channel, they are automatically\nmoved and a `VoiceStateUpdate(Left)` event is emitted for the old channel.\n\n# Errors\n- 401 if not authenticated.\n- 403 if not a server member or plan limit exceeded.\n- 404 if the channel does not exist.\n- 422 if the channel is not a voice channel.\n- 503 if voice is not configured (`LiveKit` disabled).",
+        "operationId": "join_voice",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Voice channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Joined voice channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden or plan limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a voice channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Voice not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/channels/{id}/voice/leave": {
+      "post": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "Leave a voice channel. The user must be in the specified channel.",
+        "description": "# Errors\n- 401 if not authenticated.\n- 409 if the user is not in the specified channel.\n- 503 if voice is not configured (`LiveKit` disabled).",
+        "operationId": "leave_voice",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Voice channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Left voice channel"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not in the specified channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Voice not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/channels/{id}/voice/participants": {
+      "get": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "List all participants currently in a voice channel.",
+        "description": "# Errors\n- 401 if not authenticated.\n- 403 if not a server member.\n- 404 if the channel does not exist.\n- 503 if voice is not configured (`LiveKit` disabled).",
+        "operationId": "list_voice_participants",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Voice channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Participant list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceParticipantsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Voice not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/dms": {
       "get": {
         "tags": [
@@ -2024,6 +2251,65 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Servers"
+        ],
+        "summary": "Delete a server. Requires owner role.",
+        "description": "# Errors\nReturns `ApiError` on insufficient role, not found, or repository error.",
+        "operationId": "delete_server",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Server deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role",
             "content": {
               "application/json": {
                 "schema": {
@@ -3386,6 +3672,66 @@
           },
           "404": {
             "description": "Server or new owner not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/voice/heartbeat": {
+      "post": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "Heartbeat to keep a voice session alive. Clients should call this\nperiodically (e.g. every 30s) while connected to voice.",
+        "description": "The `session_id` in the request body must match the session created on join.\nThis prevents a stale device from keeping a replaced session alive.\n\n# Errors\n- 401 if not authenticated.\n- 404 if the session does not exist (expired, replaced, or user not in voice).\n- 503 if voice is not configured (`LiveKit` disabled).",
+        "operationId": "voice_heartbeat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceHeartbeatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Heartbeat acknowledged"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Voice not configured",
             "content": {
               "application/json": {
                 "schema": {
@@ -5194,6 +5540,108 @@
           "dnd",
           "offline"
         ]
+      },
+      "VoiceAction": {
+        "type": "string",
+        "description": "Voice channel action for SSE events.",
+        "enum": [
+          "joined",
+          "left"
+        ]
+      },
+      "VoiceHeartbeatRequest": {
+        "type": "object",
+        "description": "Request body for the voice heartbeat endpoint.",
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The session identifier returned when the user joined voice.\nEnsures only the current device's session receives the heartbeat."
+          }
+        },
+        "additionalProperties": false
+      },
+      "VoiceParticipantResponse": {
+        "type": "object",
+        "description": "A single voice participant in a channel.",
+        "required": [
+          "userId",
+          "channelId",
+          "displayName",
+          "joinedAt"
+        ],
+        "properties": {
+          "channelId": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "Display name (nickname or username). Populated from the user's\nprofile — not stored on `VoiceSession` itself."
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          }
+        }
+      },
+      "VoiceParticipantsResponse": {
+        "type": "object",
+        "description": "Envelope for a list of voice participants (ADR-036).",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceParticipantResponse"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "VoiceTokenResponse": {
+        "type": "object",
+        "description": "Voice token response returned after joining a voice channel.",
+        "required": [
+          "token",
+          "url",
+          "sessionId"
+        ],
+        "properties": {
+          "previousChannelId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ChannelId",
+                "description": "Channel the user was previously in (if auto-moved). Clients use this\nto update UI state for the old channel."
+              }
+            ]
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Opaque session identifier. Clients must send this back in heartbeats\nso the server can distinguish the current device from stale ones."
+          },
+          "token": {
+            "type": "string",
+            "description": "`LiveKit` JWT token for the client to connect with."
+          },
+          "url": {
+            "type": "string",
+            "description": "`LiveKit` server URL to connect to."
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -5269,6 +5717,10 @@
     {
       "name": "Presence",
       "description": "User presence status updates"
+    },
+    {
+      "name": "Voice",
+      "description": "Voice channel management (LiveKit)"
     },
     {
       "name": "Events",

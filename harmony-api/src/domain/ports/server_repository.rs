@@ -39,6 +39,13 @@ pub trait ServerRepository: Send + Sync + std::fmt::Debug {
         name: String,
     ) -> Result<Option<Server>, DomainError>;
 
+    /// Delete a server by ID. Returns `true` if a row was deleted, `false` if not found.
+    ///
+    /// WHY: CASCADE in the database removes related rows (channels, members,
+    /// `voice_sessions`, etc.). Callers must snapshot dependent data before calling
+    /// this method so they can emit cleanup SSE events.
+    async fn delete(&self, server_id: &ServerId) -> Result<bool, DomainError>;
+
     /// Fetch the server's Tier 2 moderation category settings.
     /// Returns empty `HashMap` if no settings configured (= all Tier 2 OFF).
     async fn get_moderation_categories(

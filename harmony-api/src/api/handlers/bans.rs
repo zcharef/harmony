@@ -9,7 +9,7 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::{BanPayload, ServerEvent};
-use crate::domain::models::{ServerId, UserId};
+use crate::domain::models::{ServerId, UserId, VoiceAction};
 
 /// Default ban page size.
 const DEFAULT_BAN_LIMIT: i64 = 50;
@@ -143,6 +143,37 @@ pub async fn ban_member(
         reason: "banned".to_string(),
     });
     tracing::debug!(server_id = %server_id, target_user_id = %banned_user_id, receivers, "emitted force.disconnect");
+
+    // WHY: Best-effort voice cleanup — the banned user's voice session has no FK
+    // to server_members, so removing membership alone won't disconnect them.
+    if let Some(voice_service) = state.voice_service() {
+        match voice_service.leave_voice(&banned_user_id, None).await {
+            Ok(Some(session)) => {
+                state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+                    sender_id: banned_user_id.clone(),
+                    server_id: session.server_id.clone(),
+                    channel_id: session.channel_id.clone(),
+                    user_id: banned_user_id.clone(),
+                    action: VoiceAction::Left,
+                });
+                tracing::debug!(
+                    server_id = %session.server_id,
+                    channel_id = %session.channel_id,
+                    user_id = %banned_user_id,
+                    "Banned user removed from voice channel"
+                );
+            }
+            Ok(None) => {} // User was not in voice — nothing to clean up.
+            Err(e) => {
+                tracing::warn!(
+                    server_id = %server_id,
+                    user_id = %banned_user_id,
+                    error = ?e,
+                    "Failed to remove banned user from voice (best-effort)"
+                );
+            }
+        }
+    }
 
     // WHY: Best-effort system message — announce the ban in the default channel.
     // Must never fail the ban itself.

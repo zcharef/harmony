@@ -66,6 +66,8 @@ pub enum ResourceKind {
     Categories,
     // §4 Roles (per server)
     Roles,
+    // §7 Voice (per server)
+    VoiceConcurrent,
     // §8 Invites (per server)
     ActiveInvites,
     // §10 DMs (per user)
@@ -83,6 +85,7 @@ impl ResourceKind {
             Self::Channels => "channels",
             Self::Categories => "categories",
             Self::Roles => "roles",
+            Self::VoiceConcurrent => "concurrent voice participants",
             Self::ActiveInvites => "active invites",
             Self::OpenDms => "open DM conversations",
         }
@@ -133,6 +136,11 @@ pub struct PlanLimits {
     pub max_custom_status_chars: u64,
     // §12 Rate limits (per user)
     pub max_messages_per_5s: u64,
+    // §13 Voice (per server)
+    pub voice_concurrent_limit: i32,
+    pub voice_channel_limit: i32,
+    pub voice_bitrate_kbps: i32,
+    pub voice_max_duration_hours: i32,
 }
 
 // -- Hardcoded limit constants -----------------------------------------------
@@ -155,6 +163,10 @@ const FREE_LIMITS: PlanLimits = PlanLimits {
     max_bio_chars: 200,
     max_custom_status_chars: 50,
     max_messages_per_5s: 5,
+    voice_concurrent_limit: 5,
+    voice_channel_limit: 5,
+    voice_bitrate_kbps: 64,
+    voice_max_duration_hours: 1,
 };
 
 const SUPPORTER_LIMITS: PlanLimits = PlanLimits {
@@ -173,6 +185,10 @@ const SUPPORTER_LIMITS: PlanLimits = PlanLimits {
     max_bio_chars: 500,
     max_custom_status_chars: 128,
     max_messages_per_5s: 10,
+    voice_concurrent_limit: 100,
+    voice_channel_limit: 50,
+    voice_bitrate_kbps: 128,
+    voice_max_duration_hours: 8,
 };
 
 const CREATOR_LIMITS: PlanLimits = PlanLimits {
@@ -191,6 +207,10 @@ const CREATOR_LIMITS: PlanLimits = PlanLimits {
     max_bio_chars: 1_000,
     max_custom_status_chars: 128,
     max_messages_per_5s: 20,
+    voice_concurrent_limit: 500,
+    voice_channel_limit: 100,
+    voice_bitrate_kbps: 256,
+    voice_max_duration_hours: 24,
 };
 
 /// Self-hosted limits: specific high defaults, with `u64::MAX` only for configurable fields.
@@ -210,6 +230,10 @@ pub const SELF_HOSTED_LIMITS: PlanLimits = PlanLimits {
     max_bio_chars: 4_000,
     max_custom_status_chars: 256,
     max_messages_per_5s: u64::MAX, // configurable
+    voice_concurrent_limit: 10_000,
+    voice_channel_limit: 10_000,
+    voice_bitrate_kbps: 512,
+    voice_max_duration_hours: i32::MAX, // configurable
 };
 
 impl PlanLimits {
@@ -243,6 +267,8 @@ impl PlanLimits {
             ResourceKind::Channels => self.max_channels,
             ResourceKind::Categories => self.max_categories,
             ResourceKind::Roles => self.max_roles,
+            #[allow(clippy::cast_sign_loss)] // WHY: voice_concurrent_limit is always positive
+            ResourceKind::VoiceConcurrent => self.voice_concurrent_limit as u64,
             ResourceKind::ActiveInvites => self.max_active_invites,
             ResourceKind::OpenDms => self.max_open_dms,
         }
@@ -284,6 +310,11 @@ mod tests {
         assert_eq!(limits.max_custom_status_chars, 50);
         // §12 Rate limits
         assert_eq!(limits.max_messages_per_5s, 5);
+        // §13 Voice
+        assert_eq!(limits.voice_concurrent_limit, 5);
+        assert_eq!(limits.voice_channel_limit, 5);
+        assert_eq!(limits.voice_bitrate_kbps, 64);
+        assert_eq!(limits.voice_max_duration_hours, 1);
     }
 
     // ── Supporter plan limits match spec ────────────────────────────────
@@ -307,6 +338,11 @@ mod tests {
         assert_eq!(limits.max_bio_chars, 500);
         assert_eq!(limits.max_custom_status_chars, 128);
         assert_eq!(limits.max_messages_per_5s, 10);
+        // §13 Voice
+        assert_eq!(limits.voice_concurrent_limit, 100);
+        assert_eq!(limits.voice_channel_limit, 50);
+        assert_eq!(limits.voice_bitrate_kbps, 128);
+        assert_eq!(limits.voice_max_duration_hours, 8);
     }
 
     // ── Creator plan limits match spec ──────────────────────────────────
@@ -330,6 +366,11 @@ mod tests {
         assert_eq!(limits.max_bio_chars, 1_000);
         assert_eq!(limits.max_custom_status_chars, 128);
         assert_eq!(limits.max_messages_per_5s, 20);
+        // §13 Voice
+        assert_eq!(limits.voice_concurrent_limit, 500);
+        assert_eq!(limits.voice_channel_limit, 100);
+        assert_eq!(limits.voice_bitrate_kbps, 256);
+        assert_eq!(limits.voice_max_duration_hours, 24);
     }
 
     // ── Self-hosted limits: specific high defaults ──────────────────────
@@ -353,6 +394,11 @@ mod tests {
         assert_eq!(limits.max_bio_chars, 4_000);
         assert_eq!(limits.max_custom_status_chars, 256);
         assert_eq!(limits.max_messages_per_5s, u64::MAX); // configurable
+        // §13 Voice
+        assert_eq!(limits.voice_concurrent_limit, 10_000);
+        assert_eq!(limits.voice_channel_limit, 10_000);
+        assert_eq!(limits.voice_bitrate_kbps, 512);
+        assert_eq!(limits.voice_max_duration_hours, i32::MAX); // configurable
     }
 
     // ── Tier ordering: Free < Supporter < Creator for all limits ────────
@@ -407,6 +453,18 @@ mod tests {
 
         assert!(free.max_messages_per_5s <= supporter.max_messages_per_5s);
         assert!(supporter.max_messages_per_5s <= creator.max_messages_per_5s);
+
+        assert!(free.voice_concurrent_limit <= supporter.voice_concurrent_limit);
+        assert!(supporter.voice_concurrent_limit <= creator.voice_concurrent_limit);
+
+        assert!(free.voice_channel_limit <= supporter.voice_channel_limit);
+        assert!(supporter.voice_channel_limit <= creator.voice_channel_limit);
+
+        assert!(free.voice_bitrate_kbps <= supporter.voice_bitrate_kbps);
+        assert!(supporter.voice_bitrate_kbps <= creator.voice_bitrate_kbps);
+
+        assert!(free.voice_max_duration_hours <= supporter.voice_max_duration_hours);
+        assert!(supporter.voice_max_duration_hours <= creator.voice_max_duration_hours);
     }
 
     // ── limit_for returns correct value for each ResourceKind ───────────
@@ -507,6 +565,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn limit_for_voice_concurrent() {
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::VoiceConcurrent),
+            5
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Supporter).limit_for(ResourceKind::VoiceConcurrent),
+            100
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::VoiceConcurrent),
+            500
+        );
+    }
+
     // ── Plan FromStr round-trip ─────────────────────────────────────────
 
     #[test]
@@ -590,6 +664,10 @@ mod tests {
         assert_eq!(ResourceKind::Channels.display_name(), "channels");
         assert_eq!(ResourceKind::Categories.display_name(), "categories");
         assert_eq!(ResourceKind::Roles.display_name(), "roles");
+        assert_eq!(
+            ResourceKind::VoiceConcurrent.display_name(),
+            "concurrent voice participants"
+        );
         assert_eq!(ResourceKind::ActiveInvites.display_name(), "active invites");
         assert_eq!(
             ResourceKind::OpenDms.display_name(),

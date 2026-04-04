@@ -98,14 +98,13 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     //   Free: 1, Supporter: 5, Creator: 10.
     // Call from attachment upload handler BEFORE storing in Supabase Storage.
 
-    // ── TODO(plan-limits-v3): §7 — Voice/Video (per server) ─────────────
-    //
-    // async fn check_voice_concurrent(&self, server_id: &ServerId) -> Result<(), DomainError>;
-    //
-    //   Free: 5 concurrent, 5 voice channels, 64kbps, no video, no screen share, 1h max.
-    //   Supporter: 100 concurrent, 50 channels, 128kbps, 720p, 720p 15fps screen share, 8h.
-    //   Creator: 500 concurrent, 100 channels, 256kbps, 1080p, 1080p 30fps screen share, 24h.
-    // Call from voice join handler when LiveKit integration lands (Phase 3).
+    /// Check if adding another voice participant would exceed the server's plan limit. (§7)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::LimitExceeded` when the concurrent voice session count
+    /// equals or exceeds the plan limit, or `DomainError::Internal` on infrastructure failure.
+    async fn check_voice_concurrent(&self, server_id: &ServerId) -> Result<(), DomainError>;
 
     /// Check if the server can create another active invite. (§8)
     ///

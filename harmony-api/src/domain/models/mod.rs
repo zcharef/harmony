@@ -21,6 +21,7 @@ pub mod role;
 mod server;
 pub mod server_event;
 mod user_preferences;
+mod voice_session;
 
 pub use ban::ServerBan;
 pub use channel::{Channel, ChannelType};
@@ -28,7 +29,7 @@ pub use crypto::{ClaimedKey, DeviceKey, OneTimeKey, PreKeyBundle};
 pub use desktop_auth::DesktopAuthCode;
 pub use ids::{
     CategoryId, ChannelId, DeviceId, DeviceKeyId, InviteCode, MegolmSessionId, MessageId,
-    ModerationRetryId, OneTimeKeyId, RoleId, SYSTEM_MODERATOR_ID, ServerId, UserId,
+    ModerationRetryId, OneTimeKeyId, RoleId, SYSTEM_MODERATOR_ID, ServerId, UserId, VoiceSessionId,
 };
 pub use invite::Invite;
 pub use megolm_session::MegolmSession;
@@ -44,3 +45,4 @@ pub use role::Role;
 pub use server::Server;
 pub use server_event::ServerEvent;
 pub use user_preferences::UserPreferences;
+pub use voice_session::{NewVoiceSession, VoiceAction, VoiceSession, VoiceToken};
