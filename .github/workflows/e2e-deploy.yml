@@ -169,16 +169,40 @@ jobs:
         run: pnpm dev &
 
       # ── Wait for services ────────────────────────────────
+      # WHY 3 attempts with restart: The API connects to Supabase Cloud Postgres
+      # on startup. Transient PoolTimedOut errors occur when the CI runner's
+      # network path to Supabase is slow. Restarting the API retries the
+      # connection with a fresh pool, which usually succeeds on the 2nd attempt.
       - name: Wait for API and Vite to be ready
+        env:
+          DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
+          SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
+          SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
+          ENVIRONMENT: test
+          SERVER_PORT: "3000"
         run: |
-          echo "Waiting for Rust API..."
-          timeout 60 bash -c 'until curl -sf http://localhost:3000/health; do sleep 1; done' || {
-            echo "::error::API failed to start. Logs:"
+          MAX_ATTEMPTS=3
+          for attempt in $(seq 1 $MAX_ATTEMPTS); do
+            echo "Waiting for Rust API (attempt $attempt/$MAX_ATTEMPTS)..."
+            if timeout 90 bash -c 'until curl -sf http://localhost:3000/health; do sleep 2; done'; then
+              echo "API is healthy."
+              break
+            fi
+            echo "::warning::API failed to start on attempt $attempt."
             cat /tmp/api-stdout.log
-            exit 1
-          }
+            if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+              echo "Killing stale API process and restarting..."
+              pkill -f harmony-api || true
+              sleep 2
+              cd harmony-api && ./target/release/harmony-api > /tmp/api-stdout.log 2>&1 &
+              cd ..
+            else
+              echo "::error::API failed to start after $MAX_ATTEMPTS attempts."
+              exit 1
+            fi
+          done
           echo "Waiting for Vite dev server..."
-          timeout 60 bash -c 'until curl -sf http://localhost:1420; do sleep 1; done'
+          timeout 90 bash -c 'until curl -sf http://localhost:1420; do sleep 2; done'
           echo "All services ready."
 
       # ── Smoke check: verify React app renders ────────────
