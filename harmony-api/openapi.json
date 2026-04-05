@@ -5255,7 +5255,7 @@
         "properties": {
           "sessionId": {
             "type": "string",
-            "description": "The session identifier returned when the user joined voice.\nThe server derives the channel from the session — no client-supplied\nchannel_id to prevent IDOR (minting tokens for the wrong room)."
+            "description": "The session identifier returned when the user joined voice.\nThe server derives the channel from the session — no client-supplied\n`channel_id` to prevent IDOR (minting tokens for the wrong room)."
           }
         },
         "additionalProperties": false
