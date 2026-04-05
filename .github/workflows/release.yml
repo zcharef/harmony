@@ -143,9 +143,10 @@ jobs:
 
       # ── Build, sign & upload to GitHub Release ──────────
       - name: Build and release
-        # WHY v0.6 not v0: pre-1.0 semver allows breaking changes on minor bumps.
-        # v0.6 gets patch fixes only. Bump deliberately when tauri-action releases v0.7+.
-        uses: tauri-apps/tauri-action@v0.6
+        # WHY pinned: pre-1.0 semver allows breaking changes on minor bumps.
+        # v0.6.x gets patch fixes only. Bump deliberately when tauri-action releases v0.7+.
+        # NOTE: v0.6 tag is stale (points to v0.6.0). Pin to latest patch explicitly.
+        uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Tauri updater signing (all platforms)
@@ -183,3 +184,83 @@ jobs:
         run: |
           rm -f certificate.p12
           security delete-keychain build.keychain 2>/dev/null || true
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Fix updater signatures — reconcile latest.json with actual .sig files
+  #
+  # WHY: tauri-action@v0.6 generates latest.json with a stale signature for
+  # macOS universal builds. The action signs the single-arch build first,
+  # writes that signature to latest.json, then re-signs after lipo creates
+  # the universal binary. The uploaded .sig file is correct but latest.json
+  # still has the pre-lipo signature, causing "signature verification failed"
+  # on macOS clients.
+  #
+  # This job reads each .sig asset, compares it to the latest.json entry,
+  # and patches any mismatch. Idempotent: if tauri-action fixes this upstream,
+  # signatures already match and the step becomes a no-op.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  fix-updater-signatures:
+    name: Fix updater signatures in latest.json
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Reconcile latest.json with .sig files
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          REPO="${GITHUB_REPOSITORY}"
+          WORK=$(mktemp -d)
+
+          gh release download "$TAG" --repo "$REPO" --dir "$WORK"
+
+          python3 << 'SCRIPT'
+          import json, sys
+          from pathlib import Path
+
+          work = Path(sys.argv[1])
+          latest = work / "latest.json"
+
+          with open(latest) as f:
+              data = json.load(f)
+
+          fixed = 0
+          for platform, info in data.get("platforms", {}).items():
+              url = info.get("url", "")
+              filename = url.rsplit("/", 1)[-1] if "/" in url else ""
+              sig_file = work / f"{filename}.sig"
+
+              if not sig_file.exists():
+                  print(f"SKIP {platform}: no .sig file for {filename}")
+                  continue
+
+              actual_sig = sig_file.read_text().strip()
+              current_sig = info.get("signature", "").strip()
+
+              if current_sig == actual_sig:
+                  print(f"  OK {platform}")
+              else:
+                  info["signature"] = actual_sig
+                  fixed += 1
+                  print(f" FIX {platform}: signature replaced")
+
+          if fixed > 0:
+              with open(latest, "w") as f:
+                  json.dump(data, f, indent=2)
+              print(f"\n{fixed} signature(s) patched")
+          else:
+              print("\nAll signatures match — no patch needed")
+
+          # Exit code signals whether re-upload is needed
+          sys.exit(0 if fixed == 0 else 42)
+          SCRIPT "$WORK" && CHANGED=no || CHANGED=yes
+
+          if [ "$CHANGED" = "yes" ]; then
+            gh release upload "$TAG" --repo "$REPO" --clobber "$WORK/latest.json"
+            echo "✅ latest.json re-uploaded with corrected signatures"
+          else
+            echo "✅ All signatures already correct — no re-upload needed"
+          fi

@@ -174,8 +174,8 @@ function ReplyBar({
 function useMarkReadOnFocus(channelId: string | null, messages: MessageResponse[]) {
   const markReadMutation = useMarkRead()
   const clearUnread = useUnreadStore((s) => s.clear)
-  const messageCount = messages.length
-  const lastMessageId = messageCount > 0 ? messages[messageCount - 1]?.id : undefined
+  // WHY: Skip temp-* optimistic IDs — they fail UUID validation on the server (422).
+  const lastMessageId = [...messages].reverse().find((m) => !m.id.startsWith('temp-'))?.id
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally stable — only re-run on channel switch or first message load
   useEffect(() => {

@@ -3,7 +3,7 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::api::dto::{
-    DeviceListResponse, DeviceResponse, KeyCountResponse, PreKeyBundleResponse,
+    DeviceListResponse, DeviceResponse, KeyCountQuery, KeyCountResponse, PreKeyBundleResponse,
     RegisterDeviceRequest, UploadOneTimeKeysRequest,
 };
 use crate::api::errors::{ApiError, ProblemDetails};
@@ -193,11 +193,11 @@ pub async fn remove_device(
     tag = "Keys",
     security(("bearer_auth" = [])),
     params(
-        ("device_id" = DeviceId, Query, description = "Device ID to check key count for"),
+        ("deviceId" = DeviceId, Query, description = "Device ID to check key count for"),
     ),
     responses(
         (status = 200, description = "Key count", body = KeyCountResponse),
-        (status = 400, description = "Missing device_id", body = ProblemDetails),
+        (status = 400, description = "Missing deviceId", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
     )
 )]
@@ -213,13 +213,4 @@ pub async fn get_key_count(
         .await?;
 
     Ok((StatusCode::OK, Json(KeyCountResponse::new(count))))
-}
-
-/// Query parameters for the key count endpoint.
-#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[into_params(parameter_in = Query)]
-pub struct KeyCountQuery {
-    /// Device ID to check key count for.
-    pub device_id: DeviceId,
 }

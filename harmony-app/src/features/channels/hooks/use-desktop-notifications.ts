@@ -6,12 +6,28 @@ import { usePreferences } from '@/features/preferences'
 import { useServerEvent } from '@/hooks/use-server-event'
 import type { NotificationSettingsResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
-import { NAVIGATE_EVENT, navigateDetailSchema } from '@/lib/navigation-events'
+import { NAVIGATE_EVENT } from '@/lib/navigation-events'
 import { isTauri } from '@/lib/platform'
 import { queryKeys } from '@/lib/query-keys'
 
 const MAX_BODY_LENGTH = 100
 const COOLDOWN_MS = 5_000
+
+// WHY: The official tauri-plugin-notification does not support onAction/click
+// callbacks on desktop (mobile-only command). As a workaround, we track the
+// last notification's navigation target and navigate on window focus within a
+// short time window. macOS brings the app to foreground on notification click,
+// so this captures the intent reliably. False positive: user Alt-Tabs/dock-clicks
+// within the window — rare, and navigation is still to a new-message channel.
+const NOTIFICATION_CLICK_WINDOW_MS = 3_000
+
+interface NotificationTarget {
+  serverId: string
+  channelId: string
+  sentAt: number
+}
+
+let lastNotificationTarget: NotificationTarget | null = null
 
 const notifEventSchema = z.object({
   senderId: z.string(),
@@ -128,9 +144,14 @@ async function fireNotification(
     sendNotification({
       title: event.message.authorUsername,
       body,
-      extra: { serverId: event.serverId, channelId: event.channelId },
     })
+    lastNotificationTarget = {
+      serverId: event.serverId,
+      channelId: event.channelId,
+      sentAt: Date.now(),
+    }
   } catch (err: unknown) {
+    lastNotificationTarget = null
     logger.warn('notification_send_failed', {
       error: err instanceof Error ? err.message : String(err),
     })
@@ -147,8 +168,9 @@ async function fireNotification(
  * channel filter, document.hasFocus(), notification settings cache,
  * per-channel rate limiting (5s cooldown).
  *
- * On notification click: dispatches a CustomEvent on `window` to trigger
- * navigation in MainLayout, and focuses the Tauri window.
+ * On notification click: macOS focuses the app window (OS default). A
+ * focus-based heuristic detects this and navigates to the notified channel
+ * within a 3-second window (see module-level comment for tradeoff).
  */
 export function useDesktopNotifications(
   activeChannelId: string | null,
@@ -160,48 +182,30 @@ export function useDesktopNotifications(
   const permissionRef = useRef<PermissionStatus>('unknown')
   const cooldownMap = useRef(new Map<string, number>())
 
-  // WHY: Register the onAction listener once to handle notification clicks.
-  // Returns a PluginListener with unregister() for cleanup on unmount.
+  // WHY: On notification click, macOS focuses the app window (OS default). We
+  // detect this via the window 'focus' event and navigate to the channel if a
+  // notification was sent recently. See module-level comment for tradeoff details.
   useEffect(() => {
     if (!isTauri()) return
 
-    let listener: { unregister: () => Promise<void> } | undefined
-
-    async function setup() {
-      try {
-        const { onAction } = await import('@tauri-apps/plugin-notification')
-        listener = await onAction((notification) => {
-          const parsed = navigateDetailSchema.safeParse(notification.extra)
-          if (!parsed.success) return
-
-          window.dispatchEvent(new CustomEvent(NAVIGATE_EVENT, { detail: parsed.data }))
-
-          import('@tauri-apps/api/window')
-            .then(({ getCurrentWindow }) => {
-              const win = getCurrentWindow()
-              return win.unminimize().then(() => win.setFocus())
-            })
-            .catch((err: unknown) => {
-              logger.warn('notification_focus_failed', {
-                error: err instanceof Error ? err.message : String(err),
-              })
-            })
-        })
-      } catch (err: unknown) {
-        logger.warn('notification_action_listener_setup_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        })
+    function handleFocus() {
+      if (lastNotificationTarget === null) return
+      if (Date.now() - lastNotificationTarget.sentAt > NOTIFICATION_CLICK_WINDOW_MS) {
+        lastNotificationTarget = null
+        return
       }
+
+      const target = lastNotificationTarget
+      lastNotificationTarget = null
+      window.dispatchEvent(
+        new CustomEvent(NAVIGATE_EVENT, {
+          detail: { serverId: target.serverId, channelId: target.channelId },
+        }),
+      )
     }
 
-    setup()
-    return () => {
-      listener?.unregister().catch((err: unknown) => {
-        logger.warn('notification_listener_unregister_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        })
-      })
-    }
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
   }, [])
 
   const handleMessageCreated = useCallback(
@@ -209,7 +213,10 @@ export function useDesktopNotifications(
       if (!isTauri()) return
 
       const parsed = notifEventSchema.safeParse(payload)
-      if (!parsed.success) return
+      if (!parsed.success) {
+        logger.warn('desktop_notification_parse_failed', { error: parsed.error.message })
+        return
+      }
 
       const event = parsed.data
       if (

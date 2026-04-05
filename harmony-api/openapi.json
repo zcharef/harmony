@@ -1626,7 +1626,7 @@
         "operationId": "get_key_count",
         "parameters": [
           {
-            "name": "device_id",
+            "name": "deviceId",
             "in": "query",
             "description": "Device ID to check key count for",
             "required": true,
@@ -1647,7 +1647,7 @@
             }
           },
           "400": {
-            "description": "Missing device_id",
+            "description": "Missing deviceId",
             "content": {
               "application/json": {
                 "schema": {

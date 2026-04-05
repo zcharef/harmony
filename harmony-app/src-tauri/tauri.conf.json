@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https: blob:; media-src 'self' blob:; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* https://*.supabase.co wss://*.supabase.co https://*.sentry.io https://* wss://*.livekit.cloud wss://localhost:* ipc://localhost; frame-src https://challenges.cloudflare.com"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https: blob:; media-src 'self' blob:; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* wss://localhost:* https://api.joinharmony.app https://*.supabase.co wss://*.supabase.co https://*.sentry.io wss://*.livekit.cloud https://github.com ipc://localhost; frame-src https://challenges.cloudflare.com"
     }
   },
   "bundle": {
@@ -36,7 +36,8 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "infoPlist": "./Info.plist"
+      "infoPlist": "./Info.plist",
+      "entitlements": "./Entitlements.plist"
     }
   },
   "plugins": {

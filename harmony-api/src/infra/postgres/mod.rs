@@ -76,6 +76,14 @@ pub(crate) fn db_err(e: sqlx::Error) -> DomainError {
 
 /// Create a connection pool to the Supabase Postgres database.
 ///
+/// SECURITY NOTE: This pool connects with the `service_role` (bypasses RLS).
+/// Authorization is enforced at the application layer — every query includes
+/// a `user_id` filter derived from the JWT via `AuthUser`. RLS policies exist
+/// on all tables but are inert for this connection role. If a handler ever
+/// omits the `user_id` filter, RLS will NOT catch it. Future improvement:
+/// evaluate per-request `SET LOCAL role` + `SET LOCAL request.jwt.claim.sub`
+/// to enable RLS as a defense-in-depth layer.
+///
 /// # Panics
 /// Panics if the database connection cannot be established (fail-fast at startup).
 #[allow(clippy::expect_used)]

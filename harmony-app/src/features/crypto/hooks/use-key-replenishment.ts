@@ -37,7 +37,7 @@ export function useKeyReplenishment(): void {
 
       try {
         const { data } = await getKeyCount({
-          query: { device_id: currentDeviceId },
+          query: { deviceId: currentDeviceId },
           throwOnError: true,
         })
 

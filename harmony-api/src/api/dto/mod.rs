@@ -32,8 +32,8 @@ pub use dms::{
 };
 pub use invites::{CreateInviteRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest};
 pub use keys::{
-    ClaimedKeyResponse, DeviceListResponse, DeviceResponse, KeyCountResponse, OneTimeKeyDto,
-    PreKeyBundleResponse, RegisterDeviceRequest, UploadOneTimeKeysRequest,
+    ClaimedKeyResponse, DeviceListResponse, DeviceResponse, KeyCountQuery, KeyCountResponse,
+    OneTimeKeyDto, PreKeyBundleResponse, RegisterDeviceRequest, UploadOneTimeKeysRequest,
 };
 pub use members::{
     AssignRoleRequest, MemberListQuery, MemberListResponse, MemberResponse,

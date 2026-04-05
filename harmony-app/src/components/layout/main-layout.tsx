@@ -371,11 +371,38 @@ export function MainLayout() {
   // WHY: Stable callback that returns the latest Supabase JWT.
   // getSession() auto-refreshes expired access tokens internally.
   // Token rotation is handled by AuthProvider reacting to TOKEN_REFRESHED.
+  // If the session isn't cached yet (race: userId set before Supabase SDK
+  // initializes), waits for onAuthStateChange callback instead of returning
+  // undefined — the SSE loop should never start without a valid token.
   const getToken = useCallback(async () => {
     const {
       data: { session },
     } = await supabase.auth.getSession()
-    return session?.access_token
+    if (session?.access_token !== undefined) return session.access_token
+
+    // WHY: userId is non-null (SSE hook is gated) but Supabase session isn't
+    // cached yet. Subscribe to auth state changes and resolve when the token
+    // appears. 5s safety timeout prevents hanging if auth is truly dead.
+    return new Promise<string | undefined>((resolve) => {
+      let sub: { unsubscribe: () => void } | undefined
+
+      const timeout = setTimeout(() => {
+        sub?.unsubscribe()
+        logger.warn('sse_token_timeout', { reason: 'onAuthStateChange did not fire within 5s' })
+        resolve(undefined)
+      }, 5_000)
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, sess) => {
+        if (sess?.access_token !== undefined) {
+          clearTimeout(timeout)
+          subscription.unsubscribe()
+          resolve(sess.access_token)
+        }
+      })
+      sub = subscription
+    })
   }, [])
   usePresence(userId)
   useFetchSSE(userId, getToken)

@@ -82,7 +82,7 @@ describe('useKeyReplenishment', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(getKeyCount).toHaveBeenCalledWith({
-      query: { device_id: 'device-1' },
+      query: { deviceId: 'device-1' },
       throwOnError: true,
     })
     expect(generateOneTimeKeys).not.toHaveBeenCalled()

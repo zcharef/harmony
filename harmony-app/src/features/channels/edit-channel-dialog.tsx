@@ -115,17 +115,19 @@ export function EditChannelDialog({ channel, serverId, isOpen, onClose }: EditCh
                 <p className="text-xs text-default-400">{tSettings('privateChannelHelp')}</p>
               </div>
             </Switch>
-            <Switch
-              isSelected={isReadOnly}
-              onValueChange={setIsReadOnly}
-              size="sm"
-              data-test="edit-channel-readonly-toggle"
-            >
-              <div>
-                <span className="text-sm">{tSettings('readOnlyChannelLabel')}</span>
-                <p className="text-xs text-default-400">{tSettings('readOnlyChannelHelp')}</p>
-              </div>
-            </Switch>
+            {channel.channelType !== 'voice' && (
+              <Switch
+                isSelected={isReadOnly}
+                onValueChange={setIsReadOnly}
+                size="sm"
+                data-test="edit-channel-readonly-toggle"
+              >
+                <div>
+                  <span className="text-sm">{tSettings('readOnlyChannelLabel')}</span>
+                  <p className="text-xs text-default-400">{tSettings('readOnlyChannelHelp')}</p>
+                </div>
+              </Switch>
+            )}
           </ModalBody>
           <ModalFooter>
             <Button variant="light" onPress={handleClose} data-test="edit-channel-cancel-button">

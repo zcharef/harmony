@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- WHY: Grants outgoing network access under hardened runtime (required for
+       notarization). Without this entitlement, Rust-side HTTP requests (updater
+       check via reqwest, future Rust HTTP calls) are blocked on macOS production
+       builds while the WebView's network stack continues to work.
+       See: https://github.com/tauri-apps/tauri/issues/13878 -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+</dict>
+</plist>

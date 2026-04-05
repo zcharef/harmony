@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::domain::models::{ClaimedKey, DeviceId, DeviceKey, DeviceKeyId, PreKeyBundle, UserId};
 
@@ -144,4 +144,16 @@ impl KeyCountResponse {
     pub fn new(count: i64) -> Self {
         Self { count }
     }
+}
+
+// WHY: Query parameter structs cannot use deny_unknown_fields because
+// Axum's query deserializer passes all URL query params to the struct,
+// and extra params (e.g., cache-busters) would cause 400 errors.
+/// Query parameters for the key count endpoint.
+#[derive(Debug, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query, rename_all = "camelCase")]
+pub struct KeyCountQuery {
+    /// Device ID to check key count for.
+    pub device_id: DeviceId,
 }

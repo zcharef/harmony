@@ -407,7 +407,9 @@ export function ChannelSidebar({
                     canManageChannels={canAccessSettings}
                     onSelect={() => {
                       if (channel.channelType === 'voice' && serverId !== null) {
-                        void joinVoice(channel.id, serverId)
+                        if (voiceChannelId !== channel.id) {
+                          void joinVoice(channel.id, serverId)
+                        }
                       } else {
                         onSelectChannel(channel.id)
                       }

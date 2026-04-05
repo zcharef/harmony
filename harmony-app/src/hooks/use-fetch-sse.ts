@@ -402,6 +402,44 @@ export function useFetchSSE(
 }
 
 /**
+ * Races getToken() against an AbortSignal so the Promise resolves immediately
+ * on unmount instead of leaking an onAuthStateChange subscription for up to 5s.
+ */
+function getTokenOrAbort(
+  getToken: () => Promise<string | undefined>,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  if (signal.aborted) return Promise.resolve(undefined)
+  return Promise.race([
+    getToken(),
+    new Promise<undefined>((resolve) => {
+      signal.addEventListener('abort', () => resolve(undefined), { once: true })
+    }),
+  ])
+}
+
+/**
+ * Acquires a token with abort-awareness and error resilience. Returns the
+ * token string on success, `undefined` if aborted/unavailable, or throws
+ * `'backoff'` to signal the caller should enter exponential backoff.
+ */
+async function acquireToken(
+  s: LoopState,
+  getToken: () => Promise<string | undefined>,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  try {
+    return await getTokenOrAbort(getToken, signal)
+  } catch (err) {
+    logger.warn('sse_get_token_failed', {
+      userId: s.userId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return undefined
+  }
+}
+
+/**
  * Main connection loop — retries with exponential backoff until stopped.
  *
  * WHY extracted: Biome enforces max cognitive complexity of 15 per function.
@@ -415,8 +453,9 @@ async function runLoop(
   queryClient: { invalidateQueries: () => void },
 ) {
   while (!s.stopped && !s.fatalError) {
-    const token = await getToken()
-    if (token === undefined || s.stopped) {
+    const token = await acquireToken(s, getToken, outerAbort.signal)
+    if (s.stopped) return
+    if (token === undefined) {
       logger.warn('sse_no_token', { userId: s.userId })
       useConnectionStore.getState().setStatus('disconnected')
       return
