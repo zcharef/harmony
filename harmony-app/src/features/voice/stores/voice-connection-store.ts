@@ -93,6 +93,19 @@ let krispInitPromise: Promise<void> | null = null
  * drained by removeRoomListeners(). */
 let roomEventCleanups: Array<() => void> = []
 
+/** WHY: Tracks whether the local participant has spoken since the last
+ * heartbeat. Consumed (read-and-reset) by the heartbeat interval so the
+ * server knows if the user was actively speaking in that window. */
+let hasSpokenSinceLastHeartbeat = false
+
+/** WHY: Read-and-reset accessor for the heartbeat. Returns true if the
+ * local user spoke since the last call, then clears the flag. */
+export function consumeHasSpokenSinceLastHeartbeat(): boolean {
+  const val = hasSpokenSinceLastHeartbeat
+  hasSpokenSinceLastHeartbeat = false
+  return val
+}
+
 /** WHY: Centralized room options — voice-only, no video tracks. */
 const ROOM_OPTIONS: RoomOptions = {
   adaptiveStream: false,
@@ -218,6 +231,14 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
 
   onRoom(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
     if (get().room !== room) return
+
+    // WHY: Set the flag BEFORE any throttle/filter logic so every speech
+    // event is captured for the next heartbeat, even if the set-equality
+    // check below short-circuits the Zustand update.
+    if (speakers.some((s) => s.identity === room.localParticipant.identity)) {
+      hasSpokenSinceLastHeartbeat = true
+    }
+
     const nextIdentities = new Set(speakers.map((s) => s.identity))
     const current = get().activeSpeakers
 

@@ -8,7 +8,10 @@ import { queryKeys } from '@/lib/query-keys'
 import { supabase } from '@/lib/supabase'
 import { fireAndForgetVoiceLeave } from '@/lib/voice-cleanup'
 import { playVoiceSound } from '../lib/voice-sounds'
-import { useVoiceConnectionStore } from '../stores/voice-connection-store'
+import {
+  consumeHasSpokenSinceLastHeartbeat,
+  useVoiceConnectionStore,
+} from '../stores/voice-connection-store'
 import { usePushToTalk } from './use-push-to-talk'
 
 /** WHY: Extracted to reduce handleJoinVoice cognitive complexity below Biome's
@@ -265,7 +268,18 @@ export function useVoiceConnection() {
     const intervalId = setInterval(() => {
       const sid = sessionIdRef.current
       if (sid === null) return
-      voiceHeartbeat({ body: { sessionId: sid }, throwOnError: true }).catch((err: unknown) => {
+      const room = useVoiceConnectionStore.getState().room
+      voiceHeartbeat({
+        body: {
+          sessionId: sid,
+          isActive: consumeHasSpokenSinceLastHeartbeat(),
+          isMuted:
+            room !== null
+              ? !room.localParticipant.isMicrophoneEnabled
+              : useVoiceConnectionStore.getState().isMuted,
+        },
+        throwOnError: true,
+      }).catch((err: unknown) => {
         // WHY (P0-3): A 404 means the server-side session no longer exists
         // (e.g., swept after timeout, or server restarted). Force a clean
         // client teardown so the user does not stay in a ghost call.

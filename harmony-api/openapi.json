@@ -5556,6 +5556,20 @@
           "sessionId"
         ],
         "properties": {
+          "isActive": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the user is actively participating (speaking, unmuted).\n`None` means the client didn't send a value; handler treats that as\n`true` via `unwrap_or(true)` for backward compatibility."
+          },
+          "isMuted": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the user's microphone is muted. Muted users are still\nconsidered \"active\" for AFK purposes (they are listening)."
+          },
           "sessionId": {
             "type": "string",
             "description": "The session identifier returned when the user joined voice.\nEnsures only the current device's session receives the heartbeat."

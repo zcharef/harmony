@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE voice_sessions\n                SET alone_since = now()\n                WHERE channel_id = $1\n                  AND alone_since IS NULL\n                  AND (SELECT COUNT(*) FROM voice_sessions WHERE channel_id = $1) = 1\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c7bb49e5a6f72224cd021b0f7e83606f1a9b61715b587c2e57403492923c7a7d"
+}

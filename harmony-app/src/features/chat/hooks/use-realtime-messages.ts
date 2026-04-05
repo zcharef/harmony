@@ -21,7 +21,7 @@ const messageEventSchema = z.object({
 const messageDeletedSchema = z.object({
   channelId: z.string(),
   messageId: z.string(),
-  deletedBy: z.string(),
+  deletedBy: z.string().optional(),
 })
 
 /**
@@ -183,7 +183,7 @@ export function useRealtimeMessages(channelId: string) {
               ...page,
               items: page.items.map((m) => {
                 if (m.id === parsed.data.messageId) {
-                  return { ...m, deletedBy: parsed.data.deletedBy }
+                  return { ...m, deletedBy: parsed.data.deletedBy ?? m.authorId }
                 }
                 if (m.parentMessage?.id === parsed.data.messageId) {
                   return {

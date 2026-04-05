@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE voice_sessions\n            SET alone_since = NULL\n            WHERE channel_id = $1 AND alone_since IS NOT NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6d1b4ae9837bd1d4179c1b51c44111d036dff642975722099fd1ee2be8a02cee"
+}

@@ -100,11 +100,13 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
             INSERT INTO voice_sessions (user_id, channel_id, server_id, session_id)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT (user_id) DO UPDATE
-                SET channel_id   = EXCLUDED.channel_id,
-                    server_id    = EXCLUDED.server_id,
-                    session_id   = EXCLUDED.session_id,
-                    joined_at    = now(),
-                    last_seen_at = now()
+                SET channel_id    = EXCLUDED.channel_id,
+                    server_id     = EXCLUDED.server_id,
+                    session_id    = EXCLUDED.session_id,
+                    joined_at     = now(),
+                    last_seen_at  = now(),
+                    last_active_at = now(),
+                    alone_since   = NULL
             RETURNING
                 id,
                 user_id,
@@ -120,6 +122,19 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
             session.session_id,
         )
         .fetch_one(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        // WHY: When a user joins a channel, no one in that channel is alone anymore.
+        sqlx::query!(
+            r#"
+            UPDATE voice_sessions
+            SET alone_since = NULL
+            WHERE channel_id = $1 AND alone_since IS NOT NULL
+            "#,
+            cid,
+        )
+        .execute(&mut *tx)
         .await
         .map_err(super::db_err)?;
 
@@ -211,11 +226,13 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
             INSERT INTO voice_sessions (user_id, channel_id, server_id, session_id)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT (user_id) DO UPDATE
-                SET channel_id   = EXCLUDED.channel_id,
-                    server_id    = EXCLUDED.server_id,
-                    session_id   = EXCLUDED.session_id,
-                    joined_at    = now(),
-                    last_seen_at = now()
+                SET channel_id    = EXCLUDED.channel_id,
+                    server_id     = EXCLUDED.server_id,
+                    session_id    = EXCLUDED.session_id,
+                    joined_at     = now(),
+                    last_seen_at  = now(),
+                    last_active_at = now(),
+                    alone_since   = NULL
             RETURNING
                 id, user_id, channel_id, server_id, session_id, joined_at, last_seen_at
             "#,
@@ -225,6 +242,19 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
             session.session_id,
         )
         .fetch_one(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        // WHY: When a user joins a channel, no one in that channel is alone anymore.
+        sqlx::query!(
+            r#"
+            UPDATE voice_sessions
+            SET alone_since = NULL
+            WHERE channel_id = $1 AND alone_since IS NOT NULL
+            "#,
+            cid,
+        )
+        .execute(&mut *tx)
         .await
         .map_err(super::db_err)?;
 
@@ -247,6 +277,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
     async fn remove_by_user(&self, user_id: &UserId) -> Result<Option<VoiceSession>, DomainError> {
         let uid = user_id.0;
 
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
+
         let row = sqlx::query!(
             r#"
             DELETE FROM voice_sessions
@@ -262,9 +294,30 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
             "#,
             uid,
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(super::db_err)?;
+
+        // WHY: If the deleted user was the second-to-last in the channel, the
+        // remaining user is now alone — mark them so the auto-disconnect timer
+        // can start.
+        if let Some(ref r) = row {
+            sqlx::query!(
+                r#"
+                UPDATE voice_sessions
+                SET alone_since = now()
+                WHERE channel_id = $1
+                  AND alone_since IS NULL
+                  AND (SELECT COUNT(*) FROM voice_sessions WHERE channel_id = $1) = 1
+                "#,
+                r.channel_id,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(super::db_err)?;
+        }
+
+        tx.commit().await.map_err(super::db_err)?;
 
         Ok(row.map(|r| {
             VoiceSessionRow {
@@ -288,6 +341,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
         let uid = user_id.0;
         let cid = channel_id.0;
 
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
+
         let row = sqlx::query!(
             r#"
             DELETE FROM voice_sessions
@@ -304,9 +359,30 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
             uid,
             cid,
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(super::db_err)?;
+
+        // WHY: If the deleted user was the second-to-last in the channel, the
+        // remaining user is now alone — mark them so the auto-disconnect timer
+        // can start.
+        if row.is_some() {
+            sqlx::query!(
+                r#"
+                UPDATE voice_sessions
+                SET alone_since = now()
+                WHERE channel_id = $1
+                  AND alone_since IS NULL
+                  AND (SELECT COUNT(*) FROM voice_sessions WHERE channel_id = $1) = 1
+                "#,
+                cid,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(super::db_err)?;
+        }
+
+        tx.commit().await.map_err(super::db_err)?;
 
         Ok(row.map(|r| {
             VoiceSessionRow {
