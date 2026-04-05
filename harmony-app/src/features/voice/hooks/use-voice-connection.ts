@@ -4,6 +4,7 @@ import { isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { supabase } from '@/lib/supabase'
 import { fireAndForgetVoiceLeave } from '@/lib/voice-cleanup'
+import { playVoiceSound } from '../lib/voice-sounds'
 import { useVoiceConnectionStore } from '../stores/voice-connection-store'
 import { usePushToTalk } from './use-push-to-talk'
 
@@ -172,6 +173,7 @@ export function useVoiceConnection() {
         })
 
         await storeConnect(channelId, serverId, data.token, data.url)
+        playVoiceSound('join')
         sessionIdRef.current = data.sessionId
         // WHY: Store the server-provided TTL so scheduleTokenRefresh uses the
         // dynamic value instead of the hardcoded fallback.
@@ -206,6 +208,7 @@ export function useVoiceConnection() {
   const handleLeaveVoice = useCallback(async () => {
     const channelId = channelIdRef.current
 
+    playVoiceSound('leave')
     clearTokenRefreshTimer()
     sessionIdRef.current = null
     cachedAuthToken = null

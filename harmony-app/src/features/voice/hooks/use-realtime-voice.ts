@@ -5,6 +5,8 @@ import { useServerEvent } from '@/hooks/use-server-event'
 import type { VoiceParticipantResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { playVoiceSound } from '../lib/voice-sounds'
+import { useVoiceConnectionStore } from '../stores/voice-connection-store'
 
 /** WHY: Consensus review recommended 500ms debounce on SSE-triggered cache
  * mutations to prevent rapid-fire TanStack Query updates during participant
@@ -136,6 +138,19 @@ export function useRealtimeVoice(channelId: string) {
       }
 
       if (parsed.data.channelId !== channelId) return
+
+      // WHY: Play sound only for OTHER users joining/leaving our active voice
+      // channel. Self-actions already trigger sounds in use-voice-connection.ts.
+      // WHY status guard: During self-join, the SSE event can arrive before
+      // storeConnect completes (status still connecting, room is null).
+      const voiceState = useVoiceConnectionStore.getState()
+      if (
+        voiceState.status === 'connected' &&
+        voiceState.currentChannelId === channelId &&
+        voiceState.room?.localParticipant.identity !== parsed.data.userId
+      ) {
+        playVoiceSound(parsed.data.action === 'joined' ? 'join' : 'leave')
+      }
 
       // WHY: Accumulate events and flush after DEBOUNCE_MS to batch cache
       // mutations during participant churn.
