@@ -7,14 +7,17 @@ import {
   DropdownSection,
   DropdownTrigger,
   Spinner,
+  Tooltip,
 } from '@heroui/react'
 import {
   ChevronDown,
   Hash,
+  HeadphoneOff,
   Headphones,
   Lock,
   Megaphone,
   Mic,
+  MicOff,
   Settings,
   UserPlus,
   Volume2,
@@ -32,6 +35,7 @@ import { useSettingsUiStore } from '@/features/settings'
 import {
   AudioAutoplayPrompt,
   useVoiceConnection,
+  useVoiceConnectionStore,
   VoiceConnectionBar,
   VoiceParticipantList,
 } from '@/features/voice'
@@ -72,7 +76,7 @@ function ChannelButton({
         onPress={onSelect}
         className={cn(
           'flex-1 justify-start gap-1.5 px-2 text-default-500',
-          isActive && 'bg-default-200 text-foreground',
+          isActive && channel.channelType !== 'voice' && 'bg-default-200 text-foreground',
           unreadCount > 0 && !isActive ? 'font-semibold text-foreground' : 'font-medium',
         )}
       >
@@ -223,6 +227,92 @@ function ServerHeader({
   )
 }
 
+// WHY: Extracted to reduce ChannelSidebar cognitive complexity below Biome's limit of 15.
+function UserControlPanel() {
+  const { t } = useTranslation('channels')
+  const user = useAuthStore((s) => s.user)
+  const { data: profile } = useCurrentProfile()
+  const status = useUserStatus(user?.id ?? '')
+  const username = profile?.username ?? t('youFallback')
+  const isMuted = useVoiceConnectionStore((s) => s.isMuted)
+  const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
+  const toggleMute = useVoiceConnectionStore((s) => s.toggleMute)
+  const toggleDeafen = useVoiceConnectionStore((s) => s.toggleDeafen)
+
+  const statusLabels = {
+    online: t('statusOnline'),
+    idle: t('statusIdle'),
+    dnd: t('statusDnd'),
+    offline: t('statusOffline'),
+  } as const
+
+  return (
+    <div
+      data-test="user-control-panel"
+      className="flex items-center border-t border-divider bg-content1"
+    >
+      <StatusPicker>
+        <div className="relative">
+          <Avatar
+            name={username}
+            size="sm"
+            color="primary"
+            showFallback
+            classNames={{
+              base: 'h-8 w-8',
+              name: 'text-xs text-primary-foreground',
+            }}
+          />
+          <div className="absolute -bottom-0.5 -right-0.5">
+            <StatusIndicator status={status} size="lg" />
+          </div>
+        </div>
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <span className="truncate text-sm font-medium text-foreground">{username}</span>
+          <span className="truncate text-xs text-default-500">{statusLabels[status]}</span>
+        </div>
+      </StatusPicker>
+      <div className="flex items-center pr-2">
+        <Tooltip content={isMuted ? 'Unmute' : 'Mute'} placement="top" delay={300}>
+          <Button
+            variant="light"
+            isIconOnly
+            size="sm"
+            className="h-8 w-8"
+            onPress={toggleMute}
+            data-test="voice-mute-btn"
+          >
+            {isMuted ? (
+              <MicOff className="h-4 w-4 text-danger" />
+            ) : (
+              <Mic className="h-4 w-4 text-default-500" />
+            )}
+          </Button>
+        </Tooltip>
+        <Tooltip content={isDeafened ? 'Undeafen' : 'Deafen'} placement="top" delay={300}>
+          <Button
+            variant="light"
+            isIconOnly
+            size="sm"
+            className="h-8 w-8"
+            onPress={toggleDeafen}
+            data-test="voice-deafen-btn"
+          >
+            {isDeafened ? (
+              <HeadphoneOff className="h-4 w-4 text-danger" />
+            ) : (
+              <Headphones className="h-4 w-4 text-default-500" />
+            )}
+          </Button>
+        </Tooltip>
+        <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
+          <Settings className="h-4 w-4 text-default-500" />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 interface ChannelSidebarProps {
   serverId: string | null
   serverName: string | null
@@ -247,18 +337,7 @@ export function ChannelSidebar({
   const { role: callerRole } = useMyMemberRole(serverId)
   /** WHY: Only admin+ can access server settings. */
   const canAccessSettings = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
-  const user = useAuthStore((s) => s.user)
-  const { data: profile } = useCurrentProfile()
-  const status = useUserStatus(user?.id ?? '')
-  const username = profile?.username ?? t('youFallback')
   const { joinVoice, currentChannelId: voiceChannelId } = useVoiceConnection()
-
-  const statusLabels = {
-    online: t('statusOnline'),
-    idle: t('statusIdle'),
-    dnd: t('statusDnd'),
-    offline: t('statusOffline'),
-  } as const
 
   return (
     <div data-test="channel-sidebar" className="flex h-full flex-col bg-default-100">
@@ -345,7 +424,7 @@ export function ChannelSidebar({
         </div>
       </div>
 
-      {/* Voice connection bar — shows mute/deafen/disconnect when in voice */}
+      {/* Voice connection bar — shows status/disconnect when in voice */}
       <VoiceConnectionBar
         channelName={channels?.find((c) => c.id === voiceChannelId)?.name ?? null}
         onRetry={() => {
@@ -356,44 +435,7 @@ export function ChannelSidebar({
       />
       <AudioAutoplayPrompt />
 
-      {/* User control panel */}
-      <div
-        data-test="user-control-panel"
-        className="flex items-center border-t border-divider bg-content1"
-      >
-        <StatusPicker>
-          <div className="relative">
-            <Avatar
-              name={username}
-              size="sm"
-              color="primary"
-              showFallback
-              classNames={{
-                base: 'h-8 w-8',
-                name: 'text-xs text-primary-foreground',
-              }}
-            />
-            <div className="absolute -bottom-0.5 -right-0.5">
-              <StatusIndicator status={status} size="lg" />
-            </div>
-          </div>
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <span className="truncate text-sm font-medium text-foreground">{username}</span>
-            <span className="truncate text-xs text-default-500">{statusLabels[status]}</span>
-          </div>
-        </StatusPicker>
-        <div className="flex items-center pr-2">
-          <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
-            <Mic className="h-4 w-4 text-default-500" />
-          </Button>
-          <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
-            <Headphones className="h-4 w-4 text-default-500" />
-          </Button>
-          <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
-            <Settings className="h-4 w-4 text-default-500" />
-          </Button>
-        </div>
-      </div>
+      <UserControlPanel />
 
       {serverId !== null && (
         <CreateInviteDialog

@@ -1,5 +1,14 @@
-import { Avatar, Button, Spinner } from '@heroui/react'
-import { Headphones, Lock, MessageSquarePlus, Mic, Settings, X } from 'lucide-react'
+import { Avatar, Button, Spinner, Tooltip } from '@heroui/react'
+import {
+  HeadphoneOff,
+  Headphones,
+  Lock,
+  MessageSquarePlus,
+  Mic,
+  MicOff,
+  Settings,
+  X,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
@@ -7,6 +16,7 @@ import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { useUnreadStore } from '@/features/channels'
 import { StatusPicker } from '@/features/preferences'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
+import { useVoiceConnectionStore } from '@/features/voice'
 import type { DmListItem } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useCloseDm } from './hooks/use-close-dm'
@@ -146,6 +156,11 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
   const status = useUserStatus(user?.id ?? '')
   const username = profile?.username ?? t('you')
 
+  const isMuted = useVoiceConnectionStore((s) => s.isMuted)
+  const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
+  const toggleMute = useVoiceConnectionStore((s) => s.toggleMute)
+  const toggleDeafen = useVoiceConnectionStore((s) => s.toggleDeafen)
+
   const statusLabels = {
     online: t('statusOnline'),
     idle: t('statusIdle'),
@@ -243,12 +258,38 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
           </div>
         </StatusPicker>
         <div className="flex items-center pr-2">
-          <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
-            <Mic className="h-4 w-4 text-default-500" />
-          </Button>
-          <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
-            <Headphones className="h-4 w-4 text-default-500" />
-          </Button>
+          <Tooltip content={isMuted ? 'Unmute' : 'Mute'} placement="top" delay={300}>
+            <Button
+              variant="light"
+              isIconOnly
+              size="sm"
+              className="h-8 w-8"
+              onPress={toggleMute}
+              data-test="voice-mute-btn"
+            >
+              {isMuted ? (
+                <MicOff className="h-4 w-4 text-danger" />
+              ) : (
+                <Mic className="h-4 w-4 text-default-500" />
+              )}
+            </Button>
+          </Tooltip>
+          <Tooltip content={isDeafened ? 'Undeafen' : 'Deafen'} placement="top" delay={300}>
+            <Button
+              variant="light"
+              isIconOnly
+              size="sm"
+              className="h-8 w-8"
+              onPress={toggleDeafen}
+              data-test="voice-deafen-btn"
+            >
+              {isDeafened ? (
+                <HeadphoneOff className="h-4 w-4 text-danger" />
+              ) : (
+                <Headphones className="h-4 w-4 text-default-500" />
+              )}
+            </Button>
+          </Tooltip>
           <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
             <Settings className="h-4 w-4 text-default-500" />
           </Button>

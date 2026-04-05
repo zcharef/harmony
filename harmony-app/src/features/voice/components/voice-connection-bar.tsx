@@ -1,9 +1,9 @@
 /**
  * Voice connection status bar — sits above the user control panel in the sidebar.
  *
- * WHY: Users need persistent, at-a-glance voice state (channel name, mute/deafen,
- * disconnect) without navigating away from the current channel. Mirrors the Discord
- * voice panel pattern.
+ * WHY: Users need persistent, at-a-glance voice state (channel name, disconnect)
+ * without navigating away from the current channel. Mute/deafen live in the
+ * always-visible UserControlPanel. Mirrors the Discord voice panel pattern.
  *
  * Shows only when the voice connection is not idle. Status-driven UI:
  * - connecting/reconnecting: spinner + status text
@@ -16,16 +16,7 @@
  */
 
 import { Button, Popover, PopoverContent, PopoverTrigger, Spinner, Tooltip } from '@heroui/react'
-import {
-  AudioWaveform,
-  HeadphoneOff,
-  Headphones,
-  Mic,
-  MicOff,
-  PhoneOff,
-  Radio,
-  Settings2,
-} from 'lucide-react'
+import { AudioWaveform, PhoneOff, Radio, Settings2 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { isTauri } from '@/lib/platform'
 import { useVoiceConnection } from '../hooks/use-voice-connection'
@@ -81,15 +72,11 @@ function StatusText({
 
 export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarProps) {
   const status = useVoiceConnectionStore((s) => s.status)
-  const isMuted = useVoiceConnectionStore((s) => s.isMuted)
-  const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
   const error = useVoiceConnectionStore((s) => s.error)
   const isKrispEnabled = useVoiceConnectionStore((s) => s.isKrispEnabled)
   const isPttMode = useVoiceConnectionStore((s) => s.isPttMode)
   const pttShortcut = useVoiceConnectionStore((s) => s.pttShortcut)
   const togglePttMode = useVoiceConnectionStore((s) => s.togglePttMode)
-  const toggleMute = useVoiceConnectionStore((s) => s.toggleMute)
-  const toggleDeafen = useVoiceConnectionStore((s) => s.toggleDeafen)
   const toggleKrisp = useVoiceConnectionStore((s) => s.toggleKrisp)
   // WHY: Use the hook's leaveVoice instead of store.disconnect so the API
   // DELETE /voice/leave is called. Without this, the server-side session
@@ -140,40 +127,6 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
             {/* Control buttons row — only when connected or reconnecting */}
             {showControls && (
               <div className="flex items-center justify-center gap-1">
-                <Tooltip content={isMuted ? 'Unmute' : 'Mute'} placement="top" delay={300}>
-                  <Button
-                    variant="light"
-                    isIconOnly
-                    size="sm"
-                    className="h-8 w-8"
-                    onPress={toggleMute}
-                    data-test="voice-mute-btn"
-                  >
-                    {isMuted ? (
-                      <MicOff className="h-4 w-4 text-danger" />
-                    ) : (
-                      <Mic className="h-4 w-4 text-default-500" />
-                    )}
-                  </Button>
-                </Tooltip>
-
-                <Tooltip content={isDeafened ? 'Undeafen' : 'Deafen'} placement="top" delay={300}>
-                  <Button
-                    variant="light"
-                    isIconOnly
-                    size="sm"
-                    className="h-8 w-8"
-                    onPress={toggleDeafen}
-                    data-test="voice-deafen-btn"
-                  >
-                    {isDeafened ? (
-                      <HeadphoneOff className="h-4 w-4 text-danger" />
-                    ) : (
-                      <Headphones className="h-4 w-4 text-default-500" />
-                    )}
-                  </Button>
-                </Tooltip>
-
                 <Tooltip
                   content={isKrispEnabled ? 'Noise Suppression: On' : 'Noise Suppression: Off'}
                   placement="top"
