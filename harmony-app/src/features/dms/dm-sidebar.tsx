@@ -148,6 +148,7 @@ interface DmSidebarProps {
 
 export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
   const { t } = useTranslation('dms')
+  const { t: tVoice } = useTranslation('voice')
   const { data: dms, isPending, isError, refetch, isRefetching } = useDms()
   const closeDmMutation = useCloseDm()
   const [isSearchOpen, setIsSearchOpen] = useState(false)
@@ -258,7 +259,11 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
           </div>
         </StatusPicker>
         <div className="flex items-center pr-2">
-          <Tooltip content={isMuted ? 'Unmute' : 'Mute'} placement="top" delay={300}>
+          <Tooltip
+            content={isMuted ? tVoice('unmute') : tVoice('mute')}
+            placement="top"
+            delay={300}
+          >
             <Button
               variant="light"
               isIconOnly
@@ -274,7 +279,11 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
               )}
             </Button>
           </Tooltip>
-          <Tooltip content={isDeafened ? 'Undeafen' : 'Deafen'} placement="top" delay={300}>
+          <Tooltip
+            content={isDeafened ? tVoice('undeafen') : tVoice('deafen')}
+            placement="top"
+            delay={300}
+          >
             <Button
               variant="light"
               isIconOnly

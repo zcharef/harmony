@@ -3,7 +3,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MainLayout } from '@/components/layout/main-layout'
 import { FeatureErrorBoundary } from '@/components/shared/error-boundary'
 import { UpdateNotification } from '@/components/shared/update-notification'
-import { AuthProvider, DesktopAuthRedirect, LoginPage, useAuthStore } from '@/features/auth'
+import {
+  AuthProvider,
+  DesktopAuthRedirect,
+  LoginPage,
+  useAuthStore,
+  VerifyEmailScreen,
+} from '@/features/auth'
 import { CryptoProvider } from '@/features/crypto'
 import { useAppUpdater } from '@/hooks/use-app-updater'
 import { useDockBadge } from '@/hooks/use-dock-badge'
@@ -37,7 +43,7 @@ function UnreadBadges() {
 }
 
 function AppContent() {
-  const { session, isLoading } = useAuthStore()
+  const { session, user, isLoading } = useAuthStore()
   // WHY: Defer the update check until after login so the update
   // notification never appears on the login page.
   const isLoggedIn = !isLoading && session !== null
@@ -53,6 +59,15 @@ function AppContent() {
 
   if (session === null) {
     return <LoginPage />
+  }
+
+  // WHY: Defense-in-depth — if the user has a session but hasn't confirmed
+  // their email, block access to the app. In production Supabase won't issue
+  // sessions for unconfirmed users, but this catches local dev misconfig and
+  // protects against Supabase-level bypasses. The backend API independently
+  // returns 403 for unverified users on all routes except /v1/auth/me.
+  if (user?.email_confirmed_at === undefined || user.email_confirmed_at === null) {
+    return <VerifyEmailScreen email={user?.email ?? ''} />
   }
 
   // WHY: When the browser is opened from Tauri with redirect_scheme=harmony

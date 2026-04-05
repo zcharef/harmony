@@ -230,6 +230,7 @@ function ServerHeader({
 // WHY: Extracted to reduce ChannelSidebar cognitive complexity below Biome's limit of 15.
 function UserControlPanel() {
   const { t } = useTranslation('channels')
+  const { t: tVoice } = useTranslation('voice')
   const user = useAuthStore((s) => s.user)
   const { data: profile } = useCurrentProfile()
   const status = useUserStatus(user?.id ?? '')
@@ -273,7 +274,7 @@ function UserControlPanel() {
         </div>
       </StatusPicker>
       <div className="flex items-center pr-2">
-        <Tooltip content={isMuted ? 'Unmute' : 'Mute'} placement="top" delay={300}>
+        <Tooltip content={isMuted ? tVoice('unmute') : tVoice('mute')} placement="top" delay={300}>
           <Button
             variant="light"
             isIconOnly
@@ -289,7 +290,11 @@ function UserControlPanel() {
             )}
           </Button>
         </Tooltip>
-        <Tooltip content={isDeafened ? 'Undeafen' : 'Deafen'} placement="top" delay={300}>
+        <Tooltip
+          content={isDeafened ? tVoice('undeafen') : tVoice('deafen')}
+          placement="top"
+          delay={300}
+        >
           <Button
             variant="light"
             isIconOnly

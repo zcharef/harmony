@@ -11,6 +11,7 @@ import members from '@/lib/locales/en/members.json'
 import messages from '@/lib/locales/en/messages.json'
 import servers from '@/lib/locales/en/servers.json'
 import settings from '@/lib/locales/en/settings.json'
+import voice from '@/lib/locales/en/voice.json'
 import { logger } from '@/lib/logger'
 
 const defaultNS = 'common' as const
@@ -28,6 +29,7 @@ const resources = {
     servers,
     members,
     settings,
+    voice,
   },
 } as const
 
@@ -46,6 +48,7 @@ i18n.use(initReactI18next).init({
     'servers',
     'members',
     'settings',
+    'voice',
   ],
   defaultNS,
   resources,

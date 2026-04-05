@@ -2,6 +2,7 @@ import { Select, SelectItem } from '@heroui/react'
 import { Room, RoomEvent } from 'livekit-client'
 import { Mic, Volume2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { logger } from '@/lib/logger'
 import { useVoiceConnectionStore } from '../stores/voice-connection-store'
@@ -19,6 +20,7 @@ interface DeviceInfo {
  * devices appear immediately.
  */
 export function AudioDeviceSelector() {
+  const { t } = useTranslation('voice')
   const room = useVoiceConnectionStore((s) => s.room)
 
   const [audioInputs, setAudioInputs] = useState<DeviceInfo[]>([])
@@ -103,7 +105,9 @@ export function AudioDeviceSelector() {
         // WHY (ADR-028): Explicit user action (device switch) gets inline
         // feedback proportional to the action. No toast — inline text is
         // sufficient for a dropdown selection failure.
-        setSwitchError(`Failed to switch ${kind === 'audioinput' ? 'microphone' : 'speaker'}`)
+        setSwitchError(
+          kind === 'audioinput' ? t('switchMicrophoneFailed') : t('switchSpeakerFailed'),
+        )
       },
     )
   }
@@ -119,8 +123,8 @@ export function AudioDeviceSelector() {
         </p>
       )}
       <Select
-        aria-label="Microphone"
-        label="Microphone"
+        aria-label={t('microphone')}
+        label={t('microphone')}
         size="sm"
         startContent={<Mic className="h-4 w-4 text-default-500" />}
         selectedKeys={activeInputId !== '' ? new Set([activeInputId]) : new Set<string>()}
@@ -133,8 +137,8 @@ export function AudioDeviceSelector() {
       </Select>
 
       <Select
-        aria-label="Speaker"
-        label="Speaker"
+        aria-label={t('speaker')}
+        label={t('speaker')}
         size="sm"
         startContent={<Volume2 className="h-4 w-4 text-default-500" />}
         selectedKeys={activeOutputId !== '' ? new Set([activeOutputId]) : new Set<string>()}

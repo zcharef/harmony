@@ -1,0 +1,21 @@
+{
+  "connecting": "Connecting...",
+  "reconnecting": "Reconnecting...",
+  "voiceConnected": "Voice Connected",
+  "connectionFailed": "Connection failed",
+  "disconnected": "Disconnected",
+  "disconnect": "Disconnect",
+  "audioSettings": "Audio Settings",
+  "noiseSuppressionOn": "Noise Suppression: On",
+  "noiseSuppressionOff": "Noise Suppression: Off",
+  "pushToTalkOn": "Push to Talk: On ({{shortcut}})",
+  "pushToTalkOff": "Push to Talk: Off",
+  "mute": "Mute",
+  "unmute": "Unmute",
+  "deafen": "Deafen",
+  "undeafen": "Undeafen",
+  "microphone": "Microphone",
+  "speaker": "Speaker",
+  "switchMicrophoneFailed": "Failed to switch microphone",
+  "switchSpeakerFailed": "Failed to switch speaker"
+}

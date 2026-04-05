@@ -18,6 +18,7 @@
 import { Button, Popover, PopoverContent, PopoverTrigger, Spinner, Tooltip } from '@heroui/react'
 import { AudioWaveform, PhoneOff, Radio, Settings2 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
+import { useTranslation } from 'react-i18next'
 import { isTauri } from '@/lib/platform'
 import { useVoiceConnection } from '../hooks/use-voice-connection'
 import {
@@ -43,15 +44,16 @@ function StatusText({
   channelName: string | null
   error: string | null
 }) {
+  const { t } = useTranslation('voice')
   switch (status) {
     case 'connecting':
-      return <span className="text-xs font-medium text-warning">Connecting...</span>
+      return <span className="text-xs font-medium text-warning">{t('connecting')}</span>
     case 'reconnecting':
-      return <span className="text-xs font-medium text-warning">Reconnecting...</span>
+      return <span className="text-xs font-medium text-warning">{t('reconnecting')}</span>
     case 'connected':
       return (
         <>
-          <span className="text-xs font-semibold text-success">Voice Connected</span>
+          <span className="text-xs font-semibold text-success">{t('voiceConnected')}</span>
           {channelName !== null && (
             <span className="truncate text-xs text-default-500">{channelName}</span>
           )}
@@ -60,17 +62,18 @@ function StatusText({
     case 'failed':
       return (
         <span className="truncate text-xs font-medium text-danger">
-          {error ?? 'Connection failed'}
+          {error ?? t('connectionFailed')}
         </span>
       )
     case 'disconnected':
-      return <span className="text-xs text-default-500">Disconnected</span>
+      return <span className="text-xs text-default-500">{t('disconnected')}</span>
     default:
       return null
   }
 }
 
 export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarProps) {
+  const { t } = useTranslation('voice')
   const status = useVoiceConnectionStore((s) => s.status)
   const error = useVoiceConnectionStore((s) => s.error)
   const isKrispEnabled = useVoiceConnectionStore((s) => s.isKrispEnabled)
@@ -128,7 +131,7 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
             {showControls && (
               <div className="flex items-center justify-center gap-1">
                 <Tooltip
-                  content={isKrispEnabled ? 'Noise Suppression: On' : 'Noise Suppression: Off'}
+                  content={isKrispEnabled ? t('noiseSuppressionOn') : t('noiseSuppressionOff')}
                   placement="top"
                   delay={300}
                 >
@@ -150,7 +153,9 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
                  * Showing the button on web would let users toggle a mode that has no effect. */}
                 {isTauri() && (
                   <Tooltip
-                    content={isPttMode ? `Push to Talk: On (${pttShortcut})` : 'Push to Talk: Off'}
+                    content={
+                      isPttMode ? t('pushToTalkOn', { shortcut: pttShortcut }) : t('pushToTalkOff')
+                    }
                     placement="top"
                     delay={300}
                   >
@@ -170,7 +175,7 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
                 )}
 
                 <Popover placement="top">
-                  <Tooltip content="Audio Settings" placement="top" delay={300}>
+                  <Tooltip content={t('audioSettings')} placement="top" delay={300}>
                     <div>
                       <PopoverTrigger>
                         <Button
@@ -192,7 +197,7 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
                   </PopoverContent>
                 </Popover>
 
-                <Tooltip content="Disconnect" placement="top" delay={300}>
+                <Tooltip content={t('disconnect')} placement="top" delay={300}>
                   <Button
                     variant="light"
                     isIconOnly
