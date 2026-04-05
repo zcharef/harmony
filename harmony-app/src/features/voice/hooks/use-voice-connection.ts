@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
+import type React from 'react'
 import { useCallback, useEffect, useRef } from 'react'
 import type { VoiceParticipantResponse } from '@/lib/api'
 import { joinVoice, leaveVoice, refreshVoiceToken, voiceHeartbeat } from '@/lib/api'
@@ -29,6 +30,91 @@ function evictFromPreviousChannel(
     queryKeys.voice.participants(previousChannelId),
     (old) => old?.filter((p) => p.userId !== userId),
   )
+}
+
+/** WHY: Extracted to reduce scheduleTokenRefresh cognitive complexity below
+ * Biome's limit of 15. Handles the successful token refresh: reconnects to
+ * LiveKit if still in the same channel, updates TTL, resets retry count, and
+ * re-schedules the next refresh cycle. */
+async function handleTokenRefreshSuccess(
+  refreshData: { token: string; url: string; ttlSecs?: number },
+  refreshChannelId: string,
+  refreshServerId: string,
+  storeConnect: (channelId: string, serverId: string, token: string, url: string) => Promise<void>,
+  ttlSecsRef: React.MutableRefObject<number>,
+  refreshRetryCountRef: React.MutableRefObject<number>,
+  reschedule: () => void,
+): Promise<void> {
+  const store = useVoiceConnectionStore.getState()
+  // WHY: Only reconnect if still in the same channel. If the user
+  // switched channels or disconnected, skip the refresh.
+  if (store.currentChannelId === refreshChannelId && store.room !== null) {
+    await storeConnect(refreshChannelId, refreshServerId, refreshData.token, refreshData.url)
+    // WHY: Update TTL from the fresh response so the next cycle
+    // uses the server's latest value (may change across plans).
+    ttlSecsRef.current = refreshData.ttlSecs ?? FALLBACK_TOKEN_TTL_SECS
+    refreshRetryCountRef.current = 0
+    logger.info('voice_token_refreshed', { channelId: refreshChannelId })
+
+    reschedule()
+  }
+}
+
+/** WHY: Extracted to reduce scheduleTokenRefresh cognitive complexity below
+ * Biome's limit of 15. Handles token refresh errors: non-retryable 4xx errors
+ * force-disconnect immediately; 5xx/network errors retry with capped exponential
+ * backoff up to 5 attempts before force-disconnecting. */
+function handleTokenRefreshError(
+  err: unknown,
+  refreshChannelId: string,
+  storeDisconnect: () => Promise<void>,
+  refreshRetryCountRef: React.MutableRefObject<number>,
+  rescheduleWithDelay: (delayMs: number) => void,
+): void {
+  // WHY: Non-retryable errors (4xx = kicked, session gone, bad input)
+  // should immediately disconnect. Only 5xx and network errors are
+  // worth retrying with backoff.
+  const isNonRetryable = isProblemDetails(err) && err.status !== undefined && err.status < 500
+  if (isNonRetryable) {
+    logger.warn('voice_token_refresh_non_retryable', {
+      error: err instanceof Error ? err.message : String(err),
+      channelId: refreshChannelId,
+      status: isProblemDetails(err) ? err.status : undefined,
+    })
+    storeDisconnect().catch((disconnectErr: unknown) => {
+      logger.warn('voice_refresh_disconnect_failed', {
+        error: disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
+      })
+    })
+    return
+  }
+
+  const retries = refreshRetryCountRef.current
+  if (retries < 5) {
+    refreshRetryCountRef.current = retries + 1
+    const backoffMs = Math.min(30_000 * 2 ** retries, 300_000)
+    rescheduleWithDelay(backoffMs)
+    logger.warn('voice_token_refresh_failed', {
+      error: err instanceof Error ? err.message : String(err),
+      channelId: refreshChannelId,
+      retryIn: backoffMs,
+      attempt: retries + 1,
+    })
+  } else {
+    logger.error('voice_token_refresh_exhausted', {
+      error: err instanceof Error ? err.message : String(err),
+      channelId: refreshChannelId,
+      attempts: retries,
+    })
+    // WHY: After 5 retries the token is expired and the LiveKit
+    // connection is dead. Force disconnect so the user sees
+    // 'disconnected' instead of a silent ghost call.
+    storeDisconnect().catch((disconnectErr: unknown) => {
+      logger.warn('voice_refresh_exhausted_disconnect_failed', {
+        error: disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
+      })
+    })
+  }
 }
 
 /** WHY: 15s heartbeat keeps the server-side voice session alive. */
@@ -147,75 +233,26 @@ export function useVoiceConnection() {
           body: { sessionId: sid },
           throwOnError: true,
         })
-          .then(async ({ data: refreshData }) => {
-            const store = useVoiceConnectionStore.getState()
-            // WHY: Only reconnect if still in the same channel. If the user
-            // switched channels or disconnected, skip the refresh.
-            if (store.currentChannelId === refreshChannelId && store.room !== null) {
-              await storeConnect(
-                refreshChannelId,
-                refreshServerId,
-                refreshData.token,
-                refreshData.url,
-              )
-              // WHY: Update TTL from the fresh response so the next cycle
-              // uses the server's latest value (may change across plans).
-              ttlSecsRef.current = refreshData.ttlSecs ?? FALLBACK_TOKEN_TTL_SECS
-              refreshRetryCountRef.current = 0
-              logger.info('voice_token_refreshed', { channelId: refreshChannelId })
-
-              scheduleTokenRefresh()
-            }
-          })
-          .catch((err: unknown) => {
-            // WHY: Non-retryable errors (4xx = kicked, session gone, bad input)
-            // should immediately disconnect. Only 5xx and network errors are
-            // worth retrying with backoff.
-            const isNonRetryable =
-              isProblemDetails(err) && err.status !== undefined && err.status < 500
-            if (isNonRetryable) {
-              logger.warn('voice_token_refresh_non_retryable', {
-                error: err instanceof Error ? err.message : String(err),
-                channelId: refreshChannelId,
-                status: isProblemDetails(err) ? err.status : undefined,
-              })
-              storeDisconnect().catch((disconnectErr: unknown) => {
-                logger.warn('voice_refresh_disconnect_failed', {
-                  error:
-                    disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
-                })
-              })
-              return
-            }
-
-            const retries = refreshRetryCountRef.current
-            if (retries < 5) {
-              refreshRetryCountRef.current = retries + 1
-              const backoffMs = Math.min(30_000 * 2 ** retries, 300_000)
-              scheduleTokenRefresh(backoffMs)
-              logger.warn('voice_token_refresh_failed', {
-                error: err instanceof Error ? err.message : String(err),
-                channelId: refreshChannelId,
-                retryIn: backoffMs,
-                attempt: retries + 1,
-              })
-            } else {
-              logger.error('voice_token_refresh_exhausted', {
-                error: err instanceof Error ? err.message : String(err),
-                channelId: refreshChannelId,
-                attempts: retries,
-              })
-              // WHY: After 5 retries the token is expired and the LiveKit
-              // connection is dead. Force disconnect so the user sees
-              // 'disconnected' instead of a silent ghost call.
-              storeDisconnect().catch((disconnectErr: unknown) => {
-                logger.warn('voice_refresh_exhausted_disconnect_failed', {
-                  error:
-                    disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
-                })
-              })
-            }
-          })
+          .then(({ data: refreshData }) =>
+            handleTokenRefreshSuccess(
+              refreshData,
+              refreshChannelId,
+              refreshServerId,
+              storeConnect,
+              ttlSecsRef,
+              refreshRetryCountRef,
+              () => scheduleTokenRefresh(),
+            ),
+          )
+          .catch((err: unknown) =>
+            handleTokenRefreshError(
+              err,
+              refreshChannelId,
+              storeDisconnect,
+              refreshRetryCountRef,
+              (delayMs) => scheduleTokenRefresh(delayMs),
+            ),
+          )
           .finally(() => {
             isRefreshingRef.current = false
           })
@@ -280,7 +317,7 @@ export function useVoiceConnection() {
         isJoiningRef.current = false
       }
     },
-    [storeConnect, scheduleTokenRefresh, queryClient],
+    [storeConnect, scheduleTokenRefresh, queryClient, clearTokenRefreshTimer],
   )
 
   const handleLeaveVoice = useCallback(async () => {
