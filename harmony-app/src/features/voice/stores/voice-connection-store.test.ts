@@ -15,6 +15,7 @@ interface MockRoom {
   connect: Mock
   disconnect: Mock
   startAudio: Mock
+  switchActiveDevice: Mock
   localParticipant: {
     setMicrophoneEnabled: Mock
     getTrackPublication: Mock
@@ -38,6 +39,7 @@ function createMockRoom(): MockRoom {
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn().mockResolvedValue(undefined),
     startAudio: vi.fn().mockResolvedValue(undefined),
+    switchActiveDevice: vi.fn().mockResolvedValue(undefined),
     localParticipant: {
       setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
       getTrackPublication: vi.fn().mockReturnValue(undefined),
@@ -92,6 +94,7 @@ vi.mock('livekit-client', () => {
       connect: vi.fn().mockResolvedValue(undefined),
       disconnect: vi.fn().mockResolvedValue(undefined),
       startAudio: vi.fn().mockResolvedValue(undefined),
+      switchActiveDevice: vi.fn().mockResolvedValue(undefined),
       localParticipant: {
         setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
         getTrackPublication: vi.fn().mockReturnValue(undefined),
@@ -1032,6 +1035,133 @@ describe('useVoiceConnectionStore', () => {
 
       expect(useVoiceConnectionStore.getState().status).toBe('connected')
       expect(useVoiceConnectionStore.getState().currentChannelId).toBe('channel-2')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Audio device preferences
+  // -------------------------------------------------------------------------
+  describe('audio device preferences', () => {
+    it('has null preferred devices in initial state', () => {
+      const state = useVoiceConnectionStore.getState()
+      expect(state.preferredAudioInputId).toBeNull()
+      expect(state.preferredAudioOutputId).toBeNull()
+    })
+
+    it('setPreferredDevice updates preferredAudioInputId', async () => {
+      await connectStore()
+
+      useVoiceConnectionStore.getState().setPreferredDevice('audioinput', 'mic-123')
+
+      expect(useVoiceConnectionStore.getState().preferredAudioInputId).toBe('mic-123')
+      expect(useVoiceConnectionStore.getState().preferredAudioOutputId).toBeNull()
+    })
+
+    it('setPreferredDevice updates preferredAudioOutputId', async () => {
+      await connectStore()
+
+      useVoiceConnectionStore.getState().setPreferredDevice('audiooutput', 'speaker-456')
+
+      expect(useVoiceConnectionStore.getState().preferredAudioOutputId).toBe('speaker-456')
+      expect(useVoiceConnectionStore.getState().preferredAudioInputId).toBeNull()
+    })
+
+    it('connect() calls switchActiveDevice for stored input preference', async () => {
+      useVoiceConnectionStore.setState({ preferredAudioInputId: 'mic-123' })
+
+      const room = await connectStore()
+
+      expect(room.switchActiveDevice).toHaveBeenCalledWith('audioinput', 'mic-123')
+    })
+
+    it('connect() calls switchActiveDevice for stored output preference', async () => {
+      useVoiceConnectionStore.setState({ preferredAudioOutputId: 'speaker-456' })
+
+      const room = await connectStore()
+
+      expect(room.switchActiveDevice).toHaveBeenCalledWith('audiooutput', 'speaker-456')
+    })
+
+    it('connect() restores both devices when both preferences are set', async () => {
+      useVoiceConnectionStore.setState({
+        preferredAudioInputId: 'mic-123',
+        preferredAudioOutputId: 'speaker-456',
+      })
+
+      const room = await connectStore()
+
+      expect(room.switchActiveDevice).toHaveBeenCalledWith('audioinput', 'mic-123')
+      expect(room.switchActiveDevice).toHaveBeenCalledWith('audiooutput', 'speaker-456')
+    })
+
+    it('connect() does not call switchActiveDevice when no preferences set', async () => {
+      const room = await connectStore()
+
+      expect(room.switchActiveDevice).not.toHaveBeenCalled()
+    })
+
+    it('connect() logs warning when preferred device switch fails', async () => {
+      const { logger } = await import('@/lib/logger')
+      useVoiceConnectionStore.setState({ preferredAudioInputId: 'unplugged-mic' })
+
+      const livekitModule = await import('livekit-client')
+      const original = livekitModule.Room
+      const failRoom = createMockRoom()
+      failRoom.switchActiveDevice = vi.fn().mockRejectedValue(new Error('device not found'))
+
+      // @ts-expect-error — overriding module export for test
+      livekitModule.Room = function FailSwitchRoom() {
+        ;(globalThis as Record<string, unknown>).__latestMockRoom = failRoom
+        return failRoom
+      }
+
+      await useVoiceConnectionStore.getState().connect(CHANNEL_ID, SERVER_ID, TOKEN, URL)
+      // WHY: Let the fire-and-forget switchActiveDevice rejection propagate
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        'voice_restore_preferred_input_failed',
+        expect.objectContaining({ deviceId: 'unplugged-mic' }),
+      )
+
+      livekitModule.Room = original
+    })
+
+    it('preserves preferences across disconnect()', async () => {
+      await connectStore()
+      useVoiceConnectionStore.getState().setPreferredDevice('audioinput', 'mic-123')
+      useVoiceConnectionStore.getState().setPreferredDevice('audiooutput', 'speaker-456')
+
+      await useVoiceConnectionStore.getState().disconnect()
+
+      const state = useVoiceConnectionStore.getState()
+      expect(state.preferredAudioInputId).toBe('mic-123')
+      expect(state.preferredAudioOutputId).toBe('speaker-456')
+      expect(state.status).toBe('idle')
+    })
+
+    it('preserves preferences across reset()', async () => {
+      await connectStore()
+      useVoiceConnectionStore.getState().setPreferredDevice('audioinput', 'mic-123')
+      useVoiceConnectionStore.getState().setPreferredDevice('audiooutput', 'speaker-456')
+
+      useVoiceConnectionStore.getState().reset()
+
+      const state = useVoiceConnectionStore.getState()
+      expect(state.preferredAudioInputId).toBe('mic-123')
+      expect(state.preferredAudioOutputId).toBe('speaker-456')
+      expect(state.status).toBe('idle')
+    })
+
+    it('preserves preferences across disconnect-to-idle transition', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.getState().setPreferredDevice('audioinput', 'mic-123')
+
+      room.__emit('disconnected')
+      vi.advanceTimersByTime(3_000)
+
+      expect(useVoiceConnectionStore.getState().preferredAudioInputId).toBe('mic-123')
+      expect(useVoiceConnectionStore.getState().status).toBe('idle')
     })
   })
 })

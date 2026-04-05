@@ -22,6 +22,9 @@ interface DeviceInfo {
 export function AudioDeviceSelector() {
   const { t } = useTranslation('voice')
   const room = useVoiceConnectionStore((s) => s.room)
+  const setPreferredDevice = useVoiceConnectionStore((s) => s.setPreferredDevice)
+  const preferredAudioInputId = useVoiceConnectionStore((s) => s.preferredAudioInputId)
+  const preferredAudioOutputId = useVoiceConnectionStore((s) => s.preferredAudioOutputId)
 
   const [audioInputs, setAudioInputs] = useState<DeviceInfo[]>([])
   const [audioOutputs, setAudioOutputs] = useState<DeviceInfo[]>([])
@@ -49,19 +52,25 @@ export function AudioDeviceSelector() {
         })),
       )
 
-      // WHY: Sync selected state with room's active devices after enumeration.
-      if (room !== null) {
-        const currentInput = room.getActiveDevice('audioinput')
-        const currentOutput = room.getActiveDevice('audiooutput')
-        if (currentInput !== undefined) setActiveInputId(currentInput)
-        if (currentOutput !== undefined) setActiveOutputId(currentOutput)
-      }
+      // WHY: Prefer stored preferences over room.getActiveDevice(). During token
+      // refresh, restorePreferredDevices() is in-flight (async switchActiveDevice)
+      // while this callback fires concurrently. room.getActiveDevice() returns
+      // the system default at that instant, causing the dropdown to flash/revert.
+      // The store is the SSoT for the user's intent; the Room is the SSoT for
+      // hardware state — and hardware state is mid-transition during refresh.
+      const inputId =
+        preferredAudioInputId ?? (room !== null ? room.getActiveDevice('audioinput') : undefined)
+      const outputId =
+        preferredAudioOutputId ?? (room !== null ? room.getActiveDevice('audiooutput') : undefined)
+
+      if (inputId !== undefined) setActiveInputId(inputId)
+      if (outputId !== undefined) setActiveOutputId(outputId)
     } catch (err: unknown) {
       logger.error('voice_device_enumeration_failed', {
         error: err instanceof Error ? err.message : String(err),
       })
     }
-  }, [room])
+  }, [room, preferredAudioInputId, preferredAudioOutputId])
 
   // WHY: Enumerate devices on mount and whenever the room reference changes.
   useEffect(() => {
@@ -83,7 +92,7 @@ export function AudioDeviceSelector() {
     }
   }, [room, refreshDevices])
 
-  function switchDevice(kind: MediaDeviceKind, selection: Iterable<string | number>) {
+  function switchDevice(kind: 'audioinput' | 'audiooutput', selection: Iterable<string | number>) {
     const first = [...selection][0]
     if (first === undefined || room === null) return
     const deviceId = String(first)
@@ -95,6 +104,7 @@ export function AudioDeviceSelector() {
       () => {
         if (kind === 'audioinput') setActiveInputId(deviceId)
         else setActiveOutputId(deviceId)
+        setPreferredDevice(kind, deviceId)
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)

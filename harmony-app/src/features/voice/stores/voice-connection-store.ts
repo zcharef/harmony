@@ -465,6 +465,9 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
         })
       }
     }
+    // WHY: preferredAudioInputId / preferredAudioOutputId are intentionally
+    // NOT cleared here. They are user preferences that should persist across
+    // disconnect → rejoin so the same devices are restored automatically.
     set({
       status: 'idle',
       room: null,
