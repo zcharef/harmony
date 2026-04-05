@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { z } from 'zod'
 
 import { usePreferences } from '@/features/preferences'
+import { useVoiceConnectionStore } from '@/features/voice'
 import { useServerEvent } from '@/hooks/use-server-event'
 import { type UserStatus, updatePresence } from '@/lib/api'
 import { logger } from '@/lib/logger'
@@ -53,6 +54,9 @@ export function usePresence(userId: string | null): void {
   const preferences = usePreferences()
   const preferencesReady = !preferences.isPending
   const dndEnabled = preferences.data?.dndEnabled === true
+  // WHY: Voice channel participation is a form of active engagement. Without this,
+  // users talking in voice get marked idle after 5 min of no mouse/keyboard input.
+  const inVoice = useVoiceConnectionStore((s) => s.status === 'connected')
   const lastActivityRef = useRef(Date.now())
   const isIdleRef = useRef(false)
 
@@ -73,10 +77,14 @@ export function usePresence(userId: string | null): void {
       postPresenceStatus(status)
     }
 
-    // Compute correct initial status based on DND + actual activity.
+    // Compute correct initial status based on DND + voice + actual activity.
     if (dndEnabled) {
       updateStatus('dnd')
       isIdleRef.current = false
+    } else if (inVoice) {
+      // WHY: Voice connection suppresses idle — the user is actively participating.
+      isIdleRef.current = false
+      updateStatus('online')
     } else {
       const elapsed = Date.now() - lastActivityRef.current
       const shouldBeIdle = elapsed >= IDLE_TIMEOUT_MS
@@ -95,7 +103,7 @@ export function usePresence(userId: string | null): void {
     }
 
     function onVisibilityChange() {
-      if (dndEnabled) return
+      if (dndEnabled || inVoice) return
       if (document.hidden) {
         isIdleRef.current = true
         updateStatus('idle')
@@ -110,7 +118,7 @@ export function usePresence(userId: string | null): void {
     document.addEventListener('visibilitychange', onVisibilityChange)
 
     const idleInterval = setInterval(() => {
-      if (dndEnabled) return
+      if (dndEnabled || inVoice) return
       const elapsed = Date.now() - lastActivityRef.current
       if (elapsed >= IDLE_TIMEOUT_MS && !isIdleRef.current) {
         isIdleRef.current = true
@@ -128,7 +136,7 @@ export function usePresence(userId: string | null): void {
       // not just on logout. Removing the user causes a store flash and lets stale
       // SSE echoes race with the new status. Logout cleanup is handled below.
     }
-  }, [userId, dndEnabled, preferencesReady])
+  }, [userId, dndEnabled, inVoice, preferencesReady])
 
   // WHY separate effect: removeUser must only run on actual logout (userId → null),
   // not on every dndEnabled toggle. The main effect's cleanup fires on both cases,
