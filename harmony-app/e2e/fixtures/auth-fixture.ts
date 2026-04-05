@@ -126,6 +126,32 @@ export async function selectServer(page: Page, serverId: string): Promise<void> 
 }
 
 /**
+ * Opens server settings panel via the header dropdown.
+ * WHY retry loop: HeroUI dropdown sometimes fails to open on the first click
+ * in CI (slow runners + animation timing). Re-clicking the header re-triggers
+ * the dropdown. 3 attempts with 10s each covers even the slowest CI runners.
+ */
+export async function openServerSettings(page: Page): Promise<void> {
+  const headerButton = page.locator('[data-test="server-header-button"]')
+  const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await headerButton.click()
+    try {
+      await settingsItem.waitFor({ timeout: 10_000 })
+      break
+    } catch {
+      if (attempt === 2) throw new Error('Server settings dropdown failed to open after 3 attempts')
+    }
+  }
+
+  // WHY: force:true bypasses the actionability "stable" check. HeroUI dropdown items
+  // animate on open and can fail the stability check before the animation completes.
+  await settingsItem.click({ force: true })
+  await page.locator('[data-test="server-settings"]').waitFor({ timeout: 10_000 })
+}
+
+/**
  * Clicks a channel in the sidebar by name.
  */
 export async function selectChannel(page: Page, channelName: string): Promise<void> {

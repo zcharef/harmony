@@ -30,7 +30,12 @@
  * - message-item.tsx:182 (encrypted web fallback in message-content)
  */
 import { expect, test } from '@playwright/test'
-import { authenticatePage, selectChannel, selectServer } from './fixtures/auth-fixture'
+import {
+  authenticatePage,
+  openServerSettings,
+  selectChannel,
+  selectServer,
+} from './fixtures/auth-fixture'
 import {
   assignRole,
   createChannel,
@@ -84,12 +89,7 @@ test.describe('Encryption UI', () => {
     await selectServer(page, server.id)
 
     // Open server settings > Channels tab
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 10_000 })
-    await settingsItem.click()
-    await page.locator('[data-test="server-settings"]').waitFor({ timeout: 10_000 })
+    await openServerSettings(page)
     await page.locator('[data-test="settings-tab-channels"]').click()
 
     // Find the plain channel row (not yet encrypted)
@@ -120,12 +120,7 @@ test.describe('Encryption UI', () => {
     await authenticatePage(page, admin)
     await selectServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 10_000 })
-    await settingsItem.click()
-    await page.locator('[data-test="server-settings"]').waitFor({ timeout: 10_000 })
+    await openServerSettings(page)
     await page.locator('[data-test="settings-tab-channels"]').click()
 
     const channelList = page.locator('[data-test="settings-channel-list"]')
@@ -150,12 +145,7 @@ test.describe('Encryption UI', () => {
     await authenticatePage(page, owner)
     await selectServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-    await page.locator('[data-test="server-settings"]').waitFor({ timeout: 10_000 })
+    await openServerSettings(page)
     await page.locator('[data-test="settings-tab-channels"]').click()
 
     const channelList = page.locator('[data-test="settings-channel-list"]')
@@ -352,12 +342,7 @@ test.describe('Encryption UI', () => {
     await authenticatePage(page, owner)
     await selectServer(page, server.id)
 
-    await page.locator('[data-test="server-header-button"]').click()
-    // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-    const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
-    await settingsItem.click()
-    await page.locator('[data-test="server-settings"]').waitFor({ timeout: 10_000 })
+    await openServerSettings(page)
     await page.locator('[data-test="settings-tab-channels"]').click()
 
     const channelList = page.locator('[data-test="settings-channel-list"]')

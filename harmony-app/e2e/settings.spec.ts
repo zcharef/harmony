@@ -19,7 +19,7 @@
  * - roles-tab.tsx:260 (transfer-ownership-button)
  */
 import { expect, type Page, test } from '@playwright/test'
-import { authenticatePage, selectServer } from './fixtures/auth-fixture'
+import { authenticatePage, openServerSettings, selectServer } from './fixtures/auth-fixture'
 import {
   assignRole,
   banUser,
@@ -46,22 +46,6 @@ async function navigateToServer(page: Page, serverId: string): Promise<void> {
   // Previously used waitForResponse, but TanStack Query cache can satisfy the
   // query without a new network request — causing the response listener to miss.
   await page.locator('[data-test="member-list"]').waitFor({ timeout: 15_000 })
-}
-
-/**
- * Opens the server settings panel for an admin+ user.
- * WHY: Extracted to reduce duplication — every settings test repeats this 5-step flow.
- */
-async function openServerSettings(page: Page, _serverId: string): Promise<void> {
-  await page.locator('[data-test="server-header-button"]').click()
-  // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
-  const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-  await settingsItem.waitFor({ timeout: 10_000 })
-  // WHY: force:true bypasses the actionability "stable" check. HeroUI dropdown items
-  // animate on open and can fail the stability check before the animation completes,
-  // causing the click to time out while the dropdown eventually closes on its own.
-  await settingsItem.click({ force: true })
-  await page.locator('[data-test="server-settings"]').waitFor({ timeout: 10_000 })
 }
 
 test.describe('Server Settings Role Gating', () => {
@@ -98,7 +82,7 @@ test.describe('Server Settings Role Gating', () => {
     await authenticatePage(page, owner)
     await navigateToServer(page, server.id)
 
-    await openServerSettings(page, server.id)
+    await openServerSettings(page)
 
     // Verify all 4 tabs are visible
     await expect(page.locator('[data-test="settings-tab-overview"]')).toBeVisible()
@@ -114,7 +98,7 @@ test.describe('Server Settings Role Gating', () => {
     await authenticatePage(page, admin)
     await navigateToServer(page, server.id)
 
-    await openServerSettings(page, server.id)
+    await openServerSettings(page)
 
     await expect(page.locator('[data-test="settings-tab-overview"]')).toBeVisible()
     await expect(page.locator('[data-test="settings-tab-roles"]')).toBeVisible()
@@ -144,7 +128,7 @@ test.describe('Server Settings Role Gating', () => {
     await authenticatePage(page, admin)
     await navigateToServer(page, server.id)
 
-    await openServerSettings(page, server.id)
+    await openServerSettings(page)
 
     // Overview tab is the default tab
     const nameInput = page.locator('[data-test="settings-server-name-input"]')
@@ -184,7 +168,7 @@ test.describe('Server Settings Role Gating', () => {
     await authenticatePage(page, admin)
     await navigateToServer(page, server.id)
 
-    await openServerSettings(page, server.id)
+    await openServerSettings(page)
 
     // Navigate to Channels tab
     await page.locator('[data-test="settings-tab-channels"]').click()
@@ -216,7 +200,7 @@ test.describe('Server Settings Role Gating', () => {
     await authenticatePage(page, admin)
     await navigateToServer(page, server.id)
 
-    await openServerSettings(page, server.id)
+    await openServerSettings(page)
 
     await page.locator('[data-test="settings-tab-bans"]').click()
 
@@ -237,7 +221,7 @@ test.describe('Server Settings Role Gating', () => {
     await authenticatePage(page, admin)
     await navigateToServer(page, server.id)
 
-    await openServerSettings(page, server.id)
+    await openServerSettings(page)
 
     await page.locator('[data-test="settings-tab-roles"]').click()
 
@@ -270,7 +254,7 @@ test.describe('Server Settings Role Gating', () => {
     await authenticatePage(page, admin)
     await navigateToServer(page, server.id)
 
-    await openServerSettings(page, server.id)
+    await openServerSettings(page)
 
     await page.locator('[data-test="settings-tab-roles"]').click()
 
@@ -285,7 +269,7 @@ test.describe('Server Settings Role Gating', () => {
     await authenticatePage(page, owner)
     await navigateToServer(page, server.id)
 
-    await openServerSettings(page, server.id)
+    await openServerSettings(page)
 
     // Overview is default tab — verify danger zone is visible for owner
     const deleteInput = page.locator('[data-test="delete-server-confirm-input"]')
@@ -302,7 +286,7 @@ test.describe('Server Settings Role Gating', () => {
     await authenticatePage(page, admin)
     await navigateToServer(page, server.id)
 
-    await openServerSettings(page, server.id)
+    await openServerSettings(page)
 
     // Overview is default tab — delete section should NOT be visible for admin
     await expect(page.locator('[data-test="delete-server-confirm-input"]')).not.toBeVisible()
@@ -313,7 +297,7 @@ test.describe('Server Settings Role Gating', () => {
     await authenticatePage(page, owner)
     await navigateToServer(page, server.id)
 
-    await openServerSettings(page, server.id)
+    await openServerSettings(page)
 
     // Click close button
     await page.locator('[data-test="close-settings-button"]').click()
