@@ -17,7 +17,12 @@ targets = [
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-ignore = []
+ignore = [
+    # WHY: Transitive dep from jsonwebtoken → rsa. No upstream fix available (RUSTSEC-2023-0071).
+    # We do not use RSA directly for key exchange — jsonwebtoken uses it for JWT RS256 validation.
+    # Risk is mitigated: tokens are short-lived (1h) and validated server-side only.
+    "RUSTSEC-2023-0071",
+]
 
 # ============================================================================
 # LICENSES - Ensure all dependencies have acceptable licenses
@@ -71,7 +76,9 @@ external-default-features = "allow"
 # Crates to deny entirely
 deny = [
     # Unmaintained / known issues
-    { name = "openssl", wrappers = ["openssl-sys", "native-tls"] },
+    # WHY: openssl-sys removed from wrappers — it's no longer a transitive dep
+    # after switching to rustls. Keeping native-tls as a safety net.
+    { name = "openssl", wrappers = ["native-tls"] },
 
     # Deprecated crates
     { name = "failure" },
