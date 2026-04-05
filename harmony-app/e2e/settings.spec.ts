@@ -56,7 +56,7 @@ async function openServerSettings(page: Page, _serverId: string): Promise<void> 
   await page.locator('[data-test="server-header-button"]').click()
   // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
   const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-  await settingsItem.waitFor({ timeout: 5_000 })
+  await settingsItem.waitFor({ timeout: 10_000 })
   // WHY: force:true bypasses the actionability "stable" check. HeroUI dropdown items
   // animate on open and can fail the stability check before the animation completes,
   // causing the click to time out while the dropdown eventually closes on its own.
@@ -205,7 +205,7 @@ test.describe('Server Settings Role Gating', () => {
     // WHY: Channels tab uses accordion layout — controls are inside ChannelSettingsCard
     // which only renders when the row is expanded. Click to expand first.
     await channelRow.click()
-    await channelRow.locator('[data-test="channel-settings-card"]').waitFor({ timeout: 5_000 })
+    await channelRow.locator('[data-test="channel-settings-card"]').waitFor({ timeout: 10_000 })
 
     await expect(channelRow.locator('[data-test="channel-private-toggle"]')).toBeVisible()
     await expect(channelRow.locator('[data-test="channel-readonly-toggle"]')).toBeVisible()

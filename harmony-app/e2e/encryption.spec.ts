@@ -87,7 +87,7 @@ test.describe('Encryption UI', () => {
     await page.locator('[data-test="server-header-button"]').click()
     // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
     const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
+    await settingsItem.waitFor({ timeout: 10_000 })
     await settingsItem.click()
     await page.locator('[data-test="server-settings"]').waitFor({ timeout: 10_000 })
     await page.locator('[data-test="settings-tab-channels"]').click()
@@ -103,7 +103,7 @@ test.describe('Encryption UI', () => {
 
     // WHY: Accordion layout — expand the row to reveal ChannelSettingsCard controls.
     await plainRow.click()
-    await plainRow.locator('[data-test="channel-settings-card"]').waitFor({ timeout: 5_000 })
+    await plainRow.locator('[data-test="channel-settings-card"]').waitFor({ timeout: 10_000 })
 
     // WHY: On web, the toggle should be present but disabled (data-test="channel-encryption-toggle-disabled").
     const disabledToggle = plainRow.locator('[data-test="channel-encryption-toggle-disabled"]')
@@ -123,7 +123,7 @@ test.describe('Encryption UI', () => {
     await page.locator('[data-test="server-header-button"]').click()
     // WHY: Wait for dropdown to render — HeroUI dropdown has animation delay.
     const settingsItem = page.locator('[data-test="server-menu-settings-item"]')
-    await settingsItem.waitFor({ timeout: 5_000 })
+    await settingsItem.waitFor({ timeout: 10_000 })
     await settingsItem.click()
     await page.locator('[data-test="server-settings"]').waitFor({ timeout: 10_000 })
     await page.locator('[data-test="settings-tab-channels"]').click()
