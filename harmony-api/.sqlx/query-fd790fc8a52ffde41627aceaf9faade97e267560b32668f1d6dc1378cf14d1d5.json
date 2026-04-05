@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE voice_sessions\n            SET last_seen_at = now(),\n                last_active_at = CASE WHEN $3 THEN now() ELSE last_active_at END\n            WHERE user_id = $1 AND session_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fd790fc8a52ffde41627aceaf9faade97e267560b32668f1d6dc1378cf14d1d5"
+}

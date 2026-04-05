@@ -10,6 +10,7 @@ use crate::api::dto::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, AuthUser};
 use crate::api::state::AppState;
+use crate::domain::models::server_event::{MemberPayload, ServerEvent};
 use crate::domain::services::ProfileService;
 use crate::infra::auth::AuthenticatedUser;
 
@@ -86,7 +87,96 @@ pub async fn sync_profile(
         .upsert_from_auth(user_id.clone(), email, username, is_user_chosen)
         .await?;
 
+    // WHY: Auto-join the official server for new users. Membership creation
+    // and event emission are co-located here (SSoT) — no DB trigger involved.
+    // Skipped when OFFICIAL_SERVER_ID is unset (self-hosted instances).
+    if let Some(official_server_id) = state.official_server_id() {
+        auto_join_official_server(&state, official_server_id, &user_id).await;
+    }
+
     Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
+}
+
+/// Best-effort auto-join for the official server.
+///
+/// Owns the full flow: membership INSERT + system message + SSE event.
+/// Replaces the former DB trigger `trg_auto_join_official_server`.
+///
+/// All failures are logged and swallowed — auto-join must never fail signup.
+async fn auto_join_official_server(
+    state: &AppState,
+    official_server_id: &crate::domain::models::ServerId,
+    user_id: &crate::domain::models::UserId,
+) {
+    // 1. Insert membership (idempotent — ON CONFLICT DO NOTHING).
+    if let Err(e) = state
+        .member_repository()
+        .add_member(official_server_id, user_id)
+        .await
+    {
+        tracing::warn!(
+            server_id = %official_server_id,
+            user_id = %user_id,
+            error = ?e,
+            "Failed to auto-join official server (best-effort)"
+        );
+        return;
+    }
+
+    // 2. System message in default channel (best-effort).
+    if let Err(e) =
+        super::post_system_message(state, official_server_id, user_id, "member_join").await
+    {
+        tracing::warn!(
+            server_id = %official_server_id,
+            user_id = %user_id,
+            error = ?e,
+            "Failed to post auto-join announcement (best-effort)"
+        );
+    }
+
+    // 3. MemberJoined SSE event (best-effort).
+    match state
+        .member_repository()
+        .get_member(official_server_id, user_id)
+        .await
+    {
+        Ok(Some(member)) => {
+            let event = ServerEvent::MemberJoined {
+                sender_id: user_id.clone(),
+                server_id: official_server_id.clone(),
+                member: MemberPayload {
+                    user_id: member.user_id,
+                    username: member.username,
+                    avatar_url: member.avatar_url,
+                    nickname: member.nickname,
+                    role: member.role,
+                    joined_at: member.joined_at,
+                },
+            };
+            state.event_bus().publish(event);
+            tracing::info!(
+                server_id = %official_server_id,
+                user_id = %user_id,
+                "Auto-joined official server for new user"
+            );
+        }
+        Ok(None) => {
+            tracing::warn!(
+                server_id = %official_server_id,
+                user_id = %user_id,
+                "Member not found after auto-join INSERT — skipping MemberJoined event"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                server_id = %official_server_id,
+                user_id = %user_id,
+                error = ?e,
+                "Failed to fetch member for MemberJoined event"
+            );
+        }
+    }
 }
 
 /// Get the authenticated user's own profile.

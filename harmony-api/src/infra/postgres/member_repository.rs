@@ -223,6 +223,7 @@ impl MemberRepository for PgMemberRepository {
             r#"
             INSERT INTO server_members (server_id, user_id, role)
             VALUES ($1, $2, $3)
+            ON CONFLICT (server_id, user_id) DO NOTHING
             "#,
             sid,
             uid,

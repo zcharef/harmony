@@ -298,7 +298,12 @@ pub async fn voice_heartbeat(
         ));
     }
 
-    voice_service.heartbeat(&user_id, &body.session_id).await?;
+    let is_active = body.is_active.unwrap_or(true);
+    let is_muted = body.is_muted.unwrap_or(false);
+
+    voice_service
+        .heartbeat(&user_id, &body.session_id, is_active, is_muted)
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

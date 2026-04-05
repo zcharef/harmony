@@ -8,7 +8,6 @@
 // WHY: main.rs is the composition root — process::exit on fatal startup errors is acceptable.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-use harmony_api::domain::ports::VoiceSessionRepository as _;
 use harmony_api::{api, config, domain, infra};
 
 use std::net::SocketAddr;
@@ -283,7 +282,10 @@ async fn init_app_state(config: &Config) -> AppState {
 
     // WHY: Construct voice service only when all three LiveKit env vars are set.
     // When None, voice endpoints return DomainError::VoiceDisabled (graceful degradation).
-    let voice_service: Option<Arc<domain::services::VoiceService>> = if config.livekit_enabled() {
+    let (voice_service, voice_session_repo): (
+        Option<Arc<domain::services::VoiceService>>,
+        Option<Arc<dyn domain::ports::VoiceSessionRepository>>,
+    ) = if config.livekit_enabled() {
         let livekit_url = config.livekit_url.as_deref().unwrap().to_string();
         let livekit_key = config.livekit_api_key.clone().unwrap();
         let livekit_secret = config.livekit_api_secret.clone().unwrap();
@@ -293,19 +295,21 @@ async fn init_app_state(config: &Config) -> AppState {
             livekit_secret,
             config.livekit_token_ttl_secs,
         ));
-        let voice_repo = Arc::new(infra::postgres::PgVoiceSessionRepository::new(pool.clone()));
+        let voice_repo: Arc<dyn domain::ports::VoiceSessionRepository> =
+            Arc::new(infra::postgres::PgVoiceSessionRepository::new(pool.clone()));
 
         tracing::info!("Voice channels ENABLED (LiveKit configured)");
-        Some(Arc::new(domain::services::VoiceService::new(
-            voice_repo,
+        let svc = Arc::new(domain::services::VoiceService::new(
+            voice_repo.clone(),
             channel_repo.clone(),
             member_repo.clone(),
             plan_limit_checker.clone(),
             livekit_service,
-        )))
+        ));
+        (Some(svc), Some(voice_repo))
     } else {
         tracing::info!("Voice channels DISABLED (LiveKit not configured)");
-        None
+        (None, None)
     };
 
     tracing::info!("Domain services initialized");
@@ -341,6 +345,8 @@ async fn init_app_state(config: &Config) -> AppState {
         server_repo_for_moderation,
         moderation_retry_repo,
         voice_service,
+        voice_session_repo,
+        None, // official_server_id — config field added in a future commit
     )
 }
 
@@ -551,6 +557,7 @@ fn spawn_moderation_retry_sweep(state: api::AppState) {
                                         server_id: retry.server_id.clone(),
                                         channel_id: retry.channel_id.clone(),
                                         message_id: retry.message_id.clone(),
+                                        deleted_by: SYSTEM_MODERATOR_ID,
                                     };
                                     event_bus.publish(event);
                                 }
@@ -635,53 +642,109 @@ fn spawn_voice_session_sweep(state: api::AppState) {
     /// tab timers to 1/min max, so 45s was too aggressive and killed sessions
     /// in backgrounded tabs.
     const STALE_THRESHOLD_SECS: i64 = 75;
+    /// Alone-in-channel threshold: disconnect after 3 minutes alone.
+    const ALONE_THRESHOLD_SECS: i64 = 180;
+    /// AFK threshold: disconnect after 30 minutes of inactivity.
+    const AFK_THRESHOLD_SECS: i64 = 1800;
 
     // WHY: Skip sweep entirely when voice is not enabled.
-    // No voice service means no voice sessions can exist.
-    let voice_service = match state.voice_service().cloned() {
-        Some(s) => s,
+    // No voice session repository means no voice sessions can exist.
+    let voice_repo = match state.voice_session_repository().cloned() {
+        Some(repo) => repo,
         None => return,
     };
 
-    // WHY: We need the VoiceSessionRepository directly for delete_stale,
-    // but VoiceService doesn't expose it. Use a separate repo instance
-    // constructed from the pool (same pattern as message_repo_for_moderation).
-    // However, delete_stale is on VoiceSessionRepository which is inside
-    // VoiceService. Instead, we construct a separate repo from the pool.
-    let pool = state.pool().clone();
-    let voice_repo = infra::postgres::PgVoiceSessionRepository::new(pool);
-
     tokio::spawn(async move {
-        // WHY: Suppress unused variable warning — voice_service is held to prove
-        // voice is enabled, but the sweep uses voice_repo directly.
-        let _voice_enabled = voice_service;
-
         let mut interval = tokio::time::interval(SWEEP_INTERVAL);
         loop {
             interval.tick().await;
 
-            let threshold = chrono::Utc::now() - chrono::Duration::seconds(STALE_THRESHOLD_SECS);
-            match voice_repo.delete_stale(threshold).await {
-                Ok(stale) => {
-                    if stale.is_empty() {
-                        continue;
-                    }
+            let now = chrono::Utc::now();
+            let stale_threshold = now - chrono::Duration::seconds(STALE_THRESHOLD_SECS);
 
-                    tracing::info!(count = stale.len(), "Swept stale voice sessions");
+            let mut stale_count: usize = 0;
+            let mut stale_ok = true;
+            let mut alone_count: usize = 0;
+            let mut alone_ok = true;
+            let mut afk_count: usize = 0;
+            let mut afk_ok = true;
 
-                    for session in stale {
-                        let event = ServerEvent::VoiceStateUpdate {
-                            sender_id: session.user_id.clone(),
-                            server_id: session.server_id.clone(),
-                            channel_id: session.channel_id.clone(),
-                            user_id: session.user_id,
-                            action: VoiceAction::Left,
-                            display_name: String::new(),
-                        };
-                        state.event_bus().publish(event);
-                    }
+            // Helper closure: emit VoiceStateUpdate(Left) for each removed session.
+            let emit_left = |sessions: Vec<crate::domain::models::VoiceSession>| {
+                for session in sessions {
+                    let event = ServerEvent::VoiceStateUpdate {
+                        sender_id: session.user_id.clone(),
+                        server_id: session.server_id.clone(),
+                        channel_id: session.channel_id.clone(),
+                        user_id: session.user_id,
+                        action: VoiceAction::Left,
+                        display_name: String::new(),
+                    };
+                    state.event_bus().publish(event);
                 }
-                Err(e) => tracing::warn!(error = %e, "Voice session sweep failed"),
+            };
+
+            // Step 1: Remove sessions that stopped heartbeating.
+            match voice_repo.delete_stale(stale_threshold).await {
+                Ok(stale) => {
+                    stale_count = stale.len();
+                    emit_left(stale);
+                }
+                Err(e) => {
+                    stale_ok = false;
+                    tracing::warn!(error = %e, "Voice session sweep: delete_stale failed");
+                }
+            }
+
+            // Step 2: Remove sessions alone in their channel beyond threshold.
+            let alone_threshold = now - chrono::Duration::seconds(ALONE_THRESHOLD_SECS);
+            match voice_repo.delete_alone_in_channel(alone_threshold).await {
+                Ok(alone) => {
+                    alone_count = alone.len();
+                    emit_left(alone);
+                }
+                Err(e) => {
+                    alone_ok = false;
+                    tracing::warn!(error = %e, "Voice session sweep: delete_alone_in_channel failed");
+                }
+            }
+
+            // Step 3: Remove AFK sessions (still heartbeating but inactive).
+            let afk_threshold = now - chrono::Duration::seconds(AFK_THRESHOLD_SECS);
+            match voice_repo.delete_afk(afk_threshold, stale_threshold).await {
+                Ok(afk) => {
+                    afk_count = afk.len();
+                    emit_left(afk);
+                }
+                Err(e) => {
+                    afk_ok = false;
+                    tracing::warn!(error = %e, "Voice session sweep: delete_afk failed");
+                }
+            }
+
+            // Step 4: Update alone_since markers for the next sweep cycle.
+            if let Err(e) = voice_repo.update_alone_since().await {
+                tracing::warn!(error = %e, "Voice session sweep: update_alone_since failed");
+            }
+
+            // WHY: Always log a summary so operators can distinguish
+            // "sweep ran and found nothing" from "sweep failed."
+            if stale_count > 0
+                || alone_count > 0
+                || afk_count > 0
+                || !stale_ok
+                || !alone_ok
+                || !afk_ok
+            {
+                tracing::info!(
+                    stale = stale_count,
+                    stale_ok,
+                    alone = alone_count,
+                    alone_ok,
+                    afk = afk_count,
+                    afk_ok,
+                    "Voice session sweep complete"
+                );
             }
         }
     });

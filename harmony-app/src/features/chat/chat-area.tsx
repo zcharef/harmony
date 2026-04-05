@@ -102,8 +102,13 @@ function buildVirtualItems(messages: MessageResponse[]): VirtualItem[] {
       }
     }
 
+    // WHY: Deleted messages always break grouping so the "[Message deleted]"
+    // placeholder renders with its own header, not collapsed under the previous
+    // message. Uses explicit null/undefined checks per CLAUDE.md §philosophy.
     const isGrouped =
       prev !== undefined &&
+      (prev.deletedBy === null || prev.deletedBy === undefined) &&
+      (msg.deletedBy === null || msg.deletedBy === undefined) &&
       prev.authorId === msg.authorId &&
       prev.messageType === 'default' &&
       msg.messageType === 'default' &&

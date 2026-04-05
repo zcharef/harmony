@@ -67,16 +67,19 @@ function applyBatch(
   queryClient.setQueryData<VoiceParticipantResponse[]>(
     queryKeys.voice.participants(channelId),
     (old) => {
-      if (old === undefined) return undefined
+      // WHY: When the cache hasn't been populated yet (e.g. SSE event arrives
+      // before the initial REST fetch completes), start from an empty array
+      // instead of silently dropping the event.
+      const baseline = old ?? []
 
-      let next = old
+      let next = baseline
       for (const event of events) {
         next = event.action === 'joined' ? applyJoin(next, event) : applyLeave(next, event)
       }
 
-      // WHY: If nothing changed after processing all events, return old
+      // WHY: If nothing changed after processing all events, return baseline
       // reference to avoid unnecessary re-renders.
-      return next === old ? old : next
+      return next === baseline ? baseline : next
     },
   )
 }
@@ -141,8 +144,11 @@ export function useRealtimeVoice(channelId: string) {
 
       // WHY: Play sound only for OTHER users joining/leaving our active voice
       // channel. Self-actions already trigger sounds in use-voice-connection.ts.
+      // getState() is a sync Zustand read — safe inside a callback.
       // WHY status guard: During self-join, the SSE event can arrive before
-      // storeConnect completes (status still connecting, room is null).
+      // storeConnect completes (status is still 'connecting', room is null).
+      // Without this check, room?.localParticipant.identity is undefined and
+      // the self-filter fails, causing a double-play with use-voice-connection.
       const voiceState = useVoiceConnectionStore.getState()
       if (
         voiceState.status === 'connected' &&

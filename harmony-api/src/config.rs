@@ -85,6 +85,10 @@ pub struct Config {
     /// Controls the maximum lifetime of voice channel JWTs.
     #[serde(default = "default_livekit_token_ttl_secs")]
     pub livekit_token_ttl_secs: u64,
+
+    /// UUID of the official Harmony server. When set, new users are
+    /// auto-joined and SSE events are emitted. Unset = no auto-join.
+    pub official_server_id: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -195,6 +199,7 @@ impl std::fmt::Debug for Config {
             )
             .field("livekit_token_ttl_secs", &self.livekit_token_ttl_secs)
             .field("livekit_enabled", &self.livekit_enabled())
+            .field("official_server_id", &self.official_server_id)
             .finish()
     }
 }

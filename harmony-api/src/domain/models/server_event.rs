@@ -181,6 +181,9 @@ pub enum ServerEvent {
         server_id: ServerId,
         channel_id: ChannelId,
         message_id: MessageId,
+        /// Who performed the deletion: the author's `UserId` for user-initiated,
+        /// `SYSTEM_MODERATOR_ID` for automod deletions.
+        deleted_by: UserId,
     },
 
     // ── Members ──────────────────────────────────────────────
@@ -530,11 +533,13 @@ mod tests {
 
     #[test]
     fn serializes_as_tagged_union() {
+        let deleter = test_user_id();
         let event = ServerEvent::MessageDeleted {
-            sender_id: test_user_id(),
+            sender_id: deleter.clone(),
             server_id: test_server_id(),
             channel_id: test_channel_id(),
             message_id: MessageId::new(Uuid::new_v4()),
+            deleted_by: deleter,
         };
         let json = serde_json::to_value(&event).unwrap();
         // WHY: `rename_all_fields = "camelCase"` renames all struct variant
@@ -544,6 +549,7 @@ mod tests {
         assert!(json["senderId"].is_string());
         assert!(json["serverId"].is_string());
         assert!(json["channelId"].is_string());
+        assert!(json["deletedBy"].is_string());
         assert!(json["messageId"].is_string());
     }
 }

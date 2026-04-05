@@ -261,6 +261,7 @@ pub async fn delete_message(
         server_id: channel.server_id,
         channel_id: path.channel_id.clone(),
         message_id: path.message_id.clone(),
+        deleted_by: user_id,
     };
     let receivers = state.event_bus().publish(event);
     tracing::debug!(
@@ -512,6 +513,7 @@ fn spawn_async_moderation(
             server_id,
             channel_id,
             message_id: msg_id.clone(),
+            deleted_by: SYSTEM_MODERATOR_ID,
         };
         let receivers = event_bus.publish(event);
         tracing::debug!(message_id = %msg_id, receivers, "emitted moderation message.deleted");

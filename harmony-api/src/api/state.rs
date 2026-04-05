@@ -6,10 +6,11 @@ use jsonwebtoken::DecodingKey;
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
 
+use crate::domain::models::ServerId;
 use crate::domain::ports::{
     BanRepository, ContentModerator, DesktopAuthRepository, EventBus, MegolmSessionRepository,
     MemberRepository, MessageRepository, ModerationRetryRepository, PlanLimitChecker,
-    ServerRepository,
+    ServerRepository, VoiceSessionRepository,
 };
 use crate::domain::services::{
     ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
@@ -92,6 +93,10 @@ pub struct AppState {
     moderation_retry_repository: Arc<dyn ModerationRetryRepository>,
     /// Voice domain service. None = `LiveKit` not configured.
     voice_service: Option<Arc<VoiceService>>,
+    /// Voice session repository for sweep background task. None = voice disabled.
+    voice_session_repository: Option<Arc<dyn VoiceSessionRepository>>,
+    /// Official Harmony server ID. When set, `sync_profile` auto-joins new users.
+    official_server_id: Option<ServerId>,
 }
 
 // WHY: Manual Debug because `dyn MemberRepository` needs explicit impl through Arc.
@@ -132,6 +137,11 @@ impl std::fmt::Debug for AppState {
                 &self.moderation_retry_repository,
             )
             .field("voice_service", &self.voice_service.is_some())
+            .field(
+                "voice_session_repository",
+                &self.voice_session_repository.is_some(),
+            )
+            .field("official_server_id", &self.official_server_id)
             .finish()
     }
 }
@@ -171,6 +181,8 @@ impl AppState {
         server_repository_for_moderation: Arc<dyn ServerRepository>,
         moderation_retry_repository: Arc<dyn ModerationRetryRepository>,
         voice_service: Option<Arc<VoiceService>>,
+        voice_session_repository: Option<Arc<dyn VoiceSessionRepository>>,
+        official_server_id: Option<ServerId>,
     ) -> Self {
         Self {
             pool,
@@ -204,6 +216,8 @@ impl AppState {
             moderation_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_MODERATIONS)),
             moderation_retry_repository,
             voice_service,
+            voice_session_repository,
+            official_server_id,
         }
     }
 
@@ -373,6 +387,18 @@ impl AppState {
     #[must_use]
     pub fn voice_service(&self) -> Option<&Arc<VoiceService>> {
         self.voice_service.as_ref()
+    }
+
+    /// Access the voice session repository for sweep tasks. None = voice disabled.
+    #[must_use]
+    pub fn voice_session_repository(&self) -> Option<&Arc<dyn VoiceSessionRepository>> {
+        self.voice_session_repository.as_ref()
+    }
+
+    /// Access the official Harmony server ID. None = not configured (self-hosted).
+    #[must_use]
+    pub fn official_server_id(&self) -> Option<&ServerId> {
+        self.official_server_id.as_ref()
     }
 
     /// Access the Postgres connection pool.

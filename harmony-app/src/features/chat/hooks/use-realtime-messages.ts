@@ -15,10 +15,13 @@ const messageEventSchema = z.object({
   message: messagePayloadSchema,
 })
 
-/** WHY: message.deleted only carries messageId + channelId, not the full message. */
+/** WHY: message.deleted carries messageId, channelId, and deletedBy (who performed
+ * the deletion). deletedBy is the user's ID for user-initiated deletes, or
+ * SYSTEM_MODERATOR_ID for automod deletions. */
 const messageDeletedSchema = z.object({
   channelId: z.string(),
   messageId: z.string(),
+  deletedBy: z.string(),
 })
 
 /**
@@ -166,9 +169,8 @@ export function useRealtimeMessages(channelId: string) {
 
       // WHY: Soft-delete — set deletedBy to signal the UI to show
       // "[Message deleted]" instead of silently removing the message.
-      // The SSE message.deleted event doesn't carry who deleted it,
-      // so we use a sentinel value. The REST API will have the real
-      // deletedBy on next full fetch.
+      // The SSE event now carries `deletedBy` (user ID or SYSTEM_MODERATOR_ID),
+      // so the UI can distinguish user-delete from automod-delete immediately.
       // Also marks parentMessage as deleted on child messages that
       // quote the deleted message, so the quote shows "[deleted]".
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
@@ -181,7 +183,7 @@ export function useRealtimeMessages(channelId: string) {
               ...page,
               items: page.items.map((m) => {
                 if (m.id === parsed.data.messageId) {
-                  return { ...m, deletedBy: m.authorId }
+                  return { ...m, deletedBy: parsed.data.deletedBy }
                 }
                 if (m.parentMessage?.id === parsed.data.messageId) {
                   return {

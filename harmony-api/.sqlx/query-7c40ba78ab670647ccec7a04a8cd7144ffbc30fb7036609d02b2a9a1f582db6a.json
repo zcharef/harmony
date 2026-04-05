@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM voice_sessions\n            WHERE alone_since IS NOT NULL\n              AND alone_since < $1\n            RETURNING\n                id,\n                user_id,\n                channel_id,\n                server_id,\n                session_id,\n                joined_at,\n                last_seen_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "session_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7c40ba78ab670647ccec7a04a8cd7144ffbc30fb7036609d02b2a9a1f582db6a"
+}

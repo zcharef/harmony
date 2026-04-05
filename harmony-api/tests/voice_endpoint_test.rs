@@ -129,27 +129,32 @@ async fn app_state_with_voice(pool: PgPool) -> AppState {
     let member_repo = Arc::new(PgMemberRepository::new(pool.clone()));
     let plan_checker: Arc<dyn harmony_api::domain::ports::PlanLimitChecker> =
         Arc::new(AlwaysAllowedChecker);
-    let voice_repo = Arc::new(PgVoiceSessionRepository::new(pool.clone()));
+    let voice_repo: Arc<dyn harmony_api::domain::ports::VoiceSessionRepository> =
+        Arc::new(PgVoiceSessionRepository::new(pool.clone()));
     let livekit: Arc<dyn LiveKitTokenGenerator> = Arc::new(FakeLiveKitTokenGenerator);
 
     let voice_service = Some(Arc::new(VoiceService::new(
-        voice_repo,
+        voice_repo.clone(),
         channel_repo.clone(),
         member_repo.clone(),
         plan_checker.clone(),
         livekit,
     )));
 
-    build_app_state(pool, voice_service).await
+    build_app_state(pool, voice_service, Some(voice_repo)).await
 }
 
 /// Build a full `AppState` with voice disabled (None).
 async fn app_state_without_voice(pool: PgPool) -> AppState {
-    build_app_state(pool, None).await
+    build_app_state(pool, None, None).await
 }
 
 /// Shared builder — wires all required services with real Postgres repos.
-async fn build_app_state(pool: PgPool, voice_service: Option<Arc<VoiceService>>) -> AppState {
+async fn build_app_state(
+    pool: PgPool,
+    voice_service: Option<Arc<VoiceService>>,
+    voice_session_repository: Option<Arc<dyn harmony_api::domain::ports::VoiceSessionRepository>>,
+) -> AppState {
     let profile_repo: Arc<dyn harmony_api::domain::ports::ProfileRepository> =
         Arc::new(PgProfileRepository::new(pool.clone()));
     let server_repo = Arc::new(PgServerRepository::new(pool.clone()));
@@ -267,6 +272,8 @@ async fn build_app_state(pool: PgPool, voice_service: Option<Arc<VoiceService>>)
         server_repo,
         moderation_retry_repo,
         voice_service,
+        voice_session_repository,
+        None, // official_server_id
     )
 }
 

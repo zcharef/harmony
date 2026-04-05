@@ -142,6 +142,7 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     serverId: z.string(),
     channelId: z.string(),
     messageId: z.string(),
+    deletedBy: z.string(),
   }),
 
   // Members

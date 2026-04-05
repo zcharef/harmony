@@ -391,6 +391,7 @@ describe('useRealtimeMessages', () => {
       fireSSEEvent('message.deleted', {
         channelId: CHANNEL_ID,
         messageId: 'msg-del',
+        deletedBy: 'user-42',
       })
     })
 
@@ -429,6 +430,7 @@ describe('useRealtimeMessages', () => {
       fireSSEEvent('message.deleted', {
         channelId: CHANNEL_ID,
         messageId: 'msg-parent',
+        deletedBy: 'user-42',
       })
     })
 
@@ -468,6 +470,7 @@ describe('useRealtimeMessages', () => {
       fireSSEEvent('message.deleted', {
         channelId: CHANNEL_ID,
         messageId: 'msg-parent',
+        deletedBy: 'user-42',
       })
     })
 
