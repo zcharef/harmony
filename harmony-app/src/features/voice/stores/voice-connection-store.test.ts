@@ -864,10 +864,6 @@ describe('useVoiceConnectionStore', () => {
       it('updates activeSpeakers set', async () => {
         const room = await connectStore()
 
-        // WHY: Speaker updates are throttled at 250ms. The module-level
-        // lastSpeakerUpdate variable uses Date.now(). With fake timers,
-        // we advance time so the throttle window passes.
-        vi.advanceTimersByTime(300)
         room.__emit('activeSpeakersChanged', [{ identity: 'alice' }, { identity: 'bob' }])
 
         const speakers = useVoiceConnectionStore.getState().activeSpeakers
@@ -879,14 +875,10 @@ describe('useVoiceConnectionStore', () => {
       it('skips update when speakers set is unchanged', async () => {
         const room = await connectStore()
 
-        // WHY: Advance well past the throttle window and any prior test state
-        vi.advanceTimersByTime(1000)
         room.__emit('activeSpeakersChanged', [{ identity: 'alice' }])
         const first = useVoiceConnectionStore.getState().activeSpeakers
         expect(first.has('alice')).toBe(true)
 
-        // Same speakers emitted after throttle window
-        vi.advanceTimersByTime(1000)
         room.__emit('activeSpeakersChanged', [{ identity: 'alice' }])
         const second = useVoiceConnectionStore.getState().activeSpeakers
 

@@ -1,12 +1,32 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef } from 'react'
+import type { VoiceParticipantResponse } from '@/lib/api'
 import { joinVoice, leaveVoice, voiceHeartbeat } from '@/lib/api'
 import { isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
+import { queryKeys } from '@/lib/query-keys'
 import { supabase } from '@/lib/supabase'
 import { fireAndForgetVoiceLeave } from '@/lib/voice-cleanup'
 import { playVoiceSound } from '../lib/voice-sounds'
 import { useVoiceConnectionStore } from '../stores/voice-connection-store'
 import { usePushToTalk } from './use-push-to-talk'
+
+/** WHY: Extracted to reduce handleJoinVoice cognitive complexity below Biome's
+ * limit of 15. Removes the user from the previous channel's participant cache
+ * so the sidebar updates instantly without waiting for the SSE debounce. */
+function evictFromPreviousChannel(
+  previousChannelId: string | null | undefined,
+  userId: string | undefined,
+  queryClient: ReturnType<typeof useQueryClient>,
+): void {
+  if (previousChannelId === undefined || previousChannelId === null) return
+  if (userId === undefined) return
+
+  queryClient.setQueryData<VoiceParticipantResponse[]>(
+    queryKeys.voice.participants(previousChannelId),
+    (old) => old?.filter((p) => p.userId !== userId),
+  )
+}
 
 /** WHY: 15s heartbeat keeps the server-side voice session alive. */
 const HEARTBEAT_INTERVAL_MS = 15_000
@@ -47,6 +67,8 @@ export function useVoiceConnection() {
   const toggleDeafen = useVoiceConnectionStore((s) => s.toggleDeafen)
   const isPttMode = useVoiceConnectionStore((s) => s.isPttMode)
   const pttShortcut = useVoiceConnectionStore((s) => s.pttShortcut)
+
+  const queryClient = useQueryClient()
 
   // WHY: Mount PTT global hotkey — passing null disables the shortcut registration.
   // When isPttMode is false, no shortcut is registered.
@@ -172,6 +194,12 @@ export function useVoiceConnection() {
           throwOnError: true,
         })
 
+        // WHY: The server atomically replaces the old session on join. Remove
+        // the user from the previous channel's participant cache immediately so
+        // the sidebar updates without waiting for the SSE event (which depends
+        // on broadcast timing and the 500ms debounce in useRealtimeVoice).
+        evictFromPreviousChannel(data.previousChannelId, sessionData.session?.user?.id, queryClient)
+
         await storeConnect(channelId, serverId, data.token, data.url)
         playVoiceSound('join')
         sessionIdRef.current = data.sessionId
@@ -202,7 +230,7 @@ export function useVoiceConnection() {
         isJoiningRef.current = false
       }
     },
-    [storeConnect, scheduleTokenRefresh],
+    [storeConnect, scheduleTokenRefresh, queryClient],
   )
 
   const handleLeaveVoice = useCallback(async () => {

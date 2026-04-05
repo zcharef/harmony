@@ -48,7 +48,7 @@ export function VoiceParticipantList({ channelId }: VoiceParticipantListProps) {
               showFallback
               classNames={{
                 base: cn(
-                  'h-6 w-6 shrink-0 transition-shadow',
+                  'h-6 w-6 shrink-0 transition-shadow duration-75',
                   isSpeaking && 'ring-2 ring-success ring-offset-1 ring-offset-default-100',
                 ),
                 name: 'text-[10px]',

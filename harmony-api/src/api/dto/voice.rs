@@ -13,6 +13,15 @@ pub struct VoiceHeartbeatRequest {
     /// The session identifier returned when the user joined voice.
     /// Ensures only the current device's session receives the heartbeat.
     pub session_id: String,
+    /// Whether the user is actively participating (speaking, unmuted).
+    /// `None` means the client didn't send a value; handler treats that as
+    /// `true` via `unwrap_or(true)` for backward compatibility.
+    #[serde(default)]
+    pub is_active: Option<bool>,
+    /// Whether the user's microphone is muted. Muted users are still
+    /// considered "active" for AFK purposes (they are listening).
+    #[serde(default)]
+    pub is_muted: Option<bool>,
 }
 
 /// Voice token response returned after joining a voice channel.
@@ -86,5 +95,49 @@ impl VoiceParticipantsResponse {
             items: participants.into_iter().map(Into::into).collect(),
             total,
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    /// T8.16: Missing `isActive` deserializes to `None`; handler uses
+    /// `unwrap_or(true)` so the runtime behavior is identical.
+    #[test]
+    fn heartbeat_dto_missing_is_active_defaults_to_none() {
+        let json = r#"{"sessionId":"test-session-123"}"#;
+        let dto: VoiceHeartbeatRequest =
+            serde_json::from_str(json).expect("should deserialize with missing isActive");
+
+        assert_eq!(dto.session_id, "test-session-123");
+        assert_eq!(
+            dto.is_active, None,
+            "Missing isActive should be None; handler unwrap_or(true) preserves backward compat"
+        );
+    }
+
+    /// T8.17: Missing `isMuted` defaults to not-muted (None).
+    #[test]
+    fn heartbeat_dto_missing_is_muted_defaults_to_none() {
+        let json = r#"{"sessionId":"test-session-456"}"#;
+        let dto: VoiceHeartbeatRequest =
+            serde_json::from_str(json).expect("should deserialize with missing isMuted");
+
+        assert_eq!(dto.session_id, "test-session-456");
+        assert_eq!(dto.is_muted, None, "Missing isMuted should default to None");
+    }
+
+    /// T8.18: Full payload with all fields deserializes correctly.
+    #[test]
+    fn heartbeat_dto_full_payload_deserializes_correctly() {
+        let json = r#"{"sessionId":"x","isActive":false,"isMuted":true}"#;
+        let dto: VoiceHeartbeatRequest =
+            serde_json::from_str(json).expect("should deserialize full payload");
+
+        assert_eq!(dto.session_id, "x");
+        assert_eq!(dto.is_active, Some(false), "isActive should be Some(false)");
+        assert_eq!(dto.is_muted, Some(true), "isMuted should be Some(true)");
     }
 }

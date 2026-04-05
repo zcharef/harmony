@@ -63,9 +63,42 @@ pub trait VoiceSessionRepository: Send + Sync + std::fmt::Debug {
         threshold: DateTime<Utc>,
     ) -> Result<Vec<VoiceSession>, DomainError>;
 
+    /// Delete sessions where the user has been alone in their channel for too long.
+    ///
+    /// Removes sessions with `alone_since IS NOT NULL AND alone_since < threshold`.
+    /// Returns removed sessions for SSE cleanup.
+    async fn delete_alone_in_channel(
+        &self,
+        threshold: DateTime<Utc>,
+    ) -> Result<Vec<VoiceSession>, DomainError>;
+
+    /// Delete AFK sessions (active users who stopped interacting).
+    ///
+    /// Removes sessions where `last_active_at < threshold` AND the session is
+    /// still "connected" (`last_seen_at >= stale_threshold`). The `stale_threshold`
+    /// guard prevents double-deletion of sessions already handled by `delete_stale`.
+    async fn delete_afk(
+        &self,
+        threshold: DateTime<Utc>,
+        stale_threshold: DateTime<Utc>,
+    ) -> Result<Vec<VoiceSession>, DomainError>;
+
+    /// Scan all voice channels and set `alone_since = now()` for sessions where
+    /// the user is the only participant in their channel AND `alone_since` is NULL.
+    /// Clears `alone_since` back to NULL for sessions that are no longer alone.
+    ///
+    /// Returns the number of rows updated.
+    async fn update_alone_since(&self) -> Result<u64, DomainError>;
+
     /// Update `last_seen_at` for a user's session (heartbeat).
+    /// When `is_active` is true, also updates `last_active_at` (user is speaking/unmuted).
     ///
     /// Returns `true` if a matching session was found and updated, `false` if no
     /// row matched (session expired, wrong device, or user not in voice).
-    async fn touch(&self, user_id: &UserId, session_id: &str) -> Result<bool, DomainError>;
+    async fn touch(
+        &self,
+        user_id: &UserId,
+        session_id: &str,
+        is_active: bool,
+    ) -> Result<bool, DomainError>;
 }

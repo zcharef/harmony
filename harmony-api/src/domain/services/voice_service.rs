@@ -263,8 +263,21 @@ impl VoiceService {
     /// - `DomainError::NotFound` if no session matches the user + session pair
     ///   (session expired, replaced by another device, or user not in voice).
     /// - Repository error on DB failure.
-    pub async fn heartbeat(&self, user_id: &UserId, session_id: &str) -> Result<(), DomainError> {
-        let updated = self.voice_repo.touch(user_id, session_id).await?;
+    pub async fn heartbeat(
+        &self,
+        user_id: &UserId,
+        session_id: &str,
+        is_active: bool,
+        is_muted: bool,
+    ) -> Result<(), DomainError> {
+        // WHY: Muted users are still listening, so they count as "active" for AFK
+        // purposes. Only truly idle users (not speaking AND not muted) are inactive.
+        let effective_active = is_active || is_muted;
+
+        let updated = self
+            .voice_repo
+            .touch(user_id, session_id, effective_active)
+            .await?;
 
         if !updated {
             tracing::warn!(
@@ -636,7 +649,31 @@ mod tests {
             Ok(vec![])
         }
 
-        async fn touch(&self, user_id: &UserId, session_id: &str) -> Result<bool, DomainError> {
+        async fn delete_alone_in_channel(
+            &self,
+            _threshold: DateTime<Utc>,
+        ) -> Result<Vec<VoiceSession>, DomainError> {
+            Ok(vec![])
+        }
+
+        async fn delete_afk(
+            &self,
+            _threshold: DateTime<Utc>,
+            _stale_threshold: DateTime<Utc>,
+        ) -> Result<Vec<VoiceSession>, DomainError> {
+            Ok(vec![])
+        }
+
+        async fn update_alone_since(&self) -> Result<u64, DomainError> {
+            Ok(0)
+        }
+
+        async fn touch(
+            &self,
+            user_id: &UserId,
+            session_id: &str,
+            _is_active: bool,
+        ) -> Result<bool, DomainError> {
             let sessions = self.sessions.lock().await;
             Ok(sessions
                 .get(user_id)

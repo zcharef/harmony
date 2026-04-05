@@ -469,7 +469,141 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
         Ok(sessions)
     }
 
-    async fn touch(&self, user_id: &UserId, session_id: &str) -> Result<bool, DomainError> {
+    async fn delete_alone_in_channel(
+        &self,
+        threshold: DateTime<Utc>,
+    ) -> Result<Vec<VoiceSession>, DomainError> {
+        let rows = sqlx::query!(
+            r#"
+            DELETE FROM voice_sessions
+            WHERE alone_since IS NOT NULL
+              AND alone_since < $1
+            RETURNING
+                id,
+                user_id,
+                channel_id,
+                server_id,
+                session_id,
+                joined_at,
+                last_seen_at
+            "#,
+            threshold,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        let sessions = rows
+            .into_iter()
+            .map(|r| {
+                VoiceSessionRow {
+                    id: r.id,
+                    user_id: r.user_id,
+                    channel_id: r.channel_id,
+                    server_id: r.server_id,
+                    session_id: r.session_id,
+                    joined_at: r.joined_at,
+                    last_seen_at: r.last_seen_at,
+                }
+                .into_voice_session()
+            })
+            .collect();
+
+        Ok(sessions)
+    }
+
+    async fn delete_afk(
+        &self,
+        threshold: DateTime<Utc>,
+        stale_threshold: DateTime<Utc>,
+    ) -> Result<Vec<VoiceSession>, DomainError> {
+        // WHY: `last_seen_at >= stale_threshold` ensures we only remove sessions
+        // that are still "connected" (heartbeating). Sessions that already missed
+        // heartbeats are handled by `delete_stale` — no double-deletion.
+        let rows = sqlx::query!(
+            r#"
+            DELETE FROM voice_sessions
+            WHERE last_active_at < $1
+              AND last_seen_at >= $2
+            RETURNING
+                id,
+                user_id,
+                channel_id,
+                server_id,
+                session_id,
+                joined_at,
+                last_seen_at
+            "#,
+            threshold,
+            stale_threshold,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        let sessions = rows
+            .into_iter()
+            .map(|r| {
+                VoiceSessionRow {
+                    id: r.id,
+                    user_id: r.user_id,
+                    channel_id: r.channel_id,
+                    server_id: r.server_id,
+                    session_id: r.session_id,
+                    joined_at: r.joined_at,
+                    last_seen_at: r.last_seen_at,
+                }
+                .into_voice_session()
+            })
+            .collect();
+
+        Ok(sessions)
+    }
+
+    async fn update_alone_since(&self) -> Result<u64, DomainError> {
+        // WHY: Two-step update in a single statement:
+        // 1. Set alone_since = now() for sessions that are the sole occupant
+        //    of their channel AND alone_since is currently NULL.
+        // 2. Clear alone_since = NULL for sessions that are no longer alone
+        //    (another user joined their channel).
+        //
+        // Uses a CTE with a window function to count participants per channel
+        // and conditionally update alone_since.
+        let result = sqlx::query!(
+            r#"
+            WITH channel_counts AS (
+                SELECT
+                    id,
+                    COUNT(*) OVER (PARTITION BY channel_id) AS occupants
+                FROM voice_sessions
+            )
+            UPDATE voice_sessions vs
+            SET alone_since = CASE
+                WHEN cc.occupants = 1 AND vs.alone_since IS NULL THEN now()
+                WHEN cc.occupants > 1 AND vs.alone_since IS NOT NULL THEN NULL
+                ELSE vs.alone_since
+            END
+            FROM channel_counts cc
+            WHERE vs.id = cc.id
+              AND (
+                  (cc.occupants = 1 AND vs.alone_since IS NULL)
+                  OR (cc.occupants > 1 AND vs.alone_since IS NOT NULL)
+              )
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(result.rows_affected())
+    }
+
+    async fn touch(
+        &self,
+        user_id: &UserId,
+        session_id: &str,
+        is_active: bool,
+    ) -> Result<bool, DomainError> {
         let uid = user_id.0;
 
         // WHY: Filter on both user_id AND session_id so that a stale device's
@@ -477,11 +611,13 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
         let result = sqlx::query!(
             r#"
             UPDATE voice_sessions
-            SET last_seen_at = now()
+            SET last_seen_at = now(),
+                last_active_at = CASE WHEN $3 THEN now() ELSE last_active_at END
             WHERE user_id = $1 AND session_id = $2
             "#,
             uid,
             session_id,
+            is_active,
         )
         .execute(&self.pool)
         .await

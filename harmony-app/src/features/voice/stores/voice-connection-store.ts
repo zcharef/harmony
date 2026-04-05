@@ -70,10 +70,6 @@ const INITIAL_STATE = {
   activeSpeakers: new Set<string>(),
 }
 
-/** WHY: Throttle active-speaker updates to 4 Hz to avoid excessive re-renders. */
-const SPEAKER_THROTTLE_MS = 250
-let lastSpeakerUpdate = 0
-
 /** WHY: Auto-transition disconnected → idle after a brief delay so the UI
  * shows "Disconnected" feedback before resetting. Stored at module level
  * so connect() and reset() can clear it if the user acts during the delay. */
@@ -221,14 +217,12 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
   })
 
   onRoom(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
-    const now = Date.now()
-    if (now - lastSpeakerUpdate < SPEAKER_THROTTLE_MS) return
-    lastSpeakerUpdate = now
-
     if (get().room !== room) return
     const nextIdentities = new Set(speakers.map((s) => s.identity))
     const current = get().activeSpeakers
 
+    // WHY: Set equality check prevents redundant Zustand updates (and
+    // downstream re-renders) when the speaker set hasn't actually changed.
     if (
       nextIdentities.size === current.size &&
       [...nextIdentities].every((id) => current.has(id))
