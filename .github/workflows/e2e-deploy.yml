@@ -149,9 +149,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
           ENVIRONMENT: test
           SERVER_PORT: "3000"
-          # WHY: E2E test setup creates many users/servers rapidly in beforeAll.
-          # Default rate limit (60/min) causes 429 failures in test data factory.
-          RATE_LIMIT_PER_MINUTE: "0"
         run: ./target/release/harmony-api > /tmp/api-stdout.log 2>&1 &
 
       # ── Generate API client (gitignored, must be regenerated) ─

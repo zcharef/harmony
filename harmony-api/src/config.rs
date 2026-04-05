@@ -51,16 +51,6 @@ pub struct Config {
     #[serde(default = "default_content_moderation")]
     pub content_moderation_enabled: bool,
 
-    /// Comma-separated CIDRs of trusted reverse proxies (e.g. `"172.16.0.0/12,10.0.0.0/8"`).
-    /// Only when the TCP peer IP matches a trusted proxy CIDR will `X-Forwarded-For` /
-    /// `X-Real-IP` headers be used for rate limiting. When unset, proxy headers are ignored.
-    pub trusted_proxies: Option<String>,
-
-    /// Per-IP rate limit in requests per minute (default: 60).
-    /// Set to 0 to disable rate limiting (dev/CI environments).
-    #[serde(default = "default_rate_limit_per_minute")]
-    pub rate_limit_per_minute: u32,
-
     /// `OpenAI` API key for the Moderation API (optional).
     /// When absent, async content moderation is disabled (graceful degradation).
     pub openai_api_key: Option<SecretString>,
@@ -113,10 +103,6 @@ fn default_plan_enforcement() -> bool {
 
 fn default_content_moderation() -> bool {
     true
-}
-
-fn default_rate_limit_per_minute() -> u32 {
-    60
 }
 
 fn default_livekit_token_ttl_secs() -> u64 {
@@ -178,8 +164,6 @@ impl std::fmt::Debug for Config {
                 "content_moderation_enabled",
                 &self.content_moderation_enabled,
             )
-            .field("trusted_proxies", &self.trusted_proxies)
-            .field("rate_limit_per_minute", &self.rate_limit_per_minute)
             .field(
                 "openai_api_key",
                 &self.openai_api_key.as_ref().map(|_| "[REDACTED]"),

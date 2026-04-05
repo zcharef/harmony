@@ -72,9 +72,6 @@ http = "1"
 # Content Moderation (unicode normalization for bypass resistance)
 unicode-normalization = "0.1"
 
-# Rate Limiting
-governor = "0.10"
-
 # Async Streams
 tokio-stream = { version = "0.1", features = ["sync", "time"] }
 
@@ -85,8 +82,6 @@ livekit-api = { version = "0.4", default-features = true }
 sentry = { version = "0.47", features = ["tower", "tower-axum-matched-path", "tracing", "rustls"] }
 dashmap = "6.1.0"
 bitflags = "2"
-ipnet = "2.12.0"
-
 # ── Lints ────────────────────────────────────────────────
 # These lints are enforced project-wide. Contributors MUST comply.
 # Run `cargo clippy -- -D warnings` to check locally.

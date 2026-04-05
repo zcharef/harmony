@@ -34,8 +34,6 @@ services:
       ENVIRONMENT: production
       PLAN_ENFORCEMENT_ENABLED: "false"
       SESSION_SECRET: ${SESSION_SECRET}
-      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
-      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

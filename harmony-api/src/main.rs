@@ -54,38 +54,16 @@ async fn main() {
     // 4. Initialize infrastructure services
     let state = init_app_state(&config).await;
 
-    // 5. Parse trusted proxy CIDRs for rate limiter
-    let trusted_proxies = config
-        .trusted_proxies
-        .as_deref()
-        .map(api::middleware::rate_limit::parse_trusted_proxies)
-        .unwrap_or_default();
-    if trusted_proxies.is_empty() {
-        tracing::info!(
-            "No trusted proxies configured — proxy headers will be ignored for rate limiting"
-        );
-    } else {
-        tracing::info!(
-            count = trusted_proxies.len(),
-            "Trusted proxies configured for rate limiting"
-        );
-    }
-
-    // 6. Background tasks: sweep stale presence entries + expired mutes every 60s
+    // 5. Background tasks: sweep stale presence entries + expired mutes every 60s
     spawn_presence_sweep(state.clone());
     spawn_spam_guard_sweep(state.spam_guard().clone());
     spawn_moderation_retry_sweep(state.clone());
     spawn_voice_session_sweep(state.clone());
 
-    // 7. Build router with middleware stack
-    let app = build_router(
-        state,
-        trusted_proxies,
-        config.rate_limit_per_minute,
-        config.livekit_url.as_deref(),
-    );
+    // 6. Build router with middleware stack
+    let app = build_router(state, config.livekit_url.as_deref());
 
-    // 8. Start server with graceful shutdown
+    // 7. Start server with graceful shutdown
     let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await

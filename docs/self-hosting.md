@@ -74,9 +74,6 @@ Copy `.env.example` to `.env` and fill in the following:
 |----------|-------------|-------|
 | `PLAN_ENFORCEMENT_ENABLED` | Disable SaaS plan limits | `false` |
 | `ENVIRONMENT` | Runtime environment | `production` |
-| `RATE_LIMIT_PER_MINUTE` | API rate limit per IP | `60` |
-| `TRUSTED_PROXIES` | CIDR list of trusted reverse proxies | — |
-
 ### Optional / integrations
 
 | Variable | Description |
