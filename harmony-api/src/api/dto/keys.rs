@@ -150,7 +150,7 @@ impl KeyCountResponse {
 // Axum's query deserializer passes all URL query params to the struct,
 // and extra params (e.g., cache-busters) would cause 400 errors.
 /// Query parameters for the key count endpoint.
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query, rename_all = "camelCase")]
 pub struct KeyCountQuery {
