@@ -41,6 +41,11 @@ interface VoiceConnectionState {
    * standard in gaming/voice apps. Only used when isPttMode is true. */
   pttShortcut: string
 
+  /** WHY: Survives room recreation (token refresh). Without these, a new Room()
+   * defaults to system audio devices, losing the user's selection mid-call. */
+  preferredAudioInputId: string | null
+  preferredAudioOutputId: string | null
+
   connect: (channelId: string, serverId: string, token: string, url: string) => Promise<void>
   disconnect: () => Promise<void>
   toggleMute: () => void
@@ -53,6 +58,7 @@ interface VoiceConnectionState {
   setPttMicEnabled: (enabled: boolean) => void
   togglePttMode: () => void
   setPttShortcut: (shortcut: string) => void
+  setPreferredDevice: (kind: 'audioinput' | 'audiooutput', deviceId: string) => void
   reset: () => void
 }
 
@@ -66,6 +72,8 @@ const INITIAL_STATE = {
   isKrispEnabled: true,
   isPttMode: false,
   pttShortcut: 'Space',
+  preferredAudioInputId: null,
+  preferredAudioOutputId: null,
   error: null,
   activeSpeakers: new Set<string>(),
 }
@@ -215,8 +223,22 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
     disconnectIdleTimer = setTimeout(() => {
       disconnectIdleTimer = null
       if (get().status === 'disconnected') {
-        const { isKrispEnabled, isPttMode, pttShortcut } = get()
-        set({ ...INITIAL_STATE, activeSpeakers: new Set(), isKrispEnabled, isPttMode, pttShortcut })
+        const {
+          isKrispEnabled,
+          isPttMode,
+          pttShortcut,
+          preferredAudioInputId,
+          preferredAudioOutputId,
+        } = get()
+        set({
+          ...INITIAL_STATE,
+          activeSpeakers: new Set(),
+          isKrispEnabled,
+          isPttMode,
+          pttShortcut,
+          preferredAudioInputId,
+          preferredAudioOutputId,
+        })
       }
     }, DISCONNECT_IDLE_DELAY_MS)
   })
@@ -354,6 +376,29 @@ async function enableMic(room: Room, channelId: string): Promise<boolean> {
   }
 }
 
+/** WHY: Extracted to reduce connect() cognitive complexity. Restores the user's
+ * preferred audio devices after room recreation (e.g., token refresh creates a
+ * new Room that defaults to system devices, losing the user's selection). */
+function restorePreferredDevices(room: Room, get: GetState): void {
+  const { preferredAudioInputId, preferredAudioOutputId } = get()
+  if (preferredAudioInputId !== null) {
+    room.switchActiveDevice('audioinput', preferredAudioInputId).catch((err: unknown) => {
+      logger.warn('voice_restore_preferred_input_failed', {
+        error: err instanceof Error ? err.message : String(err),
+        deviceId: preferredAudioInputId,
+      })
+    })
+  }
+  if (preferredAudioOutputId !== null) {
+    room.switchActiveDevice('audiooutput', preferredAudioOutputId).catch((err: unknown) => {
+      logger.warn('voice_restore_preferred_output_failed', {
+        error: err instanceof Error ? err.message : String(err),
+        deviceId: preferredAudioOutputId,
+      })
+    })
+  }
+}
+
 export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get) => ({
   ...INITIAL_STATE,
 
@@ -400,6 +445,8 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       isMuted: micFailed,
       isDeafened: false,
     })
+
+    restorePreferredDevices(room, get)
   },
 
   disconnect: async () => {
@@ -541,6 +588,11 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     set({ pttShortcut: shortcut })
   },
 
+  setPreferredDevice: (kind, deviceId) => {
+    if (kind === 'audioinput') set({ preferredAudioInputId: deviceId })
+    else set({ preferredAudioOutputId: deviceId })
+  },
+
   reset: () => {
     if (disconnectIdleTimer !== null) {
       clearTimeout(disconnectIdleTimer)
@@ -557,7 +609,21 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
         })
       })
     }
-    const { isKrispEnabled, isPttMode, pttShortcut } = get()
-    set({ ...INITIAL_STATE, activeSpeakers: new Set(), isKrispEnabled, isPttMode, pttShortcut })
+    const {
+      isKrispEnabled,
+      isPttMode,
+      pttShortcut,
+      preferredAudioInputId,
+      preferredAudioOutputId,
+    } = get()
+    set({
+      ...INITIAL_STATE,
+      activeSpeakers: new Set(),
+      isKrispEnabled,
+      isPttMode,
+      pttShortcut,
+      preferredAudioInputId,
+      preferredAudioOutputId,
+    })
   },
 }))
