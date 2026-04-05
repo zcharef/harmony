@@ -47,6 +47,14 @@ pub enum VoiceAction {
     Left,
 }
 
+/// Token returned by `refresh_token` — no session mutation, no SSE events.
+#[derive(Debug)]
+pub struct VoiceRefreshToken {
+    pub token: String,
+    pub url: String,
+    pub ttl_secs: u32,
+}
+
 /// Token and metadata returned after a successful `join_voice` call.
 #[derive(Debug)]
 pub struct VoiceToken {

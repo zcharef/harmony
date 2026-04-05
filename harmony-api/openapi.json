@@ -3747,6 +3747,83 @@
           }
         ]
       }
+    },
+    "/v1/voice/refresh-token": {
+      "post": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "Refresh a `LiveKit` JWT for an active voice session.",
+        "description": "Unlike `join_voice`, this does NOT replace the server-side session or emit\nSSE leave/join events. Other participants see no change. The client uses\nthis to extend its `LiveKit` connection without UI churn.\n\n# Errors\n- 401 if not authenticated.\n- 404 if the channel or session does not exist (expired/swept).\n- 422 if the channel is not a voice channel.\n- 503 if voice is not configured (`LiveKit` disabled).",
+        "operationId": "refresh_voice_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshVoiceTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Refreshed voice token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshVoiceTokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel or session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a voice channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Voice not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -5166,6 +5243,46 @@
           },
           "refreshToken": {
             "type": "string"
+          }
+        }
+      },
+      "RefreshVoiceTokenRequest": {
+        "type": "object",
+        "description": "Request body for the voice token refresh endpoint.",
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The session identifier returned when the user joined voice.\nThe server derives the channel from the session — no client-supplied\nchannel_id to prevent IDOR (minting tokens for the wrong room)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RefreshVoiceTokenResponse": {
+        "type": "object",
+        "description": "Response for a token refresh — lighter than `VoiceTokenResponse` because\nthe session is not replaced (no `session_id`, no `previous_channel_id`).",
+        "required": [
+          "token",
+          "url",
+          "ttlSecs"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Fresh `LiveKit` JWT token."
+          },
+          "ttlSecs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Token TTL in seconds. Frontend schedules the next refresh at 80%.",
+            "example": 7200,
+            "minimum": 0
+          },
+          "url": {
+            "type": "string",
+            "description": "`LiveKit` server URL."
           }
         }
       },

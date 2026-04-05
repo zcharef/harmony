@@ -45,4 +45,6 @@ pub use role::Role;
 pub use server::Server;
 pub use server_event::ServerEvent;
 pub use user_preferences::UserPreferences;
-pub use voice_session::{NewVoiceSession, VoiceAction, VoiceParticipant, VoiceSession, VoiceToken};
+pub use voice_session::{
+    NewVoiceSession, VoiceAction, VoiceParticipant, VoiceRefreshToken, VoiceSession, VoiceToken,
+};

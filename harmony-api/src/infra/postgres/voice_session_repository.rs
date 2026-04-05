@@ -274,6 +274,25 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
         Ok((new_session, previous))
     }
 
+    async fn find_by_user(&self, user_id: &UserId) -> Result<Option<VoiceSession>, DomainError> {
+        let uid = user_id.0;
+
+        let row = sqlx::query_as!(
+            VoiceSessionRow,
+            r#"
+            SELECT id, user_id, channel_id, server_id, session_id, joined_at, last_seen_at
+            FROM voice_sessions
+            WHERE user_id = $1
+            "#,
+            uid,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(VoiceSessionRow::into_voice_session))
+    }
+
     async fn remove_by_user(&self, user_id: &UserId) -> Result<Option<VoiceSession>, DomainError> {
         let uid = user_id.0;
 

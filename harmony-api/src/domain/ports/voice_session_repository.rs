@@ -29,6 +29,9 @@ pub trait VoiceSessionRepository: Send + Sync + std::fmt::Debug {
         plan_name: String,
     ) -> Result<(VoiceSession, Option<VoiceSession>), DomainError>;
 
+    /// Find a user's active voice session (if any). One session per user (UNIQUE constraint).
+    async fn find_by_user(&self, user_id: &UserId) -> Result<Option<VoiceSession>, DomainError>;
+
     /// Remove a voice session by `user_id`. Returns the removed session if it existed.
     async fn remove_by_user(&self, user_id: &UserId) -> Result<Option<VoiceSession>, DomainError>;
 

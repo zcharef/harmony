@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{
-    ChannelId, ChannelType, NewVoiceSession, ServerId, UserId, VoiceSession, VoiceToken,
+    ChannelId, ChannelType, NewVoiceSession, ServerId, UserId, VoiceRefreshToken, VoiceSession,
+    VoiceToken,
 };
 use crate::domain::ports::{
     ChannelRepository, LiveKitTokenGenerator, MemberRepository, PlanLimitChecker, VoiceGrants,
@@ -172,6 +173,106 @@ impl VoiceService {
             server_id: server_id.clone(),
             channel_id: channel_id.clone(),
             user_id: user_id.clone(),
+        })
+    }
+
+    /// Refresh a `LiveKit` JWT for an active voice session.
+    ///
+    /// Unlike `join_voice`, this does NOT replace the DB session or emit SSE
+    /// events. It only generates a fresh JWT so the client can reconnect its
+    /// `LiveKit` Room without causing UI churn (no "left + joined" flicker for
+    /// other participants).
+    ///
+    /// The channel is derived from the session, not from client input, to
+    /// prevent IDOR (minting a token for a channel the user isn't actually in).
+    ///
+    /// # Errors
+    /// - `DomainError::NotFound` if the session is gone (expired/swept).
+    /// - `DomainError::Forbidden` if the user lost server membership or
+    ///   private channel access since joining.
+    pub async fn refresh_token(
+        &self,
+        user_id: &UserId,
+        session_id: &str,
+    ) -> Result<VoiceRefreshToken, DomainError> {
+        // 1. Look up the user's active session. Derive channel_id from the DB
+        //    row — never trust the client's channel_id.
+        let session = self
+            .voice_repo
+            .find_by_user(user_id)
+            .await?
+            .ok_or_else(|| DomainError::NotFound {
+                resource_type: "VoiceSession",
+                id: session_id.to_string(),
+            })?;
+
+        // WHY: Validate that the session_id matches. Prevents a user from
+        // refreshing a stale session that was replaced by another device.
+        if session.session_id != session_id {
+            return Err(DomainError::NotFound {
+                resource_type: "VoiceSession",
+                id: session_id.to_string(),
+            });
+        }
+
+        let channel_id = &session.channel_id;
+        let server_id = &session.server_id;
+
+        // 2. Verify user is still a member (could have been kicked since joining).
+        let member = self
+            .member_repo
+            .get_member(server_id, user_id)
+            .await?
+            .ok_or_else(|| {
+                DomainError::Forbidden("You are not a member of this server".to_string())
+            })?;
+
+        // 3. Re-check private channel access (could have been revoked since joining).
+        let channel = self
+            .channel_repo
+            .get_by_id(channel_id)
+            .await?
+            .ok_or_else(|| DomainError::NotFound {
+                resource_type: "Channel",
+                id: channel_id.to_string(),
+            })?;
+        if channel.is_private {
+            let has_access = self
+                .channel_repo
+                .has_private_channel_access(channel_id, member.role)
+                .await?;
+            if !has_access {
+                return Err(DomainError::Forbidden(
+                    "You do not have access to this private channel".to_string(),
+                ));
+            }
+        }
+
+        // 4. Touch the session (acts as heartbeat) to keep it alive.
+        self.voice_repo.touch(user_id, session_id, true).await?;
+
+        // 5. Generate fresh token (same logic as join_voice, no DB mutation).
+        let limits = self.plan_checker.get_server_plan_limits(server_id).await?;
+        let display_name = member.nickname.as_deref().unwrap_or(&member.username);
+        let room_name = format!("harmony_{}", channel_id);
+        #[allow(clippy::cast_sign_loss)]
+        let plan_duration_secs = (limits.voice_max_duration_hours as u64).saturating_mul(3600);
+        let grants = VoiceGrants {
+            can_publish: true,
+            can_subscribe: true,
+            bitrate_kbps: limits.voice_bitrate_kbps,
+            max_duration_secs: plan_duration_secs,
+        };
+        #[allow(clippy::cast_possible_truncation)]
+        let ttl_secs = plan_duration_secs.min(self.livekit.max_ttl_secs()) as u32;
+        let token = self
+            .livekit
+            .generate_token(&room_name, user_id, display_name, grants)?;
+
+        Ok(VoiceRefreshToken {
+            token,
+            url: self.livekit.livekit_url().to_string(),
+            ttl_secs,
         })
     }
 
@@ -577,6 +678,13 @@ mod tests {
             }
             drop(sessions);
             self.upsert(session).await
+        }
+
+        async fn find_by_user(
+            &self,
+            user_id: &UserId,
+        ) -> Result<Option<VoiceSession>, DomainError> {
+            Ok(self.sessions.lock().await.get(user_id).cloned())
         }
 
         async fn remove_by_user(

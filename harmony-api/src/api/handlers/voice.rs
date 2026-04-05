@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::api::dto::voice::{
-    VoiceHeartbeatRequest, VoiceParticipantsResponse, VoiceTokenResponse,
+    RefreshVoiceTokenRequest, RefreshVoiceTokenResponse, VoiceHeartbeatRequest,
+    VoiceParticipantsResponse, VoiceTokenResponse,
 };
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiPath, AuthUser};
@@ -251,6 +252,60 @@ pub async fn list_voice_participants(
     Ok((
         StatusCode::OK,
         Json(VoiceParticipantsResponse::from_participants(participants)),
+    ))
+}
+
+/// Refresh a `LiveKit` JWT for an active voice session.
+///
+/// Unlike `join_voice`, this does NOT replace the server-side session or emit
+/// SSE leave/join events. Other participants see no change. The client uses
+/// this to extend its `LiveKit` connection without UI churn.
+///
+/// # Errors
+/// - 401 if not authenticated.
+/// - 404 if the channel or session does not exist (expired/swept).
+/// - 422 if the channel is not a voice channel.
+/// - 503 if voice is not configured (`LiveKit` disabled).
+#[utoipa::path(
+    post,
+    path = "/v1/voice/refresh-token",
+    tag = "Voice",
+    security(("bearer_auth" = [])),
+    request_body = RefreshVoiceTokenRequest,
+    responses(
+        (status = 200, description = "Refreshed voice token", body = RefreshVoiceTokenResponse),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 404, description = "Channel or session not found", body = ProblemDetails),
+        (status = 422, description = "Not a voice channel", body = ProblemDetails),
+        (status = 503, description = "Voice not configured", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn refresh_voice_token(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    Json(body): Json<RefreshVoiceTokenRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let voice_service = state.voice_service().ok_or_else(|| {
+        ApiError::service_unavailable(
+            "Voice Not Configured",
+            "Voice channels are not available on this server. Configure LiveKit to enable voice.",
+        )
+    })?;
+
+    if body.session_id.len() > 64 {
+        return Err(ApiError::bad_request(
+            "session_id must not exceed 64 characters",
+        ));
+    }
+
+    let refresh = voice_service
+        .refresh_token(&user_id, &body.session_id)
+        .await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(RefreshVoiceTokenResponse::from(refresh)),
     ))
 }
 

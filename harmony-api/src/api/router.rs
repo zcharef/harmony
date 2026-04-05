@@ -21,10 +21,7 @@ use tower_http::{
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use ipnet::IpNet;
-
 use super::handlers;
-use super::middleware::rate_limit::RateLimitLayer;
 use super::openapi::ApiDoc;
 use super::state::AppState;
 
@@ -32,16 +29,15 @@ use super::state::AppState;
 ///
 /// Layers are applied in reverse order of declaration:
 /// ```text
-/// Request  → SentryHub → RequestId → Tracing → Timeout → BodyLimit → CORS → RateLimit → Handler
-/// Response ← SecurityHeaders(X-Content-Type-Options, X-Frame-Options, HSTS, CSP, Referrer-Policy, Permissions-Policy) ← Compression ← RateLimit ← CORS ← Handler
+/// Request  → SentryHub → RequestId → Tracing → Timeout → BodyLimit → CORS → Handler
+/// Response ← SecurityHeaders(X-Content-Type-Options, X-Frame-Options, HSTS, CSP, Referrer-Policy, Permissions-Policy) ← Compression ← CORS ← Handler
 /// ```
+///
+/// Per-IP rate limiting is handled at the edge (Cloudflare) rather than in the
+/// application. Per-user business rate limits (message flooding, DM creation,
+/// spam guard) remain in the service layer.
 #[allow(deprecated)] // TimeoutLayer::new is deprecated; upgrade when tower-http 0.7 releases
-pub fn build_router(
-    state: AppState,
-    trusted_proxies: Vec<IpNet>,
-    rate_limit_per_minute: u32,
-    livekit_url: Option<&str>,
-) -> Router {
+pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
     let is_production = state.is_production;
     let request_id_header = header::HeaderName::from_static("x-request-id");
 
@@ -195,6 +191,10 @@ pub fn build_router(
             get(handlers::voice::list_voice_participants),
         )
         .route(
+            "/v1/voice/refresh-token",
+            post(handlers::voice::refresh_voice_token),
+        )
+        .route(
             "/v1/voice/heartbeat",
             post(handlers::voice::voice_heartbeat),
         )
@@ -341,7 +341,7 @@ pub fn build_router(
         }
     }
 
-    let mut router = router
+    router
         .layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("referrer-policy"),
             HeaderValue::from_static("no-referrer"),
@@ -350,21 +350,7 @@ pub fn build_router(
             header::HeaderName::from_static("permissions-policy"),
             HeaderValue::from_static("interest-cohort=()"),
         ))
-        .layer(CompressionLayer::new());
-
-    // WHY: rate_limit_per_minute == 0 disables rate limiting for dev/CI environments
-    // where E2E tests create many users from 127.0.0.1, exhausting the per-IP bucket.
-    if rate_limit_per_minute > 0 {
-        router = router.layer(RateLimitLayer::new(rate_limit_per_minute, trusted_proxies));
-    } else {
-        tracing::warn!("Rate limiting is DISABLED (RATE_LIMIT_PER_MINUTE=0)");
-    }
-
-    // WHY: CORS must be OUTSIDE the rate limiter. When the rate limiter
-    // short-circuits with 429, inner layers (like CORS) never run. The
-    // browser then sees the 429 as a CORS error (missing
-    // Access-Control-Allow-Origin header) instead of a rate limit.
-    router
+        .layer(CompressionLayer::new())
         .layer(cors)
         .layer(RequestBodyLimitLayer::new(2 * 1024 * 1024))
         .layer(TimeoutLayer::new(Duration::from_secs(30)))

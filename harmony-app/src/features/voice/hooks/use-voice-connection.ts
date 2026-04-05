@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef } from 'react'
 import type { VoiceParticipantResponse } from '@/lib/api'
-import { joinVoice, leaveVoice, voiceHeartbeat } from '@/lib/api'
+import { joinVoice, leaveVoice, refreshVoiceToken, voiceHeartbeat } from '@/lib/api'
 import { isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
@@ -105,6 +105,12 @@ export function useVoiceConnection() {
   // Reset to 0 on success; after 5 failures, stop retrying entirely.
   const refreshRetryCountRef = useRef(0)
 
+  // WHY: During storeConnect (Room teardown + new Room), the heartbeat interval
+  // may fire with a stale session_id before React re-renders and clears the
+  // interval. This flag tells the heartbeat's 404 handler to skip the
+  // force-disconnect during the refresh window.
+  const isRefreshingRef = useRef(false)
+
   const clearTokenRefreshTimer = useCallback(() => {
     if (tokenRefreshTimerRef.current !== null) {
       clearTimeout(tokenRefreshTimerRef.current)
@@ -126,9 +132,21 @@ export function useVoiceConnection() {
       tokenRefreshTimerRef.current = setTimeout(() => {
         const refreshChannelId = channelIdRef.current
         const refreshServerId = serverIdRef.current
-        if (refreshChannelId === null || refreshServerId === null) return
+        const sid = sessionIdRef.current
+        if (refreshChannelId === null || refreshServerId === null || sid === null) {
+          logger.warn('voice_token_refresh_skipped', {
+            channelId: refreshChannelId,
+            hasSession: sid !== null,
+          })
+          return
+        }
 
-        joinVoice({ path: { id: refreshChannelId }, throwOnError: true })
+        isRefreshingRef.current = true
+
+        refreshVoiceToken({
+          body: { sessionId: sid },
+          throwOnError: true,
+        })
           .then(async ({ data: refreshData }) => {
             const store = useVoiceConnectionStore.getState()
             // WHY: Only reconnect if still in the same channel. If the user
@@ -140,23 +158,36 @@ export function useVoiceConnection() {
                 refreshData.token,
                 refreshData.url,
               )
-              sessionIdRef.current = refreshData.sessionId
               // WHY: Update TTL from the fresh response so the next cycle
               // uses the server's latest value (may change across plans).
               ttlSecsRef.current = refreshData.ttlSecs ?? FALLBACK_TOKEN_TTL_SECS
-              // WHY (F3): Reset retry counter on success so the next failure
-              // starts backoff from scratch.
               refreshRetryCountRef.current = 0
               logger.info('voice_token_refreshed', { channelId: refreshChannelId })
 
-              // WHY (P1-2): Re-schedule for the next TTL cycle. Without this,
-              // the token refresh is one-shot and the session expires after 2x TTL.
               scheduleTokenRefresh()
             }
           })
           .catch((err: unknown) => {
-            // WHY (F3): Re-schedule with capped exponential backoff so a
-            // single transient failure does not permanently kill the refresh loop.
+            // WHY: Non-retryable errors (4xx = kicked, session gone, bad input)
+            // should immediately disconnect. Only 5xx and network errors are
+            // worth retrying with backoff.
+            const isNonRetryable =
+              isProblemDetails(err) && err.status !== undefined && err.status < 500
+            if (isNonRetryable) {
+              logger.warn('voice_token_refresh_non_retryable', {
+                error: err instanceof Error ? err.message : String(err),
+                channelId: refreshChannelId,
+                status: isProblemDetails(err) ? err.status : undefined,
+              })
+              storeDisconnect().catch((disconnectErr: unknown) => {
+                logger.warn('voice_refresh_disconnect_failed', {
+                  error:
+                    disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
+                })
+              })
+              return
+            }
+
             const retries = refreshRetryCountRef.current
             if (retries < 5) {
               refreshRetryCountRef.current = retries + 1
@@ -174,17 +205,33 @@ export function useVoiceConnection() {
                 channelId: refreshChannelId,
                 attempts: retries,
               })
+              // WHY: After 5 retries the token is expired and the LiveKit
+              // connection is dead. Force disconnect so the user sees
+              // 'disconnected' instead of a silent ghost call.
+              storeDisconnect().catch((disconnectErr: unknown) => {
+                logger.warn('voice_refresh_exhausted_disconnect_failed', {
+                  error:
+                    disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
+                })
+              })
             }
+          })
+          .finally(() => {
+            isRefreshingRef.current = false
           })
       }, refreshAtMs)
     },
-    [storeConnect, clearTokenRefreshTimer],
+    [storeConnect, storeDisconnect, clearTokenRefreshTimer],
   )
 
   const handleJoinVoice = useCallback(
     async (channelId: string, serverId: string) => {
       if (isJoiningRef.current) return
       isJoiningRef.current = true
+      // WHY: Cancel any in-flight token refresh to prevent a concurrent
+      // refresh from racing with this join on the same Room instance.
+      clearTokenRefreshTimer()
+      isRefreshingRef.current = false
       try {
         // WHY: Cache auth token for beforeunload cleanup. getSession() reads
         // from memory and resolves instantly, but is async so we can't call it
@@ -284,6 +331,18 @@ export function useVoiceConnection() {
         // (e.g., swept after timeout, or server restarted). Force a clean
         // client teardown so the user does not stay in a ghost call.
         if (isProblemDetails(err) && err.status === 404) {
+          // WHY: During token refresh, joinVoice atomically replaces the DB
+          // session before the client reconnects. A heartbeat using the stale
+          // session_id will 404 — this is expected and transient. Forcing a
+          // disconnect here would kill the in-progress refresh, causing the
+          // original token to expire (~1h) and produce robotic audio.
+          if (isRefreshingRef.current) {
+            logger.info('voice_heartbeat_404_during_refresh', {
+              sessionId: sid,
+            })
+            return
+          }
+
           logger.warn('voice_heartbeat_session_gone', {
             sessionId: sid,
           })

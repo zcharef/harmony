@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::models::{ChannelId, UserId, VoiceParticipant, VoiceToken};
+use crate::domain::models::{ChannelId, UserId, VoiceParticipant, VoiceRefreshToken, VoiceToken};
 
 /// Request body for the voice heartbeat endpoint.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -52,6 +52,40 @@ impl From<VoiceToken> for VoiceTokenResponse {
             ttl_secs: vt.ttl_secs,
             session_id: vt.session_id,
             previous_channel_id: vt.previous_channel_id,
+        }
+    }
+}
+
+/// Request body for the voice token refresh endpoint.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RefreshVoiceTokenRequest {
+    /// The session identifier returned when the user joined voice.
+    /// The server derives the channel from the session — no client-supplied
+    /// `channel_id` to prevent IDOR (minting tokens for the wrong room).
+    pub session_id: String,
+}
+
+/// Response for a token refresh — lighter than `VoiceTokenResponse` because
+/// the session is not replaced (no `session_id`, no `previous_channel_id`).
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshVoiceTokenResponse {
+    /// Fresh `LiveKit` JWT token.
+    pub token: String,
+    /// `LiveKit` server URL.
+    pub url: String,
+    /// Token TTL in seconds. Frontend schedules the next refresh at 80%.
+    #[schema(example = 7200)]
+    pub ttl_secs: u32,
+}
+
+impl From<VoiceRefreshToken> for RefreshVoiceTokenResponse {
+    fn from(rt: VoiceRefreshToken) -> Self {
+        Self {
+            token: rt.token,
+            url: rt.url,
+            ttl_secs: rt.ttl_secs,
         }
     }
 }
