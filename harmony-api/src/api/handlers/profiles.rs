@@ -56,6 +56,20 @@ pub async fn sync_profile(
     // DB upsert is a no-op for existing profiles, skip the entire validation
     // chain and return the existing profile directly.
     if let Some(existing) = state.profile_service().get_by_id_optional(&user_id).await? {
+        // WHY: The DB trigger handle_new_user() creates the profile before
+        // sync_profile runs, so new users always land here. Check membership
+        // and auto-join if needed — the membership check avoids duplicate
+        // system messages on subsequent logins.
+        if let Some(official_server_id) = state.official_server_id() {
+            let is_member = state
+                .member_repository()
+                .is_member(official_server_id, &user_id)
+                .await
+                .unwrap_or(false);
+            if !is_member {
+                auto_join_official_server(&state, official_server_id, &user_id).await;
+            }
+        }
         return Ok((StatusCode::OK, Json(ProfileResponse::from(existing))));
     }
 
