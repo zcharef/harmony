@@ -375,22 +375,31 @@ export function LoginPage() {
     }
   }
 
-  // WHY extracted: Detects duplicate email signups and sends a recovery link
+  // WHY extracted: Detects duplicate email signups and sends a magic link
   // instead of revealing "email taken". Returns true if handled (caller should
   // return early), false if normal flow should continue.
   function handleDuplicateEmailSignup(result: {
     error: null
     data: { user: { identities?: { id: string }[] } | null }
   }): boolean {
-    if (result.data.user?.identities?.length === 0) {
-      // WHY: Supabase returns a fake user (empty identities) for duplicate emails
-      // when email confirmations are enabled (anti-enumeration). We silently send
-      // a password reset link so the existing user gets an actionable email. The UI
-      // shows the same "check your email" — indistinguishable from a real signup.
+    // WHY: Supabase anti-enumeration returns either a fake user with empty
+    // identities (older GoTrue) or user: null (newer GoTrue) for duplicate
+    // emails when email confirmations are enabled. Both cases mean the email
+    // is already registered. We send a magic link so the existing user can
+    // sign in directly (Slack-style), and show the same "check your email"
+    // message — indistinguishable from a real signup.
+    const user = result.data.user
+    if (user === null || user.identities?.length === 0) {
       supabase.auth
-        .resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/` })
+        .signInWithOtp({
+          email,
+          options: {
+            shouldCreateUser: false,
+            emailRedirectTo: `${window.location.origin}/`,
+          },
+        })
         .catch((err: unknown) => {
-          logger.warn('duplicate_signup_reset_email_failed', {
+          logger.warn('duplicate_signup_magic_link_failed', {
             error: err instanceof Error ? err.message : 'Unknown error',
           })
         })
