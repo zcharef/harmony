@@ -9,6 +9,9 @@ import { queryKeys } from '@/lib/query-keys'
 import { toast } from '@/lib/toast'
 import { buildParentPreview } from './build-parent-preview'
 
+/** WHY: Shared prefix so useMarkReadOnFocus can skip optimistic messages. */
+export const OPTIMISTIC_ID_PREFIX = 'temp-'
+
 export interface SendMessageEncryption {
   /** WHY: Async function that encrypts plaintext and returns the ciphertext envelope + deviceId. */
   encryptFn: (plaintext: string) => Promise<{ content: string; senderDeviceId: string }>
@@ -93,7 +96,7 @@ export function useSendMessage(
       const previousData =
         queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageQueryKey)
 
-      const optimisticId = `temp-${crypto.randomUUID()}`
+      const optimisticId = `${OPTIMISTIC_ID_PREFIX}${crypto.randomUUID()}`
 
       // WHY: Build parentMessage preview from cached messages so the ParentQuote
       // renders immediately in the optimistic entry, not only after invalidation.

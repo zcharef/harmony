@@ -59,7 +59,7 @@ import { useRealtimeMessages } from './hooks/use-realtime-messages'
 import { useRealtimeReactions } from './hooks/use-realtime-reactions'
 import { useRemoveReaction } from './hooks/use-remove-reaction'
 import type { SendMessageEncryption } from './hooks/use-send-message'
-import { useSendMessage } from './hooks/use-send-message'
+import { OPTIMISTIC_ID_PREFIX, useSendMessage } from './hooks/use-send-message'
 import { useSlowMode } from './hooks/use-slow-mode'
 import { useTypingIndicator } from './hooks/use-typing-indicator'
 import { useUpdateNotificationSettings } from './hooks/use-update-notification-settings'
@@ -175,7 +175,13 @@ function useMarkReadOnFocus(channelId: string | null, messages: MessageResponse[
   const markReadMutation = useMarkRead()
   const clearUnread = useUnreadStore((s) => s.clear)
   // WHY: Skip temp-* optimistic IDs — they fail UUID validation on the server (422).
-  const lastMessageId = [...messages].reverse().find((m) => !m.id.startsWith('temp-'))?.id
+  let lastMessageId: string | undefined
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (!messages[i]?.id.startsWith(OPTIMISTIC_ID_PREFIX)) {
+      lastMessageId = messages[i]?.id
+      break
+    }
+  }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally stable — only re-run on channel switch or first message load
   useEffect(() => {
