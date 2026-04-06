@@ -12,7 +12,7 @@ import { logger } from '@/lib/logger'
 import { isTauri, openExternalUrl } from '@/lib/platform'
 import { supabase } from '@/lib/supabase'
 
-type AuthMode = 'login' | 'signup'
+type AuthMode = 'login' | 'signup' | 'forgot'
 
 // WHY: Matches the DB constraint on profiles.username — lowercase alphanumeric + underscores, 3-32 chars.
 const USERNAME_REGEX = /^[a-z0-9_]{3,32}$/
@@ -91,6 +91,7 @@ function isSubmitDisabled(
   password: string,
 ): boolean {
   if (captchaToken === null) return true
+  if (mode === 'forgot') return false
   if (mode !== 'signup') return false
   return !isUsernameValid || usernameStatus === 'taken' || !isPasswordValid(password)
 }
@@ -358,6 +359,48 @@ export function LoginPage() {
 
   const isUsernameValid = USERNAME_REGEX.test(username)
 
+  // WHY extracted: Handles the forgot password flow separately to keep
+  // handleSubmit below Biome's cognitive complexity limit of 15.
+  async function handleForgotSubmit() {
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/`,
+      captchaToken: captchaToken ?? undefined,
+    })
+    if (resetError) {
+      setError(resetError.message)
+      turnstileRef.current?.reset()
+      setCaptchaToken(null)
+    } else {
+      setSuccessMessage(t('checkYourEmailReset'))
+    }
+  }
+
+  // WHY extracted: Detects duplicate email signups and sends a recovery link
+  // instead of revealing "email taken". Returns true if handled (caller should
+  // return early), false if normal flow should continue.
+  function handleDuplicateEmailSignup(result: {
+    error: null
+    data: { user: { identities?: { id: string }[] } | null }
+  }): boolean {
+    if (result.data.user?.identities?.length === 0) {
+      // WHY: Supabase returns a fake user (empty identities) for duplicate emails
+      // when email confirmations are enabled (anti-enumeration). We silently send
+      // a password reset link so the existing user gets an actionable email. The UI
+      // shows the same "check your email" — indistinguishable from a real signup.
+      supabase.auth
+        .resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/` })
+        .catch((err: unknown) => {
+          logger.warn('duplicate_signup_reset_email_failed', {
+            error: err instanceof Error ? err.message : 'Unknown error',
+          })
+        })
+      setSuccessMessage(t('checkYourEmail'))
+      return true
+    }
+    return false
+  }
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: auth form submit handles 3 modes (login/signup/forgot), duplicate detection, and captcha — extracting further would scatter tightly-coupled auth logic
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
 
@@ -380,6 +423,11 @@ export function LoginPage() {
     setIsSubmitting(true)
 
     try {
+      if (mode === 'forgot') {
+        await handleForgotSubmit()
+        return
+      }
+
       const result =
         mode === 'login'
           ? await supabase.auth.signInWithPassword({
@@ -395,6 +443,10 @@ export function LoginPage() {
                 data: { username },
               },
             })
+
+      if (mode === 'signup' && result.error === null && handleDuplicateEmailSignup(result)) {
+        return
+      }
 
       await handleAuthResult(result, mode)
     } catch (err: unknown) {
@@ -506,7 +558,11 @@ export function LoginPage() {
             {t('alphaLabel', { ns: 'common' })}
           </Chip>
           <p data-test="login-subtitle" className="text-sm text-default-500">
-            {mode === 'login' ? t('welcomeBack') : t('createYourAccount')}
+            {mode === 'forgot'
+              ? t('forgotPasswordTitle')
+              : mode === 'login'
+                ? t('welcomeBack')
+                : t('createYourAccount')}
           </p>
         </CardHeader>
 
@@ -541,11 +597,29 @@ export function LoginPage() {
                   autoComplete="email"
                 />
 
-                <PasswordField
-                  password={password}
-                  onValueChange={setPassword}
-                  isSignup={mode === 'signup'}
-                />
+                {mode !== 'forgot' && (
+                  <PasswordField
+                    password={password}
+                    onValueChange={setPassword}
+                    isSignup={mode === 'signup'}
+                  />
+                )}
+
+                {mode === 'login' && (
+                  <button
+                    data-test="login-forgot-password"
+                    type="button"
+                    onClick={() => {
+                      setMode('forgot')
+                      setPassword('')
+                      setError(null)
+                      setSuccessMessage(null)
+                    }}
+                    className="-mt-2 self-end text-xs text-primary hover:underline"
+                  >
+                    {t('forgotPassword')}
+                  </button>
+                )}
 
                 {/* WHY: Honeypot field — invisible to real users, auto-filled by bots.
                     Positioned off-screen, excluded from tab order and screen readers. */}
@@ -601,22 +675,43 @@ export function LoginPage() {
                   )}
                   className="mt-2"
                 >
-                  {mode === 'login' ? t('signIn') : t('signUp')}
+                  {mode === 'forgot'
+                    ? t('resetPasswordSubmit')
+                    : mode === 'login'
+                      ? t('signIn')
+                      : t('signUp')}
                 </Button>
               </form>
 
               <Divider />
 
               <p className="text-center text-sm text-default-500">
-                {mode === 'login' ? t('noAccount') : t('hasAccount')}{' '}
-                <button
-                  data-test="login-toggle-button"
-                  type="button"
-                  onClick={toggleMode}
-                  className="font-medium text-primary hover:underline"
-                >
-                  {mode === 'login' ? t('switchToSignUp') : t('switchToSignIn')}
-                </button>
+                {mode === 'forgot' ? (
+                  <button
+                    data-test="login-toggle-button"
+                    type="button"
+                    onClick={() => {
+                      setMode('login')
+                      setError(null)
+                      setSuccessMessage(null)
+                    }}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    {t('backToSignIn')}
+                  </button>
+                ) : (
+                  <>
+                    {mode === 'login' ? t('noAccount') : t('hasAccount')}{' '}
+                    <button
+                      data-test="login-toggle-button"
+                      type="button"
+                      onClick={toggleMode}
+                      className="font-medium text-primary hover:underline"
+                    >
+                      {mode === 'login' ? t('switchToSignUp') : t('switchToSignIn')}
+                    </button>
+                  </>
+                )}
               </p>
             </>
           )}

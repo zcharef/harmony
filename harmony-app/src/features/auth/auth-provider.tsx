@@ -86,6 +86,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
+      // WHY: When the user clicks a password reset link, Supabase processes the
+      // recovery token and fires PASSWORD_RECOVERY. We set a flag so App.tsx
+      // renders the ResetPasswordScreen instead of the main app.
+      if (event === 'PASSWORD_RECOVERY') {
+        useAuthStore.getState().setPasswordRecovery(true)
+      }
+
       // WHY: Fire-and-forget profile sync to update metadata (display_name,
       // avatar_url) from OAuth providers. The DB trigger (Phase 1) handles
       // initial profile creation, so this is NOT on the critical path.

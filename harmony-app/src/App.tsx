@@ -7,6 +7,7 @@ import {
   AuthProvider,
   DesktopAuthRedirect,
   LoginPage,
+  ResetPasswordScreen,
   useAuthStore,
   VerifyEmailScreen,
 } from '@/features/auth'
@@ -43,7 +44,7 @@ function UnreadBadges() {
 }
 
 function AppContent() {
-  const { session, user, isLoading } = useAuthStore()
+  const { session, user, isLoading, isPasswordRecovery } = useAuthStore()
   // WHY: Defer the update check until after login so the update
   // notification never appears on the login page.
   const isLoggedIn = !isLoading && session !== null
@@ -68,6 +69,13 @@ function AppContent() {
   // returns 403 for unverified users on all routes except /v1/auth/me.
   if (user?.email_confirmed_at === undefined || user.email_confirmed_at === null) {
     return <VerifyEmailScreen email={user?.email ?? ''} />
+  }
+
+  // WHY: After clicking a password reset link, Supabase establishes a session
+  // and fires PASSWORD_RECOVERY. This gate shows the new-password form before
+  // the user reaches the main app.
+  if (isPasswordRecovery) {
+    return <ResetPasswordScreen />
   }
 
   // WHY: When the browser is opened from Tauri with redirect_scheme=harmony
