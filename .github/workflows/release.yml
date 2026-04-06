@@ -217,11 +217,13 @@ jobs:
 
           gh release download "$TAG" --repo "$REPO" --dir "$WORK"
 
-          python3 << 'SCRIPT'
-          import json, sys
+          # WHY: Pass $WORK via env var because heredoc stdin has no argv.
+          export WORK_DIR="$WORK"
+          python3 << 'SCRIPT' && CHANGED=no || CHANGED=yes
+          import json, sys, os
           from pathlib import Path
 
-          work = Path(sys.argv[1])
+          work = Path(os.environ["WORK_DIR"])
           latest = work / "latest.json"
 
           with open(latest) as f:
@@ -256,7 +258,7 @@ jobs:
 
           # Exit code signals whether re-upload is needed
           sys.exit(0 if fixed == 0 else 42)
-          SCRIPT "$WORK" && CHANGED=no || CHANGED=yes
+          SCRIPT
 
           if [ "$CHANGED" = "yes" ]; then
             gh release upload "$TAG" --repo "$REPO" --clobber "$WORK/latest.json"
