@@ -7,8 +7,10 @@
  */
 
 import { Avatar } from '@heroui/react'
-import { MicOff } from 'lucide-react'
+import { HeadphoneOff, MicOff } from 'lucide-react'
+import { memo } from 'react'
 
+import type { VoiceParticipantResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useRealtimeVoice } from '../hooks/use-realtime-voice'
 import { useVoiceParticipants } from '../hooks/use-voice-participants'
@@ -31,59 +33,83 @@ export function VoiceParticipantList({ channelId }: VoiceParticipantListProps) {
 
   return (
     <ul className="flex flex-col gap-0.5 pb-1 pl-6 pr-2" data-test="voice-participant-list">
-      {participants.map((participant) => {
-        const isSpeaking = activeSpeakers.has(participant.userId)
-        const displayName =
-          participant.displayName.length > 0 ? participant.displayName : participant.userId
-
-        return (
-          <li
-            key={participant.userId}
-            data-test={`voice-participant-${participant.userId}`}
-            className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5"
-          >
-            <Avatar
-              name={displayName}
-              size="sm"
-              showFallback
-              classNames={{
-                base: cn(
-                  'h-6 w-6 shrink-0 transition-shadow duration-75',
-                  isSpeaking && 'ring-2 ring-success ring-offset-1 ring-offset-default-100',
-                ),
-                name: 'text-[10px]',
-              }}
-            />
-            <span className="min-w-0 flex-1 truncate text-xs text-default-500">{displayName}</span>
-            {/* WHY: MicOff shown only when the local user is the participant and
-                is muted. The API does not expose remote mute state — only the
-                local connection store tracks isMuted. */}
-            <LocalMuteIndicator participantUserId={participant.userId} />
-          </li>
-        )
-      })}
+      {participants.map((participant) => (
+        <VoiceParticipantRow
+          key={participant.userId}
+          participant={participant}
+          isSpeaking={activeSpeakers.has(participant.userId)}
+        />
+      ))}
     </ul>
   )
 }
 
+// ---------------------------------------------------------------------------
+// H2: React.memo participant row — skips re-render when isSpeaking unchanged.
+// WHY: ActiveSpeakersChanged fires every 100-300ms during conversation.
+// Without memo, ALL rows re-render on every event even though only 1-2
+// participants' isSpeaking actually changes.
+// ---------------------------------------------------------------------------
+
+interface VoiceParticipantRowProps {
+  participant: VoiceParticipantResponse
+  isSpeaking: boolean
+}
+
+const VoiceParticipantRow = memo(function VoiceParticipantRow({
+  participant,
+  isSpeaking,
+}: VoiceParticipantRowProps) {
+  const displayName =
+    participant.displayName.length > 0 ? participant.displayName : participant.userId
+
+  return (
+    <li
+      data-test={`voice-participant-${participant.userId}`}
+      className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5"
+    >
+      <Avatar
+        name={displayName}
+        size="sm"
+        showFallback
+        classNames={{
+          base: cn(
+            'h-6 w-6 shrink-0 transition-shadow duration-75',
+            isSpeaking && 'ring-2 ring-success ring-offset-1 ring-offset-default-100',
+          ),
+          name: 'text-[10px]',
+        }}
+      />
+      <span className="min-w-0 flex-1 truncate text-xs text-default-500">{displayName}</span>
+      <MuteDeafIndicator participant={participant} />
+    </li>
+  )
+})
+
 /**
- * WHY extracted: Subscribing to isMuted + auth user per row would cause every
- * row to re-render when any slice changes. Extracting isolates the subscription
- * to only the row that matches the local user.
+ * WHY extracted: Subscribing to isMuted/isDeafened per row would cause every
+ * row to re-render when any slice changes. Extracting isolates the Zustand
+ * subscription to only the row that matches the local user.
+ *
+ * For the local user: prefers Zustand store (instant toggle feedback) over
+ * the participant cache (SSE-delayed by ~500ms debounce).
+ * For remote users: reads from the participant cache (SSE-driven).
  */
-function LocalMuteIndicator({ participantUserId }: { participantUserId: string }) {
-  const isMuted = useVoiceConnectionStore((s) => s.isMuted)
-  const currentChannelId = useVoiceConnectionStore((s) => s.currentChannelId)
+function MuteDeafIndicator({ participant }: { participant: VoiceParticipantResponse }) {
+  const localMuted = useVoiceConnectionStore((s) => s.isMuted)
+  const localDeafened = useVoiceConnectionStore((s) => s.isDeafened)
+  // WHY reactive selector instead of getState(): If room changes (e.g. on
+  // reconnect), this selector re-evaluates automatically. getState() is a
+  // point-in-time read that would go stale.
+  const localIdentity = useVoiceConnectionStore((s) => s.room?.localParticipant.identity ?? null)
+  const isLocal = localIdentity === participant.userId
 
-  // WHY: Only show the mute icon for the locally connected user in their
-  // active channel. We cannot know remote participants' mute state from
-  // the current API shape.
-  if (currentChannelId === null || !isMuted) return null
+  const isMuted = isLocal ? localMuted : participant.isMuted
+  const isDeafened = isLocal ? localDeafened : participant.isDeafened
 
-  // WHY: We check if the local user's identity matches this participant.
-  // The store's room.localParticipant.identity holds the user ID.
-  const room = useVoiceConnectionStore.getState().room
-  if (room === null || room.localParticipant.identity !== participantUserId) return null
-
-  return <MicOff className="h-3 w-3 shrink-0 text-default-400" data-test="mic-off-indicator" />
+  if (isDeafened)
+    return <HeadphoneOff className="h-3 w-3 shrink-0 text-default-400" data-test="deaf-indicator" />
+  if (isMuted)
+    return <MicOff className="h-3 w-3 shrink-0 text-default-400" data-test="mic-off-indicator" />
+  return null
 }

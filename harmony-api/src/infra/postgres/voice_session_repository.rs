@@ -33,6 +33,8 @@ struct VoiceSessionRow {
     session_id: String,
     joined_at: DateTime<Utc>,
     last_seen_at: DateTime<Utc>,
+    is_muted: bool,
+    is_deafened: bool,
 }
 
 impl VoiceSessionRow {
@@ -45,12 +47,21 @@ impl VoiceSessionRow {
             session_id: self.session_id,
             joined_at: self.joined_at,
             last_seen_at: self.last_seen_at,
+            is_muted: self.is_muted,
+            is_deafened: self.is_deafened,
         }
     }
 }
 
 #[async_trait]
 impl VoiceSessionRepository for PgVoiceSessionRepository {
+    async fn now(&self) -> Result<DateTime<Utc>, DomainError> {
+        sqlx::query_scalar!(r#"SELECT now() as "now!""#)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(super::db_err)
+    }
+
     async fn upsert(
         &self,
         session: &NewVoiceSession,
@@ -73,7 +84,9 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 server_id,
                 session_id,
                 joined_at,
-                last_seen_at
+                last_seen_at,
+                is_muted,
+                is_deafened
             FROM voice_sessions
             WHERE user_id = $1
             "#,
@@ -91,6 +104,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 session_id: r.session_id,
                 joined_at: r.joined_at,
                 last_seen_at: r.last_seen_at,
+                is_muted: r.is_muted,
+                is_deafened: r.is_deafened,
             }
             .into_voice_session()
         });
@@ -106,7 +121,9 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                     joined_at     = now(),
                     last_seen_at  = now(),
                     last_active_at = now(),
-                    alone_since   = NULL
+                    alone_since   = NULL,
+                    is_muted      = false,
+                    is_deafened   = false
             RETURNING
                 id,
                 user_id,
@@ -114,7 +131,9 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 server_id,
                 session_id,
                 joined_at,
-                last_seen_at
+                last_seen_at,
+                is_muted,
+                is_deafened
             "#,
             uid,
             cid,
@@ -148,6 +167,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
             session_id: r.session_id,
             joined_at: r.joined_at,
             last_seen_at: r.last_seen_at,
+            is_muted: r.is_muted,
+            is_deafened: r.is_deafened,
         }
         .into_voice_session();
 
@@ -168,10 +189,20 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
 
         let mut tx = self.pool.begin().await.map_err(super::db_err)?;
 
+        // WHY: FOR UPDATE on zero rows provides no serialization. Advisory lock
+        // on the server_id ensures concurrent joins to the same server are
+        // serialized even when no prior sessions exist.
+        let sid_str = sid.to_string();
+        sqlx::query!("SELECT pg_advisory_xact_lock(hashtext($1::TEXT))", sid_str)
+            .execute(&mut *tx)
+            .await
+            .map_err(super::db_err)?;
+
         // WHY: Fetch existing session first for SSE leave event (same as upsert).
         let previous = sqlx::query!(
             r#"
-            SELECT id, user_id, channel_id, server_id, session_id, joined_at, last_seen_at
+            SELECT id, user_id, channel_id, server_id, session_id, joined_at, last_seen_at,
+                   is_muted, is_deafened
             FROM voice_sessions
             WHERE user_id = $1
             "#,
@@ -189,6 +220,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 session_id: r.session_id,
                 joined_at: r.joined_at,
                 last_seen_at: r.last_seen_at,
+                is_muted: r.is_muted,
+                is_deafened: r.is_deafened,
             }
             .into_voice_session()
         });
@@ -232,9 +265,12 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                     joined_at     = now(),
                     last_seen_at  = now(),
                     last_active_at = now(),
-                    alone_since   = NULL
+                    alone_since   = NULL,
+                    is_muted      = false,
+                    is_deafened   = false
             RETURNING
-                id, user_id, channel_id, server_id, session_id, joined_at, last_seen_at
+                id, user_id, channel_id, server_id, session_id, joined_at, last_seen_at,
+                is_muted, is_deafened
             "#,
             uid,
             cid,
@@ -268,6 +304,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
             session_id: r.session_id,
             joined_at: r.joined_at,
             last_seen_at: r.last_seen_at,
+            is_muted: r.is_muted,
+            is_deafened: r.is_deafened,
         }
         .into_voice_session();
 
@@ -280,7 +318,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
         let row = sqlx::query_as!(
             VoiceSessionRow,
             r#"
-            SELECT id, user_id, channel_id, server_id, session_id, joined_at, last_seen_at
+            SELECT id, user_id, channel_id, server_id, session_id, joined_at, last_seen_at,
+                   is_muted, is_deafened
             FROM voice_sessions
             WHERE user_id = $1
             "#,
@@ -309,7 +348,9 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 server_id,
                 session_id,
                 joined_at,
-                last_seen_at
+                last_seen_at,
+                is_muted,
+                is_deafened
             "#,
             uid,
         )
@@ -347,6 +388,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 session_id: r.session_id,
                 joined_at: r.joined_at,
                 last_seen_at: r.last_seen_at,
+                is_muted: r.is_muted,
+                is_deafened: r.is_deafened,
             }
             .into_voice_session()
         }))
@@ -373,7 +416,9 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 server_id,
                 session_id,
                 joined_at,
-                last_seen_at
+                last_seen_at,
+                is_muted,
+                is_deafened
             "#,
             uid,
             cid,
@@ -412,6 +457,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 session_id: r.session_id,
                 joined_at: r.joined_at,
                 last_seen_at: r.last_seen_at,
+                is_muted: r.is_muted,
+                is_deafened: r.is_deafened,
             }
             .into_voice_session()
         }))
@@ -432,7 +479,9 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 server_id,
                 session_id,
                 joined_at,
-                last_seen_at
+                last_seen_at,
+                is_muted,
+                is_deafened
             FROM voice_sessions
             WHERE channel_id = $1
             ORDER BY joined_at
@@ -454,6 +503,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                     session_id: r.session_id,
                     joined_at: r.joined_at,
                     last_seen_at: r.last_seen_at,
+                    is_muted: r.is_muted,
+                    is_deafened: r.is_deafened,
                 }
                 .into_voice_session()
             })
@@ -474,7 +525,9 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 server_id,
                 session_id,
                 joined_at,
-                last_seen_at
+                last_seen_at,
+                is_muted,
+                is_deafened
             FROM voice_sessions
             WHERE server_id = $1
             ORDER BY joined_at
@@ -496,6 +549,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                     session_id: r.session_id,
                     joined_at: r.joined_at,
                     last_seen_at: r.last_seen_at,
+                    is_muted: r.is_muted,
+                    is_deafened: r.is_deafened,
                 }
                 .into_voice_session()
             })
@@ -537,7 +592,9 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 server_id,
                 session_id,
                 joined_at,
-                last_seen_at
+                last_seen_at,
+                is_muted,
+                is_deafened
             "#,
             threshold,
         )
@@ -556,6 +613,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                     session_id: r.session_id,
                     joined_at: r.joined_at,
                     last_seen_at: r.last_seen_at,
+                    is_muted: r.is_muted,
+                    is_deafened: r.is_deafened,
                 }
                 .into_voice_session()
             })
@@ -580,7 +639,9 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 server_id,
                 session_id,
                 joined_at,
-                last_seen_at
+                last_seen_at,
+                is_muted,
+                is_deafened
             "#,
             threshold,
         )
@@ -599,6 +660,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                     session_id: r.session_id,
                     joined_at: r.joined_at,
                     last_seen_at: r.last_seen_at,
+                    is_muted: r.is_muted,
+                    is_deafened: r.is_deafened,
                 }
                 .into_voice_session()
             })
@@ -627,7 +690,9 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                 server_id,
                 session_id,
                 joined_at,
-                last_seen_at
+                last_seen_at,
+                is_muted,
+                is_deafened
             "#,
             threshold,
             stale_threshold,
@@ -647,6 +712,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
                     session_id: r.session_id,
                     joined_at: r.joined_at,
                     last_seen_at: r.last_seen_at,
+                    is_muted: r.is_muted,
+                    is_deafened: r.is_deafened,
                 }
                 .into_voice_session()
             })
@@ -691,6 +758,77 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
         .map_err(super::db_err)?;
 
         Ok(result.rows_affected())
+    }
+
+    async fn update_voice_state(
+        &self,
+        user_id: &UserId,
+        session_id: &str,
+        is_muted: bool,
+        is_deafened: bool,
+    ) -> Result<Option<VoiceSession>, DomainError> {
+        let uid = user_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            UPDATE voice_sessions
+            SET is_muted = $3, is_deafened = $4
+            WHERE user_id = $1 AND session_id = $2
+            RETURNING
+                id,
+                user_id,
+                channel_id,
+                server_id,
+                session_id,
+                joined_at,
+                last_seen_at,
+                is_muted,
+                is_deafened
+            "#,
+            uid,
+            session_id,
+            is_muted,
+            is_deafened,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|r| {
+            VoiceSessionRow {
+                id: r.id,
+                user_id: r.user_id,
+                channel_id: r.channel_id,
+                server_id: r.server_id,
+                session_id: r.session_id,
+                joined_at: r.joined_at,
+                last_seen_at: r.last_seen_at,
+                is_muted: r.is_muted,
+                is_deafened: r.is_deafened,
+            }
+            .into_voice_session()
+        }))
+    }
+
+    async fn clear_alone_since_for_channel(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Result<(), DomainError> {
+        let cid = channel_id.0;
+
+        sqlx::query!(
+            r#"
+            UPDATE voice_sessions
+            SET alone_since = NULL
+            WHERE channel_id = $1 AND alone_since IS NOT NULL
+            "#,
+            cid,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(())
     }
 
     async fn touch(

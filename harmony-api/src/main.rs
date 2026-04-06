@@ -259,7 +259,7 @@ async fn init_app_state(config: &Config) -> AppState {
     let presence_tracker = Arc::new(infra::PresenceTracker::new());
 
     // WHY: Construct voice service only when all three LiveKit env vars are set.
-    // When None, voice endpoints return DomainError::VoiceDisabled (graceful degradation).
+    // When None, voice handlers return 503 directly (graceful degradation).
     let (voice_service, voice_session_repo): (
         Option<Arc<domain::services::VoiceService>>,
         Option<Arc<dyn domain::ports::VoiceSessionRepository>>,
@@ -324,7 +324,12 @@ async fn init_app_state(config: &Config) -> AppState {
         moderation_retry_repo,
         voice_service,
         voice_session_repo,
-        None, // official_server_id — config field added in a future commit
+        config.official_server_id.as_deref().map(|id| {
+            domain::models::ServerId(
+                id.parse::<uuid::Uuid>()
+                    .expect("OFFICIAL_SERVER_ID must be a valid UUID"),
+            )
+        }),
     )
 }
 
@@ -637,7 +642,16 @@ fn spawn_voice_session_sweep(state: api::AppState) {
         loop {
             interval.tick().await;
 
-            let now = chrono::Utc::now();
+            // WHY: Use Postgres clock (not Rust Utc::now()) to eliminate clock skew.
+            // Heartbeat's touch() uses Postgres now() for last_seen_at, so thresholds
+            // must be computed from the same clock.
+            let now = match voice_repo.now().await {
+                Ok(ts) => ts,
+                Err(e) => {
+                    tracing::warn!(error = %e, "Voice session sweep: failed to fetch DB time");
+                    continue;
+                }
+            };
             let stale_threshold = now - chrono::Duration::seconds(STALE_THRESHOLD_SECS);
 
             let mut stale_count: usize = 0;
@@ -657,6 +671,8 @@ fn spawn_voice_session_sweep(state: api::AppState) {
                         user_id: session.user_id,
                         action: VoiceAction::Left,
                         display_name: String::new(),
+                        is_muted: None,
+                        is_deafened: None,
                     };
                     state.event_bus().publish(event);
                 }

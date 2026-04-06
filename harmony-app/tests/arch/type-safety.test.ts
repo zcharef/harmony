@@ -264,6 +264,49 @@ describe('Type Safety', () => {
     })
   })
 
+  describe('no_hand_written_api_enums', () => {
+    it('should use generated Zod schemas instead of hand-written z.enum for API enums', () => {
+      // WHY: The OpenAPI pipeline generates Zod schemas (zVoiceAction, zUserStatus,
+      // zChannelType, zMessageType) in lib/api/zod.gen.ts. Hand-writing z.enum with
+      // the same values creates drift risk — if the Rust enum changes, the generated
+      // schema updates automatically but hand-written copies silently diverge.
+      const files = [
+        ...getAllFiles(FEATURES_DIR, ['.ts', '.tsx']),
+        ...getAllFiles(join(SRC_DIR, 'lib'), ['.ts', '.tsx']),
+        ...getAllFiles(join(SRC_DIR, 'hooks'), ['.ts', '.tsx']),
+      ].filter((f) => {
+        if (f.includes('.test.') || f.includes('.spec.')) return false
+        // Exclude generated API files — they ARE the source of truth.
+        if (f.includes(`${join('lib', 'api')}/`)) return false
+        return true
+      })
+
+      // Each pattern uniquely identifies a z.enum call duplicating a generated schema.
+      // Uses a high-signal value from each enum to avoid false positives.
+      const GENERATED_ENUM_SIGNATURES: Array<{ pattern: RegExp; schema: string }> = [
+        { pattern: /z\.enum\(\[.*'deafened'/, schema: 'zVoiceAction' },
+        { pattern: /z\.enum\(\[.*'dnd'/, schema: 'zUserStatus' },
+        { pattern: /z\.enum\(\[.*'text'.*'voice'/, schema: 'zChannelType' },
+        { pattern: /z\.enum\(\[.*'default'.*'system'/, schema: 'zMessageType' },
+      ]
+
+      const violations = scanFilesForViolations(files, (line, i, filePath) => {
+        if (isCommentLine(line)) return null
+        for (const { pattern, schema } of GENERATED_ENUM_SIGNATURES) {
+          if (pattern.test(line)) {
+            return `${relative(SRC_DIR, filePath)}:${i + 1} — use ${schema} from @/lib/api`
+          }
+        }
+        return null
+      })
+
+      expect(
+        violations,
+        `Hand-written z.enum duplicating generated API schemas found. Import from @/lib/api instead.\nViolations:\n${violations.join('\n')}`,
+      ).toEqual([])
+    })
+  })
+
   describe('no_manual_api_type_definitions', () => {
     it('should not define types named *Response/*Request/*Dto in features', () => {
       // WHY: API types must come from the generated SDK (@/lib/api), never be

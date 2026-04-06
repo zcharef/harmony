@@ -198,6 +198,10 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             "/v1/voice/heartbeat",
             post(handlers::voice::voice_heartbeat),
         )
+        .route(
+            "/v1/voice/state",
+            patch(handlers::voice::update_voice_state),
+        )
         // Typing indicators
         .route(
             "/v1/channels/{id}/typing",

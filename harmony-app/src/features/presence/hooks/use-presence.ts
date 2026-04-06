@@ -5,6 +5,7 @@ import { usePreferences } from '@/features/preferences'
 import { useVoiceConnectionStore } from '@/features/voice'
 import { useServerEvent } from '@/hooks/use-server-event'
 import { type UserStatus, updatePresence } from '@/lib/api'
+import { zUserStatus } from '@/lib/api/zod.gen'
 import { logger } from '@/lib/logger'
 import { usePresenceStore } from '../stores/presence-store'
 
@@ -13,10 +14,7 @@ const IDLE_CHECK_INTERVAL_MS = 30_000
 const ACTIVITY_EVENTS = ['mousemove', 'keydown', 'pointerdown'] as const
 
 // WHY Zod: SSE event payloads are external data (CLAUDE.md §1.2).
-const userStatusSchema = z.enum(['online', 'idle', 'dnd', 'offline'] satisfies [
-  UserStatus,
-  ...UserStatus[],
-])
+const userStatusSchema = zUserStatus
 
 const presenceEventSchema = z.object({
   userId: z.string(),

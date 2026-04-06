@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::api::dto::voice::{
-    RefreshVoiceTokenRequest, RefreshVoiceTokenResponse, VoiceHeartbeatRequest,
-    VoiceParticipantsResponse, VoiceTokenResponse,
+    RefreshVoiceTokenRequest, RefreshVoiceTokenResponse, UpdateVoiceStateRequest,
+    VoiceHeartbeatRequest, VoiceParticipantsResponse, VoiceTokenResponse,
 };
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiPath, AuthUser};
@@ -71,6 +71,8 @@ pub async fn join_voice(
             user_id: user_id.clone(),
             action: VoiceAction::Left,
             display_name: String::new(),
+            is_muted: None,
+            is_deafened: None,
         });
         tracing::debug!(
             server_id = %prev_server_id,
@@ -103,6 +105,8 @@ pub async fn join_voice(
         user_id: user_id.clone(),
         action: VoiceAction::Joined,
         display_name,
+        is_muted: None,
+        is_deafened: None,
     });
     tracing::debug!(
         server_id = %voice_token.server_id,
@@ -161,6 +165,8 @@ pub async fn leave_voice(
             user_id: user_id.clone(),
             action: VoiceAction::Left,
             display_name: String::new(),
+            is_muted: None,
+            is_deafened: None,
         });
         tracing::debug!(
             server_id = %session.server_id,
@@ -245,6 +251,8 @@ pub async fn list_voice_participants(
                 channel_id: session.channel_id,
                 display_name,
                 joined_at: session.joined_at,
+                is_muted: session.is_muted,
+                is_deafened: session.is_deafened,
             }
         })
         .collect();
@@ -297,6 +305,9 @@ pub async fn refresh_voice_token(
         return Err(ApiError::bad_request(
             "session_id must not exceed 64 characters",
         ));
+    }
+    if uuid::Uuid::parse_str(&body.session_id).is_err() {
+        return Err(ApiError::bad_request("session_id must be a valid UUID"));
     }
 
     let refresh = voice_service
@@ -352,6 +363,9 @@ pub async fn voice_heartbeat(
             "session_id must not exceed 64 characters",
         ));
     }
+    if uuid::Uuid::parse_str(&body.session_id).is_err() {
+        return Err(ApiError::bad_request("session_id must be a valid UUID"));
+    }
 
     let is_active = body.is_active.unwrap_or(true);
     let is_muted = body.is_muted.unwrap_or(false);
@@ -359,6 +373,97 @@ pub async fn voice_heartbeat(
     voice_service
         .heartbeat(&user_id, &body.session_id, is_active, is_muted)
         .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Update mute/deafen state for an active voice session.
+///
+/// Persists the state in the database and broadcasts a `VoiceStateUpdate`
+/// SSE event so other participants see the change instantly.
+///
+/// # Errors
+/// - 401 if not authenticated.
+/// - 404 if the session does not exist (expired, replaced, or user not in voice).
+/// - 503 if voice is not configured (`LiveKit` disabled).
+#[utoipa::path(
+    patch,
+    path = "/v1/voice/state",
+    tag = "Voice",
+    security(("bearer_auth" = [])),
+    request_body = UpdateVoiceStateRequest,
+    responses(
+        (status = 204, description = "Voice state updated"),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 404, description = "Session not found", body = ProblemDetails),
+        (status = 503, description = "Voice not configured", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn update_voice_state(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    Json(body): Json<UpdateVoiceStateRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let voice_service = state.voice_service().ok_or_else(|| {
+        ApiError::service_unavailable(
+            "Voice Not Configured",
+            "Voice channels are not available on this server. Configure LiveKit to enable voice.",
+        )
+    })?;
+
+    if body.session_id.len() > 64 {
+        return Err(ApiError::bad_request(
+            "session_id must not exceed 64 characters",
+        ));
+    }
+    if uuid::Uuid::parse_str(&body.session_id).is_err() {
+        return Err(ApiError::bad_request("session_id must be a valid UUID"));
+    }
+
+    let session = voice_service
+        .update_voice_state(&user_id, &body.session_id, body.is_muted, body.is_deafened)
+        .await?;
+
+    // WHY: The action variant is informational (sound cues). The authoritative
+    // state is carried by is_muted/is_deafened booleans on the SSE payload,
+    // making the cache update idempotent and order-independent.
+    let action = if body.is_muted {
+        VoiceAction::Muted
+    } else if body.is_deafened {
+        VoiceAction::Deafened
+    } else {
+        VoiceAction::Unmuted
+    };
+
+    let receivers = state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+        sender_id: user_id.clone(),
+        server_id: session.server_id.clone(),
+        channel_id: session.channel_id.clone(),
+        user_id: user_id.clone(),
+        action,
+        display_name: String::new(),
+        is_muted: Some(body.is_muted),
+        is_deafened: Some(body.is_deafened),
+    });
+    if receivers == 0 {
+        tracing::warn!(
+            server_id = %session.server_id,
+            channel_id = %session.channel_id,
+            user_id = %user_id,
+            "voice.state_update had 0 SSE receivers — mute/deaf change invisible to others"
+        );
+    } else {
+        tracing::debug!(
+            server_id = %session.server_id,
+            channel_id = %session.channel_id,
+            user_id = %user_id,
+            is_muted = body.is_muted,
+            is_deafened = body.is_deafened,
+            receivers,
+            "emitted voice.state_update (mute/deaf state change)"
+        );
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

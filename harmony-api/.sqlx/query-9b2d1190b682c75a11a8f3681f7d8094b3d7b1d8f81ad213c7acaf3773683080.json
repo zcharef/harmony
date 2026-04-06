@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                user_id,\n                channel_id,\n                server_id,\n                session_id,\n                joined_at,\n                last_seen_at\n            FROM voice_sessions\n            WHERE server_id = $1\n            ORDER BY joined_at\n            ",
+  "query": "\n            SELECT\n                id,\n                user_id,\n                channel_id,\n                server_id,\n                session_id,\n                joined_at,\n                last_seen_at,\n                is_muted,\n                is_deafened\n            FROM voice_sessions\n            WHERE channel_id = $1\n            ORDER BY joined_at\n            ",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,16 @@
         "ordinal": 6,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_muted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "is_deafened",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -51,8 +61,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "6d777af1b0b24d48953476b5d648109a03ddff3ed4f3774a307c5d648995ef85"
+  "hash": "9b2d1190b682c75a11a8f3681f7d8094b3d7b1d8f81ad213c7acaf3773683080"
 }

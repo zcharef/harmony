@@ -5,8 +5,8 @@
 use utoipa::OpenApi;
 
 use super::dto::voice::{
-    RefreshVoiceTokenRequest, RefreshVoiceTokenResponse, VoiceHeartbeatRequest,
-    VoiceParticipantResponse, VoiceParticipantsResponse, VoiceTokenResponse,
+    RefreshVoiceTokenRequest, RefreshVoiceTokenResponse, UpdateVoiceStateRequest,
+    VoiceHeartbeatRequest, VoiceParticipantResponse, VoiceParticipantsResponse, VoiceTokenResponse,
 };
 use super::dto::{
     AssignRoleRequest, BanListQuery, BanListResponse, BanResponse, BanUserRequest,
@@ -121,6 +121,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         handlers::voice::list_voice_participants,
         handlers::voice::refresh_voice_token,
         handlers::voice::voice_heartbeat,
+        handlers::voice::update_voice_state,
         // Events (SSE)
         handlers::events::sse_events,
     ),
@@ -224,6 +225,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             VoiceParticipantResponse,
             VoiceParticipantsResponse,
             VoiceAction,
+            UpdateVoiceStateRequest,
             // Key Distribution DTOs
             RegisterDeviceRequest,
             UploadOneTimeKeysRequest,

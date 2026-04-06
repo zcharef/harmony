@@ -137,6 +137,40 @@ pub async fn leave_server(
         reason: "left".to_string(),
     });
 
+    // WHY: Best-effort voice cleanup — the user's voice session has no FK
+    // to server_members, so removing membership alone won't disconnect them.
+    if let Some(voice_service) = state.voice_service() {
+        match voice_service.leave_voice(&caller_id, None).await {
+            Ok(Some(session)) => {
+                state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+                    sender_id: caller_id.clone(),
+                    server_id: session.server_id.clone(),
+                    channel_id: session.channel_id.clone(),
+                    user_id: caller_id.clone(),
+                    action: VoiceAction::Left,
+                    display_name: String::new(),
+                    is_muted: None,
+                    is_deafened: None,
+                });
+                tracing::debug!(
+                    server_id = %session.server_id,
+                    channel_id = %session.channel_id,
+                    user_id = %caller_id,
+                    "User removed from voice channel on server leave"
+                );
+            }
+            Ok(None) => {} // User was not in voice — nothing to clean up.
+            Err(e) => {
+                tracing::warn!(
+                    server_id = %server_id,
+                    user_id = %caller_id,
+                    error = ?e,
+                    "Failed to remove user from voice on server leave (best-effort)"
+                );
+            }
+        }
+    }
+
     // WHY: Best-effort system message — announce the leave in the default channel.
     // Must never fail the leave itself.
     if let Err(e) = super::post_system_message(&state, &server_id, &caller_id, "member_leave").await
@@ -224,6 +258,8 @@ pub async fn kick_member(
                     user_id: path.user_id.clone(),
                     action: VoiceAction::Left,
                     display_name: String::new(),
+                    is_muted: None,
+                    is_deafened: None,
                 });
                 tracing::debug!(
                     server_id = %session.server_id,

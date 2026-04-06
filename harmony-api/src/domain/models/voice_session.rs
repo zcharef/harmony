@@ -18,6 +18,8 @@ pub struct VoiceSession {
     pub session_id: String,
     pub joined_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
+    pub is_muted: bool,
+    pub is_deafened: bool,
 }
 
 /// Input for creating a new voice session. No id or timestamps — DB generates those.
@@ -37,6 +39,8 @@ pub struct VoiceParticipant {
     pub channel_id: ChannelId,
     pub display_name: String,
     pub joined_at: DateTime<Utc>,
+    pub is_muted: bool,
+    pub is_deafened: bool,
 }
 
 /// Voice channel action for SSE events.
@@ -45,6 +49,10 @@ pub struct VoiceParticipant {
 pub enum VoiceAction {
     Joined,
     Left,
+    Muted,
+    Unmuted,
+    Deafened,
+    Undeafened,
 }
 
 /// Token returned by `refresh_token` — no session mutation, no SSE events.

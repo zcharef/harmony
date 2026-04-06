@@ -14,7 +14,7 @@
  */
 
 import { z } from 'zod'
-import type { ChannelType, MessageType, UserStatus } from '@/lib/api'
+import { zChannelType, zMessageType, zUserStatus, zVoiceAction } from '@/lib/api/zod.gen'
 
 // ── SSE event names (dot-separated, as sent in the `event:` field) ───
 
@@ -59,7 +59,7 @@ export const messagePayloadSchema = z.object({
   senderDeviceId: z.string().nullable(),
   editedAt: z.string().nullable(),
   parentMessageId: z.string().nullable().optional(),
-  messageType: z.enum(['default', 'system'] satisfies [MessageType, ...MessageType[]]),
+  messageType: zMessageType,
   systemEventKey: z.string().nullable().optional(),
   moderatedAt: z.string().nullable().optional(),
   moderationReason: z.string().nullable().optional(),
@@ -85,7 +85,7 @@ const channelPayloadSchema = z.object({
   id: z.string(),
   name: z.string(),
   topic: z.string().nullable().optional(),
-  channelType: z.enum(['text', 'voice'] satisfies [ChannelType, ...ChannelType[]]),
+  channelType: zChannelType,
   position: z.number(),
   isPrivate: z.boolean(),
   isReadOnly: z.boolean(),
@@ -111,10 +111,7 @@ const dmPayloadSchema = z.object({
   otherAvatarUrl: z.string().nullable(),
 })
 
-const userStatusSchema = z.enum(['online', 'idle', 'dnd', 'offline'] satisfies [
-  UserStatus,
-  ...UserStatus[],
-])
+const userStatusSchema = zUserStatus
 
 // ── Discriminated union schema ───────────────────────────────────────
 // WHY: The Rust enum serializes with `"type"` as the discriminator field.
@@ -272,8 +269,10 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     serverId: z.string(),
     channelId: z.string().uuid(),
     userId: z.string().uuid(),
-    action: z.enum(['joined', 'left']),
+    action: zVoiceAction,
     displayName: z.string(),
+    isMuted: z.boolean().optional(),
+    isDeafened: z.boolean().optional(),
   }),
 
   // System

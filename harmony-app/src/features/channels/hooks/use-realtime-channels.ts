@@ -3,6 +3,7 @@ import { useCallback } from 'react'
 import { z } from 'zod'
 import { useServerEvent } from '@/hooks/use-server-event'
 import type { ChannelResponse } from '@/lib/api'
+import { zChannelType } from '@/lib/api/zod.gen'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 
@@ -18,7 +19,7 @@ const channelPayloadSchema = z.object({
   id: z.string(),
   name: z.string(),
   topic: z.string().nullable().optional(),
-  channelType: z.enum(['text', 'voice']),
+  channelType: zChannelType,
   position: z.number(),
   isPrivate: z.boolean(),
   isReadOnly: z.boolean(),

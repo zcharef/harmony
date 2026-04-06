@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            DELETE FROM voice_sessions\n            WHERE last_seen_at < $1\n            RETURNING\n                id,\n                user_id,\n                channel_id,\n                server_id,\n                session_id,\n                joined_at,\n                last_seen_at\n            ",
+  "query": "\n            UPDATE voice_sessions\n            SET is_muted = $3, is_deafened = $4\n            WHERE user_id = $1 AND session_id = $2\n            RETURNING\n                id,\n                user_id,\n                channel_id,\n                server_id,\n                session_id,\n                joined_at,\n                last_seen_at,\n                is_muted,\n                is_deafened\n            ",
   "describe": {
     "columns": [
       {
@@ -37,11 +37,24 @@
         "ordinal": 6,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_muted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "is_deafened",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
       "Left": [
-        "Timestamptz"
+        "Uuid",
+        "Text",
+        "Bool",
+        "Bool"
       ]
     },
     "nullable": [
@@ -51,8 +64,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "5478999f1b44bca6d146d51cee353962fdb1b062660129f757aeb179f0281971"
+  "hash": "290a57a0fc1f059cf2ae12e485826f141229651991c6748ada5f4ddc2b5bbfea"
 }

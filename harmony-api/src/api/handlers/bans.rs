@@ -156,6 +156,8 @@ pub async fn ban_member(
                     user_id: banned_user_id.clone(),
                     action: VoiceAction::Left,
                     display_name: String::new(),
+                    is_muted: None,
+                    is_deafened: None,
                 });
                 tracing::debug!(
                     server_id = %session.server_id,

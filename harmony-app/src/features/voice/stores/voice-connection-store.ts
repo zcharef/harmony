@@ -351,7 +351,7 @@ function setAllParticipantVolumes(room: Room, volume: number): number {
       participant.setVolume(volume)
     } catch (err: unknown) {
       failCount += 1
-      logger.error('voice_deafen_participant_failed', {
+      logger.warn('voice_deafen_participant_failed', {
         error: err instanceof Error ? err.message : String(err),
         participantIdentity: participant.identity,
       })
@@ -399,6 +399,21 @@ function restorePreferredDevices(room: Room, get: GetState): void {
   }
 }
 
+/** WHY: Extracted to reduce connect() cognitive complexity below Biome's limit of 15.
+ * Tears down an existing room without setting status to 'idle' (which disconnect()
+ * does), avoiding a transient idle→connecting flicker on channel switch. */
+async function teardownOldRoom(oldRoom: Room): Promise<void> {
+  detachAllAudioTracks(oldRoom)
+  removeRoomListeners()
+  try {
+    await oldRoom.disconnect()
+  } catch (err: unknown) {
+    logger.warn('voice_connect_old_room_disconnect_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
 export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get) => ({
   ...INITIAL_STATE,
 
@@ -408,11 +423,16 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       disconnectIdleTimer = null
     }
 
-    if (get().room !== null) {
-      await get().disconnect()
-    }
-
+    // WHY: Set connecting BEFORE tearing down the old room to avoid a transient
+    // idle→connecting flicker that causes VoiceConnectionBar to animate out then back in.
     set({ status: 'connecting', error: null })
+
+    // WHY: teardownOldRoom instead of disconnect() — disconnect() sets status to
+    // 'idle' which would overwrite the 'connecting' we just set above.
+    const { room: oldRoom } = get()
+    if (oldRoom !== null) {
+      await teardownOldRoom(oldRoom)
+    }
 
     const room = new Room(ROOM_OPTIONS)
     registerRoomEvents(room, get, set)
@@ -421,8 +441,12 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       await room.connect(url, token)
     } catch (err: unknown) {
       removeRoomListeners()
+      // WHY: The partially-constructed Room may hold open WebSocket/WebRTC
+      // resources. Disconnect it so they are released on connect failure.
+      room.disconnect().catch(() => {})
+      krispProcessorRef = null
       const message = err instanceof Error ? err.message : String(err)
-      logger.error('voice_connect_failed', { error: message, channelId, serverId })
+      logger.warn('voice_connect_failed', { error: message, channelId, serverId })
       set({ status: 'failed', error: message, room: null })
       return
     }

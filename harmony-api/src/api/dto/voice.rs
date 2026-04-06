@@ -56,6 +56,18 @@ impl From<VoiceToken> for VoiceTokenResponse {
     }
 }
 
+/// Request body for updating mute/deafen state.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateVoiceStateRequest {
+    /// The session identifier returned when the user joined voice.
+    pub session_id: String,
+    /// Whether the user's microphone is muted.
+    pub is_muted: bool,
+    /// Whether the user has deafened themselves (not hearing others).
+    pub is_deafened: bool,
+}
+
 /// Request body for the voice token refresh endpoint.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -100,6 +112,8 @@ pub struct VoiceParticipantResponse {
     /// profile — not stored on `VoiceSession` itself.
     pub display_name: String,
     pub joined_at: DateTime<Utc>,
+    pub is_muted: bool,
+    pub is_deafened: bool,
 }
 
 impl From<VoiceParticipant> for VoiceParticipantResponse {
@@ -109,6 +123,8 @@ impl From<VoiceParticipant> for VoiceParticipantResponse {
             channel_id: p.channel_id,
             display_name: p.display_name,
             joined_at: p.joined_at,
+            is_muted: p.is_muted,
+            is_deafened: p.is_deafened,
         }
     }
 }

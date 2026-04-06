@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO voice_sessions (user_id, channel_id, server_id, session_id)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (user_id) DO UPDATE\n                SET channel_id    = EXCLUDED.channel_id,\n                    server_id     = EXCLUDED.server_id,\n                    session_id    = EXCLUDED.session_id,\n                    joined_at     = now(),\n                    last_seen_at  = now(),\n                    last_active_at = now(),\n                    alone_since   = NULL\n            RETURNING\n                id,\n                user_id,\n                channel_id,\n                server_id,\n                session_id,\n                joined_at,\n                last_seen_at\n            ",
+  "query": "\n            DELETE FROM voice_sessions\n            WHERE alone_since IS NOT NULL\n              AND alone_since < $1\n            RETURNING\n                id,\n                user_id,\n                channel_id,\n                server_id,\n                session_id,\n                joined_at,\n                last_seen_at,\n                is_muted,\n                is_deafened\n            ",
   "describe": {
     "columns": [
       {
@@ -37,14 +37,21 @@
         "ordinal": 6,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_muted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "is_deafened",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        "Text"
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -54,8 +61,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "01a80550cc0e1ab89dfc72f38915db09f21a36cdd1ad88eae69d28d731e1d0f8"
+  "hash": "667c7d99deb511996a7fd0cf8466dbaf2d6d4dcd7dd05480e5c1eceef90a5bde"
 }

@@ -196,10 +196,6 @@ impl From<DomainError> for ApiError {
             DomainError::Internal(_) => ApiError::internal("An internal error occurred"),
             DomainError::ExternalService(msg) => ApiError::bad_gateway(msg),
             DomainError::RateLimited(msg) => ApiError::too_many_requests(msg),
-            DomainError::VoiceDisabled => ApiError::service_unavailable(
-                "Voice Not Configured",
-                "Voice channels are not available on this server. Configure LiveKit to enable voice.",
-            ),
         }
     }
 }

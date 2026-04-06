@@ -3824,6 +3824,66 @@
           }
         ]
       }
+    },
+    "/v1/voice/state": {
+      "patch": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "Update mute/deafen state for an active voice session.",
+        "description": "Persists the state in the database and broadcasts a `VoiceStateUpdate`\nSSE event so other participants see the change instantly.\n\n# Errors\n- 401 if not authenticated.\n- 404 if the session does not exist (expired, replaced, or user not in voice).\n- 503 if voice is not configured (`LiveKit` disabled).",
+        "operationId": "update_voice_state",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVoiceStateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Voice state updated"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Voice not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -5599,6 +5659,30 @@
         },
         "additionalProperties": false
       },
+      "UpdateVoiceStateRequest": {
+        "type": "object",
+        "description": "Request body for updating mute/deafen state.",
+        "required": [
+          "sessionId",
+          "isMuted",
+          "isDeafened"
+        ],
+        "properties": {
+          "isDeafened": {
+            "type": "boolean",
+            "description": "Whether the user has deafened themselves (not hearing others)."
+          },
+          "isMuted": {
+            "type": "boolean",
+            "description": "Whether the user's microphone is muted."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "The session identifier returned when the user joined voice."
+          }
+        },
+        "additionalProperties": false
+      },
       "UploadOneTimeKeysRequest": {
         "type": "object",
         "description": "Request body for uploading one-time keys for a device.",
@@ -5663,7 +5747,11 @@
         "description": "Voice channel action for SSE events.",
         "enum": [
           "joined",
-          "left"
+          "left",
+          "muted",
+          "unmuted",
+          "deafened",
+          "undeafened"
         ]
       },
       "VoiceHeartbeatRequest": {
@@ -5701,7 +5789,9 @@
           "userId",
           "channelId",
           "displayName",
-          "joinedAt"
+          "joinedAt",
+          "isMuted",
+          "isDeafened"
         ],
         "properties": {
           "channelId": {
@@ -5710,6 +5800,12 @@
           "displayName": {
             "type": "string",
             "description": "Display name (nickname or username). Populated from the user's\nprofile — not stored on `VoiceSession` itself."
+          },
+          "isDeafened": {
+            "type": "boolean"
+          },
+          "isMuted": {
+            "type": "boolean"
           },
           "joinedAt": {
             "type": "string",

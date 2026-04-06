@@ -80,7 +80,7 @@ export function useForceDisconnect(
 
       const parsed = forceDisconnectSchema.safeParse(payload)
       if (!parsed.success) {
-        logger.error('Malformed force.disconnect SSE payload', {
+        logger.warn('Malformed force.disconnect SSE payload', {
           error: parsed.error.message,
         })
         return

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            DELETE FROM voice_sessions\n            WHERE last_active_at < $1\n              AND last_seen_at >= $2\n            RETURNING\n                id,\n                user_id,\n                channel_id,\n                server_id,\n                session_id,\n                joined_at,\n                last_seen_at\n            ",
+  "query": "\n            DELETE FROM voice_sessions\n            WHERE last_seen_at < $1\n            RETURNING\n                id,\n                user_id,\n                channel_id,\n                server_id,\n                session_id,\n                joined_at,\n                last_seen_at,\n                is_muted,\n                is_deafened\n            ",
   "describe": {
     "columns": [
       {
@@ -37,11 +37,20 @@
         "ordinal": 6,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_muted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "is_deafened",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
       "Left": [
-        "Timestamptz",
         "Timestamptz"
       ]
     },
@@ -52,8 +61,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "bf78ca12a810e7e859ff87e977e71f8e5e00f9fee8e859770b5fa491c945e7a2"
+  "hash": "4c195ca4574a9ccc41761f9e0c2b2137d0cd6e6ead6ade079cd22b03a600bf98"
 }

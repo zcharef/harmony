@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { z } from 'zod'
 import { useServerEvent } from '@/hooks/use-server-event'
 import type { VoiceParticipantResponse } from '@/lib/api'
+import { zVoiceAction } from '@/lib/api/zod.gen'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 import { playVoiceSound } from '../lib/voice-sounds'
@@ -24,8 +25,10 @@ const voiceStateUpdateSchema = z.object({
   serverId: z.string(),
   channelId: z.string().uuid(),
   userId: z.string().uuid(),
-  action: z.enum(['joined', 'left']),
+  action: zVoiceAction,
   displayName: z.string(),
+  isMuted: z.boolean().optional(),
+  isDeafened: z.boolean().optional(),
 })
 
 type VoiceStateUpdate = z.infer<typeof voiceStateUpdateSchema>
@@ -47,6 +50,8 @@ function applyJoin(
       userId: event.userId,
       displayName: event.displayName,
       joinedAt: new Date().toISOString(),
+      isMuted: false,
+      isDeafened: false,
     },
   ]
 }
@@ -57,6 +62,46 @@ function applyLeave(
 ): VoiceParticipantResponse[] {
   const filtered = list.filter((p) => p.userId !== event.userId)
   return filtered.length !== list.length ? filtered : list
+}
+
+/** WHY extracted: Keeps applyMuteState map callback under Biome's cognitive
+ * complexity limit of 15. Uses authoritative booleans from SSE payload when
+ * present, falls back to action-based inference for backward compat. */
+function resolveMuted(event: VoiceStateUpdate, current: boolean): boolean {
+  if (event.isMuted !== undefined) return event.isMuted
+  if (event.action === 'muted') return true
+  if (event.action === 'unmuted') return false
+  return current
+}
+
+function resolveDeafened(event: VoiceStateUpdate, current: boolean): boolean {
+  if (event.isDeafened !== undefined) return event.isDeafened
+  if (event.action === 'deafened') return true
+  if (event.action === 'undeafened') return false
+  return current
+}
+
+function applyMuteState(
+  list: VoiceParticipantResponse[],
+  event: VoiceStateUpdate,
+): VoiceParticipantResponse[] {
+  let found = false
+  const result = list.map((p) => {
+    if (p.userId !== event.userId) return p
+    found = true
+    return {
+      ...p,
+      isMuted: resolveMuted(event, p.isMuted),
+      isDeafened: resolveDeafened(event, p.isDeafened),
+    }
+  })
+  if (!found) {
+    logger.warn('voice_mute_state_participant_not_found', {
+      userId: event.userId,
+      action: event.action,
+    })
+  }
+  return result
 }
 
 function applyBatch(
@@ -74,7 +119,13 @@ function applyBatch(
 
       let next = baseline
       for (const event of events) {
-        next = event.action === 'joined' ? applyJoin(next, event) : applyLeave(next, event)
+        if (event.action === 'joined') {
+          next = applyJoin(next, event)
+        } else if (event.action === 'left') {
+          next = applyLeave(next, event)
+        } else {
+          next = applyMuteState(next, event)
+        }
       }
 
       // WHY: If nothing changed after processing all events, return baseline
@@ -82,6 +133,40 @@ function applyBatch(
       return next === baseline ? baseline : next
     },
   )
+}
+
+/** WHY extracted: Keeps handleVoiceStateUpdate under Biome's cognitive complexity
+ * limit of 15. Checks if a "left" event targets the locally connected user. If
+ * so, the event is ignored — the heartbeat 404 → force-disconnect handles
+ * legitimate disconnects cleanly, preventing the jarring "name disappears while
+ * still talking" symptom caused by sweep race conditions. */
+function isSelfLeftWhileConnected(event: VoiceStateUpdate): boolean {
+  if (event.action !== 'left') return false
+  const { status, room } = useVoiceConnectionStore.getState()
+  // WHY 'reconnecting': During ICE restart the heartbeat is still alive
+  // (use-voice-connection.ts:362), so the server session is valid. A sweep-
+  // fired "left" event during reconnecting is just as spurious as during
+  // connected — let the heartbeat 404 handle legitimate disconnects.
+  return (
+    (status === 'connected' || status === 'reconnecting') &&
+    room?.localParticipant.identity === event.userId
+  )
+}
+
+/** WHY extracted: Keeps handleVoiceStateUpdate under Biome's cognitive complexity
+ * limit of 15. Plays join/leave sound only for OTHER users in the locally
+ * connected voice channel. Self-actions already trigger sounds in
+ * use-voice-connection.ts. */
+function maybePlayParticipantSound(event: VoiceStateUpdate, channelId: string): void {
+  if (event.action !== 'joined' && event.action !== 'left') return
+  const voiceState = useVoiceConnectionStore.getState()
+  if (
+    voiceState.status === 'connected' &&
+    voiceState.currentChannelId === channelId &&
+    voiceState.room?.localParticipant.identity !== event.userId
+  ) {
+    playVoiceSound(event.action === 'joined' ? 'join' : 'leave')
+  }
 }
 
 /**
@@ -142,20 +227,17 @@ export function useRealtimeVoice(channelId: string) {
 
       if (parsed.data.channelId !== channelId) return
 
-      // WHY: Play sound only for OTHER users joining/leaving our active voice
-      // channel. Self-actions already trigger sounds in use-voice-connection.ts.
-      // getState() is a sync Zustand read — safe inside a callback.
-      // WHY status guard: During self-join, the SSE event can arrive before
-      // storeConnect completes (status is still 'connecting', room is null).
-      // Without this check, room?.localParticipant.identity is undefined and
-      // the self-filter fails, causing a double-play with use-voice-connection.
-      const voiceState = useVoiceConnectionStore.getState()
-      if (
-        voiceState.status === 'connected' &&
-        voiceState.currentChannelId === channelId &&
-        voiceState.room?.localParticipant.identity !== parsed.data.userId
-      ) {
-        playVoiceSound(parsed.data.action === 'joined' ? 'join' : 'leave')
+      maybePlayParticipantSound(parsed.data, channelId)
+
+      // WHY: See isSelfLeftWhileConnected doc — prevents sweep race from
+      // removing our name while we can still talk. Self-leave is handled by
+      // direct cache eviction in handleLeaveVoice.
+      if (isSelfLeftWhileConnected(parsed.data)) {
+        logger.info('voice_self_left_event_ignored', {
+          channelId,
+          userId: parsed.data.userId,
+        })
+        return
       }
 
       // WHY: Accumulate events and flush after DEBOUNCE_MS to batch cache

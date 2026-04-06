@@ -2,7 +2,13 @@ import { useQueryClient } from '@tanstack/react-query'
 import type React from 'react'
 import { useCallback, useEffect, useRef } from 'react'
 import type { VoiceParticipantResponse } from '@/lib/api'
-import { joinVoice, leaveVoice, refreshVoiceToken, voiceHeartbeat } from '@/lib/api'
+import {
+  joinVoice,
+  leaveVoice,
+  refreshVoiceToken,
+  updateVoiceState,
+  voiceHeartbeat,
+} from '@/lib/api'
 import { isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
@@ -285,11 +291,22 @@ export function useVoiceConnection() {
         // the user from the previous channel's participant cache immediately so
         // the sidebar updates without waiting for the SSE event (which depends
         // on broadcast timing and the 500ms debounce in useRealtimeVoice).
-        evictFromPreviousChannel(data.previousChannelId, sessionData.session?.user?.id, queryClient)
+        // WHY: Skip eviction when reconnecting to the same channel — the user is
+        // already in the list and removing them causes a flash disappearance.
+        if (data.previousChannelId !== channelId) {
+          evictFromPreviousChannel(
+            data.previousChannelId,
+            sessionData.session?.user?.id,
+            queryClient,
+          )
+        }
 
         await storeConnect(channelId, serverId, data.token, data.url)
         playVoiceSound('join')
         sessionIdRef.current = data.sessionId
+        // WHY (H2): Reset the guard so the mute/deaf sync useEffect skips the
+        // initial post-join render (server already has is_muted=false from upsert).
+        isInitialMuteDeafRef.current = true
         // WHY: Store the server-provided TTL so scheduleTokenRefresh uses the
         // dynamic value instead of the hardcoded fallback.
         ttlSecsRef.current = data.ttlSecs ?? FALLBACK_TOKEN_TTL_SECS
@@ -299,10 +316,16 @@ export function useVoiceConnection() {
         // This is a background op — failure is logged, not surfaced (ADR-028).
         scheduleTokenRefresh()
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        logger.error('voice_join_api_failed', { error: message, channelId, serverId })
-        // WHY: Set store error for inline feedback (ADR-028). No toast.
-        useVoiceConnectionStore.setState({ status: 'failed', error: message })
+        const rawMessage = err instanceof Error ? err.message : String(err)
+        logger.error('voice_join_api_failed', { error: rawMessage, channelId, serverId })
+        // WHY: ProblemDetails from our API have user-friendly detail messages.
+        // LiveKit SDK errors contain raw WebSocket URLs — not user-friendly.
+        // Passing null lets VoiceConnectionBar fall through to the i18n
+        // 'connectionFailed' translation key (ADR-028).
+        // WHY: rawMessage is String(err) which produces "[object Object]" for
+        // ProblemDetails (plain objects, not Error instances). Use .detail directly.
+        const userMessage = isProblemDetails(err) ? err.detail : null
+        useVoiceConnectionStore.setState({ status: 'failed', error: userMessage })
 
         // WHY (P1-5): If storeConnect (room.connect()) failed, the server-side
         // session created by joinVoice is still alive and will linger for 45s
@@ -328,6 +351,18 @@ export function useVoiceConnection() {
     sessionIdRef.current = null
     cachedAuthToken = null
 
+    // WHY: Directly evict self from the participant cache so the sidebar
+    // updates instantly without waiting for the SSE voice.state_update(left)
+    // event. This also prevents a race where the SSE event arrives after
+    // storeDisconnect clears currentChannelId.
+    const userId = useVoiceConnectionStore.getState().room?.localParticipant.identity
+    if (channelId !== null && userId !== undefined) {
+      queryClient.setQueryData<VoiceParticipantResponse[]>(
+        queryKeys.voice.participants(channelId),
+        (old) => old?.filter((p) => p.userId !== userId),
+      )
+    }
+
     // WHY: Disconnect from LiveKit first so the user sees instant feedback.
     await storeDisconnect()
 
@@ -340,7 +375,7 @@ export function useVoiceConnection() {
         })
       })
     }
-  }, [storeDisconnect, clearTokenRefreshTimer])
+  }, [storeDisconnect, clearTokenRefreshTimer, queryClient])
 
   // --- Heartbeat while connected or reconnecting ---
   useEffect(() => {
@@ -404,6 +439,87 @@ export function useVoiceConnection() {
     }
   }, [status, storeDisconnect])
 
+  // --- Sync mute/deaf state to server on toggle ---
+  // WHY (H2): Ref is reset to true in handleJoinVoice after storeConnect so
+  // the first post-join render is always skipped (server has correct state).
+  const isInitialMuteDeafRef = useRef(true)
+  const muteDeafTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    // WHY: Skip the initial render — both start as false and the server
+    // already has the correct state from the join (reset to false on upsert).
+    if (isInitialMuteDeafRef.current) {
+      isInitialMuteDeafRef.current = false
+      return
+    }
+    // WHY (C2): Read status imperatively instead of as a dependency. This
+    // prevents spurious API calls on every connect/reconnect/ICE transition.
+    const currentStatus = useVoiceConnectionStore.getState().status
+    if (currentStatus !== 'connected' && currentStatus !== 'reconnecting') return
+    const sid = sessionIdRef.current
+    if (sid === null) return
+
+    // WHY (M1): 200ms trailing debounce collapses rapid mute toggles into a
+    // single API call. The last-value-wins semantics make this safe.
+    if (muteDeafTimerRef.current !== null) clearTimeout(muteDeafTimerRef.current)
+    muteDeafTimerRef.current = setTimeout(() => {
+      muteDeafTimerRef.current = null
+      updateVoiceState({
+        body: { sessionId: sid, isMuted, isDeafened },
+        throwOnError: true,
+      }).catch((err: unknown) => {
+        // WHY (M3): 404 means session expired — force-disconnect immediately
+        // instead of waiting for the next heartbeat cycle (up to 15s).
+        if (isProblemDetails(err) && err.status === 404) {
+          logger.warn('voice_state_update_session_gone', { sessionId: sid })
+          storeDisconnect().catch((disconnectErr: unknown) => {
+            logger.warn('voice_state_disconnect_failed', {
+              error: disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
+            })
+          })
+          return
+        }
+        logger.warn('voice_state_update_failed', {
+          error: err instanceof Error ? err.message : String(err),
+          isMuted,
+          isDeafened,
+        })
+      })
+    }, 200)
+
+    return () => {
+      if (muteDeafTimerRef.current !== null) {
+        clearTimeout(muteDeafTimerRef.current)
+        muteDeafTimerRef.current = null
+      }
+    }
+  }, [isMuted, isDeafened, storeDisconnect])
+
+  // WHY: Capture channelId before it's cleared to null on disconnect,
+  // so the unexpected-disconnect leave effect can reference it.
+  const prevChannelIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (currentChannelId !== null) {
+      prevChannelIdRef.current = currentChannelId
+    }
+  }, [currentChannelId])
+
+  // WHY: When LiveKit disconnects unexpectedly (server down, network loss),
+  // the store sets status to 'disconnected' but never notifies our API.
+  // This best-effort leave call reduces the ghost participant window from
+  // 75s (sweep) to near-zero.
+  useEffect(() => {
+    if (status !== 'disconnected') return
+    const channelId = prevChannelIdRef.current
+    if (channelId === null) return
+
+    leaveVoice({ path: { id: channelId }, throwOnError: true }).catch((err: unknown) => {
+      logger.warn('voice_unexpected_disconnect_leave_failed', {
+        error: err instanceof Error ? err.message : String(err),
+        channelId,
+      })
+    })
+  }, [status])
+
   // WHY: On page refresh (F5), the LiveKit room disconnects (disconnectOnPageLeave)
   // but the server-side voice session stays alive until the heartbeat sweep (~45s).
   // This causes a ghost participant: the user's name lingers in the channel while
@@ -420,6 +536,25 @@ export function useVoiceConnection() {
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [])
+
+  // WHY: Keep cachedAuthToken fresh so the beforeunload handler
+  // can send a valid leave request even after JWT rotation (~1h).
+  // Without this, a page refresh after token rotation sends an expired
+  // Bearer token and the leave request is rejected (401).
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token !== undefined) {
+        cachedAuthToken = session.access_token
+      } else {
+        cachedAuthToken = null
+      }
+    })
+    return () => {
+      subscription.unsubscribe()
     }
   }, [])
 

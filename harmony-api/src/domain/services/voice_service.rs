@@ -109,6 +109,28 @@ impl VoiceService {
             }
         }
 
+        // 3b. Eagerly clear alone_since for the target channel BEFORE the slow
+        //     pre-computation below (plan limits + LiveKit token gen).
+        //     WHY: The background delete_alone_in_channel sweep runs every 30s
+        //     and deletes sessions with alone_since older than 3 minutes. Without
+        //     this eager clear, the sweep can race with this join and delete the
+        //     existing solo user's session during the pre-computation window —
+        //     before upsert_with_limit's FOR UPDATE lock can protect them.
+        //     Placed AFTER auth checks so only authorized members can clear the
+        //     timer; if the join still fails later (plan limit), the next sweep
+        //     cycle re-sets alone_since within 30s — harmless.
+        if let Err(e) = self
+            .voice_repo
+            .clear_alone_since_for_channel(channel_id)
+            .await
+        {
+            tracing::warn!(
+                channel_id = %channel_id,
+                error = %e,
+                "Failed to eagerly clear alone_since — upsert_with_limit will handle it"
+            );
+        }
+
         // 4. Get plan limits (single query — used for both concurrent limit
         //    check and bitrate/duration grants, eliminating the previous
         //    duplicate get_server_limits query from check_voice_concurrent).
@@ -331,14 +353,35 @@ impl VoiceService {
                 id: channel_id.to_string(),
             })?;
 
-        let is_member = self
-            .member_repo
-            .is_member(&channel.server_id, user_id)
-            .await?;
-        if !is_member {
-            return Err(DomainError::Forbidden(
-                "You must be a server member to list voice participants".to_string(),
+        if channel.channel_type != ChannelType::Voice {
+            return Err(DomainError::ValidationError(
+                "Channel is not a voice channel".to_string(),
             ));
+        }
+
+        // WHY: get_member (not is_member) to retrieve the role for private access check.
+        let member = self
+            .member_repo
+            .get_member(&channel.server_id, user_id)
+            .await?
+            .ok_or_else(|| {
+                DomainError::Forbidden(
+                    "You must be a server member to list voice participants".to_string(),
+                )
+            })?;
+
+        // WHY: Same access rules as join_voice — admin/owner always have access,
+        // member/moderator need a channel_role_access entry.
+        if channel.is_private {
+            let has_access = self
+                .channel_repo
+                .has_private_channel_access(channel_id, member.role)
+                .await?;
+            if !has_access {
+                return Err(DomainError::Forbidden(
+                    "You do not have access to this private channel".to_string(),
+                ));
+            }
         }
 
         self.voice_repo.list_by_channel(channel_id).await
@@ -356,6 +399,26 @@ impl VoiceService {
         server_id: &ServerId,
     ) -> Result<Vec<VoiceSession>, DomainError> {
         self.voice_repo.list_by_server(server_id).await
+    }
+
+    /// Update mute/deafen state for the user's active voice session.
+    ///
+    /// # Errors
+    /// - `DomainError::NotFound` if no session matches `user_id` + `session_id`.
+    pub async fn update_voice_state(
+        &self,
+        user_id: &UserId,
+        session_id: &str,
+        is_muted: bool,
+        is_deafened: bool,
+    ) -> Result<VoiceSession, DomainError> {
+        self.voice_repo
+            .update_voice_state(user_id, session_id, is_muted, is_deafened)
+            .await?
+            .ok_or_else(|| DomainError::NotFound {
+                resource_type: "VoiceSession",
+                id: session_id.to_string(),
+            })
     }
 
     /// Update the heartbeat timestamp for a user's active voice session.
@@ -637,6 +700,10 @@ mod tests {
 
     #[async_trait]
     impl VoiceSessionRepository for InMemoryVoiceSessionRepo {
+        async fn now(&self) -> Result<DateTime<Utc>, DomainError> {
+            Ok(Utc::now())
+        }
+
         async fn upsert(
             &self,
             session: &NewVoiceSession,
@@ -652,6 +719,8 @@ mod tests {
                 session_id: session.session_id.clone(),
                 joined_at: now,
                 last_seen_at: now,
+                is_muted: false,
+                is_deafened: false,
             };
             sessions.insert(session.user_id.clone(), new_session.clone());
             Ok((new_session, previous))
@@ -776,6 +845,31 @@ mod tests {
             Ok(0)
         }
 
+        async fn clear_alone_since_for_channel(
+            &self,
+            _channel_id: &ChannelId,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+
+        async fn update_voice_state(
+            &self,
+            user_id: &UserId,
+            session_id: &str,
+            is_muted: bool,
+            is_deafened: bool,
+        ) -> Result<Option<VoiceSession>, DomainError> {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(user_id)
+                && s.session_id == session_id
+            {
+                s.is_muted = is_muted;
+                s.is_deafened = is_deafened;
+                return Ok(Some(s.clone()));
+            }
+            Ok(None)
+        }
+
         async fn touch(
             &self,
             user_id: &UserId,
@@ -871,7 +965,7 @@ mod tests {
 
     #[derive(Debug)]
     struct FakeLiveKit {
-        /// When true, `generate_token` returns `VoiceDisabled` error.
+        /// When true, `generate_token` returns `ExternalService` error.
         disabled: bool,
     }
 
@@ -894,7 +988,9 @@ mod tests {
             _grants: VoiceGrants,
         ) -> Result<String, DomainError> {
             if self.disabled {
-                return Err(DomainError::VoiceDisabled);
+                return Err(DomainError::ExternalService(
+                    "LiveKit token generation failed: disabled".to_string(),
+                ));
             }
             Ok(format!("fake-token-{}-{}", room_name, user_id))
         }
@@ -1118,9 +1214,9 @@ mod tests {
         }
     }
 
-    // 5. join_voice when voice is disabled returns VoiceDisabled
+    // 5. join_voice when token generation fails returns ExternalService
     #[tokio::test]
-    async fn join_voice_disabled_returns_voice_disabled() {
+    async fn join_voice_disabled_returns_external_service() {
         let h = build_harness(FakePlanChecker::allowed(), FakeLiveKit::disabled());
         let uid = user_id(1);
         let sid = server_id(10);
@@ -1136,8 +1232,8 @@ mod tests {
         let result = h.service.join_voice(&uid, &cid).await;
         assert!(result.is_err());
         assert!(
-            matches!(result.unwrap_err(), DomainError::VoiceDisabled),
-            "Expected VoiceDisabled error"
+            matches!(result.unwrap_err(), DomainError::ExternalService(_)),
+            "Expected ExternalService error"
         );
     }
 

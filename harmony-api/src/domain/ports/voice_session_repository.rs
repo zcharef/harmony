@@ -9,6 +9,13 @@ use crate::domain::models::{ChannelId, NewVoiceSession, ServerId, UserId, VoiceS
 /// Repository for ephemeral voice sessions (one per user, upsert semantics).
 #[async_trait]
 pub trait VoiceSessionRepository: Send + Sync + std::fmt::Debug {
+    /// Return the database server's current timestamp.
+    ///
+    /// WHY: Heartbeat `touch()` writes `last_seen_at = now()` using the DB clock.
+    /// Sweep thresholds must be computed from the same clock to avoid skew between
+    /// the Rust process and Postgres (e.g. containerised deployments, NTP drift).
+    async fn now(&self) -> Result<DateTime<Utc>, DomainError>;
+
     /// Insert a voice session. If the user already has one, replace it (auto-leave old channel).
     /// Returns the new session and the PREVIOUS session if one existed (for SSE leave event).
     async fn upsert(
@@ -104,4 +111,27 @@ pub trait VoiceSessionRepository: Send + Sync + std::fmt::Debug {
         session_id: &str,
         is_active: bool,
     ) -> Result<bool, DomainError>;
+
+    /// Update mute/deafen state for an active voice session.
+    /// Returns the updated session (with `server_id`/`channel_id` for SSE routing).
+    /// Returns `None` if no session matches `user_id` + `session_id`.
+    async fn update_voice_state(
+        &self,
+        user_id: &UserId,
+        session_id: &str,
+        is_muted: bool,
+        is_deafened: bool,
+    ) -> Result<Option<VoiceSession>, DomainError>;
+
+    /// Eagerly clear `alone_since` for all sessions in a channel.
+    ///
+    /// WHY: Called at the start of `join_voice` BEFORE the heavy pre-computation
+    /// (channel fetch, membership check, plan limits, token generation). This
+    /// prevents a race where the background `delete_alone_in_channel` sweep could
+    /// delete the existing solo user's session during the ~50ms pre-computation
+    /// window, before `upsert_with_limit` acquires its `FOR UPDATE` lock.
+    async fn clear_alone_since_for_channel(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Result<(), DomainError>;
 }

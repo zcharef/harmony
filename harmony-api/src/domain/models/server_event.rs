@@ -287,6 +287,13 @@ pub enum ServerEvent {
         /// Human-readable name resolved from the user's profile.
         /// Populated on `Joined` events; empty on `Left` events (unused by clients).
         display_name: String,
+        /// Authoritative mute state from the DB. Present on mute/deaf events,
+        /// absent on join/leave (clients use `action` for those).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_muted: Option<bool>,
+        /// Authoritative deafen state from the DB.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_deafened: Option<bool>,
     },
 
     // ── System ───────────────────────────────────────────────

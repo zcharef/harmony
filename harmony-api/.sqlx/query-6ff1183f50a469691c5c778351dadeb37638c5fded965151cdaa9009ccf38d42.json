@@ -1,0 +1,73 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO voice_sessions (user_id, channel_id, server_id, session_id)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (user_id) DO UPDATE\n                SET channel_id    = EXCLUDED.channel_id,\n                    server_id     = EXCLUDED.server_id,\n                    session_id    = EXCLUDED.session_id,\n                    joined_at     = now(),\n                    last_seen_at  = now(),\n                    last_active_at = now(),\n                    alone_since   = NULL,\n                    is_muted      = false,\n                    is_deafened   = false\n            RETURNING\n                id, user_id, channel_id, server_id, session_id, joined_at, last_seen_at,\n                is_muted, is_deafened\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "session_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_muted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "is_deafened",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6ff1183f50a469691c5c778351dadeb37638c5fded965151cdaa9009ccf38d42"
+}

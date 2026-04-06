@@ -37,7 +37,4 @@ pub enum DomainError {
         plan: String,
         limit: u64,
     },
-
-    #[error("Voice channels are not available — LiveKit is not configured")]
-    VoiceDisabled,
 }

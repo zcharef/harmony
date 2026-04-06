@@ -11,13 +11,18 @@
  */
 
 import { env } from '@/lib/env'
+import { logger } from '@/lib/logger'
 
 export function fireAndForgetVoiceLeave(channelId: string, authToken: string): void {
   fetch(`${env.VITE_API_URL}/v1/channels/${encodeURIComponent(channelId)}/voice/leave`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${authToken}` },
     keepalive: true,
-  }).catch(() => {
-    // Best-effort — heartbeat sweep handles cleanup if this fails.
+  }).catch((err: unknown) => {
+    // WHY: Best-effort — heartbeat sweep handles cleanup if this fails.
+    // Log for observability per ADR-027.
+    logger.warn('voice_leave_beacon_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    })
   })
 }
