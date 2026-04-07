@@ -9,5 +9,12 @@
        See: https://github.com/tauri-apps/tauri/issues/13878 -->
   <key>com.apple.security.network.client</key>
   <true/>
+  <!-- WHY: macOS 15+ requires this entitlement in addition to
+       NSMicrophoneUsageDescription in Info.plist for getUserMedia() to work
+       inside WKWebView. Without it, LiveKit's microphone capture is silently
+       denied in signed/notarized builds.
+       See: https://github.com/tauri-apps/tauri/issues/11951 -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

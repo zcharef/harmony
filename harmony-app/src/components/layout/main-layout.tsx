@@ -26,6 +26,7 @@ import {
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, useSettingsUiStore } from '@/features/settings'
+import { useVoiceConnection } from '@/features/voice'
 import { useFetchSSE } from '@/hooks/use-fetch-sse'
 import { useNotificationSound } from '@/hooks/use-notification-sound'
 import { useAboutUiStore } from '@/lib/about-ui-store'
@@ -410,8 +411,8 @@ export function MainLayout() {
   // WHY: Realtime hooks MUST live here (not inside collapsible sidebar/member-list
   // panels). When a panel collapses, its component unmounts and SSE listeners are
   // torn down — events would be silently missed until the panel re-opens.
-  useRealtimeChannels(selectedServerId ?? '')
-  useRealtimeMembers(selectedServerId ?? '')
+  useRealtimeChannels()
+  useRealtimeMembers()
   // WHY: Mounted here (not in DmSidebar) so dm.created SSE events invalidate
   // the DM list cache even when the DM sidebar is unmounted (user viewing a
   // server). The backend now dynamically updates the server_ids filter via a
@@ -432,6 +433,11 @@ export function MainLayout() {
   // Suppression differs from desktop notifications: sound plays when focused
   // on a different channel, desktop notifications suppress on focus alone.
   useNotificationSound(selectedChannelId, userId)
+  // WHY: Voice lifecycle (heartbeat, token refresh, mute sync, cleanup) MUST
+  // survive the DM/server view toggle. ChannelSidebar unmounts in DM view,
+  // which killed the heartbeat → server swept sessions after 75s → names
+  // disappeared while audio was still working (LiveKit P2P is independent).
+  const { joinVoice } = useVoiceConnection()
   const { data: channels } = useChannels(selectedServerId)
 
   // WHY: DM list needed to derive chat header info (recipient name) when in DM view
@@ -577,6 +583,7 @@ export function MainLayout() {
                 serverName={serverName}
                 selectedChannelId={selectedChannelId}
                 onSelectChannel={setSelectedChannelId}
+                joinVoice={joinVoice}
               />
             )}
           </FeatureErrorBoundary>

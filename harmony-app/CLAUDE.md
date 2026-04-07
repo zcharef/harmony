@@ -365,13 +365,38 @@ All push notifications use Server-Sent Events from the Rust API. Supabase Realti
 3. **Feature hook:** Create `use-realtime-<feature>.ts` using `useServerEvent("<event.name>", handler)` pattern
 4. **Cache update:** Use `queryClient.setQueryData()` for instant UI, matching the pattern in `use-realtime-messages.ts`
 
-### 4.6 Cross-Feature Communication
+### 4.6 Hook Lifecycle & View Switches (MANDATORY)
+
+Hooks with persistent side-effects (intervals, timers, subscriptions, event listeners) that must survive view changes **MUST** live in `MainLayout` — the only component that never unmounts.
+
+#### Why
+
+The app swaps entire sidebars on view change: `isDmView ? <DmSidebar/> : <ChannelSidebar/>`. A hook inside `ChannelSidebar` is **killed** when the user navigates to DMs. If that hook runs a heartbeat, the server thinks the user disconnected.
+
+#### Rules
+
+| Hook type | Where to mount | Examples |
+|-----------|---------------|----------|
+| Global SSE listeners (`useServerEvent`) | `MainLayout` | `useRealtimeChannels`, `useRealtimeMembers`, `useForceDisconnect` |
+| Global lifecycle (heartbeats, token refresh, cleanup) | `MainLayout` | `useVoiceConnection`, `usePresence`, `useFetchSSE` |
+| Per-channel subscriptions (only needed when viewing) | Feature component | `useRealtimeVoice(channelId)`, `useRealtimeMessages(channelId)` |
+
+#### Components that unmount during normal use
+
+- `ChannelSidebar` — unmounts in DM view
+- `DmSidebar` — unmounts in server view
+- `MemberList` — unmounts when panel is collapsed
+- `VoiceParticipantList` — unmounts when viewing a different server
+
+**Before adding a hook with `setInterval`, `addEventListener`, `onAuthStateChange`, or `useServerEvent` to any of these components, ask: "Does this side-effect need to survive a view switch?" If yes, mount it in `MainLayout`.**
+
+### 4.7 Cross-Feature Communication
 
 - Import via barrel exports only: `import { X } from '@/features/y'`
 - Pass IDs between features, NOT full objects
 - Side effects handled by API (not cross-feature function calls)
 
-### 4.7 Query Key Factory (MANDATORY) (ADR-029)
+### 4.8 Query Key Factory (MANDATORY) (ADR-029)
 
 ```typescript
 // FORBIDDEN: inline query keys
@@ -382,11 +407,11 @@ import { queryKeys } from '@/lib/query-keys'
 queryKey: queryKeys.messages.byChannel(channelId)
 ```
 
-### 4.8 Error Boundaries (MANDATORY) (ADR-034)
+### 4.9 Error Boundaries (MANDATORY) (ADR-034)
 
 Every feature route wrapped in `<FeatureErrorBoundary>` from `@/components/shared/error-boundary`.
 
-### 4.9 Styling (MANDATORY) (ADR-044)
+### 4.10 Styling (MANDATORY) (ADR-044)
 
 - **HeroUI prop-based styling first**: Use component props (`color="primary"`, `variant="flat"`, `size="sm"`) over Tailwind classes.
 - **`className`/`classNames` for layout only**: Flexbox, margins, positioning that HeroUI props cannot express.
@@ -394,7 +419,7 @@ Every feature route wrapped in `<FeatureErrorBoundary>` from `@/components/share
 - **No inline `style={{}}`** in application code — Tailwind via `className` only.
 - **No `dark:` color overrides** — HeroUI handles dark mode color switching automatically.
 
-### 4.10 Type Assertions (MANDATORY) (ADR-035)
+### 4.11 Type Assertions (MANDATORY) (ADR-035)
 
 - Never use `as Type` (lies to compiler). Use `satisfies Type` or fix the actual type.
 - Allowed: `as const`, `as unknown`, `as never` (exhaustive switches).
@@ -597,6 +622,7 @@ but must be explicit when running from the CLI.
 - [ ] New SSE events have Zod schema in `event-types.ts` and entry in `SSE_EVENT_NAME_TO_TYPE`
 - [ ] Feature realtime hooks use `useServerEvent()`, not direct `addEventListener`
 - [ ] SSE handlers update cache via `setQueryData()`, not `invalidateQueries()`
+- [ ] Hooks with persistent side-effects (heartbeats, timers, global listeners) live in `MainLayout`, not in `ChannelSidebar`/`DmSidebar`/`MemberList`
 
 ### Enforcement Rules
 - [ ] No inline `style={{}}` in feature code -- Tailwind `className` only

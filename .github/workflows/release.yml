@@ -143,10 +143,9 @@ jobs:
 
       # ── Build, sign & upload to GitHub Release ──────────
       - name: Build and release
-        # WHY pinned: pre-1.0 semver allows breaking changes on minor bumps.
+        # WHY SHA pin: mutable tags can be moved after compromise. SHA is immutable.
         # v0.6.x gets patch fixes only. Bump deliberately when tauri-action releases v0.7+.
-        # NOTE: v0.6 tag is stale (points to v0.6.0). Pin to latest patch explicitly.
-        uses: tauri-apps/tauri-action@action-v0.6.2
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Tauri updater signing (all platforms)
@@ -202,6 +201,9 @@ jobs:
   fix-updater-signatures:
     name: Fix updater signatures in latest.json
     needs: [release]
+    # WHY always(): Without this, the job is skipped when any matrix leg fails.
+    # The macOS signature fix must still run even if e.g. Windows build fails.
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -217,14 +219,19 @@ jobs:
 
           gh release download "$TAG" --repo "$REPO" --dir "$WORK"
 
-          # WHY: Pass $WORK via env var because heredoc stdin has no argv.
-          export WORK_DIR="$WORK"
-          python3 << 'SCRIPT' && CHANGED=no || CHANGED=yes
+          # WHY ||: Capture Python exit code without set -e killing the shell.
+          # Exit codes: 0 = no changes needed, 42 = patched, other = crash.
+          PYTHON_EXIT=0
+          WORK_DIR="$WORK" python3 << 'SCRIPT' || PYTHON_EXIT=$?
           import json, sys, os
           from pathlib import Path
 
           work = Path(os.environ["WORK_DIR"])
           latest = work / "latest.json"
+
+          if not latest.exists():
+              print("ERROR: latest.json not found in release assets", file=sys.stderr)
+              sys.exit(1)
 
           with open(latest) as f:
               data = json.load(f)
@@ -256,13 +263,15 @@ jobs:
           else:
               print("\nAll signatures match — no patch needed")
 
-          # Exit code signals whether re-upload is needed
           sys.exit(0 if fixed == 0 else 42)
           SCRIPT
 
-          if [ "$CHANGED" = "yes" ]; then
+          if [ "$PYTHON_EXIT" -eq 42 ]; then
             gh release upload "$TAG" --repo "$REPO" --clobber "$WORK/latest.json"
             echo "✅ latest.json re-uploaded with corrected signatures"
-          else
+          elif [ "$PYTHON_EXIT" -eq 0 ]; then
             echo "✅ All signatures already correct — no re-upload needed"
+          else
+            echo "::error::Signature reconciliation script failed (exit $PYTHON_EXIT)"
+            exit 1
           fi

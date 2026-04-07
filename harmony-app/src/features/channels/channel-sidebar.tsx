@@ -34,7 +34,6 @@ import { CreateInviteDialog } from '@/features/server-nav'
 import { useSettingsUiStore } from '@/features/settings'
 import {
   AudioAutoplayPrompt,
-  useVoiceConnection,
   useVoiceConnectionStore,
   VoiceConnectionBar,
   VoiceParticipantList,
@@ -323,6 +322,7 @@ interface ChannelSidebarProps {
   serverName: string | null
   selectedChannelId: string | null
   onSelectChannel: (channelId: string) => void
+  joinVoice: (channelId: string, serverId: string) => void
 }
 
 export function ChannelSidebar({
@@ -330,6 +330,7 @@ export function ChannelSidebar({
   serverName,
   selectedChannelId,
   onSelectChannel,
+  joinVoice,
 }: ChannelSidebarProps) {
   const { t } = useTranslation('channels')
   const { data: channels, isPending, isError, refetch, isRefetching } = useChannels(serverId)
@@ -342,7 +343,7 @@ export function ChannelSidebar({
   const { role: callerRole } = useMyMemberRole(serverId)
   /** WHY: Only admin+ can access server settings. */
   const canAccessSettings = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
-  const { joinVoice, currentChannelId: voiceChannelId } = useVoiceConnection()
+  const voiceChannelId = useVoiceConnectionStore((s) => s.currentChannelId)
 
   return (
     <div data-test="channel-sidebar" className="flex h-full flex-col bg-default-100">
