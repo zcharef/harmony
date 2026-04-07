@@ -134,21 +134,15 @@ impl PlanLimitChecker for PgPlanLimitChecker {
     async fn check_member_limit(&self, server_id: &ServerId) -> Result<(), DomainError> {
         let sid = server_id.0;
 
-        // WHY: Use denormalized member_count from servers table for performance.
-        // Avoids COUNT(*) on potentially large server_members table.
         let count = sqlx::query_scalar!(
-            r#"SELECT member_count as "member_count!" FROM servers WHERE id = $1"#,
+            r#"SELECT COALESCE(COUNT(*)::BIGINT, 0) as "count!" FROM server_members WHERE server_id = $1"#,
             sid
         )
-        .fetch_optional(&self.pool)
+        .fetch_one(&self.pool)
         .await
-        .map_err(db_err)?
-        .ok_or_else(|| DomainError::NotFound {
-            resource_type: "Server",
-            id: server_id.to_string(),
-        })?;
+        .map_err(db_err)?;
 
-        #[allow(clippy::cast_sign_loss)] // WHY: member_count is non-negative by DB constraint
+        #[allow(clippy::cast_sign_loss)] // WHY: COUNT is non-negative
         self.check_limit(server_id, ResourceKind::Members, count as u64)
             .await
     }

@@ -102,14 +102,13 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Server: "Harmony Dev"
-INSERT INTO public.servers (id, name, description, owner_id, is_public, member_count)
+INSERT INTO public.servers (id, name, description, owner_id, is_public)
 VALUES (
     'cccccccc-cccc-cccc-cccc-cccccccccccc',
     'Harmony Dev',
     'Development server for testing Harmony',
     'a1111111-1111-1111-1111-111111111111',
-    true,
-    2
+    true
 ) ON CONFLICT (id) DO NOTHING;
 
 -- Server members

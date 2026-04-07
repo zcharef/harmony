@@ -326,18 +326,15 @@ impl MemberRepository for PgMemberRepository {
     async fn count_by_server(&self, server_id: &ServerId) -> Result<i64, DomainError> {
         let sid = server_id.0;
 
-        // WHY: Use denormalized member_count from servers table for performance.
-        // Avoids COUNT(*) on potentially large server_members table.
-        // Same pattern as PgPlanLimitChecker::check_member_limit.
         let count = sqlx::query_scalar!(
-            r#"SELECT member_count as "member_count!" FROM servers WHERE id = $1"#,
+            r#"SELECT COALESCE(COUNT(*)::BIGINT, 0) as "count!" FROM server_members WHERE server_id = $1"#,
             sid
         )
         .fetch_one(&self.pool)
         .await
         .map_err(super::db_err)?;
 
-        Ok(i64::from(count))
+        Ok(count)
     }
 
     async fn transfer_ownership(

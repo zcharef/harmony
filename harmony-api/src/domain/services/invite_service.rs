@@ -198,24 +198,13 @@ impl InviteService {
             ));
         }
 
-        // WHY: TOCTOU race exists between this limit check and complete_join below.
-        // Two concurrent join requests could both pass, exceeding the limit by one.
-        // Acceptable: same pattern as Discord. Plan limits are billing guard-rails,
-        // not hard DB constraints. Exact enforcement would require advisory locks.
-        //
-        // Check plan member limit AFTER already-member check (no point
-        // counting limits for someone who's already in) but BEFORE the actual
-        // join to enforce billing constraints.
+        // WHY: TOCTOU race exists between these limit checks and complete_join below.
+        // Two concurrent joins could both pass, exceeding a limit by one.
+        // Acceptable: plan limits are billing guard-rails, not hard DB constraints.
+        // Exact enforcement would require advisory locks.
         self.plan_checker
             .check_member_limit(&invite.server_id)
             .await?;
-
-        // WHY: TOCTOU race exists between this limit check and complete_join below.
-        // Acceptable: same pattern as channel/member limits. Plan limits are billing
-        // guard-rails, not hard DB constraints.
-        //
-        // Per-user joined server limit — Free: 20, Supporter: 100, Creator: 500.
-        // Checked AFTER member limit (server-level) since both must pass.
         self.plan_checker.check_joined_server_limit(user_id).await?;
 
         self.invite_repo
