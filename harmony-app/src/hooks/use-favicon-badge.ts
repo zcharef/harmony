@@ -94,6 +94,7 @@ export function useFaviconBadge(): void {
   // Also snapshot all existing icon links so we can restore them on cleanup.
   useEffect(() => {
     const img = new Image()
+    img.onerror = () => logger.warn('favicon_image_load_failed', { src: FAVICON_SRC })
     img.src = FAVICON_SRC
     imgRef.current = img
 
@@ -111,24 +112,33 @@ export function useFaviconBadge(): void {
     }))
 
     return () => {
+      img.onload = null
+      img.onerror = null
       restoreOriginalFavicons(savedLinksRef.current, badgeLinkRef)
     }
   }, [])
 
   // WHY: Redraw the favicon on every totalUnread change. When 0, restore
   // originals. When > 0, draw the favicon + red dot and suppress other links.
+  // Uses a `cancelled` flag + cleanup to prevent a stale img.onload callback
+  // from re-applying the badge after totalUnread has already dropped to 0.
   useEffect(() => {
     const img = imgRef.current
     const canvas = canvasRef.current
     if (img === null || canvas === null) return
 
     if (totalUnread === 0) {
+      // WHY: Kill any pending onload from a previous effect run that would
+      // re-draw the badge after we restore originals.
+      img.onload = null
       restoreOriginalFavicons(savedLinksRef.current, badgeLinkRef)
       return
     }
 
+    let cancelled = false
+
     function applyBadge() {
-      if (img === null || canvas === null) return
+      if (cancelled || img === null || canvas === null) return
       const dataUrl = drawBadgedFavicon(img, canvas)
       if (dataUrl !== null) {
         applyBadgeDataUrl(dataUrl, savedLinksRef.current, badgeLinkRef)
@@ -139,6 +149,11 @@ export function useFaviconBadge(): void {
       applyBadge()
     } else {
       img.onload = applyBadge
+    }
+
+    return () => {
+      cancelled = true
+      if (img !== null) img.onload = null
     }
   }, [totalUnread])
 }
