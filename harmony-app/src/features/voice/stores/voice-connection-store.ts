@@ -8,7 +8,7 @@
 
 import type { KrispNoiseFilterProcessor } from '@livekit/krisp-noise-filter'
 import type { Participant, RoomOptions } from 'livekit-client'
-import { LocalAudioTrack, Room, RoomEvent, Track } from 'livekit-client'
+import { DisconnectReason, LocalAudioTrack, Room, RoomEvent, Track } from 'livekit-client'
 import { create } from 'zustand'
 
 import { logger } from '@/lib/logger'
@@ -180,15 +180,14 @@ async function attachKrispProcessor(track: LocalAudioTrack): Promise<void> {
     const processor = KrispNoiseFilter()
     await track.setProcessor(processor)
     krispProcessorRef = processor
-    logger.info('voice_krisp_enabled')
 
-    // WHY: If the user toggled KRISP off while we were loading the WASM,
-    // honour their intent by disabling immediately after init completes.
+    // WHY: Per LiveKit docs, setProcessor does NOT activate the processor.
+    // setEnabled(true) must be called explicitly to start noise cancellation.
+    // Without this, the KRISP WASM pipeline is loaded but inactive — the UI
+    // shows the green button while no noise cancellation actually runs.
     const { isKrispEnabled } = useVoiceConnectionStore.getState()
-    if (!isKrispEnabled) {
-      await processor.setEnabled(false)
-      logger.info('voice_krisp_disabled_after_init')
-    }
+    await processor.setEnabled(isKrispEnabled)
+    logger.info('voice_krisp_initialized', { enabled: isKrispEnabled })
   }
 
   krispInitPromise = doAttach().finally(() => {
@@ -208,8 +207,18 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
     roomEventCleanups.push(() => room.off(event, callback))
   }
 
-  onRoom(RoomEvent.Disconnected, () => {
+  // WHY: Per LiveKit docs, the Disconnected callback receives a DisconnectReason
+  // that distinguishes intentional disconnects from errors. Logging it aids
+  // diagnosis; DUPLICATE_IDENTITY in particular fires during token refresh when
+  // the old and new Room share the same participant identity.
+  onRoom(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
     if (get().room !== room) return
+
+    logger.info('voice_room_disconnected', {
+      reason: reason !== undefined ? DisconnectReason[reason] : 'unknown',
+      channelId: get().currentChannelId,
+    })
+
     removeRoomListeners()
     set({
       status: 'disconnected',

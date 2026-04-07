@@ -5,6 +5,7 @@ import { syncProfile as syncProfileApi } from '@/lib/api'
 import { useConnectionStore } from '@/lib/connection-store'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
+import { Sentry } from '@/lib/sentry'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from './stores/auth-store'
 
@@ -66,6 +67,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(({ data: { session } }) => {
         setSession(session)
         setUser(session?.user ?? null)
+        // WHY: Mirror the Sentry.setUser call from onAuthStateChange so crashes
+        // during the brief window between getSession() and the first SIGNED_IN
+        // event are tagged with the user ID.
+        if (session?.user !== undefined && session?.user !== null) {
+          Sentry.setUser({ id: session.user.id })
+        }
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -80,6 +87,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
       setUser(session?.user ?? null)
+
+      // WHY: Tag all Sentry events (crashes, breadcrumbs) with the current user
+      // so we can filter "all errors for user X" in the Sentry dashboard.
+      // On logout (session === null), clear the user to stop tagging.
+      if (session?.user !== undefined && session?.user !== null) {
+        Sentry.setUser({ id: session.user.id })
+      } else {
+        Sentry.setUser(null)
+      }
 
       if (session === null) {
         clear()

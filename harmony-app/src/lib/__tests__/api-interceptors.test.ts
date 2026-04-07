@@ -29,6 +29,7 @@ vi.mock('@/features/auth/stores/auth-store', () => {
 vi.mock('@/lib/api/client.gen', () => ({
   client: {
     interceptors: {
+      request: { use: vi.fn() },
       response: { use: vi.fn() },
     },
   },
@@ -81,6 +82,7 @@ describe('responseInterceptor', () => {
         status: 500,
         method: 'POST',
         url: 'http://localhost:3000/v1/messages',
+        requestId: null,
       })
       // WHY: 5xx responses propagate as-is (no retry at the interceptor level).
       expect(result).toBe(response)
@@ -107,6 +109,7 @@ describe('responseInterceptor', () => {
         status: 403,
         method: 'GET',
         url: 'http://localhost:3000/v1/messages',
+        requestId: null,
       })
       // WHY: 403 is neither 401 nor 429 — response passes through untouched.
       expect(result).toBe(response)
@@ -209,7 +212,7 @@ describe('responseInterceptor', () => {
       globalThis.fetch = originalFetch
     })
 
-    it('logs api_error breadcrumb before attempting refresh', async () => {
+    it('logs api_retry breadcrumb (warn level) before attempting refresh', async () => {
       vi.mocked(supabase.auth.refreshSession).mockResolvedValue({
         data: { session: null, user: null },
         error: new AuthError('expired', 401, 'session_expired'),
@@ -220,11 +223,14 @@ describe('responseInterceptor', () => {
 
       await responseInterceptor(response, request, buildOptions())
 
-      expect(logger.error).toHaveBeenCalledWith('api_error', {
+      // WHY: 401 has a transparent retry path — logged as warn, not error (ADR-046).
+      expect(logger.warn).toHaveBeenCalledWith('api_retry', {
         status: 401,
         method: 'GET',
         url: 'http://localhost:3000/v1/messages',
+        requestId: null,
       })
+      expect(logger.error).not.toHaveBeenCalled()
     })
 
     it('retries POST requests with body via rebuildRequest (not new Request(request))', async () => {
@@ -309,7 +315,7 @@ describe('responseInterceptor', () => {
       expect(result).toBe(retryResponse)
     })
 
-    it('logs api_error breadcrumb for 429 responses', async () => {
+    it('logs api_retry breadcrumb (warn level) for 429 responses', async () => {
       vi.useFakeTimers()
 
       const mockFetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(buildResponse(200))
@@ -321,11 +327,14 @@ describe('responseInterceptor', () => {
       await vi.advanceTimersByTimeAsync(1000)
       await resultPromise
 
-      expect(logger.error).toHaveBeenCalledWith('api_error', {
+      // WHY: 429 has a transparent retry path — logged as warn, not error (ADR-046).
+      expect(logger.warn).toHaveBeenCalledWith('api_retry', {
         status: 429,
         method: 'POST',
         url: 'http://localhost:3000/v1/messages',
+        requestId: null,
       })
+      expect(logger.error).not.toHaveBeenCalled()
     })
 
     it('uses globalThis.fetch when options.fetch is undefined', async () => {

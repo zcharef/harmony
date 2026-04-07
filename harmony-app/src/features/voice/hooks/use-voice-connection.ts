@@ -177,6 +177,12 @@ export function useVoiceConnection() {
   const serverIdRef = useRef(currentServerId)
   serverIdRef.current = currentServerId
 
+  // WHY: Captures the local user's Supabase ID on join so the unexpected-
+  // disconnect effect can evict the user from the participant cache. By the
+  // time the Disconnected event fires, room is already null and the identity
+  // is no longer accessible via room.localParticipant.identity.
+  const localUserIdRef = useRef<string | undefined>(undefined)
+
   // WHY: Prevents overlapping join requests when the user rapidly switches
   // voice channels. Without this guard, multiple simultaneous join API calls
   // race against the one-session-per-user server constraint.
@@ -281,6 +287,8 @@ export function useVoiceConnection() {
         // inside the synchronous beforeunload handler.
         const { data: sessionData } = await supabase.auth.getSession()
         cachedAuthToken = sessionData.session?.access_token ?? null
+        const userId = sessionData.session?.user?.id
+        localUserIdRef.current = userId
 
         const { data } = await joinVoice({
           path: { id: channelId },
@@ -294,11 +302,7 @@ export function useVoiceConnection() {
         // WHY: Skip eviction when reconnecting to the same channel — the user is
         // already in the list and removing them causes a flash disappearance.
         if (data.previousChannelId !== channelId) {
-          evictFromPreviousChannel(
-            data.previousChannelId,
-            sessionData.session?.user?.id,
-            queryClient,
-          )
+          evictFromPreviousChannel(data.previousChannelId, userId, queryClient)
         }
 
         await storeConnect(channelId, serverId, data.token, data.url)
@@ -349,6 +353,7 @@ export function useVoiceConnection() {
     playVoiceSound('leave')
     clearTokenRefreshTimer()
     sessionIdRef.current = null
+    localUserIdRef.current = undefined
     cachedAuthToken = null
 
     // WHY: Directly evict self from the participant cache so the sidebar
@@ -512,13 +517,26 @@ export function useVoiceConnection() {
     const channelId = prevChannelIdRef.current
     if (channelId === null) return
 
+    // WHY: Immediately evict self from the participant cache so the sidebar
+    // removes our name. Without this, the user sees their name in the voice
+    // channel (from the stale cache) but has no VoiceConnectionBar to
+    // disconnect — confusing ghost state until the leave API + SSE cycle
+    // completes (or the 45s sweep if the leave API fails).
+    const userId = localUserIdRef.current
+    if (userId !== undefined) {
+      queryClient.setQueryData<VoiceParticipantResponse[]>(
+        queryKeys.voice.participants(channelId),
+        (old) => old?.filter((p) => p.userId !== userId),
+      )
+    }
+
     leaveVoice({ path: { id: channelId }, throwOnError: true }).catch((err: unknown) => {
       logger.warn('voice_unexpected_disconnect_leave_failed', {
         error: err instanceof Error ? err.message : String(err),
         channelId,
       })
     })
-  }, [status])
+  }, [status, queryClient])
 
   // WHY: On page refresh (F5), the LiveKit room disconnects (disconnectOnPageLeave)
   // but the server-side voice session stays alive until the heartbeat sweep (~45s).

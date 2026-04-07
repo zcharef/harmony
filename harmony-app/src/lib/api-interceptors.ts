@@ -3,6 +3,7 @@
  *
  * WHY: This module registers response/error interceptors on the generated API client
  * (bundled by @hey-api/openapi-ts) to handle cross-cutting concerns that no individual hook should own:
+ *   - x-request-id     → generated per-request for frontend↔backend log correlation
  *   - 401 Unauthorized → silent token refresh, then redirect to login on failure
  *   - 429 Rate Limited  → transparent retry respecting Retry-After header
  *   - All HTTP errors   → structured breadcrumb via logger (no PII)
@@ -16,6 +17,8 @@
 import { client } from '@/lib/api/client.gen'
 import { logger } from '@/lib/logger'
 import { supabase } from '@/lib/supabase'
+
+const REQUEST_ID_HEADER = 'x-request-id'
 
 // WHY: Singleton promise prevents concurrent refresh races when multiple
 // 401s arrive simultaneously (e.g., parallel queries on page load).
@@ -97,12 +100,24 @@ export async function responseInterceptor(
   options: InterceptorOptions,
 ): Promise<Response> {
   // --- Structured breadcrumb for ALL non-2xx responses ---
+  // WHY: Include x-request-id so the breadcrumb can be correlated with backend
+  // logs. The backend's SetRequestIdLayer uses the client-provided UUID (or
+  // generates one if missing) and PropagateRequestIdLayer echoes it back.
+  // WHY warn for 401/429: These have transparent retry paths — they are expected
+  // rejections (ADR-046), not real errors. Using logger.error for them would
+  // pollute the Sentry pre-crash trail with routine token refreshes (~1/hour).
   if (!response.ok) {
-    logger.error('api_error', {
+    const breadcrumb = {
       status: response.status,
       method: request.method,
       url: request.url,
-    })
+      requestId: response.headers.get(REQUEST_ID_HEADER),
+    }
+    if (response.status === 401 || response.status === 429) {
+      logger.warn('api_retry', breadcrumb)
+    } else {
+      logger.error('api_error', breadcrumb)
+    }
   }
 
   // --- 401 Unauthorized: silent token refresh + retry ---
@@ -146,5 +161,17 @@ export async function responseInterceptor(
   return response
 }
 
-// --- Side-effect: register the interceptor on the shared client instance ---
+// --- Side-effect: register interceptors on the shared client instance ---
+
+// WHY: Generate a UUID per request and attach it as x-request-id. The backend's
+// SetRequestIdLayer respects client-provided IDs, so this single UUID appears in:
+//   1. Frontend Sentry breadcrumbs (api_error above)
+//   2. Backend structured logs (tracing spans via TraceLayer)
+//   3. Backend Sentry transactions (tower SentryHttpLayer)
+// To correlate: find the requestId in a Sentry breadcrumb → search backend logs.
+client.interceptors.request.use((request) => {
+  request.headers.set(REQUEST_ID_HEADER, crypto.randomUUID())
+  return request
+})
+
 client.interceptors.response.use(responseInterceptor)

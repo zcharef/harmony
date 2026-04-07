@@ -68,7 +68,19 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION, header::ACCEPT])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            // WHY: The frontend generates a UUID per request and sends it as
+            // x-request-id. SetRequestIdLayer respects client-provided IDs,
+            // enabling end-to-end correlation between Sentry breadcrumbs and
+            // backend structured logs.
+            request_id_header.clone(),
+        ])
+        // WHY: Expose x-request-id in responses so the browser JS can read it
+        // via response.headers.get(). Without this, CORS hides custom headers.
+        .expose_headers([request_id_header.clone()])
         .allow_credentials(true);
 
     // ── Authenticated v1 routes ───────────
