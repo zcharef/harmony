@@ -121,8 +121,8 @@ pre-push:
     # break CI. This replicates CI's offline build to catch stale cache.
     sqlx-cache:
       root: harmony-api/
-      run: SQLX_OFFLINE=true $HOME/.cargo/bin/cargo check
-      fail_text: "SQLX offline cache is stale. Run 'cargo sqlx prepare' and commit .sqlx/ files."
+      run: SQLX_OFFLINE=true $HOME/.cargo/bin/cargo check --all-targets
+      fail_text: "SQLX offline cache is stale. Run 'cargo sqlx prepare -- --all-targets' and commit .sqlx/ files."
 
     # --- Monorepo-wide ---
     lint-migrations:
