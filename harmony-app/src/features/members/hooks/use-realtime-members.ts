@@ -47,113 +47,121 @@ function toMemberResponse(payload: z.infer<typeof memberPayloadSchema>): MemberR
 }
 
 /**
- * Subscribes to SSE member events for a given server and updates
- * the TanStack Query cache on:
+ * Subscribes to SSE member events and updates the TanStack Query cache on:
  * - member.joined: new member appended to the list
  * - member.removed: member removed from the list
  * - member.role_updated: member replaced in-place
  *
  * WHY direct cache update instead of invalidation: avoids a network
  * round-trip per event, keeping the member list feel instant.
+ *
+ * WHY no serverId filter: SSE delivers events for ALL servers the user
+ * belongs to. Filtering by selectedServerId caused missed updates — when the
+ * user viewed server Y, member events for server X were silently dropped.
+ * Combined with the 5-min global staleTime, navigating back to X showed a
+ * stale member list. Using the event's own serverId as the cache key ensures
+ * every server's cache stays current. The `if (!old) return undefined` guard
+ * prevents creating phantom cache entries for un-fetched servers.
+ *
+ * WHY no parameter: This hook is mounted in MainLayout (behind auth guard),
+ * so it is inherently active whenever the user is logged in. Same pattern as
+ * useRealtimeDms().
  */
-export function useRealtimeMembers(serverId: string) {
+export function useRealtimeMembers() {
   const queryClient = useQueryClient()
 
   const handleMemberJoined = useCallback(
     (payload: unknown) => {
-      if (serverId.length === 0) return
-
       const parsed = memberEventSchema.safeParse(payload)
       if (!parsed.success) {
         logger.error('Malformed member.joined SSE payload', {
-          serverId,
           error: parsed.error.message,
         })
         return
       }
 
-      // WHY: Only process events for the server this hook is watching.
-      if (parsed.data.serverId !== serverId) return
-
+      const eventServerId = parsed.data.serverId
       const member = toMemberResponse(parsed.data.member)
 
-      queryClient.setQueryData<MemberListResponse>(queryKeys.servers.members(serverId), (old) => {
-        if (!old) return undefined
+      queryClient.setQueryData<MemberListResponse>(
+        queryKeys.servers.members(eventServerId),
+        (old) => {
+          if (!old) return undefined
 
-        // WHY: Deduplicate — skip if member already exists in the list.
-        const alreadyExists = old.items.some((m) => m.userId === member.userId)
-        if (alreadyExists) return old
+          // WHY: Deduplicate — skip if member already exists in the list.
+          const alreadyExists = old.items.some((m) => m.userId === member.userId)
+          if (alreadyExists) return old
 
-        return {
-          ...old,
-          items: [...old.items, member],
-        }
-      })
+          return {
+            ...old,
+            items: [...old.items, member],
+          }
+        },
+      )
     },
-    [serverId, queryClient],
+    [queryClient],
   )
 
   const handleMemberRemoved = useCallback(
     (payload: unknown) => {
-      if (serverId.length === 0) return
-
       const parsed = memberRemovedSchema.safeParse(payload)
       if (!parsed.success) {
         logger.error('Malformed member.removed SSE payload', {
-          serverId,
           error: parsed.error.message,
         })
         return
       }
 
-      if (parsed.data.serverId !== serverId) return
+      const eventServerId = parsed.data.serverId
 
-      queryClient.setQueryData<MemberListResponse>(queryKeys.servers.members(serverId), (old) => {
-        if (!old) return undefined
+      queryClient.setQueryData<MemberListResponse>(
+        queryKeys.servers.members(eventServerId),
+        (old) => {
+          if (!old) return undefined
 
-        const filtered = old.items.filter((m) => m.userId !== parsed.data.userId)
-        // WHY: If no member was actually removed, return old to avoid re-render.
-        if (filtered.length === old.items.length) return old
+          const filtered = old.items.filter((m) => m.userId !== parsed.data.userId)
+          // WHY: If no member was actually removed, return old to avoid re-render.
+          if (filtered.length === old.items.length) return old
 
-        return {
-          ...old,
-          items: filtered,
-        }
-      })
+          return {
+            ...old,
+            items: filtered,
+          }
+        },
+      )
     },
-    [serverId, queryClient],
+    [queryClient],
   )
 
   const handleMemberRoleUpdated = useCallback(
     (payload: unknown) => {
-      if (serverId.length === 0) return
-
       const parsed = memberEventSchema.safeParse(payload)
       if (!parsed.success) {
         logger.error('Malformed member.role_updated SSE payload', {
-          serverId,
           error: parsed.error.message,
         })
         return
       }
 
-      if (parsed.data.serverId !== serverId) return
-
+      const eventServerId = parsed.data.serverId
       const member = toMemberResponse(parsed.data.member)
 
-      queryClient.setQueryData<MemberListResponse>(queryKeys.servers.members(serverId), (old) => {
-        if (!old) return undefined
+      queryClient.setQueryData<MemberListResponse>(
+        queryKeys.servers.members(eventServerId),
+        (old) => {
+          if (!old) return undefined
 
-        return {
-          ...old,
-          items: old.items.map((m) => (m.userId === member.userId ? member : m)),
-        }
-      })
+          return {
+            ...old,
+            items: old.items.map((m) => (m.userId === member.userId ? member : m)),
+          }
+        },
+      )
     },
-    [serverId, queryClient],
+    [queryClient],
   )
 
-  useServerEvent(serverId.length > 0 ? 'member.joined' : null, handleMemberJoined)
-  useServerEvent(serverId.length > 0 ? 'member.removed' : null, handleMemberRemoved)
-  useServerEvent(serverId.length > 0 ? 'member.role_updated' : null, handleMemberRoleUpdated)
+  useServerEvent('member.joined', handleMemberJoined)
+  useServerEvent('member.removed', handleMemberRemoved)
+  useServerEvent('member.role_updated', handleMemberRoleUpdated)
 }

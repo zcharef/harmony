@@ -67,8 +67,7 @@ function toChannelResponse(
 }
 
 /**
- * Subscribes to SSE channel events for a given server and updates
- * the TanStack Query cache on:
+ * Subscribes to SSE channel events and updates the TanStack Query cache on:
  * - channel.created: new channel appended to the list
  * - channel.updated: channel replaced in-place
  * - channel.deleted: channel removed from the list
@@ -76,96 +75,100 @@ function toChannelResponse(
  * WHY direct cache update instead of invalidation: avoids a network
  * round-trip per event, keeping the channel sidebar feel instant.
  *
+ * WHY no serverId filter: SSE delivers events for ALL servers the user
+ * belongs to. Filtering by selectedServerId caused missed updates — when the
+ * user viewed server Y, channel events for server X were silently dropped.
+ * Combined with the 5-min global staleTime, navigating back to X showed a
+ * stale channel list. Same fix as useRealtimeMembers().
+ *
  * NOTE: The cache shape is ChannelResponse[] (not ChannelListResponse),
  * because useChannels returns `data.items` in its queryFn.
  */
-export function useRealtimeChannels(serverId: string) {
+export function useRealtimeChannels() {
   const queryClient = useQueryClient()
 
   const handleChannelCreated = useCallback(
     (payload: unknown) => {
-      if (serverId.length === 0) return
-
       const parsed = channelEventSchema.safeParse(payload)
       if (!parsed.success) {
         logger.error('Malformed channel.created SSE payload', {
-          serverId,
           error: parsed.error.message,
         })
         return
       }
 
-      if (parsed.data.serverId !== serverId) return
+      const eventServerId = parsed.data.serverId
+      const channel = toChannelResponse(parsed.data.channel, eventServerId)
 
-      const channel = toChannelResponse(parsed.data.channel, parsed.data.serverId)
+      queryClient.setQueryData<ChannelResponse[]>(
+        queryKeys.channels.byServer(eventServerId),
+        (old) => {
+          if (!old) return undefined
 
-      queryClient.setQueryData<ChannelResponse[]>(queryKeys.channels.byServer(serverId), (old) => {
-        if (!old) return undefined
+          // WHY: Deduplicate — skip if channel already exists in the list.
+          const alreadyExists = old.some((c) => c.id === channel.id)
+          if (alreadyExists) return old
 
-        // WHY: Deduplicate — skip if channel already exists in the list.
-        const alreadyExists = old.some((c) => c.id === channel.id)
-        if (alreadyExists) return old
-
-        return [...old, channel]
-      })
+          return [...old, channel]
+        },
+      )
     },
-    [serverId, queryClient],
+    [queryClient],
   )
 
   const handleChannelUpdated = useCallback(
     (payload: unknown) => {
-      if (serverId.length === 0) return
-
       const parsed = channelEventSchema.safeParse(payload)
       if (!parsed.success) {
         logger.error('Malformed channel.updated SSE payload', {
-          serverId,
           error: parsed.error.message,
         })
         return
       }
 
-      if (parsed.data.serverId !== serverId) return
+      const eventServerId = parsed.data.serverId
+      const channel = toChannelResponse(parsed.data.channel, eventServerId)
 
-      const channel = toChannelResponse(parsed.data.channel, parsed.data.serverId)
-
-      queryClient.setQueryData<ChannelResponse[]>(queryKeys.channels.byServer(serverId), (old) => {
-        if (!old) return undefined
-        return old.map((c) => (c.id === channel.id ? channel : c))
-      })
+      queryClient.setQueryData<ChannelResponse[]>(
+        queryKeys.channels.byServer(eventServerId),
+        (old) => {
+          if (!old) return undefined
+          return old.map((c) => (c.id === channel.id ? channel : c))
+        },
+      )
     },
-    [serverId, queryClient],
+    [queryClient],
   )
 
   const handleChannelDeleted = useCallback(
     (payload: unknown) => {
-      if (serverId.length === 0) return
-
       const parsed = channelDeletedSchema.safeParse(payload)
       if (!parsed.success) {
         logger.error('Malformed channel.deleted SSE payload', {
-          serverId,
           error: parsed.error.message,
         })
         return
       }
 
-      if (parsed.data.serverId !== serverId) return
+      const eventServerId = parsed.data.serverId
 
-      queryClient.setQueryData<ChannelResponse[]>(queryKeys.channels.byServer(serverId), (old) => {
-        if (!old) return undefined
+      queryClient.setQueryData<ChannelResponse[]>(
+        queryKeys.channels.byServer(eventServerId),
+        (old) => {
+          if (!old) return undefined
 
-        const filtered = old.filter((c) => c.id !== parsed.data.channelId)
-        // WHY: If no channel was actually removed, return old to avoid re-render.
-        if (filtered.length === old.length) return old
+          const filtered = old.filter((c) => c.id !== parsed.data.channelId)
+          // WHY: If no channel was actually removed, return old to avoid re-render.
+          if (filtered.length === old.length) return old
 
-        return filtered
-      })
+          return filtered
+        },
+      )
     },
-    [serverId, queryClient],
+    [queryClient],
   )
 
-  useServerEvent(serverId.length > 0 ? 'channel.created' : null, handleChannelCreated)
-  useServerEvent(serverId.length > 0 ? 'channel.updated' : null, handleChannelUpdated)
-  useServerEvent(serverId.length > 0 ? 'channel.deleted' : null, handleChannelDeleted)
+  useServerEvent('channel.created', handleChannelCreated)
+  useServerEvent('channel.updated', handleChannelUpdated)
+  useServerEvent('channel.deleted', handleChannelDeleted)
 }
