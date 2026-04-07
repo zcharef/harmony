@@ -214,6 +214,7 @@ function useAutoScroll(
   messageCount: number,
   channelId: string | null,
   virtualizer: Virtualizer<HTMLDivElement, Element>,
+  isTypingVisible: boolean,
 ) {
   const prevMessageCountRef = useRef(0)
   const prevChannelIdRef = useRef(channelId)
@@ -240,6 +241,21 @@ function useAutoScroll(
 
     prevMessageCountRef.current = messageCount
   }, [messageCount, channelId, virtualizer, scrollRef])
+
+  // WHY: When the typing indicator appears or disappears, the scroll container
+  // resizes (flex-1 gains/loses ~24px). The browser preserves scrollTop, so the
+  // visible bottom edge shifts — hiding the last message. Re-anchor to bottom
+  // if the user was already near the bottom.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: isTypingVisible is a trigger-only dep — not read inside, but the effect must run when it changes
+  useEffect(() => {
+    if (messageCount === 0) return
+    const el = scrollRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (distanceFromBottom < 200) {
+      virtualizer.scrollToIndex(messageCount - 1, { align: 'end' })
+    }
+  }, [isTypingVisible, messageCount, virtualizer, scrollRef])
 }
 
 function useThrottledScroll(
@@ -1096,7 +1112,7 @@ export function ChatArea({
     overscan: 10,
   })
 
-  useAutoScroll(scrollRef, virtualItems.length, channelId, virtualizer)
+  useAutoScroll(scrollRef, virtualItems.length, channelId, virtualizer, typingUsers.length > 0)
 
   const handleScroll = useThrottledScroll(scrollRef, hasNextPage, isFetchingNextPage, fetchNextPage)
 
