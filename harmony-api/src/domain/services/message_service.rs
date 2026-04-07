@@ -263,6 +263,13 @@ impl MessageService {
             }
         }
 
+        // A4: ASCII art / text art / Zalgo detection (unencrypted only).
+        // WHY: Admin+ bypass consistent with flood mute bypass — admins may
+        // legitimately post formatted announcements.
+        if !encrypted && !is_admin {
+            spam_guard::check_ascii_art(&content)?;
+        }
+
         // WHY: Skip content moderation for encrypted messages — ciphertext is
         // opaque, we can't inspect it. Also skip for system messages (handled
         // by create_system_message which bypasses this method entirely).
@@ -446,6 +453,11 @@ impl MessageService {
         let (final_content, mod_at, mod_reason, orig_content) = if message.encrypted {
             (content, None, None, None)
         } else {
+            // A4: ASCII art detection on edits (prevent edit-in-bypass).
+            // WHY: No admin bypass — consistent with word filter and invite
+            // blocking which also apply to all users on edits.
+            spam_guard::check_ascii_art(&content)?;
+
             // B5: Block competitor invite links on edits too (prevent edit-in-bypass).
             self.content_filter.check_invite_links(&content)?;
 
