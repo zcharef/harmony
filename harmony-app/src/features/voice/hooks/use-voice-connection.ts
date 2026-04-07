@@ -76,6 +76,7 @@ function handleTokenRefreshError(
   storeDisconnect: () => Promise<void>,
   refreshRetryCountRef: React.MutableRefObject<number>,
   rescheduleWithDelay: (delayMs: number) => void,
+  evictSelf: () => void,
 ): void {
   // WHY: Non-retryable errors (4xx = kicked, session gone, bad input)
   // should immediately disconnect. Only 5xx and network errors are
@@ -87,6 +88,7 @@ function handleTokenRefreshError(
       channelId: refreshChannelId,
       status: isProblemDetails(err) ? err.status : undefined,
     })
+    evictSelf()
     storeDisconnect().catch((disconnectErr: unknown) => {
       logger.warn('voice_refresh_disconnect_failed', {
         error: disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
@@ -115,6 +117,7 @@ function handleTokenRefreshError(
     // WHY: After 5 retries the token is expired and the LiveKit
     // connection is dead. Force disconnect so the user sees
     // 'disconnected' instead of a silent ghost call.
+    evictSelf()
     storeDisconnect().catch((disconnectErr: unknown) => {
       logger.warn('voice_refresh_exhausted_disconnect_failed', {
         error: disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
@@ -216,6 +219,23 @@ export function useVoiceConnection() {
     }
   }, [])
 
+  // WHY: Server-initiated disconnects (AFK/alone/stale sweep) call
+  // storeDisconnect() which sets status to 'idle' directly, bypassing the
+  // 'disconnected' status that the unexpected-disconnect effect watches.
+  // The SSE Left event is also blocked by isSelfLeftWhileConnected().
+  // Without explicit eviction here, the user's name lingers in the
+  // participant cache (ghost name, no toggles).
+  const evictSelfFromParticipantCache = useCallback(() => {
+    const channelId = channelIdRef.current
+    const userId = localUserIdRef.current
+    if (channelId !== null && userId !== undefined) {
+      queryClient.setQueryData<VoiceParticipantResponse[]>(
+        queryKeys.voice.participants(channelId),
+        (old) => old?.filter((p) => p.userId !== userId),
+      )
+    }
+  }, [queryClient])
+
   // WHY (P1-2): Extracted to a named function so the token refresh can
   // re-schedule itself after each successful cycle instead of being one-shot.
   // Uses ttlSecsRef so the timer duration tracks the server's dynamic TTL.
@@ -263,6 +283,7 @@ export function useVoiceConnection() {
               storeDisconnect,
               refreshRetryCountRef,
               (delayMs) => scheduleTokenRefresh(delayMs),
+              evictSelfFromParticipantCache,
             ),
           )
           .finally(() => {
@@ -270,7 +291,7 @@ export function useVoiceConnection() {
           })
       }, refreshAtMs)
     },
-    [storeConnect, storeDisconnect, clearTokenRefreshTimer],
+    [storeConnect, storeDisconnect, clearTokenRefreshTimer, evictSelfFromParticipantCache],
   )
 
   const handleJoinVoice = useCallback(
@@ -423,6 +444,7 @@ export function useVoiceConnection() {
           logger.warn('voice_heartbeat_session_gone', {
             sessionId: sid,
           })
+          evictSelfFromParticipantCache()
           storeDisconnect().catch((disconnectErr: unknown) => {
             logger.warn('voice_heartbeat_disconnect_failed', {
               error: disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
@@ -442,7 +464,7 @@ export function useVoiceConnection() {
     return () => {
       clearInterval(intervalId)
     }
-  }, [status, storeDisconnect])
+  }, [status, storeDisconnect, evictSelfFromParticipantCache])
 
   // --- Sync mute/deaf state to server on toggle ---
   // WHY (H2): Ref is reset to true in handleJoinVoice after storeConnect so
@@ -476,6 +498,7 @@ export function useVoiceConnection() {
         // instead of waiting for the next heartbeat cycle (up to 15s).
         if (isProblemDetails(err) && err.status === 404) {
           logger.warn('voice_state_update_session_gone', { sessionId: sid })
+          evictSelfFromParticipantCache()
           storeDisconnect().catch((disconnectErr: unknown) => {
             logger.warn('voice_state_disconnect_failed', {
               error: disconnectErr instanceof Error ? disconnectErr.message : String(disconnectErr),
@@ -497,7 +520,7 @@ export function useVoiceConnection() {
         muteDeafTimerRef.current = null
       }
     }
-  }, [isMuted, isDeafened, storeDisconnect])
+  }, [isMuted, isDeafened, storeDisconnect, evictSelfFromParticipantCache])
 
   // WHY: Capture channelId before it's cleared to null on disconnect,
   // so the unexpected-disconnect leave effect can reference it.
