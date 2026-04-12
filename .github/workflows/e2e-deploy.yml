@@ -62,7 +62,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
 
       # ── Node / pnpm ──────────────────────────────────────
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.15.9
 
@@ -367,7 +367,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.15.9
 
