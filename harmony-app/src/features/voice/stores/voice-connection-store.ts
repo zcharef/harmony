@@ -531,7 +531,7 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
   },
 
   toggleDeafen: () => {
-    const { room, isDeafened } = get()
+    const { room, isDeafened, isMuted } = get()
     if (room === null) return
     const nextDeafened = !isDeafened
 
@@ -548,7 +548,19 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       return
     }
 
-    set({ isDeafened: nextDeafened })
+    // WHY: Deafen implies mute — if you can't hear others, you shouldn't
+    // broadcast either (Discord/TeamSpeak standard). Undeafen restores the mic.
+    set({ isDeafened: nextDeafened, isMuted: nextDeafened })
+    room.localParticipant.setMicrophoneEnabled(!nextDeafened).catch((err: unknown) => {
+      logger.error('voice_deafen_mic_toggle_failed', {
+        error: err instanceof Error ? err.message : String(err),
+        deafened: nextDeafened,
+      })
+      // WHY (P0-4): Roll back both flags and restore participant volumes so
+      // the UI reflects the actual mic/audio state after the SDK call failed.
+      set({ isDeafened, isMuted })
+      setAllParticipantVolumes(room, isDeafened ? 0 : 1)
+    })
   },
 
   toggleKrisp: () => {
@@ -593,8 +605,13 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
   },
 
   setPttMicEnabled: (enabled) => {
-    const { room } = get()
+    const { room, isDeafened } = get()
     if (room === null) return
+    // WHY: Deafen is a stronger contract than PTT — if the user deafened,
+    // a PTT key press must NOT re-enable the mic. Without this guard,
+    // holding the PTT key while deafened would broadcast audio while the
+    // UI shows the deafen icon.
+    if (enabled && isDeafened) return
     room.localParticipant.setMicrophoneEnabled(enabled).catch((err: unknown) => {
       logger.warn('voice_ptt_mic_toggle_failed', {
         error: err instanceof Error ? err.message : String(err),

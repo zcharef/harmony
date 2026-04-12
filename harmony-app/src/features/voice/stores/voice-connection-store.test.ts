@@ -453,7 +453,7 @@ describe('useVoiceConnectionStore', () => {
   // toggleDeafen()
   // -------------------------------------------------------------------------
   describe('toggleDeafen', () => {
-    it('sets isDeafened to true and mutes all remote participants', async () => {
+    it('sets isDeafened to true, mutes all remote participants, and disables mic', async () => {
       const room = await connectStore()
       addRemoteParticipant(room, 'user-1')
       addRemoteParticipant(room, 'user-2')
@@ -461,12 +461,14 @@ describe('useVoiceConnectionStore', () => {
       useVoiceConnectionStore.getState().toggleDeafen()
 
       expect(useVoiceConnectionStore.getState().isDeafened).toBe(true)
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(true)
       for (const p of room.remoteParticipants.values()) {
         expect(p.setVolume).toHaveBeenCalledWith(0)
       }
+      expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false)
     })
 
-    it('undeafens and restores volume to 1', async () => {
+    it('undeafens, restores volume to 1, and re-enables mic', async () => {
       const room = await connectStore()
       addRemoteParticipant(room, 'user-1')
 
@@ -475,12 +477,14 @@ describe('useVoiceConnectionStore', () => {
       useVoiceConnectionStore.getState().toggleDeafen() // undeafen
 
       expect(useVoiceConnectionStore.getState().isDeafened).toBe(false)
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(false)
       for (const p of room.remoteParticipants.values()) {
         expect(p.setVolume).toHaveBeenCalledWith(1)
       }
+      expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true)
     })
 
-    it('rolls back if any participant setVolume fails', async () => {
+    it('rolls back if any participant setVolume fails and does not toggle mic', async () => {
       const room = await connectStore()
       addRemoteParticipant(room, 'user-ok')
       addRemoteParticipant(room, 'user-fail')
@@ -491,10 +495,38 @@ describe('useVoiceConnectionStore', () => {
         throw new Error('volume error')
       })
 
+      // WHY: Clear mocks from connect() so we can assert setMicrophoneEnabled
+      // was NOT called by toggleDeafen (it was called once during connect).
+      vi.clearAllMocks()
+      failParticipant.setVolume = vi.fn().mockImplementation(() => {
+        throw new Error('volume error')
+      })
+
       useVoiceConnectionStore.getState().toggleDeafen()
 
       // Should NOT transition to deafened because of the failure
       expect(useVoiceConnectionStore.getState().isDeafened).toBe(false)
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(false)
+      // Mic should not be toggled when volume rollback happens
+      expect(room.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled()
+    })
+
+    it('rolls back isDeafened and isMuted on setMicrophoneEnabled SDK failure', async () => {
+      const room = await connectStore()
+      addRemoteParticipant(room, 'user-1')
+      room.localParticipant.setMicrophoneEnabled = vi.fn().mockRejectedValue(new Error('mic error'))
+
+      useVoiceConnectionStore.getState().toggleDeafen()
+
+      // Optimistic: both flipped immediately
+      expect(useVoiceConnectionStore.getState().isDeafened).toBe(true)
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(true)
+
+      // After the promise rejects, both should roll back
+      await vi.waitFor(() => {
+        expect(useVoiceConnectionStore.getState().isDeafened).toBe(false)
+        expect(useVoiceConnectionStore.getState().isMuted).toBe(false)
+      })
     })
 
     it('is a no-op when room is null', () => {
@@ -732,6 +764,28 @@ describe('useVoiceConnectionStore', () => {
 
       useVoiceConnectionStore.getState().setPttMicEnabled(true)
       expect(useVoiceConnectionStore.getState().isMuted).toBe(false)
+    })
+
+    it('blocks mic enable when deafened', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.getState().toggleDeafen()
+      vi.clearAllMocks()
+
+      useVoiceConnectionStore.getState().setPttMicEnabled(true)
+
+      // Mic should NOT be enabled — deafen is a stronger contract than PTT
+      expect(room.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled()
+    })
+
+    it('allows mic disable when deafened', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.getState().toggleDeafen()
+      vi.clearAllMocks()
+
+      useVoiceConnectionStore.getState().setPttMicEnabled(false)
+
+      // Mic disable is always allowed (PTT key-up should work)
+      expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false)
     })
 
     it('is a no-op when room is null', () => {
