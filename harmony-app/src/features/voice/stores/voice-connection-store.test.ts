@@ -8,6 +8,27 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }))
 
+/** WHY: Mock speaking-detector so store tests don't need real AudioContext.
+ * The detector's own tests cover its audio analysis logic. */
+const mockDetectorCleanup = vi.fn()
+vi.mock('../lib/speaking-detector', () => ({
+  createSpeakingDetector: vi.fn().mockReturnValue(mockDetectorCleanup),
+}))
+
+/** WHY: voice-connection-store creates a shared AudioContext. jsdom doesn't
+ * provide one. Minimal mock with the methods the store actually calls. */
+globalThis.AudioContext = vi.fn().mockImplementation(function (this: unknown) {
+  return {
+    close: vi.fn().mockResolvedValue(undefined),
+    createAnalyser: vi.fn().mockReturnValue({
+      fftSize: 0,
+      frequencyBinCount: 1024,
+      getFloatTimeDomainData: vi.fn(),
+    }),
+    createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn(), disconnect: vi.fn() }),
+  }
+}) as unknown as typeof AudioContext
+
 /** WHY: Builds a fake Room that satisfies the surface the store uses.
  * Declared at module level so both the vi.mock factory and test helpers
  * can reference the same shape. */
@@ -917,31 +938,87 @@ describe('useVoiceConnectionStore', () => {
       })
     })
 
-    describe('ActiveSpeakersChanged event', () => {
-      it('updates activeSpeakers set', async () => {
+    describe('speaking detector wiring', () => {
+      it('creates a detector when a remote audio track is subscribed', async () => {
+        const { createSpeakingDetector } = await import('../lib/speaking-detector')
         const room = await connectStore()
 
-        room.__emit('activeSpeakersChanged', [{ identity: 'alice' }, { identity: 'bob' }])
+        const mockElement = document.createElement('audio')
+        const mockTrack = {
+          kind: 'audio',
+          attach: vi.fn().mockReturnValue(mockElement),
+          detach: vi.fn().mockReturnValue([]),
+          mediaStreamTrack: { kind: 'audio', id: 'remote-track' },
+        }
+        const mockParticipant = { identity: 'remote-user', setVolume: vi.fn() }
 
-        const speakers = useVoiceConnectionStore.getState().activeSpeakers
-        expect(speakers.has('alice')).toBe(true)
-        expect(speakers.has('bob')).toBe(true)
-        expect(speakers.size).toBe(2)
+        room.__emit('trackSubscribed', mockTrack, {}, mockParticipant)
+
+        expect(createSpeakingDetector).toHaveBeenCalledWith(
+          expect.anything(), // AudioContext
+          mockTrack.mediaStreamTrack,
+          expect.any(Function),
+        )
+
+        // Cleanup
+        mockElement.remove()
       })
 
-      it('skips update when speakers set is unchanged', async () => {
+      it('cleans up detector when a remote audio track is unsubscribed', async () => {
         const room = await connectStore()
 
-        room.__emit('activeSpeakersChanged', [{ identity: 'alice' }])
-        const first = useVoiceConnectionStore.getState().activeSpeakers
-        expect(first.has('alice')).toBe(true)
+        const mockElement = document.createElement('audio')
+        const mockTrack = {
+          kind: 'audio',
+          attach: vi.fn().mockReturnValue(mockElement),
+          detach: vi.fn().mockReturnValue([mockElement]),
+          mediaStreamTrack: { kind: 'audio', id: 'remote-track' },
+        }
+        const mockParticipant = { identity: 'remote-user', setVolume: vi.fn() }
 
-        room.__emit('activeSpeakersChanged', [{ identity: 'alice' }])
-        const second = useVoiceConnectionStore.getState().activeSpeakers
+        room.__emit('trackSubscribed', mockTrack, {}, mockParticipant)
+        mockDetectorCleanup.mockClear()
 
-        // WHY: When the set contents are identical, the store skips the
-        // update to avoid unnecessary re-renders. Same reference means no update.
-        expect(first).toBe(second)
+        room.__emit('trackUnsubscribed', mockTrack, {}, mockParticipant)
+
+        expect(mockDetectorCleanup).toHaveBeenCalled()
+      })
+
+      it('updates activeSpeakers when detector fires onChange', async () => {
+        const { createSpeakingDetector: mockCreate } = await import('../lib/speaking-detector')
+        const room = await connectStore()
+
+        // Capture the onChange callback passed to createSpeakingDetector
+        let capturedOnChange: ((speaking: boolean) => void) | undefined
+        ;(mockCreate as ReturnType<typeof vi.fn>).mockImplementation(
+          (_ctx: unknown, _track: unknown, onChange: (speaking: boolean) => void) => {
+            capturedOnChange = onChange
+            return vi.fn()
+          },
+        )
+
+        const mockElement = document.createElement('audio')
+        const mockTrack = {
+          kind: 'audio',
+          attach: vi.fn().mockReturnValue(mockElement),
+          detach: vi.fn().mockReturnValue([]),
+          mediaStreamTrack: { kind: 'audio', id: 'remote-track' },
+        }
+        const mockParticipant = { identity: 'alice', setVolume: vi.fn() }
+
+        room.__emit('trackSubscribed', mockTrack, {}, mockParticipant)
+        expect(capturedOnChange).toBeDefined()
+
+        // Simulate speaking
+        capturedOnChange!(true)
+        expect(useVoiceConnectionStore.getState().activeSpeakers.has('alice')).toBe(true)
+
+        // Simulate stop speaking
+        capturedOnChange!(false)
+        expect(useVoiceConnectionStore.getState().activeSpeakers.has('alice')).toBe(false)
+
+        // Cleanup
+        mockElement.remove()
       })
     })
 
@@ -954,8 +1031,9 @@ describe('useVoiceConnectionStore', () => {
           kind: 'audio',
           attach: vi.fn().mockReturnValue(mockElement),
           detach: vi.fn().mockReturnValue([]),
+          mediaStreamTrack: { kind: 'audio', id: 'test-track' },
         }
-        const mockParticipant = { identity: 'remote-user' }
+        const mockParticipant = { identity: 'remote-user', setVolume: vi.fn() }
 
         room.__emit('trackSubscribed', mockTrack, {}, mockParticipant)
 
@@ -976,6 +1054,7 @@ describe('useVoiceConnectionStore', () => {
           kind: 'audio',
           attach: vi.fn().mockReturnValue(mockElement),
           detach: vi.fn().mockReturnValue([]),
+          mediaStreamTrack: { kind: 'audio', id: 'test-track' },
         }
         const mockParticipant = { identity: 'late-joiner', setVolume: vi.fn() }
 
@@ -1000,9 +1079,10 @@ describe('useVoiceConnectionStore', () => {
           kind: 'audio',
           attach: vi.fn().mockReturnValue(newElement),
           detach: vi.fn().mockReturnValue([]),
+          mediaStreamTrack: { kind: 'audio', id: 'test-track' },
         }
 
-        room.__emit('trackSubscribed', mockTrack, {}, { identity: 'user-1' })
+        room.__emit('trackSubscribed', mockTrack, {}, { identity: 'user-1', setVolume: vi.fn() })
 
         expect(document.body.contains(existing)).toBe(false)
         expect(document.body.contains(newElement)).toBe(true)
@@ -1023,9 +1103,10 @@ describe('useVoiceConnectionStore', () => {
         const mockTrack = {
           kind: 'audio',
           detach: vi.fn().mockReturnValue([mockElement]),
+          mediaStreamTrack: { kind: 'audio', id: 'test-track' },
         }
 
-        room.__emit('trackUnsubscribed', mockTrack)
+        room.__emit('trackUnsubscribed', mockTrack, {}, { identity: 'remote-user' })
 
         expect(mockTrack.detach).toHaveBeenCalled()
         expect(removeSpy).toHaveBeenCalled()
@@ -1039,7 +1120,7 @@ describe('useVoiceConnectionStore', () => {
           detach: vi.fn().mockReturnValue([]),
         }
 
-        room.__emit('trackUnsubscribed', mockTrack)
+        room.__emit('trackUnsubscribed', mockTrack, {}, { identity: 'remote-user' })
 
         expect(mockTrack.detach).not.toHaveBeenCalled()
       })
