@@ -46,7 +46,7 @@ export function VoiceParticipantList({ channelId }: VoiceParticipantListProps) {
 
 // ---------------------------------------------------------------------------
 // H2: React.memo participant row — skips re-render when isSpeaking unchanged.
-// WHY: ActiveSpeakersChanged fires every 100-300ms during conversation.
+// WHY: The client-side speaking detector fires onChange at ~50ms intervals.
 // Without memo, ALL rows re-render on every event even though only 1-2
 // participants' isSpeaking actually changes.
 // ---------------------------------------------------------------------------

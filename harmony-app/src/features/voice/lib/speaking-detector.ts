@@ -53,30 +53,31 @@ export function createSpeakingDetector(
     // amplitude. Values in buffer are -1.0 to 1.0 per Web Audio spec.
     let sumSquares = 0
     for (let i = 0; i < buffer.length; i++) {
+      // WHY: noUncheckedIndexedAccess makes this `number | undefined`.
+      // Float32Array elements are always defined, but TS doesn't know that.
       const sample = buffer[i] ?? 0
       sumSquares += sample * sample
     }
     const rms = Math.sqrt(sumSquares / buffer.length)
 
     if (rms > threshold) {
-      // Speech detected — reset the hold timer on every speaking tick so the
-      // offset countdown always begins from the last active speech sample.
+      // Speech detected — cancel any pending off-timer
       if (holdTimer !== null) {
         clearTimeout(holdTimer)
+        holdTimer = null
       }
+      if (!isSpeaking) {
+        isSpeaking = true
+        onChange(true)
+      }
+    } else if (isSpeaking && holdTimer === null) {
+      // Silence detected while marked as speaking — start hold timer
       holdTimer = setTimeout(() => {
         holdTimer = null
         isSpeaking = false
         onChange(false)
       }, holdMs)
-
-      if (!isSpeaking) {
-        isSpeaking = true
-        onChange(true)
-      }
     }
-    // Silence: hold timer is already running (or we were never speaking).
-    // No action needed — the timer will fire after holdMs of no speech.
   }, intervalMs)
 
   return () => {

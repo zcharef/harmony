@@ -89,12 +89,13 @@ describe('createSpeakingDetector', () => {
     // Stop speaking
     simulateAudioLevel(analyserNode, 0.0)
 
-    // Advance past interval but before holdMs expires — should NOT call onChange(false)
+    // WHY: First silence tick starts the hold timer. Advance one interval
+    // to trigger the silence detection, then check the timer hasn't fired.
     vi.advanceTimersByTime(50)
     expect(onChange).not.toHaveBeenCalledWith(false)
 
-    // Advance past holdMs — NOW should call onChange(false)
-    vi.advanceTimersByTime(100)
+    // Advance past holdMs from the silence tick — NOW should call onChange(false)
+    vi.advanceTimersByTime(150)
     expect(onChange).toHaveBeenCalledWith(false)
   })
 
