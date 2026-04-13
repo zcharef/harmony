@@ -27,7 +27,7 @@
     "@emoji-mart/react": "^1.1.1",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource-variable/nunito": "^5.2.7",
-    "@heroui/react": "^2.8.10",
+    "@heroui/react": "^3.0.2",
     "@hookform/resolvers": "^5.2.2",
     "@livekit/krisp-noise-filter": "^0.4.1",
     "@marsidev/react-turnstile": "^1.4.2",
