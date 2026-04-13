@@ -1010,11 +1010,11 @@ describe('useVoiceConnectionStore', () => {
         expect(capturedOnChange).toBeDefined()
 
         // Simulate speaking
-        capturedOnChange!(true)
+        capturedOnChange?.(true)
         expect(useVoiceConnectionStore.getState().activeSpeakers.has('alice')).toBe(true)
 
         // Simulate stop speaking
-        capturedOnChange!(false)
+        capturedOnChange?.(false)
         expect(useVoiceConnectionStore.getState().activeSpeakers.has('alice')).toBe(false)
 
         // Cleanup
