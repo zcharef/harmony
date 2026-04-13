@@ -75,7 +75,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
     "eslint": "^9.39.4",
-    "eslint-plugin-boundaries": "^6.0.1",
+    "eslint-plugin-boundaries": "^6.0.2",
     "jsdom": "^28.1.0",
     "knip": "^5.88.1",
     "madge": "^8.0.0",
