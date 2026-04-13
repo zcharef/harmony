@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef } from 'react'
 import { z } from 'zod'
+import { useAuthStore } from '@/features/auth'
 import { useServerEvent } from '@/hooks/use-server-event'
 import type { VoiceParticipantResponse } from '@/lib/api'
 import { zVoiceAction } from '@/lib/api/zod.gen'
@@ -154,6 +155,18 @@ function isSelfLeftWhileConnected(event: VoiceStateUpdate): boolean {
 }
 
 /** WHY extracted: Keeps handleVoiceStateUpdate under Biome's cognitive complexity
+ * limit of 15. Checks if a "joined" event targets the local user. Self-join is
+ * handled by handleJoinVoice (invalidates the participant query after storeConnect
+ * confirms the LiveKit connection). Without this guard, the SSE event adds self
+ * to the cache BEFORE audio is connected — the sidebar shows the name while the
+ * status bar still reads "Connecting". */
+function isSelfJoinedEvent(event: VoiceStateUpdate): boolean {
+  if (event.action !== 'joined') return false
+  const userId = useAuthStore.getState().user?.id
+  return userId !== undefined && event.userId === userId
+}
+
+/** WHY extracted: Keeps handleVoiceStateUpdate under Biome's cognitive complexity
  * limit of 15. Plays join/leave sound only for OTHER users in the locally
  * connected voice channel. Self-actions already trigger sounds in
  * use-voice-connection.ts. */
@@ -234,6 +247,16 @@ export function useRealtimeVoice(channelId: string) {
       // direct cache eviction in handleLeaveVoice.
       if (isSelfLeftWhileConnected(parsed.data)) {
         logger.info('voice_self_left_event_ignored', {
+          channelId,
+          userId: parsed.data.userId,
+        })
+        return
+      }
+
+      // WHY: See isSelfJoinedEvent doc — self-join is handled by
+      // handleJoinVoice via direct cache insert after connection is confirmed.
+      if (isSelfJoinedEvent(parsed.data)) {
+        logger.info('voice_self_joined_event_ignored', {
           channelId,
           userId: parsed.data.userId,
         })

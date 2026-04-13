@@ -38,6 +38,41 @@ function evictFromPreviousChannel(
   )
 }
 
+/** WHY: Extracted to reduce handleJoinVoice cognitive complexity below Biome's
+ * limit of 15. Inserts self into the participant cache after storeConnect
+ * confirms the LiveKit connection. Self-joined SSE events are skipped
+ * (isSelfJoinedEvent in use-realtime-voice.ts), so this is the only path
+ * that adds self — ensuring the name appears only after audio is connected.
+ * Mirrors evictFromPreviousChannel: direct setQueryData, no network round-trip. */
+function insertSelfIntoParticipantCache(
+  channelId: string,
+  userId: string | undefined,
+  queryClient: ReturnType<typeof useQueryClient>,
+): void {
+  if (userId === undefined) return
+  const room = useVoiceConnectionStore.getState().room
+  const displayName = room?.localParticipant.name ?? ''
+
+  queryClient.setQueryData<VoiceParticipantResponse[]>(
+    queryKeys.voice.participants(channelId),
+    (old) => {
+      const baseline = old ?? []
+      if (baseline.some((p) => p.userId === userId)) return baseline
+      return [
+        ...baseline,
+        {
+          channelId,
+          userId,
+          displayName,
+          joinedAt: new Date().toISOString(),
+          isMuted: false,
+          isDeafened: false,
+        },
+      ]
+    },
+  )
+}
+
 /** WHY: Extracted to reduce scheduleTokenRefresh cognitive complexity below
  * Biome's limit of 15. Handles the successful token refresh: reconnects to
  * LiveKit if still in the same channel, updates TTL, resets retry count, and
@@ -328,6 +363,13 @@ export function useVoiceConnection() {
 
         await storeConnect(channelId, serverId, data.token, data.url)
         playVoiceSound('join')
+        // WHY: Self-joined SSE events are skipped (isSelfJoinedEvent) to prevent
+        // the name appearing before audio is connected. Now that storeConnect
+        // confirmed the connection, insert self into the cache directly. Uses
+        // setQueryData (not invalidateQueries) to avoid a race where SSE events
+        // arriving during a refetch could be clobbered by the REST response.
+        // Mirrors the evictFromPreviousChannel pattern.
+        insertSelfIntoParticipantCache(channelId, userId, queryClient)
         sessionIdRef.current = data.sessionId
         // WHY (H2): Reset the guard so the mute/deaf sync useEffect skips the
         // initial post-join render (server already has is_muted=false from upsert).
