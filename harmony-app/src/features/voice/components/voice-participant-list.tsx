@@ -74,8 +74,10 @@ const VoiceParticipantRow = memo(function VoiceParticipantRow({
         showFallback
         classNames={{
           base: cn(
-            'h-6 w-6 shrink-0 transition-shadow duration-75',
-            isSpeaking && 'ring-2 ring-success ring-offset-1 ring-offset-default-100',
+            'h-6 w-6 shrink-0 transition-shadow',
+            isSpeaking
+              ? 'duration-0 ring-2 ring-success ring-offset-1 ring-offset-default-100'
+              : 'duration-150',
           ),
           name: 'text-[10px]',
         }}
