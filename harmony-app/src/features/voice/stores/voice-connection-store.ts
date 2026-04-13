@@ -7,11 +7,12 @@
  */
 
 import type { KrispNoiseFilterProcessor } from '@livekit/krisp-noise-filter'
-import type { Participant, RoomOptions } from 'livekit-client'
+import type { RoomOptions } from 'livekit-client'
 import { DisconnectReason, LocalAudioTrack, Room, RoomEvent, Track } from 'livekit-client'
 import { create } from 'zustand'
 
 import { logger } from '@/lib/logger'
+import { createSpeakingDetector } from '../lib/speaking-detector'
 
 export type VoiceConnectionStatus =
   | 'idle'
@@ -114,6 +115,17 @@ export function consumeHasSpokenSinceLastHeartbeat(): boolean {
   return val
 }
 
+/** WHY: Stores per-participant detector cleanup functions. Keyed by
+ * participant identity so TrackUnsubscribed / LocalTrackUnpublished can
+ * clean up the exact detector without affecting others. Same lifecycle
+ * pattern as roomEventCleanups. */
+let speakerDetectorCleanups = new Map<string, () => void>()
+
+/** WHY: Single AudioContext shared across all participant detectors to avoid
+ * creating N contexts. Created lazily on first detector setup, closed on
+ * disconnect/reset. Same module-level pattern as krispProcessorRef. */
+let sharedAudioContext: AudioContext | null = null
+
 /** WHY: Centralized room options — voice-only, no video tracks. */
 const ROOM_OPTIONS: RoomOptions = {
   adaptiveStream: false,
@@ -150,6 +162,34 @@ function removeRoomListeners(): void {
   roomEventCleanups = []
 }
 
+/** WHY: Initializes the shared AudioContext lazily. Returns null if creation
+ * fails (e.g., browser policy — should not happen after user gesture). */
+function getOrCreateAudioContext(): AudioContext | null {
+  if (sharedAudioContext !== null) return sharedAudioContext
+  try {
+    sharedAudioContext = new AudioContext()
+    return sharedAudioContext
+  } catch (err: unknown) {
+    logger.warn('voice_audio_context_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return null
+  }
+}
+
+/** WHY: Tears down all speaking detectors and the shared AudioContext.
+ * Called on disconnect and reset to prevent leaks. */
+function cleanupAllSpeakerDetectors(): void {
+  for (const cleanup of speakerDetectorCleanups.values()) {
+    cleanup()
+  }
+  speakerDetectorCleanups = new Map()
+  if (sharedAudioContext !== null) {
+    sharedAudioContext.close().catch(() => {})
+    sharedAudioContext = null
+  }
+}
+
 function detachAllAudioTracks(room: Room): void {
   for (const p of room.remoteParticipants.values()) {
     for (const pub of p.trackPublications.values()) {
@@ -164,6 +204,25 @@ function detachAllAudioTracks(room: Room): void {
 
 type SetState = (partial: Partial<VoiceConnectionState>) => void
 type GetState = () => VoiceConnectionState
+
+/** WHY: Extracted to keep registerRoomEvents under Biome complexity limit.
+ * Incremental update: adds or removes a single identity from activeSpeakers
+ * instead of replacing the entire Set. Skips Zustand update if already in
+ * the desired state to avoid unnecessary re-renders. */
+function updateSpeaker(identity: string, speaking: boolean, get: GetState, set: SetState): void {
+  const current = get().activeSpeakers
+  if (speaking) {
+    if (current.has(identity)) return
+    const next = new Set(current)
+    next.add(identity)
+    set({ activeSpeakers: next })
+  } else {
+    if (!current.has(identity)) return
+    const next = new Set(current)
+    next.delete(identity)
+    set({ activeSpeakers: next })
+  }
+}
 
 /** WHY: Per LiveKit docs, KRISP attaches via LocalTrackPublished event on the
  * mic track. Dynamic import keeps the WASM bundle out of the critical path.
@@ -220,6 +279,7 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
     })
 
     removeRoomListeners()
+    cleanupAllSpeakerDetectors()
     set({
       status: 'disconnected',
       room: null,
@@ -260,31 +320,6 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
     if (get().room === room) set({ status: 'connected' })
   })
 
-  onRoom(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
-    if (get().room !== room) return
-
-    // WHY: Set the flag BEFORE any throttle/filter logic so every speech
-    // event is captured for the next heartbeat, even if the set-equality
-    // check below short-circuits the Zustand update.
-    if (speakers.some((s) => s.identity === room.localParticipant.identity)) {
-      hasSpokenSinceLastHeartbeat = true
-    }
-
-    const nextIdentities = new Set(speakers.map((s) => s.identity))
-    const current = get().activeSpeakers
-
-    // WHY: Set equality check prevents redundant Zustand updates (and
-    // downstream re-renders) when the speaker set hasn't actually changed.
-    if (
-      nextIdentities.size === current.size &&
-      [...nextIdentities].every((id) => current.has(id))
-    ) {
-      return
-    }
-
-    set({ activeSpeakers: nextIdentities })
-  })
-
   onRoom(RoomEvent.MediaDevicesChanged, () => {
     logger.info('voice_media_devices_changed')
   })
@@ -312,39 +347,76 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
       if (get().isDeafened) {
         participant.setVolume(0)
       }
+
+      // WHY: Client-side speaking detection — analyze the decoded remote
+      // audio for instant visual sync with what the user hears.
+      const audioCtx = getOrCreateAudioContext()
+      if (audioCtx !== null) {
+        const detectorCleanup = createSpeakingDetector(
+          audioCtx,
+          track.mediaStreamTrack,
+          (speaking) => updateSpeaker(participant.identity, speaking, get, set),
+        )
+        speakerDetectorCleanups.set(participant.identity, detectorCleanup)
+      }
     }
   })
 
-  onRoom(RoomEvent.TrackUnsubscribed, (track) => {
+  onRoom(RoomEvent.TrackUnsubscribed, (track, _pub, participant) => {
     if (track.kind === Track.Kind.Audio) {
+      const detectorCleanup = speakerDetectorCleanups.get(participant.identity)
+      if (detectorCleanup !== undefined) {
+        detectorCleanup()
+        speakerDetectorCleanups.delete(participant.identity)
+      }
       for (const el of track.detach()) {
         el.remove()
       }
     }
   })
 
-  // WHY: Per LiveKit SDK README — clean up local track resources on unpublish.
   onRoom(RoomEvent.LocalTrackUnpublished, (trackPublication) => {
+    if (trackPublication.source === Track.Source.Microphone) {
+      const localIdentity = room.localParticipant.identity
+      const detectorCleanup = speakerDetectorCleanups.get(localIdentity)
+      if (detectorCleanup !== undefined) {
+        detectorCleanup()
+        speakerDetectorCleanups.delete(localIdentity)
+      }
+    }
     trackPublication.track?.detach()
   })
 
-  // WHY: Per LiveKit docs, KRISP processor must be attached via
-  // LocalTrackPublished — this guarantees the track is fully ready.
-  // Dynamic import keeps the ~2MB WASM out of the initial bundle.
   onRoom(RoomEvent.LocalTrackPublished, (trackPublication) => {
     if (
       trackPublication.source === Track.Source.Microphone &&
-      trackPublication.track instanceof LocalAudioTrack &&
-      get().isKrispEnabled
+      trackPublication.track instanceof LocalAudioTrack
     ) {
-      attachKrispProcessor(trackPublication.track).catch((err: unknown) => {
-        logger.warn('voice_krisp_init_failed', {
-          error: err instanceof Error ? err.message : String(err),
+      // WHY: KRISP attaches via LocalTrackPublished per LiveKit docs.
+      if (get().isKrispEnabled) {
+        attachKrispProcessor(trackPublication.track).catch((err: unknown) => {
+          logger.warn('voice_krisp_init_failed', {
+            error: err instanceof Error ? err.message : String(err),
+          })
+          set({ isKrispEnabled: false })
         })
-        // WHY: If KRISP init fails, the UI must reflect that noise suppression
-        // is not active. Without this, the button stays green (misleading).
-        set({ isKrispEnabled: false })
-      })
+      }
+
+      // WHY: Client-side speaking detection for the local participant.
+      // Uses mediaStreamTrack which returns post-KRISP audio when active.
+      const audioCtx = getOrCreateAudioContext()
+      if (audioCtx !== null) {
+        const localIdentity = room.localParticipant.identity
+        const detectorCleanup = createSpeakingDetector(
+          audioCtx,
+          trackPublication.track.mediaStreamTrack,
+          (speaking) => {
+            if (speaking) hasSpokenSinceLastHeartbeat = true
+            updateSpeaker(localIdentity, speaking, get, set)
+          },
+        )
+        speakerDetectorCleanups.set(localIdentity, detectorCleanup)
+      }
     }
   })
 }
@@ -414,6 +486,7 @@ function restorePreferredDevices(room: Room, get: GetState): void {
 async function teardownOldRoom(oldRoom: Room): Promise<void> {
   detachAllAudioTracks(oldRoom)
   removeRoomListeners()
+  cleanupAllSpeakerDetectors()
   try {
     await oldRoom.disconnect()
   } catch (err: unknown) {
@@ -485,6 +558,7 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
   disconnect: async () => {
     const { room } = get()
     krispProcessorRef = null
+    cleanupAllSpeakerDetectors()
     if (room !== null) {
       detachAllAudioTracks(room)
       removeRoomListeners()
@@ -652,6 +726,7 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       disconnectIdleTimer = null
     }
     krispProcessorRef = null
+    cleanupAllSpeakerDetectors()
     const { room } = get()
     if (room !== null) {
       detachAllAudioTracks(room)

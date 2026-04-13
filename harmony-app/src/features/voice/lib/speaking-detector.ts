@@ -53,7 +53,8 @@ export function createSpeakingDetector(
     // amplitude. Values in buffer are -1.0 to 1.0 per Web Audio spec.
     let sumSquares = 0
     for (let i = 0; i < buffer.length; i++) {
-      sumSquares += buffer[i] * buffer[i]
+      const sample = buffer[i] ?? 0
+      sumSquares += sample * sample
     }
     const rms = Math.sqrt(sumSquares / buffer.length)
 
