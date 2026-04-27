@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::Channel;
 use super::ChannelType;
@@ -21,7 +21,7 @@ use super::voice_session::VoiceAction;
 // ── Payload structs ──────────────────────────────────────────────
 
 /// Message payload embedded in message events.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePayload {
     pub id: MessageId,
@@ -72,7 +72,7 @@ impl From<MessageWithAuthor> for MessagePayload {
 }
 
 /// Member payload embedded in member events.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberPayload {
     pub user_id: UserId,
@@ -84,7 +84,7 @@ pub struct MemberPayload {
 }
 
 /// Ban payload embedded in `MemberBanned`.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BanPayload {
     pub reason: Option<String>,
@@ -93,7 +93,7 @@ pub struct BanPayload {
 }
 
 /// Channel payload embedded in channel events.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelPayload {
     pub id: ChannelId,
@@ -128,7 +128,7 @@ impl From<&Channel> for ChannelPayload {
 }
 
 /// Server payload embedded in `ServerUpdated`.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerPayload {
     pub id: ServerId,
@@ -138,7 +138,7 @@ pub struct ServerPayload {
 }
 
 /// DM payload embedded in `DmCreated`.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DmPayload {
     pub server_id: ServerId,
@@ -156,7 +156,7 @@ pub struct DmPayload {
 /// Serializes as a tagged union: `{"type": "messageCreated", "senderId": "...", ...}`.
 /// The SSE handler uses `event_name()` for the SSE `event:` field and
 /// serializes the full variant as JSON `data:`.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -558,5 +558,37 @@ mod tests {
         assert!(json["channelId"].is_string());
         assert!(json["deletedBy"].is_string());
         assert!(json["messageId"].is_string());
+    }
+
+    #[test]
+    fn server_event_round_trip_serialization() {
+        let event = ServerEvent::MessageCreated {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message: MessagePayload {
+                id: MessageId::new(Uuid::new_v4()),
+                channel_id: test_channel_id(),
+                content: "round-trip test".to_string(),
+                author_id: test_user_id(),
+                author_username: "alice".to_string(),
+                author_avatar_url: None,
+                encrypted: false,
+                sender_device_id: None,
+                edited_at: None,
+                parent_message_id: None,
+                message_type: crate::domain::models::MessageType::Default,
+                system_event_key: None,
+                moderated_at: None,
+                moderation_reason: None,
+                created_at: Utc::now(),
+            },
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: ServerEvent = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.event_name(), "message.created");
+        assert_eq!(deserialized.sender_id(), event.sender_id());
     }
 }
