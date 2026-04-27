@@ -52,7 +52,14 @@ async fn main() {
     );
 
     // 4. Initialize infrastructure services
-    let state = init_app_state(&config).await;
+    let AppInit {
+        state,
+        instance_id,
+        event_notify_rx,
+        event_local_tx,
+        presence_write_rx,
+        presence_cache_handle,
+    } = init_app_state(&config).await;
 
     // 5. Background tasks: sweep stale presence entries + expired mutes every 60s
     spawn_presence_sweep(state.clone());
@@ -60,8 +67,34 @@ async fn main() {
     spawn_moderation_retry_sweep(state.clone());
     spawn_voice_session_sweep(state.clone());
 
+    // Background tasks: PG LISTEN/NOTIFY workers for cross-instance SSE + presence
+    let cancel = tokio_util::sync::CancellationToken::new();
+
+    tokio::spawn(infra::pg_notify_event_bus::event_notify_worker(
+        state.pool().clone(),
+        instance_id,
+        event_notify_rx,
+    ));
+    tokio::spawn(infra::pg_notify_event_bus::event_listen_worker(
+        state.pool().clone(),
+        instance_id,
+        event_local_tx,
+        cancel.clone(),
+    ));
+    tokio::spawn(infra::pg_presence_tracker::presence_write_worker(
+        state.pool().clone(),
+        instance_id,
+        presence_write_rx,
+    ));
+    tokio::spawn(infra::pg_presence_tracker::presence_listen_worker(
+        state.pool().clone(),
+        instance_id,
+        presence_cache_handle,
+        cancel.clone(),
+    ));
+
     // 6. Build router with middleware stack
-    let app = build_router(state, config.livekit_url.as_deref());
+    let app = build_router(state.clone(), config.livekit_url.as_deref());
 
     // 7. Start server with graceful shutdown
     let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
@@ -80,6 +113,11 @@ async fn main() {
         .await
         .expect("Server error");
 
+    // WHY: cleanup_instance BEFORE cancel — presence writes need PG access.
+    state.presence_tracker().cleanup_instance().await;
+    cancel.cancel();
+    tracing::info!("PgListener tasks cancelled, presence cleaned up");
+
     // Flush pending OTel spans before exit
     if let Some(provider) = tracer_provider
         && let Err(e) = provider.shutdown()
@@ -88,8 +126,21 @@ async fn main() {
     }
 }
 
+/// Pieces needed to spawn background tasks after `AppState` is constructed.
+struct AppInit {
+    state: AppState,
+    instance_id: uuid::Uuid,
+    event_notify_rx: tokio::sync::mpsc::UnboundedReceiver<crate::domain::models::ServerEvent>,
+    event_local_tx: tokio::sync::broadcast::Sender<crate::domain::models::ServerEvent>,
+    presence_write_rx:
+        tokio::sync::mpsc::UnboundedReceiver<infra::pg_presence_tracker::PresenceCommand>,
+    presence_cache_handle: std::sync::Arc<
+        dashmap::DashMap<crate::domain::models::UserId, infra::pg_presence_tracker::PresenceEntry>,
+    >,
+}
+
 /// Initialize application state with Postgres pool, services, and repositories.
-async fn init_app_state(config: &Config) -> AppState {
+async fn init_app_state(config: &Config) -> AppInit {
     // Initialize Postgres connection pool
     let pool = infra::postgres::create_pool(&config.database_url, config.max_db_connections).await;
     tracing::info!("Postgres connection pool initialized");
@@ -252,11 +303,24 @@ async fn init_app_state(config: &Config) -> AppState {
         user_preferences_repo,
     ));
 
-    // Initialize in-process event bus for SSE real-time delivery
-    let event_bus: Arc<dyn domain::ports::EventBus> = Arc::new(infra::BroadcastEventBus::new());
+    // Generate unique instance ID for this API process (cross-instance dedup)
+    let instance_id = uuid::Uuid::new_v4();
+    tracing::info!(%instance_id, "API instance ID generated");
 
-    // Initialize in-memory presence tracker
-    let presence_tracker = Arc::new(infra::PresenceTracker::new());
+    // Initialize PG-backed event bus (dual-path: local broadcast + pg_notify)
+    let (event_bus_inner, event_notify_rx) = infra::PgNotifyEventBus::new(instance_id);
+    let event_local_tx = event_bus_inner.local_sender().clone();
+    let event_bus: Arc<dyn domain::ports::EventBus> = Arc::new(event_bus_inner);
+
+    // Initialize PG-backed presence tracker (local DashMap cache + Postgres SSoT)
+    let (presence_inner, presence_write_rx) =
+        infra::PgPresenceTracker::new(instance_id, pool.clone());
+    presence_inner
+        .hydrate()
+        .await
+        .expect("Failed to hydrate presence cache from Postgres");
+    let presence_cache_handle = presence_inner.local_cache_handle();
+    let presence_tracker = Arc::new(presence_inner);
 
     // WHY: Construct voice service only when all three LiveKit env vars are set.
     // When None, voice handlers return 503 directly (graceful degradation).
@@ -292,7 +356,7 @@ async fn init_app_state(config: &Config) -> AppState {
 
     tracing::info!("Domain services initialized");
 
-    AppState::new(
+    let state = AppState::new(
         pool,
         config.supabase_jwt_secret.clone(),
         es256_key,
@@ -330,31 +394,37 @@ async fn init_app_state(config: &Config) -> AppState {
                     .expect("OFFICIAL_SERVER_ID must be a valid UUID"),
             )
         }),
-    )
+    );
+
+    AppInit {
+        state,
+        instance_id,
+        event_notify_rx,
+        event_local_tx,
+        presence_write_rx,
+        presence_cache_handle,
+    }
 }
 
 /// Spawn a background task that sweeps stale presence entries every 60s.
 ///
-/// Entries with `last_heartbeat` older than 90s are removed and
-/// `PresenceChanged { status: offline }` is emitted for each.
+/// Entries with `last_heartbeat` older than 90s (hardcoded in SQL) are
+/// removed and `PresenceChanged { status: offline }` is emitted for each.
 ///
-/// WHY: The 90s `max_age` gives a 60s buffer after the last SSE heartbeat
+/// WHY: The 90s SQL interval gives a 60s buffer after the last SSE heartbeat
 /// touch (30s interval). If a user's SSE connection drops, the sweep will
 /// detect the stale entry within ~60–90s and broadcast the offline event.
 fn spawn_presence_sweep(state: api::AppState) {
     use domain::models::{ServerEvent, UserStatus};
 
-    /// How often the sweep runs.
     const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
-    /// Entries older than this are considered stale (disconnected).
-    const STALE_MAX_AGE: Duration = Duration::from_secs(90);
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(SWEEP_INTERVAL);
         loop {
             interval.tick().await;
 
-            let stale_users = state.presence_tracker().sweep_stale(STALE_MAX_AGE);
+            let stale_users = state.presence_tracker().sweep_stale(SWEEP_INTERVAL).await;
             if stale_users.is_empty() {
                 continue;
             }

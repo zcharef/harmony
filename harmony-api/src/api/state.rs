@@ -17,7 +17,7 @@ use crate::domain::services::{
     NotificationSettingsService, ProfileService, ReactionService, ReadStateService, ServerService,
     SpamGuard, UserPreferencesService, VoiceService,
 };
-use crate::infra::PresenceTracker;
+use crate::infra::PgPresenceTracker;
 use crate::infra::safe_browsing::SafeBrowsingClient;
 
 /// Maximum concurrent async moderation tasks (`OpenAI` + Safe Browsing).
@@ -71,8 +71,8 @@ pub struct AppState {
     plan_limit_checker: Arc<dyn PlanLimitChecker>,
     /// In-process event bus for SSE real-time delivery.
     event_bus: Arc<dyn EventBus>,
-    /// In-memory presence tracker (online/idle/dnd per user).
-    presence_tracker: Arc<PresenceTracker>,
+    /// PG-backed presence tracker (online/idle/dnd per user).
+    presence_tracker: Arc<PgPresenceTracker>,
     /// Megolm session repository (E2EE channel sessions).
     megolm_session_repository: Arc<dyn MegolmSessionRepository>,
     /// Desktop auth repository (PKCE exchange codes).
@@ -171,7 +171,7 @@ impl AppState {
         ban_repository: Arc<dyn BanRepository>,
         plan_limit_checker: Arc<dyn PlanLimitChecker>,
         event_bus: Arc<dyn EventBus>,
-        presence_tracker: Arc<PresenceTracker>,
+        presence_tracker: Arc<PgPresenceTracker>,
         megolm_session_repository: Arc<dyn MegolmSessionRepository>,
         desktop_auth_repository: Arc<dyn DesktopAuthRepository>,
         spam_guard: Arc<SpamGuard>,
@@ -323,9 +323,9 @@ impl AppState {
         &self.event_bus
     }
 
-    /// Access the in-memory presence tracker.
+    /// Access the PG-backed presence tracker.
     #[must_use]
-    pub fn presence_tracker(&self) -> &PresenceTracker {
+    pub fn presence_tracker(&self) -> &PgPresenceTracker {
         &self.presence_tracker
     }
 

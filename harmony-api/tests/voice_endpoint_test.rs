@@ -38,8 +38,8 @@ use harmony_api::api::state::AppState;
 use harmony_api::domain::models::{ChannelId, ServerId, UserId};
 use harmony_api::domain::ports::{LiveKitTokenGenerator, VoiceGrants};
 use harmony_api::domain::services::{ContentFilter, SpamGuard, VoiceService};
-use harmony_api::infra::PresenceTracker;
-use harmony_api::infra::broadcast_event_bus::BroadcastEventBus;
+use harmony_api::infra::PgPresenceTracker;
+use harmony_api::infra::pg_notify_event_bus::PgNotifyEventBus;
 use harmony_api::infra::plan_always_allowed::AlwaysAllowedChecker;
 use harmony_api::infra::postgres::{
     PgBanRepository, PgChannelRepository, PgDesktopAuthRepository, PgDmRepository,
@@ -237,9 +237,11 @@ async fn build_app_state(
         harmony_api::domain::services::UserPreferencesService::new(user_preferences_repo),
     );
 
-    let event_bus: Arc<dyn harmony_api::domain::ports::EventBus> =
-        Arc::new(BroadcastEventBus::new());
-    let presence_tracker = Arc::new(PresenceTracker::new());
+    let instance_id = uuid::Uuid::new_v4();
+    let (event_bus_inner, _event_notify_rx) = PgNotifyEventBus::new(instance_id);
+    let event_bus: Arc<dyn harmony_api::domain::ports::EventBus> = Arc::new(event_bus_inner);
+    let (presence_inner, _presence_write_rx) = PgPresenceTracker::new(instance_id, pool.clone());
+    let presence_tracker = Arc::new(presence_inner);
 
     AppState::new(
         pool,

@@ -50,7 +50,7 @@ struct NotifyEnvelope {
 ///
 /// `publish()` delivers locally via broadcast AND queues the event for
 /// async relay to Postgres. Two background workers (spawned by the caller)
-/// handle the pg_notify send and LISTEN receive paths.
+/// handle the `pg_notify` send and LISTEN receive paths.
 #[derive(Debug)]
 pub struct PgNotifyEventBus {
     instance_id: Uuid,

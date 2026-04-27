@@ -81,6 +81,7 @@ livekit-api = { version = "0.4", default-features = true }
 # Sentry (Crash Reporting + Alerting) - 0.47+ required for axum 0.8 compatibility
 sentry = { version = "0.47", features = ["tower", "tower-axum-matched-path", "tracing", "rustls"] }
 dashmap = "6.1.0"
+tokio-util = { version = "0.7", features = ["rt"] }
 bitflags = "2"
 # ── Lints ────────────────────────────────────────────────
 # These lints are enforced project-wide. Contributors MUST comply.

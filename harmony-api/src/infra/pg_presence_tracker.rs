@@ -1,7 +1,7 @@
-//! Postgres-backed presence tracker with local DashMap read cache.
+//! Postgres-backed presence tracker with local `DashMap` read cache.
 //!
 //! Writes go to Postgres via a background worker (mpsc channel); reads come
-//! from the local DashMap for zero-latency lookups. Cross-instance sync
+//! from the local `DashMap` for zero-latency lookups. Cross-instance sync
 //! happens via LISTEN/NOTIFY on the `harmony_presence` channel.
 //!
 //! Replaces the in-memory-only `PresenceTracker` to support multi-instance
@@ -25,7 +25,7 @@ pub const PRESENCE_CHANNEL: &str = "harmony_presence";
 /// A single user's presence state (local cache entry).
 #[derive(Debug, Clone)]
 pub struct PresenceEntry {
-    /// Current status (Online, Idle, DoNotDisturb).
+    /// Current status (Online, Idle, `DoNotDisturb`).
     pub status: UserStatus,
     /// Servers this user belongs to (for broadcasting presence to co-members).
     pub server_ids: Vec<ServerId>,
@@ -72,9 +72,9 @@ pub struct PresenceEnvelope {
     pub s: Vec<Uuid>,
 }
 
-/// Postgres-backed presence tracker with local DashMap read cache.
+/// Postgres-backed presence tracker with local `DashMap` read cache.
 ///
-/// All sync methods update the DashMap immediately (instant local reads)
+/// All sync methods update the `DashMap` immediately (instant local reads)
 /// and send a command to the mpsc channel for async Postgres persistence.
 #[derive(Debug)]
 pub struct PgPresenceTracker {
@@ -107,7 +107,7 @@ impl PgPresenceTracker {
 
     /// Register a new SSE connection for a user.
     ///
-    /// Updates DashMap immediately, then sends Connect command to the write worker
+    /// Updates `DashMap` immediately, then sends Connect command to the write worker
     /// for async Postgres persistence.
     pub fn connect(&self, user_id: UserId, server_ids: Vec<ServerId>) {
         self.local_cache
@@ -137,9 +137,9 @@ impl PgPresenceTracker {
 
     /// Unregister an SSE connection for a user.
     ///
-    /// Decrements connection_count in DashMap. Returns `true` if the user went
+    /// Decrements `connection_count` in `DashMap`. Returns `true` if the user went
     /// fully offline (count reached 0 and entry was removed). Uses the same
-    /// two-step pattern as the old PresenceTracker.
+    /// two-step pattern as the old `PresenceTracker`.
     #[must_use]
     pub fn disconnect(&self, user_id: &UserId) -> bool {
         // WHY two-step: DashMap doesn't support "decrement then conditionally
@@ -156,21 +156,21 @@ impl PgPresenceTracker {
             .remove_if(user_id, |_, entry| entry.connection_count == 0)
             .is_some();
 
-        if went_offline {
-            if let Err(err) = self.write_tx.send(PresenceCommand::Disconnect {
+        if went_offline
+            && let Err(err) = self.write_tx.send(PresenceCommand::Disconnect {
                 user_id: user_id.clone(),
-            }) {
-                tracing::warn!(
-                    error = %err,
-                    "presence write_tx send failed — write worker may have stopped"
-                );
-            }
+            })
+        {
+            tracing::warn!(
+                error = %err,
+                "presence write_tx send failed — write worker may have stopped"
+            );
         }
 
         went_offline
     }
 
-    /// Update a user's status without changing server_ids.
+    /// Update a user's status without changing `server_ids`.
     ///
     /// No-op if the user has no presence entry (not connected).
     pub fn set_status(&self, user_id: &UserId, status: UserStatus) {
@@ -226,16 +226,14 @@ impl PgPresenceTracker {
         }
     }
 
-    /// Populate the local DashMap cache from Postgres on startup.
+    /// Populate the local `DashMap` cache from Postgres on startup.
     ///
     /// # Errors
     /// Returns `sqlx::Error` if the SELECT query fails.
     pub async fn hydrate(&self) -> Result<(), sqlx::Error> {
-        let rows = sqlx::query!(
-            r#"SELECT user_id, status, server_ids FROM presence_sessions"#
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query!(r#"SELECT user_id, status, server_ids FROM presence_sessions"#)
+            .fetch_all(&self.pool)
+            .await?;
 
         for row in rows {
             let user_id = UserId(row.user_id);
@@ -245,12 +243,7 @@ impl PgPresenceTracker {
                 "dnd" => UserStatus::DoNotDisturb,
                 _ => UserStatus::Offline,
             };
-            let server_ids: Vec<ServerId> = row
-                .server_ids
-                .unwrap_or_default()
-                .into_iter()
-                .map(ServerId)
-                .collect();
+            let server_ids: Vec<ServerId> = row.server_ids.into_iter().map(ServerId).collect();
 
             self.local_cache
                 .entry(user_id)
@@ -343,7 +336,7 @@ impl PgPresenceTracker {
 
 // ── Background Workers ───────────────────────────────────────────────
 
-/// Helper: serialize and send a presence notification via pg_notify.
+/// Helper: serialize and send a presence notification via `pg_notify`.
 async fn notify_presence(pool: &PgPool, envelope: &PresenceEnvelope) {
     let payload = match serde_json::to_string(envelope) {
         Ok(p) => p,
@@ -369,7 +362,7 @@ async fn notify_presence(pool: &PgPool, envelope: &PresenceEnvelope) {
     }
 }
 
-/// Convert a UserStatus to its wire-format action string.
+/// Convert a `UserStatus` to its wire-format action string.
 fn status_to_action(status: &UserStatus) -> &'static str {
     match status {
         UserStatus::Online => "online",
@@ -381,7 +374,7 @@ fn status_to_action(status: &UserStatus) -> &'static str {
 
 /// Background worker: drains the mpsc queue and persists presence changes to Postgres.
 ///
-/// Exits when the mpsc sender is dropped (PgPresenceTracker dropped).
+/// Exits when the mpsc sender is dropped (`PgPresenceTracker` dropped).
 pub async fn presence_write_worker(
     pool: PgPool,
     instance_id: Uuid,
@@ -395,8 +388,7 @@ pub async fn presence_write_worker(
                 user_id,
                 server_ids,
             } => {
-                let server_id_uuids: Vec<Uuid> =
-                    server_ids.iter().map(|s| s.0).collect();
+                let server_id_uuids: Vec<Uuid> = server_ids.iter().map(|s| s.0).collect();
 
                 if let Err(err) = sqlx::query!(
                     r#"INSERT INTO presence_sessions (user_id, instance_id, server_ids, last_heartbeat)
@@ -419,12 +411,15 @@ pub async fn presence_write_worker(
                     );
                 }
 
-                notify_presence(&pool, &PresenceEnvelope {
-                    i: instance_id,
-                    u: user_id.0,
-                    a: "online".to_owned(),
-                    s: server_id_uuids,
-                })
+                notify_presence(
+                    &pool,
+                    &PresenceEnvelope {
+                        i: instance_id,
+                        u: user_id.0,
+                        a: "online".to_owned(),
+                        s: server_id_uuids,
+                    },
+                )
                 .await;
             }
 
@@ -476,12 +471,15 @@ pub async fn presence_write_worker(
                 match still_connected {
                     Ok(None) => {
                         // Fully offline — notify other instances.
-                        notify_presence(&pool, &PresenceEnvelope {
-                            i: instance_id,
-                            u: user_id.0,
-                            a: "offline".to_owned(),
-                            s: Vec::new(),
-                        })
+                        notify_presence(
+                            &pool,
+                            &PresenceEnvelope {
+                                i: instance_id,
+                                u: user_id.0,
+                                a: "offline".to_owned(),
+                                s: Vec::new(),
+                            },
+                        )
                         .await;
                     }
                     Ok(Some(_)) => {
@@ -548,7 +546,7 @@ pub async fn presence_write_worker(
                 .fetch_optional(&pool)
                 .await
                 {
-                    Ok(Some(row)) => row.server_ids.unwrap_or_default(),
+                    Ok(Some(row)) => row.server_ids,
                     Ok(None) => Vec::new(),
                     Err(err) => {
                         tracing::warn!(
@@ -560,12 +558,15 @@ pub async fn presence_write_worker(
                     }
                 };
 
-                notify_presence(&pool, &PresenceEnvelope {
-                    i: instance_id,
-                    u: user_id.0,
-                    a: action.to_owned(),
-                    s: server_ids,
-                })
+                notify_presence(
+                    &pool,
+                    &PresenceEnvelope {
+                        i: instance_id,
+                        u: user_id.0,
+                        a: action.to_owned(),
+                        s: server_ids,
+                    },
+                )
                 .await;
             }
         }
@@ -575,7 +576,7 @@ pub async fn presence_write_worker(
 }
 
 /// Background worker: listens for Postgres NOTIFY on the presence channel
-/// and updates the local DashMap cache for remote instance events.
+/// and updates the local `DashMap` cache for remote instance events.
 ///
 /// Uses the same exponential backoff reconnect pattern as `event_listen_worker`.
 pub async fn presence_listen_worker(
