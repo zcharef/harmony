@@ -154,7 +154,7 @@ pub async fn event_notify_worker(
             continue;
         }
 
-        if let Err(err) = sqlx::query("SELECT pg_notify($1, $2)")
+        if let Err(err) = sqlx::query("SELECT pg_notify($1, $2)") // allow: runtime-sql
             .bind(EVENT_CHANNEL)
             .bind(&payload)
             .execute(&pool)

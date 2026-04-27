@@ -349,7 +349,7 @@ async fn notify_presence(pool: &PgPool, envelope: &PresenceEnvelope) {
     // WHY: Uses runtime sqlx::query (not macro) for pg_notify — matches the
     // existing pattern in pg_notify_event_bus.rs. pg_notify is a function call,
     // not a table query, so compile-time checking adds no value.
-    if let Err(err) = sqlx::query("SELECT pg_notify($1, $2)")
+    if let Err(err) = sqlx::query("SELECT pg_notify($1, $2)") // allow: runtime-sql
         .bind(PRESENCE_CHANNEL)
         .bind(&payload)
         .execute(pool)
