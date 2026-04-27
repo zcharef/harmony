@@ -707,3 +707,167 @@ pub async fn presence_listen_worker(
 
     tracing::info!(%instance_id, "presence listen worker exiting");
 }
+
+// ── Tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn user(n: u128) -> UserId {
+        UserId(Uuid::from_u128(n))
+    }
+
+    fn server(n: u128) -> ServerId {
+        ServerId(Uuid::from_u128(n))
+    }
+
+    /// Build a tracker without a real PG pool — local-cache operations only.
+    ///
+    /// WHY: `PgPool::connect_lazy` defers the actual TCP connection until the
+    /// first query, so it is safe to pass a dummy URL. The pool is never
+    /// queried in these tests; all assertions target the local `DashMap` only.
+    /// A Tokio runtime is still required because `connect_lazy` internally
+    /// initialises pool machinery that parks on the executor.
+    fn test_tracker() -> PgPresenceTracker {
+        let (write_tx, _write_rx) = mpsc::unbounded_channel();
+        PgPresenceTracker {
+            instance_id: Uuid::new_v4(),
+            pool: PgPool::connect_lazy("postgres://unused").unwrap(),
+            local_cache: Arc::new(DashMap::new()),
+            write_tx,
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_and_get_status() {
+        let t = test_tracker();
+        t.connect(user(1), vec![server(10)]);
+        assert_eq!(t.get_status(&user(1)), Some(UserStatus::Online));
+    }
+
+    #[tokio::test]
+    async fn set_status_updates_without_changing_servers() {
+        let t = test_tracker();
+        t.connect(user(1), vec![server(10), server(11)]);
+
+        t.set_status(&user(1), UserStatus::DoNotDisturb);
+
+        assert_eq!(t.get_status(&user(1)), Some(UserStatus::DoNotDisturb));
+
+        // server_ids must be unchanged
+        let presence_10 = t.get_server_presence(&server(10));
+        assert_eq!(presence_10.len(), 1);
+        assert_eq!(presence_10[0].0, user(1));
+
+        let presence_11 = t.get_server_presence(&server(11));
+        assert_eq!(presence_11.len(), 1);
+        assert_eq!(presence_11[0].0, user(1));
+    }
+
+    #[tokio::test]
+    async fn disconnect_single_connection_goes_offline() {
+        let t = test_tracker();
+        t.connect(user(1), vec![server(10)]);
+
+        let went_offline = t.disconnect(&user(1));
+
+        assert!(went_offline);
+        assert_eq!(t.get_status(&user(1)), None);
+    }
+
+    #[tokio::test]
+    async fn disconnect_multi_connection_stays_online() {
+        let t = test_tracker();
+        t.connect(user(1), vec![server(10)]);
+        t.connect(user(1), vec![server(10)]); // second connection
+
+        // First disconnect: still connected (count == 1)
+        let first = t.disconnect(&user(1));
+        assert!(!first);
+        assert_eq!(t.get_status(&user(1)), Some(UserStatus::Online));
+
+        // Second disconnect: fully offline (count == 0)
+        let second = t.disconnect(&user(1));
+        assert!(second);
+        assert_eq!(t.get_status(&user(1)), None);
+    }
+
+    #[tokio::test]
+    async fn get_server_presence_filters_by_server() {
+        let t = test_tracker();
+
+        // user(1) → servers 10, 11
+        t.connect(user(1), vec![server(10), server(11)]);
+        // user(2) → servers 11, 12
+        t.connect(user(2), vec![server(11), server(12)]);
+        // user(3) → server 12 only
+        t.connect(user(3), vec![server(12)]);
+
+        let s10 = t.get_server_presence(&server(10));
+        assert_eq!(s10.len(), 1);
+        assert!(s10.iter().any(|(u, _)| *u == user(1)));
+
+        let s11 = t.get_server_presence(&server(11));
+        assert_eq!(s11.len(), 2);
+        assert!(s11.iter().any(|(u, _)| *u == user(1)));
+        assert!(s11.iter().any(|(u, _)| *u == user(2)));
+
+        let s12 = t.get_server_presence(&server(12));
+        assert_eq!(s12.len(), 2);
+        assert!(s12.iter().any(|(u, _)| *u == user(2)));
+        assert!(s12.iter().any(|(u, _)| *u == user(3)));
+    }
+
+    #[tokio::test]
+    async fn touch_refreshes_heartbeat() {
+        let t = test_tracker();
+        t.connect(user(1), vec![]);
+
+        let before = t.local_cache.get(&user(1)).unwrap().last_heartbeat;
+
+        // WHY: `tokio::time::sleep` instead of `std::thread::sleep` — we are
+        // inside a Tokio runtime; blocking the thread starves the executor.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+        t.touch(&user(1));
+
+        let after = t.local_cache.get(&user(1)).unwrap().last_heartbeat;
+        assert!(after > before);
+    }
+
+    /// No Tokio runtime needed — pure serde logic; no `PgPool` constructed.
+    #[test]
+    fn presence_envelope_round_trip() {
+        let instance = Uuid::new_v4();
+        let uid = Uuid::new_v4();
+        let sid = Uuid::new_v4();
+
+        let env = PresenceEnvelope {
+            i: instance,
+            u: uid,
+            a: "online".to_owned(),
+            s: vec![sid],
+        };
+
+        let json = serde_json::to_string(&env).unwrap();
+        let decoded: PresenceEnvelope = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded.i, instance);
+        assert_eq!(decoded.u, uid);
+        assert_eq!(decoded.a, "online");
+        assert_eq!(decoded.s, vec![sid]);
+    }
+
+    #[tokio::test]
+    async fn local_cache_handle_shares_same_map() {
+        let t = test_tracker();
+        let handle = t.local_cache_handle();
+
+        t.connect(user(1), vec![server(10)]);
+
+        // The handle must see the entry inserted via the tracker.
+        assert!(handle.contains_key(&user(1)));
+    }
+}
