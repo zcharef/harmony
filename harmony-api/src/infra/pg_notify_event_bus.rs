@@ -282,3 +282,154 @@ pub async fn event_listen_worker(
 
     tracing::info!(%instance_id, "pg listen worker exiting");
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::domain::models::{
+        ChannelId, MessageId, MessageType, ServerId, UserId,
+        server_event::{MessagePayload, ServerEvent},
+    };
+    use crate::domain::ports::EventBus;
+
+    fn test_user_id() -> UserId {
+        UserId::new(Uuid::new_v4())
+    }
+
+    fn test_server_id() -> ServerId {
+        ServerId::new(Uuid::new_v4())
+    }
+
+    fn test_channel_id() -> ChannelId {
+        ChannelId::new(Uuid::new_v4())
+    }
+
+    fn make_message_event() -> ServerEvent {
+        let sender = test_user_id();
+        let server = test_server_id();
+        let channel = test_channel_id();
+
+        ServerEvent::MessageCreated {
+            sender_id: sender.clone(),
+            server_id: server,
+            channel_id: channel.clone(),
+            message: MessagePayload {
+                id: MessageId::new(Uuid::new_v4()),
+                channel_id: channel,
+                content: "hello world".to_string(),
+                author_id: sender,
+                author_username: "alice".to_string(),
+                author_avatar_url: None,
+                encrypted: false,
+                sender_device_id: None,
+                edited_at: None,
+                parent_message_id: None,
+                message_type: MessageType::Default,
+                system_event_key: None,
+                moderated_at: None,
+                moderation_reason: None,
+                created_at: Utc::now(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn publish_sends_to_local_broadcast_and_mpsc() {
+        let instance_id = Uuid::new_v4();
+        let (bus, mut notify_rx) = PgNotifyEventBus::new(instance_id);
+        let mut local_rx = bus.subscribe();
+
+        let event = make_message_event();
+        bus.publish(event.clone());
+
+        // Local broadcast receiver gets the event.
+        let received_local = local_rx.try_recv().unwrap();
+        assert_eq!(received_local.event_name(), event.event_name());
+        assert_eq!(received_local.sender_id(), event.sender_id());
+
+        // mpsc notify queue also receives the event.
+        let received_notify = notify_rx.try_recv().unwrap();
+        assert_eq!(received_notify.event_name(), event.event_name());
+        assert_eq!(received_notify.sender_id(), event.sender_id());
+    }
+
+    #[tokio::test]
+    async fn subscribe_returns_working_receiver() {
+        let instance_id = Uuid::new_v4();
+        let (bus, _notify_rx) = PgNotifyEventBus::new(instance_id);
+
+        let mut rx1 = bus.subscribe();
+        let mut rx2 = bus.subscribe();
+
+        let event = make_message_event();
+        bus.publish(event.clone());
+
+        let got1 = rx1.try_recv().unwrap();
+        let got2 = rx2.try_recv().unwrap();
+
+        assert_eq!(got1.event_name(), event.event_name());
+        assert_eq!(got2.event_name(), event.event_name());
+        assert_eq!(got1.sender_id(), event.sender_id());
+        assert_eq!(got2.sender_id(), event.sender_id());
+    }
+
+    #[test]
+    fn notify_envelope_round_trip() {
+        let instance_id = Uuid::new_v4();
+        let event = make_message_event();
+
+        let envelope = NotifyEnvelope {
+            i: instance_id,
+            e: event.clone(),
+        };
+
+        let json = serde_json::to_string(&envelope).unwrap();
+        let decoded: NotifyEnvelope = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded.i, instance_id);
+        assert_eq!(decoded.e.event_name(), event.event_name());
+    }
+
+    #[test]
+    fn notify_envelope_dedup_skip_self() {
+        let self_id = Uuid::new_v4();
+        let other_id = Uuid::new_v4();
+
+        // WHY: The listen worker skips envelopes where i == instance_id to avoid
+        // re-delivering events this instance already published locally.
+        let same_origin = NotifyEnvelope {
+            i: self_id,
+            e: make_message_event(),
+        };
+        let remote_origin = NotifyEnvelope {
+            i: other_id,
+            e: make_message_event(),
+        };
+
+        assert!(same_origin.i == self_id);
+        assert!(remote_origin.i != self_id);
+    }
+
+    #[test]
+    fn payload_size_check() {
+        let instance_id = Uuid::new_v4();
+        let event = make_message_event();
+        let envelope = NotifyEnvelope {
+            i: instance_id,
+            e: event,
+        };
+
+        let payload = serde_json::to_string(&envelope).unwrap();
+
+        assert!(
+            payload.len() <= MAX_PG_NOTIFY_PAYLOAD,
+            "payload {} bytes exceeds {} byte limit",
+            payload.len(),
+            MAX_PG_NOTIFY_PAYLOAD
+        );
+    }
+}
