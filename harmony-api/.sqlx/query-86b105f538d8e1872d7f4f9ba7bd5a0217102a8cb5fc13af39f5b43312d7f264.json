@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE presence_sessions\n                       SET connection_count = connection_count - 1\n                       WHERE user_id = $1 AND instance_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "86b105f538d8e1872d7f4f9ba7bd5a0217102a8cb5fc13af39f5b43312d7f264"
+}

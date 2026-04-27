@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM presence_sessions\n               WHERE last_heartbeat < now() - INTERVAL '90 seconds'\n               RETURNING user_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f964fe033dd2d7e6b2e76d13f435e3b8ea2e9fad888b3390942dadb33dced329"
+}

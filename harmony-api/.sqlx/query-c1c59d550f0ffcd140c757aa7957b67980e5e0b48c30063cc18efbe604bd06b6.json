@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE presence_sessions\n                       SET last_heartbeat = now()\n                       WHERE user_id = $1 AND instance_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c1c59d550f0ffcd140c757aa7957b67980e5e0b48c30063cc18efbe604bd06b6"
+}
