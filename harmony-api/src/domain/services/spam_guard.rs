@@ -6,8 +6,8 @@
 //! - **A3 (Mute enforcement):** Blocks muted users from sending messages.
 //! - **A4 (ASCII art detection):** Rejects text art, Zalgo text, and symbol spam.
 //!
-//! All state is instance-local. Same limitation as `PresenceTracker`: when Harmony
-//! scales past one instance, this needs a shared store (Redis).
+//! All state is instance-local. When Harmony scales past one instance,
+//! this needs a shared store (Redis or Postgres).
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -196,7 +196,7 @@ impl SpamGuard {
     /// Remove all expired state: mutes, stale hash entries, and stale flood counters.
     /// Call periodically from a background sweep task.
     ///
-    /// Follows the `PresenceTracker::sweep_stale` pattern.
+    /// Follows the `PgPresenceTracker::sweep_stale` pattern.
     pub fn sweep_expired(&self) {
         let now = Instant::now();
 

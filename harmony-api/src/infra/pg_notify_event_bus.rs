@@ -1,9 +1,8 @@
 //! Cross-instance event bus using Postgres LISTEN/NOTIFY.
 //!
 //! Dual-path delivery: events are broadcast locally via `tokio::sync::broadcast`
-//! AND relayed to other instances via `pg_notify` / `PgListener`. This replaces
-//! `BroadcastEventBus` when Harmony scales past a single Fly.io instance
-//! (ADR-SSE-002).
+//! AND relayed to other instances via `pg_notify` / `PgListener`. K8s-native
+//! multi-instance support with zero additional infrastructure (ADR-SSE-002).
 
 use std::time::Duration;
 

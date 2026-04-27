@@ -25,7 +25,7 @@ use crate::domain::models::{ServerEvent, ServerId, UserId, UserStatus};
 /// WHY: Without this, offline detection relies on the background sweep (60s interval,
 /// 90s `max_age` = up to 150s delay). The guard fires instantly on disconnect.
 ///
-/// Uses `PresenceTracker::disconnect()` which decrements the connection counter.
+/// Uses `PgPresenceTracker::disconnect()` which decrements the connection counter.
 /// The offline event is only published when the last connection drops (count → 0),
 /// so closing one tab while another is still open does NOT mark the user offline.
 struct PresenceGuard {
@@ -72,7 +72,7 @@ impl Drop for PresenceGuard {
 /// event buffering or `Last-Event-ID` replay needed.
 ///
 /// **Presence lifecycle**: On connect, the user is marked online in the
-/// `PresenceTracker` and a `PresenceChanged` event is emitted. A heartbeat
+/// `PgPresenceTracker` and a `PresenceChanged` event is emitted. A heartbeat
 /// stream calls `touch()` every 30s so the background sweep (in main.rs)
 /// knows the connection is still alive.
 ///
