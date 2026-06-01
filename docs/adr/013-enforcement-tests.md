@@ -23,11 +23,11 @@ pub type ApiResult<T> = Result<T, ApiError>;
 - `ApiError` forces RFC 9457 via `IntoResponse`
 - Impossible to return non-standard error JSON
 
-### Level 2: Static Analysis (AST Parsing)
+### Level 2: Static Analysis (Source-Level Text Scanning)
 `tests/openapi_enforcement_test.rs`:
-- Parses handler files with `syn` crate
-- Verifies all `pub async fn` with `State<AppState>` have `#[utoipa::path]`
-- Checks `responses` clause uses `ProblemDetails` for 4xx/5xx
+- Source-level text scanning, fast, no AST parsing needed (no `syn` crate)
+- Reads handler files with `fs::read_to_string`, scans lines for `pub async fn` taking an Axum extractor (`State(`, `Json(`, `Path(`, `Query(`) and checks the preceding lines for `#[utoipa::path`
+- Companion test verifies every `pub struct`/`pub enum` in `src/api/dto/` derives `ToSchema`
 
 ### Level 3: Runtime Verification
 `tests/rfc9457_contract_test.rs`:
@@ -42,8 +42,8 @@ pub type ApiResult<T> = Result<T, ApiError>;
 - Self-documenting via test failure messages
 
 **Negative:**
-- Extra build time (~2s for AST parsing)
-- False positives possible for helper functions
+- Text scanning is heuristic: relies on formatting conventions (the macro within ~15 lines above the fn), not a real parse
+- False positives possible for helper functions (mitigated by the `// not-a-handler` opt-out comment)
 
 **Files:**
 - `tests/openapi_enforcement_test.rs` - OpenAPI checks
