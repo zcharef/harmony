@@ -439,10 +439,27 @@ fn spawn_presence_sweep(state: api::AppState) {
             tracing::info!(count = stale_users.len(), "Swept stale presence entries");
 
             for user_id in stale_users {
+                // WHY: Routing metadata for SSE scoping (shared server/DM only,
+                // redacted before clients see it). On lookup failure fall back
+                // to an empty vec — the SSE layer treats that as broadcast, so
+                // a DB hiccup degrades to the old behavior instead of eating
+                // the offline event (ADR-027: never silently lose the signal).
+                let server_ids = match state.server_service().list_all_memberships(&user_id).await {
+                    Ok(ids) => ids,
+                    Err(e) => {
+                        tracing::warn!(
+                            user_id = %user_id.0,
+                            error = %e,
+                            "presence sweep: membership lookup failed — broadcasting unscoped offline event"
+                        );
+                        Vec::new()
+                    }
+                };
                 let event = ServerEvent::PresenceChanged {
                     sender_id: user_id.clone(),
                     user_id,
                     status: UserStatus::Offline,
+                    server_ids,
                 };
                 state.event_bus().publish(event);
             }

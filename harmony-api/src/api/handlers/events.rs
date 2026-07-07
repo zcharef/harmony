@@ -57,6 +57,9 @@ fn take_until_lagged<T>(
 struct PresenceGuard {
     user_id: UserId,
     state: AppState,
+    /// Live view of the user's server memberships (kept current by Stage 1),
+    /// so the offline event carries accurate routing scope at drop time.
+    server_ids: watch::Receiver<HashSet<ServerId>>,
 }
 
 impl Drop for PresenceGuard {
@@ -67,6 +70,7 @@ impl Drop for PresenceGuard {
                 sender_id: self.user_id.clone(),
                 user_id: self.user_id.clone(),
                 status: UserStatus::Offline,
+                server_ids: self.server_ids.borrow().iter().cloned().collect(),
             };
             self.state.event_bus().publish(event);
             tracing::info!(user_id = %self.user_id.0, "last SSE connection dropped, user marked offline");
@@ -74,6 +78,31 @@ impl Drop for PresenceGuard {
             tracing::debug!(user_id = %self.user_id.0, "SSE connection dropped, other connections remain");
         }
     }
+}
+
+/// Decides whether a `PresenceChanged` for `subject` is visible to `receiver`.
+///
+/// Visible when the receiver IS the subject (own status must sync across
+/// tabs/devices), or when they share at least one server (DMs are servers, so
+/// DM partners are covered). An EMPTY `subject_servers` means the publisher
+/// could not scope the event (older instance during a rolling deploy, or a
+/// membership lookup failure) — fail OPEN to the previous broadcast behavior
+/// rather than silently dropping presence updates.
+fn presence_visible_to(
+    subject: &UserId,
+    subject_servers: &[ServerId],
+    receiver: &UserId,
+    receiver_servers: &HashSet<ServerId>,
+) -> bool {
+    if receiver == subject {
+        return true;
+    }
+    if subject_servers.is_empty() {
+        return true;
+    }
+    subject_servers
+        .iter()
+        .any(|sid| receiver_servers.contains(sid))
 }
 
 /// Aborts the wrapped task when dropped.
@@ -151,6 +180,9 @@ pub async fn sse_events(
     // (filter) reads the latest value via borrow(). This eliminates the need
     // for client-side SSE reconnects on membership changes.
     let (watch_tx, watch_rx) = watch::channel(server_ids.clone());
+    // Second receiver for the disconnect guard: the offline event must carry
+    // the CURRENT membership set, not the connect-time snapshot.
+    let guard_watch_rx = watch_rx.clone();
 
     // ── Presence: register connection, broadcast effective status ──
     // WHY: connect() returns the EFFECTIVE status atomically — a brand-new
@@ -169,6 +201,7 @@ pub async fn sse_events(
         sender_id: user_id.clone(),
         user_id: user_id.clone(),
         status: effective_status.clone(),
+        server_ids: server_ids.iter().cloned().collect(),
     };
 
     // WHY: Subscribe BEFORE publish so the new subscriber does not miss
@@ -294,14 +327,45 @@ pub async fn sse_events(
             return None; // User not in this server
         }
 
+        // ── Filter: presence scope (shared server / DM / self) ─────
+        // WHY: PresenceChanged has neither target_user_id nor server_id, so it
+        // used to reach EVERY connected user — leaking online status (and its
+        // timing) to strangers with no shared server or DM. The event now
+        // carries the subject's memberships as routing metadata; deliver only
+        // on overlap with this receiver's memberships (or to the subject
+        // itself). The metadata is redacted below before serialization.
+        if let ServerEvent::PresenceChanged {
+            user_id: subject,
+            server_ids: subject_servers,
+            ..
+        } = &event
+            && !presence_visible_to(subject, subject_servers, &user_id, &current_server_ids)
+        {
+            return None;
+        }
+
         // Explicitly drop the borrow before serialization to release the lock.
         drop(current_server_ids);
 
-        // ── Filter: user-scoped events without server_id ──────────
-        // DmCreated always has target_user_id (handled above).
-        // PresenceChanged has no target — it broadcasts to all. For now,
-        // let it through (presence is global). The client filters by
-        // displayed server.
+        // ── Redact routing metadata from the client payload ────────
+        // WHY: server_ids exists for cross-instance routing (pg_notify) only.
+        // An empty vec is skipped by serde, so the client-facing JSON stays
+        // identical to the pre-scoping payload and the subject's full server
+        // list never leaks to receivers.
+        let event = match event {
+            ServerEvent::PresenceChanged {
+                sender_id,
+                user_id,
+                status,
+                ..
+            } => ServerEvent::PresenceChanged {
+                sender_id,
+                user_id,
+                status,
+                server_ids: Vec::new(),
+            },
+            other => other,
+        };
 
         // ── Filter: sender exclusion (create/update only) ──────────
         // WHY: The sender already has optimistic UI for create and update.
@@ -412,6 +476,7 @@ pub async fn sse_events(
     let guard = PresenceGuard {
         user_id: guard_user_id,
         state: state.clone(),
+        server_ids: guard_watch_rx,
     };
 
     // Prepend the snapshot events to the live event stream. The composed
@@ -435,6 +500,99 @@ pub async fn sse_events(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
+
+    fn uid(n: u128) -> UserId {
+        UserId::new(Uuid::from_u128(n))
+    }
+    fn sid(n: u128) -> ServerId {
+        ServerId::new(Uuid::from_u128(n))
+    }
+
+    #[test]
+    fn presence_hidden_from_users_with_no_shared_server() {
+        let receiver_servers: HashSet<ServerId> = [sid(1), sid(2)].into();
+        // Disjoint memberships — the stranger must not learn the status.
+        assert!(!presence_visible_to(
+            &uid(10),
+            &[sid(3), sid(4)],
+            &uid(20),
+            &receiver_servers
+        ));
+    }
+
+    #[test]
+    fn presence_visible_with_shared_server_or_dm() {
+        let receiver_servers: HashSet<ServerId> = [sid(1), sid(2)].into();
+        // sid(2) is shared — DMs are servers too, so this covers DM partners.
+        assert!(presence_visible_to(
+            &uid(10),
+            &[sid(2), sid(9)],
+            &uid(20),
+            &receiver_servers
+        ));
+    }
+
+    #[test]
+    fn presence_always_visible_to_self() {
+        // Multi-device self-sync: even with zero shared/known servers.
+        let receiver_servers: HashSet<ServerId> = HashSet::new();
+        assert!(presence_visible_to(
+            &uid(10),
+            &[],
+            &uid(10),
+            &receiver_servers
+        ));
+    }
+
+    #[test]
+    fn presence_with_empty_scope_broadcasts() {
+        // Empty routing metadata = older instance or lookup failure — fail
+        // open to the legacy broadcast behavior, never drop the event.
+        let receiver_servers: HashSet<ServerId> = [sid(1)].into();
+        assert!(presence_visible_to(
+            &uid(10),
+            &[],
+            &uid(20),
+            &receiver_servers
+        ));
+    }
+
+    #[test]
+    fn presence_routing_metadata_is_omitted_when_redacted() {
+        // The Stage-2 redaction empties server_ids; serde must then omit the
+        // field entirely so the client payload is unchanged from pre-scoping.
+        let redacted = ServerEvent::PresenceChanged {
+            sender_id: uid(1),
+            user_id: uid(1),
+            status: UserStatus::Online,
+            server_ids: Vec::new(),
+        };
+        let json = serde_json::to_string(&redacted).unwrap();
+        assert!(
+            !json.contains("serverIds"),
+            "redacted payload leaked: {json}"
+        );
+
+        // The unredacted event (bus/pg_notify path) must carry it and survive
+        // a serde round-trip so remote instances can scope delivery.
+        let routed = ServerEvent::PresenceChanged {
+            sender_id: uid(1),
+            user_id: uid(1),
+            status: UserStatus::Online,
+            server_ids: vec![sid(7)],
+        };
+        let json = serde_json::to_string(&routed).unwrap();
+        assert!(json.contains("serverIds"));
+        let back: ServerEvent = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(
+                back,
+                ServerEvent::PresenceChanged { ref server_ids, .. } if *server_ids == vec![sid(7)]
+            ),
+            "routing metadata must survive the bus round-trip"
+        );
+    }
 
     #[tokio::test]
     async fn take_until_lagged_terminates_stream_on_broadcast_lag() {
