@@ -34,6 +34,7 @@ function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): Messa
     content: payload.content,
     authorId: payload.authorId,
     authorUsername: payload.authorUsername,
+    authorDisplayName: payload.authorDisplayName,
     authorAvatarUrl: payload.authorAvatarUrl,
     encrypted: payload.encrypted,
     senderDeviceId: payload.senderDeviceId,

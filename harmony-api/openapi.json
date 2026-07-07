@@ -4844,6 +4844,13 @@
               "null"
             ]
           },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Member's display name (if set)."
+          },
           "joinedAt": {
             "type": "string",
             "format": "date-time"
@@ -4934,6 +4941,13 @@
               "null"
             ],
             "description": "Author's avatar URL (if set)."
+          },
+          "authorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Author's display name (if set)."
           },
           "authorId": {
             "$ref": "#/components/schemas/UserId"

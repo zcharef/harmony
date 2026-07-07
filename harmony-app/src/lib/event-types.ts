@@ -54,6 +54,8 @@ export const messagePayloadSchema = z.object({
   content: z.string(),
   authorId: z.string(),
   authorUsername: z.string(),
+  // WHY optional: older API instances omit the field during rollout.
+  authorDisplayName: z.string().optional().nullable(),
   authorAvatarUrl: z.string().nullable(),
   encrypted: z.boolean(),
   senderDeviceId: z.string().nullable(),

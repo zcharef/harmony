@@ -59,6 +59,7 @@ function buildMessagePayload(overrides: Record<string, unknown> = {}) {
     content: 'hello world',
     authorId: 'user-42',
     authorUsername: 'alice',
+    authorDisplayName: 'Alice Doe',
     authorAvatarUrl: null,
     encrypted: false,
     senderDeviceId: null,
@@ -109,6 +110,7 @@ describe('useRealtimeMessages', () => {
       channelId: CHANNEL_ID,
       authorId: 'user-42',
       authorUsername: 'alice',
+      authorDisplayName: 'Alice Doe',
       content: 'hello world',
     })
     expect(items[1]?.id).toBe('existing-1')

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                sm.user_id,\n                sm.server_id,\n                p.username,\n                p.avatar_url,\n                sm.nickname,\n                sm.role as \"role!\",\n                sm.joined_at\n            FROM server_members sm\n            INNER JOIN profiles p ON p.id = sm.user_id\n            WHERE sm.server_id = $1\n              AND ($2::timestamptz IS NULL OR sm.joined_at < $2)\n            ORDER BY sm.joined_at DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                sm.user_id,\n                sm.server_id,\n                p.username,\n                p.display_name,\n                p.avatar_url,\n                sm.nickname,\n                sm.role as \"role!\",\n                sm.joined_at\n            FROM server_members sm\n            INNER JOIN profiles p ON p.id = sm.user_id\n            WHERE sm.server_id = $1\n              AND ($2::timestamptz IS NULL OR sm.joined_at < $2)\n            ORDER BY sm.joined_at DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -20,21 +20,26 @@
       },
       {
         "ordinal": 3,
-        "name": "avatar_url",
+        "name": "display_name",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "nickname",
+        "name": "avatar_url",
         "type_info": "Text"
       },
       {
         "ordinal": 5,
-        "name": "role!",
+        "name": "nickname",
         "type_info": "Text"
       },
       {
         "ordinal": 6,
+        "name": "role!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "joined_at",
         "type_info": "Timestamptz"
       }
@@ -52,9 +57,10 @@
       false,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "06ef24ccae485382e24e6ec3b77fe725f9bf6775d396f7d9f423b688742cf05f"
+  "hash": "48b824b8a355596607c00b3bd8fb96971c6c6dde6bdb62a4f554e2f4d2c6f25a"
 }

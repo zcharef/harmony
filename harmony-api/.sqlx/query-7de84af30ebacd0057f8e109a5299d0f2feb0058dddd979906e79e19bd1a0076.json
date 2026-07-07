@@ -1,21 +1,21 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH updated AS (\n                UPDATE messages\n                SET content = $2, is_edited = true, edited_at = now(), moderated_at = $3, moderation_reason = $4, original_content = $5\n                WHERE id = $1 AND deleted_at IS NULL\n                RETURNING\n                    id,\n                    channel_id,\n                    author_id,\n                    content,\n                    edited_at,\n                    deleted_at,\n                    deleted_by,\n                    encrypted,\n                    sender_device_id,\n                    message_type,\n                    system_event_key,\n                    parent_message_id,\n                    moderated_at,\n                    moderation_reason,\n                    original_content,\n                    created_at\n            )\n            SELECT\n                u.id as \"id!\",\n                u.channel_id as \"channel_id!\",\n                u.author_id as \"author_id!\",\n                u.content,\n                u.edited_at,\n                u.deleted_at,\n                u.deleted_by,\n                u.encrypted as \"encrypted!\",\n                u.sender_device_id,\n                u.message_type as \"message_type!: String\",\n                u.system_event_key,\n                u.parent_message_id,\n                u.moderated_at,\n                u.moderation_reason,\n                u.original_content,\n                u.created_at as \"created_at!\",\n                p.username AS \"author_username?\",\n                p.avatar_url AS \"author_avatar_url?\",\n                parent_p.username AS \"parent_author_username?\",\n                LEFT(parent_m.content, 100) AS \"parent_content_preview?\",\n                (parent_m.deleted_at IS NOT NULL) AS \"parent_deleted?\"\n            FROM updated u\n            LEFT JOIN profiles p ON p.id = u.author_id\n            LEFT JOIN messages parent_m ON parent_m.id = u.parent_message_id\n            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id\n            ",
+  "query": "\n            SELECT\n                m.id,\n                m.channel_id,\n                m.author_id,\n                m.content,\n                m.edited_at,\n                m.deleted_at,\n                m.deleted_by,\n                m.encrypted,\n                m.sender_device_id,\n                m.message_type as \"message_type!: String\",\n                m.system_event_key,\n                m.parent_message_id,\n                m.moderated_at,\n                m.moderation_reason,\n                m.original_content,\n                m.created_at,\n                p.username AS \"author_username?\",\n                p.display_name AS \"author_display_name?\",\n                p.avatar_url AS \"author_avatar_url?\",\n                parent_p.username AS \"parent_author_username?\",\n                LEFT(parent_m.content, 100) AS \"parent_content_preview?\",\n                (parent_m.deleted_at IS NOT NULL) AS \"parent_deleted?\"\n            FROM messages m\n            LEFT JOIN profiles p ON p.id = m.author_id\n            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id\n            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id\n            WHERE m.channel_id = $1\n              AND m.deleted_at IS NULL\n              AND ($2::timestamptz IS NULL OR m.created_at < $2)\n            ORDER BY m.created_at DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id!",
+        "name": "id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 1,
-        "name": "channel_id!",
+        "name": "channel_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 2,
-        "name": "author_id!",
+        "name": "author_id",
         "type_info": "Uuid"
       },
       {
@@ -40,7 +40,7 @@
       },
       {
         "ordinal": 7,
-        "name": "encrypted!",
+        "name": "encrypted",
         "type_info": "Bool"
       },
       {
@@ -90,7 +90,7 @@
       },
       {
         "ordinal": 15,
-        "name": "created_at!",
+        "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
@@ -100,21 +100,26 @@
       },
       {
         "ordinal": 17,
-        "name": "author_avatar_url?",
+        "name": "author_display_name?",
         "type_info": "Text"
       },
       {
         "ordinal": 18,
-        "name": "parent_author_username?",
+        "name": "author_avatar_url?",
         "type_info": "Text"
       },
       {
         "ordinal": 19,
-        "name": "parent_content_preview?",
+        "name": "parent_author_username?",
         "type_info": "Text"
       },
       {
         "ordinal": 20,
+        "name": "parent_content_preview?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
         "name": "parent_deleted?",
         "type_info": "Bool"
       }
@@ -122,10 +127,8 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
         "Timestamptz",
-        "Text",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -145,12 +148,13 @@
       true,
       true,
       false,
+      false,
       true,
       true,
-      true,
+      false,
       null,
       null
     ]
   },
-  "hash": "cf51f2434e9cf01871f6951c4aa6761883d883a8b01ee163935939670186606a"
+  "hash": "7de84af30ebacd0057f8e109a5299d0f2feb0058dddd979906e79e19bd1a0076"
 }

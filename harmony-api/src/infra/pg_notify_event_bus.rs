@@ -322,6 +322,7 @@ mod tests {
                 content: "hello world".to_string(),
                 author_id: sender,
                 author_username: "alice".to_string(),
+                author_display_name: None,
                 author_avatar_url: None,
                 encrypted: false,
                 sender_device_id: None,

@@ -45,6 +45,9 @@ pub struct MessageResponse {
     pub author_id: UserId,
     /// Author's username from their profile.
     pub author_username: String,
+    /// Author's display name (if set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_display_name: Option<String>,
     /// Author's avatar URL (if set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author_avatar_url: Option<String>,
@@ -91,6 +94,7 @@ impl From<MessageWithAuthor> for MessageResponse {
             channel_id: m.channel_id,
             author_id: m.author_id,
             author_username: mwa.author_username,
+            author_display_name: mwa.author_display_name,
             author_avatar_url: mwa.author_avatar_url,
             content: m.content,
             edited_at: m.edited_at,
@@ -142,4 +146,68 @@ pub struct MessageListQuery {
     pub before: Option<String>,
     /// Maximum number of messages to return (1-100, default 50).
     pub limit: Option<i64>,
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use crate::domain::models::Message;
+
+    fn make_message_with_author(display_name: Option<String>) -> MessageWithAuthor {
+        MessageWithAuthor {
+            message: Message {
+                id: MessageId::from(Uuid::new_v4()),
+                channel_id: ChannelId::from(Uuid::new_v4()),
+                author_id: UserId::from(Uuid::new_v4()),
+                content: "hello".to_string(),
+                edited_at: None,
+                deleted_at: None,
+                deleted_by: None,
+                encrypted: false,
+                sender_device_id: None,
+                message_type: MessageType::Default,
+                system_event_key: None,
+                parent_message_id: None,
+                moderated_at: None,
+                moderation_reason: None,
+                original_content: None,
+                created_at: Utc::now(),
+            },
+            author_username: "alice".to_string(),
+            author_display_name: display_name,
+            author_avatar_url: None,
+            reactions: vec![],
+            parent_message: None,
+        }
+    }
+
+    /// WHY: `authorDisplayName` is how the SPA resolves the render chain
+    /// (`displayName ?? username`). The From conversion must carry it through
+    /// and serde must emit the camelCase key (ADR-039).
+    #[test]
+    fn message_response_carries_author_display_name() {
+        let mwa = make_message_with_author(Some("Alice Doe".to_string()));
+        let response = MessageResponse::from(mwa);
+
+        assert_eq!(response.author_username, "alice");
+        assert_eq!(response.author_display_name, Some("Alice Doe".to_string()));
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["authorUsername"], "alice");
+        assert_eq!(json["authorDisplayName"], "Alice Doe");
+    }
+
+    /// WHY: `skip_serializing_if` must omit the key entirely when the author
+    /// has no display name — old clients tolerate a missing optional field.
+    #[test]
+    fn message_response_omits_absent_author_display_name() {
+        let response = MessageResponse::from(make_message_with_author(None));
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert!(json.get("authorDisplayName").is_none());
+    }
 }
