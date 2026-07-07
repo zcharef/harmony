@@ -84,8 +84,13 @@ test.describe('Direct Messages', () => {
       await contextMenu.locator('[data-test="send-message-item"]').waitFor({ timeout: 5_000 })
 
       // WHY: Set up response listener BEFORE clicking to avoid race conditions.
+      // WHY 30s: this is the first API mutation of the E2E run; on a cold
+      // in-runner API container the first request can exceed a 10s ceiling
+      // (container + DB pool warmup). The listener is attached before the
+      // click, so this is a latency ceiling, not a race window.
       const dmResponsePromise = page.waitForResponse(
         (response) => response.url().includes('/v1/dms') && response.request().method() === 'POST',
+        { timeout: 30_000 },
       )
 
       const sendMessageItem = page.locator('[data-test="send-message-item"]')
@@ -99,20 +104,14 @@ test.describe('Direct Messages', () => {
       const dmSidebar = page.locator('[data-test="dm-sidebar"]')
       await dmSidebar.waitFor({ timeout: 10_000 })
 
-      // WHY: After DM creation, useCreateDm invalidates the DM list cache,
-      // triggering a GET /v1/dms refetch. Wait for this refetch to complete
-      // before checking for the conversation item — otherwise we assert on
-      // stale (empty) cache data.
-      await page.waitForResponse(
-        (response) =>
-          response.url().includes('/v1/dms') &&
-          response.request().method() === 'GET' &&
-          response.status() === 200,
-        { timeout: 10_000 },
-      )
-
+      // WHY: assert on the UI outcome, not the intermediate GET refetch.
+      // The DM-list invalidation fires a GET /v1/dms that can complete before
+      // a waitForResponse listener attaches (it is set up after the awaits
+      // above) — waiting for it then hangs on a response that already landed.
+      // toBeVisible already retries until the conversation item renders, which
+      // is the real success condition.
       const dmItem = page.locator('[data-test="dm-conversation-item"]')
-      await expect(dmItem.first()).toBeVisible({ timeout: 10_000 })
+      await expect(dmItem.first()).toBeVisible({ timeout: 15_000 })
 
       // Verify chat area is loaded for the DM
       await expect(page.locator('[data-test="chat-area"]')).toBeVisible({ timeout: 10_000 })
@@ -155,9 +154,12 @@ test.describe('Direct Messages', () => {
       const searchResults = page.locator('[data-test="user-search-result"]')
       await searchResults.first().waitFor({ timeout: 10_000 })
 
-      // Click the target user to create DM
+      // Click the target user to create DM. 30s: cold in-runner API container
+      // can exceed a 10s ceiling on early requests; listener attaches before
+      // the click, so this is a latency ceiling, not a race window.
       const dmResponsePromise = page.waitForResponse(
         (response) => response.url().includes('/v1/dms') && response.request().method() === 'POST',
+        { timeout: 30_000 },
       )
 
       await page
