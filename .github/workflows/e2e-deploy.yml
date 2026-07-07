@@ -8,10 +8,13 @@
 #   pull_request_target runs the workflow YAML from the BASE branch (main),
 #   not the PR branch — so attackers cannot modify the workflow itself.
 #   The "safe-to-test" label is a maintainer gate: review the code BEFORE
-#   adding the label, since the PR's code will run with secrets.
+#   adding the label, since the PR's code runs in the privileged
+#   pull_request_target context (the E2E job itself uses no secrets — its
+#   Supabase stack is ephemeral and in-runner — but the gate stays as
+#   defense in depth and against runner abuse).
 #   Only the "labeled" event type is allowed — after each new push, the
-#   maintainer must re-apply the label to re-trigger, preventing secret
-#   exfiltration via force-push after initial approval.
+#   maintainer must re-apply the label to re-trigger, preventing abuse
+#   via force-push after initial approval.
 #   --frozen-lockfile prevents supply-chain attacks via lockfile manipulation.
 
 name: E2E & Deploy
@@ -32,8 +35,9 @@ on:
     types: [labeled]
 
 concurrency:
-  # WHY ref not sha: pushes to main must cancel previous E2E runs to avoid
-  # concurrent migrations on the shared CI database. PRs use their number.
+  # WHY ref not sha: pushes to main cancel superseded E2E runs to save runner
+  # time. Each run gets its own ephemeral in-runner Supabase stack, so
+  # concurrent runs cannot corrupt each other's state. PRs use their number.
   group: e2e-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
@@ -52,6 +56,33 @@ jobs:
 
     permissions:
       contents: read
+
+    # WHY literal credentials: the whole E2E stack is an ephemeral in-runner
+    # Supabase (`supabase start`). These are the deterministic supabase
+    # local-dev demo credentials — the same defaults committed in
+    # harmony-api/.env.example, harmony-app/.env.example and
+    # harmony-app/e2e/fixtures/user-factory.ts. They are NOT secrets and only
+    # exist for this runner's lifetime. (The previous shared "harmony-ci"
+    # Supabase Cloud project auto-paused on the free tier and killed every
+    # deploy — an in-runner stack cannot go stale.)
+    env:
+      # Rust API
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:64322/postgres
+      SUPABASE_URL: http://127.0.0.1:64321
+      SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+      ENVIRONMENT: test
+      SERVER_PORT: "3000"
+      # Vite SPA
+      VITE_API_URL: http://localhost:3000
+      VITE_SUPABASE_URL: http://127.0.0.1:64321
+      VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+      # Cloudflare Turnstile "always passes" test site key — pairs with the
+      # test secret in supabase/config.toml. Safe to commit.
+      VITE_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+      # Playwright fixtures (user-factory) — same local demo keys, explicit.
+      CI_SUPABASE_URL: http://127.0.0.1:64321
+      CI_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+      CI_SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
 
     steps:
       - uses: actions/checkout@v4
@@ -110,37 +141,31 @@ jobs:
           workspaces: harmony-api
           shared-key: harmony-api
 
-      # ── Supabase Cloud: apply pending migrations ─────────
+      # ── Ephemeral Supabase stack (in-runner) ─────────────
       # WHY pinned: `latest` causes non-deterministic CI failures when Supabase
       # ships breaking changes. Bump deliberately via Dependabot or manually.
       - uses: supabase/setup-cli@v1.6.0
         with:
-          version: 2.84.2
+          version: 2.90.0
 
-      - name: Link Supabase CI project
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          CI_SUPABASE_PROJECT_REF: ${{ secrets.CI_SUPABASE_PROJECT_REF }}
-        run: supabase link --project-ref "$CI_SUPABASE_PROJECT_REF"
-
-      # WARNING: supabase db push targets a shared CI database. If two PRs
-      # run E2E concurrently, their migrations can race and corrupt state.
-      # Only one "safe-to-test" PR should be tested at a time. The per-PR
-      # concurrency group above prevents parallel runs for the SAME PR, but
-      # does NOT prevent two DIFFERENT PRs from racing. A global concurrency
-      # group is intentionally not used here to avoid blocking main deploys.
-      - name: Push pending migrations
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push
+      # WHY in-runner: first start applies all migrations + seed.sql to a
+      # fresh Postgres — self-contained, no cloud project to auto-pause, no
+      # shared database for concurrent runs to race on.
+      # WHY -x: E2E only needs Postgres + GoTrue + Kong (+ PostgREST). Realtime
+      # was replaced by SSE (20260329190000_drop_realtime_publications.sql);
+      # the rest are local-dev conveniences that only slow the runner down.
+      # WHY before the API build: the API fetches the ES256 JWKS from
+      # SUPABASE_URL at startup — the stack must be up before the API runs.
+      - name: Start ephemeral Supabase stack
+        run: supabase start -x studio,mailpit,imgproxy,edge-runtime,logflare,vector,supavisor,postgres-meta,realtime,storage-api
 
       # ── pgTAP database tests ────────────────────────────
       # WHY: RLS policies and CHECK constraints are security-critical.
-      # WHY --db-url: `--linked` creates a restricted login role that lacks
-      # CREATE on public schema and access to auth tables. Using --db-url
-      # with the full database URL bypasses this and runs as postgres.
+      # WHY no flags: defaults to --local, connecting to the in-runner db as
+      # postgres — full access to public and auth schemas, unlike the
+      # restricted login role `--linked` used to create on the cloud project.
       - name: Run pgTAP database tests
-        run: supabase test db --db-url "${{ secrets.CI_SUPABASE_DB_URL }}"
+        run: supabase test db
 
       # ── Build & start Rust API ───────────────────────────
       - name: Build Rust API
@@ -149,14 +174,9 @@ jobs:
           SQLX_OFFLINE: "true"
         run: cargo build --release
 
+      # API env (DATABASE_URL, SUPABASE_*) comes from the job-level env above.
       - name: Start Rust API (background)
         working-directory: harmony-api
-        env:
-          DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
-          SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
-          SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
-          ENVIRONMENT: test
-          SERVER_PORT: "3000"
         run: ./target/release/harmony-api > /tmp/api-stdout.log 2>&1 &
 
       # ── Generate API client (gitignored, must be regenerated) ─
@@ -167,27 +187,16 @@ jobs:
         run: pnpm gen:api
 
       # ── Start Vite dev server ────────────────────────────
+      # VITE_* env comes from the job-level env above.
       - name: Start Vite dev server (background)
         working-directory: harmony-app
-        env:
-          VITE_API_URL: http://localhost:3000
-          VITE_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
-          VITE_TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
         run: pnpm dev &
 
       # ── Wait for services ────────────────────────────────
-      # WHY 3 attempts with restart: The API connects to Supabase Cloud Postgres
-      # on startup. Transient PoolTimedOut errors occur when the CI runner's
-      # network path to Supabase is slow. Restarting the API retries the
-      # connection with a fresh pool, which usually succeeds on the 2nd attempt.
+      # WHY 3 attempts with restart: kept as cheap insurance against a slow
+      # API cold start (pool acquisition, JWKS fetch). The restart loop reuses
+      # the job-level env, so a restarted API is configured identically.
       - name: Wait for API and Vite to be ready
-        env:
-          DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
-          SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
-          SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
-          ENVIRONMENT: test
-          SERVER_PORT: "3000"
         run: |
           MAX_ATTEMPTS=3
           for attempt in $(seq 1 $MAX_ATTEMPTS); do
@@ -219,11 +228,6 @@ jobs:
       # silently and all E2E tests timeout. This step catches that early.
       - name: Verify React app renders (smoke check)
         working-directory: harmony-app
-        env:
-          VITE_API_URL: http://localhost:3000
-          VITE_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
-          VITE_TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
         run: |
           npx playwright test --grep "should return 200 on health endpoint" --reporter=list 2>&1 || true
           echo "--- Smoke check: navigating to app root ---"
@@ -268,12 +272,9 @@ jobs:
           "
 
       # ── Run E2E tests ────────────────────────────────────
+      # CI_SUPABASE_* env (local demo keys) comes from the job-level env above.
       - name: Run Playwright E2E tests
         working-directory: harmony-app
-        env:
-          CI_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
-          CI_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
-          CI_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.CI_SUPABASE_SERVICE_ROLE_KEY }}
         run: npx playwright test --retries=1 --fail-on-flaky-tests
 
       # ── Artifacts (on failure only) ──────────────────────
@@ -312,9 +313,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # WHY same pin as the E2E job: one CLI version across the pipeline.
       - uses: supabase/setup-cli@v1.6.0
         with:
-          version: 2.84.2
+          version: 2.90.0
 
       - name: Link production Supabase project
         env:

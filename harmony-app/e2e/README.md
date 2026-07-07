@@ -143,9 +143,11 @@ e2e/
 
 Everything defaults to local Supabase (`127.0.0.1:64321`) and local API (`localhost:3000`). The well-known Supabase local dev keys are hardcoded as defaults.
 
-### CI / Supabase Cloud (via environment variables)
+CI uses the same setup: the E2E workflow starts an ephemeral in-runner Supabase stack (`supabase start`) and passes these same local demo credentials explicitly.
 
-For running against a Supabase Cloud project (e.g., CI), set these env vars:
+### Overriding the target Supabase (via environment variables)
+
+To run against a different Supabase project, set these env vars:
 
 | Env Var | Used by | Description |
 |---------|---------|-------------|
