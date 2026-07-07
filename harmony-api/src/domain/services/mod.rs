@@ -2,6 +2,7 @@
 //!
 //! Pure Rust, no infrastructure dependencies.
 
+mod channel_access;
 mod channel_service;
 pub mod content_filter;
 pub mod content_moderation;

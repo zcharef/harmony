@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::domain::errors::DomainError;
 use crate::domain::models::{ChannelId, MessageId, UserId};
 use crate::domain::ports::{ChannelRepository, MemberRepository, ReactionRepository};
+use crate::domain::services::channel_access::ensure_channel_access;
 
 /// Maximum emoji length in characters.
 const MAX_EMOJI_LENGTH: usize = 32;
@@ -31,10 +32,13 @@ impl ReactionService {
         }
     }
 
-    /// Verify that a user is a member of the server containing a channel.
+    /// Verify that a user may access the channel they are reacting in.
     ///
-    /// WHY: Same pattern as `MessageService::verify_channel_membership` —
-    /// reactions require the same authorization check.
+    /// WHY: Reactions require the same access decision as reading/posting —
+    /// server membership plus the private-channel role gate. Delegates to the
+    /// shared [`ensure_channel_access`] helper so this path can't drift from the
+    /// message path again (it previously skipped the private-channel check,
+    /// letting non-authorized members react in private channels).
     async fn verify_channel_membership(
         &self,
         channel_id: &ChannelId,
@@ -49,18 +53,7 @@ impl ReactionService {
                 id: channel_id.to_string(),
             })?;
 
-        let is_member = self
-            .member_repo
-            .is_member(&channel.server_id, user_id)
-            .await?;
-
-        if !is_member {
-            return Err(DomainError::Forbidden(
-                "You must be a server member to react in this channel".to_string(),
-            ));
-        }
-
-        Ok(())
+        ensure_channel_access(&*self.channel_repo, &*self.member_repo, &channel, user_id).await
     }
 
     /// Add a reaction to a message.
