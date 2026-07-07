@@ -1,21 +1,21 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                m.id,\n                m.channel_id,\n                m.author_id,\n                m.content,\n                m.edited_at,\n                m.deleted_at,\n                m.deleted_by,\n                m.encrypted,\n                m.sender_device_id,\n                m.message_type as \"message_type!: String\",\n                m.system_event_key,\n                m.parent_message_id,\n                m.moderated_at,\n                m.moderation_reason,\n                m.original_content,\n                m.created_at,\n                p.username AS \"author_username?\",\n                p.avatar_url AS \"author_avatar_url?\",\n                parent_p.username AS \"parent_author_username?\",\n                LEFT(parent_m.content, 100) AS \"parent_content_preview?\",\n                (parent_m.deleted_at IS NOT NULL) AS \"parent_deleted?\"\n            FROM messages m\n            LEFT JOIN profiles p ON p.id = m.author_id\n            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id\n            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id\n            WHERE m.channel_id = $1\n              AND m.deleted_at IS NULL\n              AND ($2::timestamptz IS NULL OR m.created_at < $2)\n            ORDER BY m.created_at DESC\n            LIMIT $3\n            ",
+  "query": "\n            WITH inserted AS (\n                INSERT INTO messages (channel_id, author_id, content, message_type, system_event_key)\n                VALUES ($1, $2, '', 'system'::message_type, $3)\n                RETURNING\n                    id,\n                    channel_id,\n                    author_id,\n                    content,\n                    edited_at,\n                    deleted_at,\n                    deleted_by,\n                    encrypted,\n                    sender_device_id,\n                    message_type,\n                    system_event_key,\n                    parent_message_id,\n                    moderated_at,\n                    moderation_reason,\n                    original_content,\n                    created_at\n            )\n            SELECT\n                i.id as \"id!\",\n                i.channel_id as \"channel_id!\",\n                i.author_id as \"author_id!\",\n                i.content,\n                i.edited_at,\n                i.deleted_at,\n                i.deleted_by,\n                i.encrypted as \"encrypted!\",\n                i.sender_device_id,\n                i.message_type as \"message_type!: String\",\n                i.system_event_key,\n                i.parent_message_id,\n                i.moderated_at,\n                i.moderation_reason,\n                i.original_content,\n                i.created_at as \"created_at!\",\n                p.username AS \"author_username?\",\n                p.display_name AS \"author_display_name?\",\n                p.avatar_url AS \"author_avatar_url?\"\n            FROM inserted i\n            LEFT JOIN profiles p ON p.id = i.author_id\n            ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "id!",
         "type_info": "Uuid"
       },
       {
         "ordinal": 1,
-        "name": "channel_id",
+        "name": "channel_id!",
         "type_info": "Uuid"
       },
       {
         "ordinal": 2,
-        "name": "author_id",
+        "name": "author_id!",
         "type_info": "Uuid"
       },
       {
@@ -40,7 +40,7 @@
       },
       {
         "ordinal": 7,
-        "name": "encrypted",
+        "name": "encrypted!",
         "type_info": "Bool"
       },
       {
@@ -90,7 +90,7 @@
       },
       {
         "ordinal": 15,
-        "name": "created_at",
+        "name": "created_at!",
         "type_info": "Timestamptz"
       },
       {
@@ -100,30 +100,20 @@
       },
       {
         "ordinal": 17,
-        "name": "author_avatar_url?",
+        "name": "author_display_name?",
         "type_info": "Text"
       },
       {
         "ordinal": 18,
-        "name": "parent_author_username?",
+        "name": "author_avatar_url?",
         "type_info": "Text"
-      },
-      {
-        "ordinal": 19,
-        "name": "parent_content_preview?",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 20,
-        "name": "parent_deleted?",
-        "type_info": "Bool"
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
-        "Timestamptz",
-        "Int8"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -143,12 +133,10 @@
       true,
       true,
       false,
-      false,
       true,
-      false,
-      null,
-      null
+      true,
+      true
     ]
   },
-  "hash": "0ee6a18715d43e99cafad9071e3fd257ccb1e275069e72ef5a53441ed73eb7a8"
+  "hash": "532db2d00c61edbf7d239a6609360f982de3e1e5960f3de5a4f1ab0806c32634"
 }

@@ -204,7 +204,9 @@ impl ProfileService {
         }
 
         if let Some(ref name) = display_name {
-            let len = name.len();
+            // WHY: Count chars, not bytes — a 32-char accented or CJK name is a
+            // valid display name even though it exceeds 32 bytes in UTF-8.
+            let len = name.chars().count();
             if len == 0 || len > 32 {
                 return Err(DomainError::ValidationError(
                     "Display name must be 1-32 characters".to_string(),
@@ -447,6 +449,59 @@ mod tests {
             svc.update_profile(&UserId::new(Uuid::from_u128(1)), Some(at_limit), None, None)
                 .await
                 .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_accepts_display_name_at_32_multibyte_chars() {
+        let svc = profile_service();
+        // U+00E9 (é) is 2 bytes in UTF-8 — 32 chars = 64 bytes. A byte-based
+        // check would reject this; the char-based check must accept it.
+        let name = "é".repeat(32);
+        assert_eq!(name.chars().count(), 32);
+        assert!(
+            name.len() > 32,
+            "must exceed 32 bytes to prove chars-not-bytes"
+        );
+
+        assert!(
+            svc.update_profile(&UserId::new(Uuid::from_u128(1)), None, Some(name), None)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_rejects_display_name_over_32_chars() {
+        let svc = profile_service();
+        let too_long = "a".repeat(33);
+
+        let err = svc
+            .update_profile(&UserId::new(Uuid::from_u128(1)), None, Some(too_long), None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_rejects_empty_display_name() {
+        let svc = profile_service();
+
+        let err = svc
+            .update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                Some(String::new()),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
         );
     }
 

@@ -108,6 +108,7 @@ struct MessageWithAuthorRow {
     created_at: DateTime<Utc>,
     // Author profile fields from JOIN.
     author_username: Option<String>,
+    author_display_name: Option<String>,
     author_avatar_url: Option<String>,
     // Parent message preview fields from self-JOIN.
     parent_author_username: Option<String>,
@@ -169,6 +170,7 @@ impl MessageWithAuthorRow {
             author_username: self
                 .author_username
                 .unwrap_or_else(|| "Unknown".to_string()),
+            author_display_name: self.author_display_name,
             author_avatar_url: self.author_avatar_url,
             // WHY: Reactions are populated by MessageService after batch-fetching,
             // not by the repository query. Default to empty here.
@@ -297,6 +299,7 @@ impl MessageRepository for PgMessageRepository {
                 i.original_content,
                 i.created_at as "created_at!",
                 p.username AS "author_username?",
+                p.display_name AS "author_display_name?",
                 p.avatar_url AS "author_avatar_url?",
                 parent_p.username AS "parent_author_username?",
                 LEFT(parent_m.content, 100) AS "parent_content_preview?",
@@ -340,6 +343,7 @@ impl MessageRepository for PgMessageRepository {
                 original_content: row.original_content,
                 created_at: row.created_at,
                 author_username: row.author_username,
+                author_display_name: row.author_display_name,
                 author_avatar_url: row.author_avatar_url,
                 parent_author_username: row.parent_author_username,
                 parent_content_preview: row.parent_content_preview,
@@ -391,6 +395,7 @@ impl MessageRepository for PgMessageRepository {
                 i.original_content,
                 i.created_at as "created_at!",
                 p.username AS "author_username?",
+                p.display_name AS "author_display_name?",
                 p.avatar_url AS "author_avatar_url?",
                 parent_p.username AS "parent_author_username?",
                 LEFT(parent_m.content, 100) AS "parent_content_preview?",
@@ -432,6 +437,7 @@ impl MessageRepository for PgMessageRepository {
             original_content: row.original_content,
             created_at: row.created_at,
             author_username: row.author_username,
+            author_display_name: row.author_display_name,
             author_avatar_url: row.author_avatar_url,
             parent_author_username: row.parent_author_username,
             parent_content_preview: row.parent_content_preview,
@@ -471,6 +477,7 @@ impl MessageRepository for PgMessageRepository {
                 m.original_content,
                 m.created_at,
                 p.username AS "author_username?",
+                p.display_name AS "author_display_name?",
                 p.avatar_url AS "author_avatar_url?",
                 parent_p.username AS "parent_author_username?",
                 LEFT(parent_m.content, 100) AS "parent_content_preview?",
@@ -514,6 +521,7 @@ impl MessageRepository for PgMessageRepository {
                     original_content: r.original_content,
                     created_at: r.created_at,
                     author_username: r.author_username,
+                    author_display_name: r.author_display_name,
                     author_avatar_url: r.author_avatar_url,
                     parent_author_username: r.parent_author_username,
                     parent_content_preview: r.parent_content_preview,
@@ -635,6 +643,7 @@ impl MessageRepository for PgMessageRepository {
                 u.original_content,
                 u.created_at as "created_at!",
                 p.username AS "author_username?",
+                p.display_name AS "author_display_name?",
                 p.avatar_url AS "author_avatar_url?",
                 parent_p.username AS "parent_author_username?",
                 LEFT(parent_m.content, 100) AS "parent_content_preview?",
@@ -676,6 +685,7 @@ impl MessageRepository for PgMessageRepository {
             original_content: row.original_content,
             created_at: row.created_at,
             author_username: row.author_username,
+            author_display_name: row.author_display_name,
             author_avatar_url: row.author_avatar_url,
             parent_author_username: row.parent_author_username,
             parent_content_preview: row.parent_content_preview,
@@ -853,6 +863,7 @@ impl MessageRepository for PgMessageRepository {
                 i.original_content,
                 i.created_at as "created_at!",
                 p.username AS "author_username?",
+                p.display_name AS "author_display_name?",
                 p.avatar_url AS "author_avatar_url?"
             FROM inserted i
             LEFT JOIN profiles p ON p.id = i.author_id
@@ -883,6 +894,7 @@ impl MessageRepository for PgMessageRepository {
             original_content: row.original_content,
             created_at: row.created_at,
             author_username: row.author_username,
+            author_display_name: row.author_display_name,
             author_avatar_url: row.author_avatar_url,
             // WHY: System messages never have parent replies.
             parent_author_username: None,

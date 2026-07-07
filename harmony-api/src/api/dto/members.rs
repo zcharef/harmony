@@ -12,6 +12,9 @@ use crate::domain::models::{Role, ServerMember, UserId};
 pub struct MemberResponse {
     pub user_id: UserId,
     pub username: String,
+    /// Member's display name (if set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -25,6 +28,7 @@ impl From<ServerMember> for MemberResponse {
         Self {
             user_id: m.user_id,
             username: m.username,
+            display_name: m.display_name,
             avatar_url: m.avatar_url,
             nickname: m.nickname,
             role: m.role.to_string(),
@@ -82,4 +86,52 @@ pub struct AssignRoleRequest {
 pub struct TransferOwnershipRequest {
     /// The user ID of the new owner (must be an existing member).
     pub new_owner_id: UserId,
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use crate::domain::models::ServerId;
+
+    fn make_member(display_name: Option<String>) -> ServerMember {
+        ServerMember {
+            user_id: UserId::from(Uuid::new_v4()),
+            server_id: ServerId::from(Uuid::new_v4()),
+            username: "alice".to_string(),
+            display_name,
+            avatar_url: None,
+            nickname: None,
+            role: Role::Member,
+            joined_at: Utc::now(),
+        }
+    }
+
+    /// WHY: The member list is where the SPA resolves
+    /// `nickname ?? displayName ?? username` — the From conversion must carry
+    /// `display_name` through and serde must emit the camelCase key (ADR-039).
+    #[test]
+    fn member_response_carries_display_name() {
+        let response = MemberResponse::from(make_member(Some("Alice Doe".to_string())));
+
+        assert_eq!(response.username, "alice");
+        assert_eq!(response.display_name, Some("Alice Doe".to_string()));
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["username"], "alice");
+        assert_eq!(json["displayName"], "Alice Doe");
+    }
+
+    /// WHY: `skip_serializing_if` must omit the key entirely when the member
+    /// has no display name — old clients tolerate a missing optional field.
+    #[test]
+    fn member_response_omits_absent_display_name() {
+        let response = MemberResponse::from(make_member(None));
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert!(json.get("displayName").is_none());
+    }
 }

@@ -15,6 +15,7 @@ pub struct ServerMember {
     pub user_id: UserId,
     pub server_id: ServerId,
     pub username: String,
+    pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub nickname: Option<String>,
     pub role: Role,

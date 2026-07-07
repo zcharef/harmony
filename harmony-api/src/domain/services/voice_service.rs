@@ -1055,6 +1055,7 @@ mod tests {
             user_id: uid,
             server_id: srv_id,
             username: "testuser".to_string(),
+            display_name: None,
             avatar_url: None,
             nickname: None,
             role: Role::Member,

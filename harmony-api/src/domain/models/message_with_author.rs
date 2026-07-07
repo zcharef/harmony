@@ -22,6 +22,8 @@ pub struct MessageWithAuthor {
     pub message: Message,
     /// Author's display username (from `profiles.username`).
     pub author_username: String,
+    /// Author's display name (from `profiles.display_name`), if set.
+    pub author_display_name: Option<String>,
     /// Author's avatar URL (from `profiles.avatar_url`), if set.
     pub author_avatar_url: Option<String>,
     /// Aggregated reaction summaries (populated by `MessageService`, not the repository).
