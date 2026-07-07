@@ -109,27 +109,35 @@ pub async fn sse_events(
     // for client-side SSE reconnects on membership changes.
     let (watch_tx, watch_rx) = watch::channel(server_ids.clone());
 
-    // ── Presence: mark user online ──────────────────────────────
+    // ── Presence: register connection, broadcast effective status ──
+    // WHY: connect() returns the EFFECTIVE status atomically — a brand-new
+    // presence is Online, but a reconnect or second-tab user who is dnd/idle
+    // keeps that status. Broadcasting a hardcoded Online here would silently reset
+    // DND to online for every observer on every SSE reconnect (routine on the
+    // ~50-min JWT-rotation timer). Using connect()'s return value — rather than a
+    // separate get_status() — guarantees this local broadcast matches the value
+    // the cross-instance NOTIFY carries (no TOCTOU on a concurrent status change).
     let server_id_vec: Vec<ServerId> = server_ids.iter().cloned().collect();
-    state
+    let effective_status = state
         .presence_tracker()
         .connect(user_id.clone(), server_id_vec);
 
-    let online_event = ServerEvent::PresenceChanged {
+    let presence_event = ServerEvent::PresenceChanged {
         sender_id: user_id.clone(),
         user_id: user_id.clone(),
-        status: UserStatus::Online,
+        status: effective_status.clone(),
     };
 
     // WHY: Subscribe BEFORE publish so the new subscriber does not miss
     // events published between publish() and subscribe() (race condition).
     let rx = state.event_bus().subscribe();
 
-    let receivers = state.event_bus().publish(online_event);
+    let receivers = state.event_bus().publish(presence_event);
     tracing::info!(
         server_count = server_ids.len(),
         receivers,
-        "SSE connection established, user marked online"
+        status = ?effective_status,
+        "SSE connection established, presence broadcast"
     );
 
     // Clone user_id for the heartbeat stream, guard, and unread query before moving into event closures.
