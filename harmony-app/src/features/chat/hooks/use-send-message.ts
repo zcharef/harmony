@@ -44,43 +44,47 @@ export function useSendMessage(
 
   return useMutation({
     mutationFn: async (input: { content: string; parentMessageId?: string }) => {
-      // WHY: Attempt encryption if available. encryptFn is wrapped in its own
-      // try/catch so that encryption failures (e.g. recipient has no E2EE keys →
-      // 404 from getPreKeyBundle) fall back to plaintext instead of killing the
-      // entire mutation. sendMessage is called outside this catch so API errors
-      // propagate to onError as expected.
+      // WHY encrypted context is fail-closed: When `encryption` is present the user
+      // believes this DM is end-to-end encrypted. If encryptFn fails (recipient has
+      // no pre-key bundle → 404, Olm/ratchet error, Tauri invoke failure) we MUST NOT
+      // silently send the content in cleartext — that is a confidentiality downgrade
+      // the user never consented to and stores their message plaintext server-side.
+      // We reject the mutation instead so onError surfaces visible feedback and
+      // nothing is sent. sendMessage is called outside the catch so genuine API
+      // errors still propagate to onError as expected.
       if (encryption !== undefined) {
-        let encrypted: { content: string; senderDeviceId: string } | null = null
+        let encrypted: { content: string; senderDeviceId: string }
         try {
           encrypted = await encryption.encryptFn(input.content)
         } catch (encryptionError) {
-          // WHY: Graceful degradation — matches web DM behavior (always plaintext).
-          // The lock icon in MessageHeader already signals encrypted vs plaintext.
-          logger.warn('dm_encryption_failed_fallback_plaintext', {
+          logger.warn('dm_encryption_failed_message_not_sent', {
             channelId,
             error:
               encryptionError instanceof Error ? encryptionError.message : String(encryptionError),
           })
+          throw new Error(
+            'Message not sent — could not encrypt it. Your recipient may not have encryption set up.',
+          )
         }
 
-        if (encrypted !== null) {
-          const { data } = await sendMessage({
-            path: { id: channelId },
-            body: {
-              content: encrypted.content,
-              encrypted: true,
-              senderDeviceId: encrypted.senderDeviceId,
-              parentMessageId: input.parentMessageId,
-            },
-            throwOnError: true,
-          })
-          // WHY: Cache the plaintext locally so the sender can read their own message
-          // without needing to decrypt it (sender doesn't have their own session).
-          encryption.cachePlaintext(data.id, channelId, input.content)
-          return data
-        }
+        const { data } = await sendMessage({
+          path: { id: channelId },
+          body: {
+            content: encrypted.content,
+            encrypted: true,
+            senderDeviceId: encrypted.senderDeviceId,
+            parentMessageId: input.parentMessageId,
+          },
+          throwOnError: true,
+        })
+        // WHY: Cache the plaintext locally so the sender can read their own message
+        // without needing to decrypt it (sender doesn't have their own session).
+        encryption.cachePlaintext(data.id, channelId, input.content)
+        return data
       }
 
+      // WHY plaintext here is intentional: no encryption context means a channel
+      // message or a web DM (plaintext by design). This path is unchanged.
       const { data } = await sendMessage({
         path: { id: channelId },
         body: { content: input.content, parentMessageId: input.parentMessageId },
