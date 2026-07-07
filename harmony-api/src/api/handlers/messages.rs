@@ -45,6 +45,7 @@ const MAX_MESSAGE_LIMIT: i64 = 100;
         (status = 201, description = "Message sent", body = MessageResponse),
         (status = 400, description = "Validation error", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 429, description = "Message rate limit exceeded", body = ProblemDetails),
     )
 )]
 #[tracing::instrument(skip(state, req))]

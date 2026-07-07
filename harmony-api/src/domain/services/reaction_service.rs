@@ -130,14 +130,17 @@ impl ReactionService {
         self.verify_message_in_channel(channel_id, message_id)
             .await?;
 
+        // WHY: Static validation BEFORE the rate limit — malformed emoji must
+        // not consume budget (25 bad requests would exhaust the window without
+        // adding a single reaction). Nothing probeable: the rules are static.
+        validate_emoji(emoji)?;
+
         self.spam_guard.check_and_record_action(
             user_id,
             "reaction",
             REACTION_RATE_MAX,
             REACTION_RATE_WINDOW,
         )?;
-
-        validate_emoji(emoji)?;
 
         // WHY: Cap DISTINCT emoji per message so a spammer can't grow a
         // message's reaction bar unboundedly. Piling onto an existing emoji

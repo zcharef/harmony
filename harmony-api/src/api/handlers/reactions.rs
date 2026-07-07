@@ -51,6 +51,7 @@ pub struct AddReactionRequest {
         (status = 400, description = "Validation error", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
         (status = 403, description = "Not a server member", body = ProblemDetails),
+        (status = 429, description = "Reaction rate limit exceeded", body = ProblemDetails),
     )
 )]
 #[tracing::instrument(skip(state, req))]

@@ -503,6 +503,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Reaction rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -803,6 +813,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Message rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1025,6 +1045,16 @@
           },
           "404": {
             "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Typing rate limit exceeded",
             "content": {
               "application/json": {
                 "schema": {
@@ -1395,6 +1425,16 @@
           },
           "404": {
             "description": "Recipient not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "DM creation rate limit exceeded",
             "content": {
               "application/json": {
                 "schema": {
@@ -2009,6 +2049,16 @@
           },
           "422": {
             "description": "Unprocessable request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Presence rate limit exceeded",
             "content": {
               "application/json": {
                 "schema": {

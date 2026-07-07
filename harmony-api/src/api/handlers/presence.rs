@@ -46,6 +46,7 @@ pub struct UpdatePresenceRequest {
         (status = 400, description = "Invalid status (e.g. 'offline' is system-managed)", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
         (status = 422, description = "Unprocessable request body", body = ProblemDetails),
+        (status = 429, description = "Presence rate limit exceeded", body = ProblemDetails),
     )
 )]
 #[tracing::instrument(skip(state))]

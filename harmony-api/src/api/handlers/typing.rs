@@ -40,6 +40,7 @@ const TYPING_RATE_WINDOW: Duration = Duration::from_secs(10);
         (status = 401, description = "Unauthorized", body = ProblemDetails),
         (status = 403, description = "Not a server member", body = ProblemDetails),
         (status = 404, description = "Channel not found", body = ProblemDetails),
+        (status = 429, description = "Typing rate limit exceeded", body = ProblemDetails),
     )
 )]
 #[tracing::instrument(skip(state))]

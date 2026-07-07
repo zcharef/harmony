@@ -35,6 +35,7 @@ const MAX_DM_LIMIT: i64 = 100;
         (status = 400, description = "Cannot DM yourself", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
         (status = 404, description = "Recipient not found", body = ProblemDetails),
+        (status = 429, description = "DM creation rate limit exceeded", body = ProblemDetails),
     )
 )]
 #[tracing::instrument(skip(state, req))]
