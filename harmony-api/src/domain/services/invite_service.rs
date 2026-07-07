@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use rand::Rng;
+use rand::RngExt;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Invite, InviteCode, ServerId, UserId};
