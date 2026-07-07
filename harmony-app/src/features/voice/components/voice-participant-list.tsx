@@ -9,19 +9,28 @@
 import { Avatar } from '@heroui/react'
 import { HeadphoneOff, MicOff } from 'lucide-react'
 import { memo } from 'react'
+import { useTranslation } from 'react-i18next'
 
+import { useMembers } from '@/features/members'
 import type { VoiceParticipantResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useRealtimeVoice } from '../hooks/use-realtime-voice'
 import { useVoiceParticipants } from '../hooks/use-voice-participants'
+import { resolveParticipantName } from '../lib/resolve-participant-name'
 import { useVoiceConnectionStore } from '../stores/voice-connection-store'
 
 interface VoiceParticipantListProps {
   channelId: string
+  /** WHY: Needed to resolve empty displayNames from the server member cache. */
+  serverId: string | null
 }
 
-export function VoiceParticipantList({ channelId }: VoiceParticipantListProps) {
+export function VoiceParticipantList({ channelId, serverId }: VoiceParticipantListProps) {
+  const { t } = useTranslation('voice')
   const { data: participants } = useVoiceParticipants(channelId)
+  // WHY: Shares the query key with MemberList — cache hit, no extra request
+  // in the common case. Used to resolve names when displayName arrives empty.
+  const { data: membersData } = useMembers(serverId)
   const activeSpeakers = useVoiceConnectionStore((s) => s.activeSpeakers)
 
   // WHY: Keeps TanStack Query cache updated via SSE for this channel.
@@ -37,6 +46,11 @@ export function VoiceParticipantList({ channelId }: VoiceParticipantListProps) {
         <VoiceParticipantRow
           key={participant.userId}
           participant={participant}
+          displayName={resolveParticipantName(
+            participant,
+            membersData?.items,
+            t('unknownParticipant'),
+          )}
           isSpeaking={activeSpeakers.has(participant.userId)}
         />
       ))}
@@ -53,16 +67,16 @@ export function VoiceParticipantList({ channelId }: VoiceParticipantListProps) {
 
 interface VoiceParticipantRowProps {
   participant: VoiceParticipantResponse
+  /** WHY: Pre-resolved by the parent (member cache + i18n fallback) — never a raw UUID. */
+  displayName: string
   isSpeaking: boolean
 }
 
 const VoiceParticipantRow = memo(function VoiceParticipantRow({
   participant,
+  displayName,
   isSpeaking,
 }: VoiceParticipantRowProps) {
-  const displayName =
-    participant.displayName.length > 0 ? participant.displayName : participant.userId
-
   return (
     <li
       data-test={`voice-participant-${participant.userId}`}

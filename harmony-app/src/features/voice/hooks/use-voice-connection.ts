@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import type React from 'react'
 import { useCallback, useEffect, useRef } from 'react'
-import type { VoiceParticipantResponse } from '@/lib/api'
+import type { ProfileResponse, VoiceParticipantResponse } from '@/lib/api'
 import {
   joinVoice,
   leaveVoice,
@@ -51,7 +51,12 @@ function insertSelfIntoParticipantCache(
 ): void {
   if (userId === undefined) return
   const room = useVoiceConnectionStore.getState().room
-  const displayName = room?.localParticipant.name ?? ''
+  const liveKitName = room?.localParticipant.name ?? ''
+  // WHY: LiveKit only knows the name embedded in the token grant, which can be
+  // empty. Fall back to the cached profile username so the sidebar never shows
+  // self as "Unknown user" — the local user's username is always known locally.
+  const profile = queryClient.getQueryData<ProfileResponse>(queryKeys.profiles.me())
+  const displayName = liveKitName.length > 0 ? liveKitName : (profile?.username ?? '')
 
   queryClient.setQueryData<VoiceParticipantResponse[]>(
     queryKeys.voice.participants(channelId),

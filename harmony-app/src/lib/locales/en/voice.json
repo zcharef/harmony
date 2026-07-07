@@ -17,5 +17,6 @@
   "microphone": "Microphone",
   "speaker": "Speaker",
   "switchMicrophoneFailed": "Failed to switch microphone",
-  "switchSpeakerFailed": "Failed to switch speaker"
+  "switchSpeakerFailed": "Failed to switch speaker",
+  "unknownParticipant": "Unknown user"
 }
