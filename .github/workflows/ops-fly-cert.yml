@@ -1,0 +1,48 @@
+# Ops workflow: manage the Fly.io TLS certificate for the API custom domain.
+#
+# WHY: prod incident 2026-07-07 — api.joinharmony.app answered 525 on every
+# request because Fly had no certificate for that hostname (DNS was pointed
+# at Fly on 2026-04-05 but `flyctl certs add` was never run). The SPA bakes
+# this URL in, so the whole app was dead. This workflow lets an operator
+# (or the autonomous agent) provision/inspect the cert using the same
+# FLY_API_TOKEN the deploy pipeline already uses.
+name: Ops — Fly cert
+
+on:
+  workflow_dispatch:
+    inputs:
+      hostname:
+        description: Hostname to add/inspect on the Fly app
+        required: false
+        default: api.joinharmony.app
+
+concurrency: ops-fly-cert
+
+jobs:
+  cert:
+    name: Provision + show cert
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+      # WHY pinned: @master is a supply-chain risk — any push to their repo
+      # changes what runs in our production deploy pipeline.
+      - uses: superfly/flyctl-actions/setup-flyctl@1.5
+
+      # `certs add` is idempotent-ish: it errors if the cert already exists,
+      # which is fine — the `show` step below is the source of truth.
+      - name: Add certificate
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CERT_HOSTNAME: ${{ inputs.hostname }}
+        run: flyctl certs add "$CERT_HOSTNAME" -a harmony-api || true
+
+      - name: Show certificate status + validation instructions
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CERT_HOSTNAME: ${{ inputs.hostname }}
+        run: |
+          flyctl certs show "$CERT_HOSTNAME" -a harmony-api
+          flyctl certs list -a harmony-api
