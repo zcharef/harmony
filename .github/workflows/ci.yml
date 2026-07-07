@@ -238,7 +238,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: taiki-e/install-action@v2.71.1
+      - uses: taiki-e/install-action@v2.82.10
         with:
           tool: cargo-audit,cargo-deny
 
