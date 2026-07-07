@@ -326,7 +326,14 @@ function handleConnectResult(result: ConnectResult, s: LoopState): 'continue' | 
 
 /** Waits for the exponential backoff delay. Resolves after the timeout. */
 function waitBackoff(s: LoopState): Promise<void> {
-  const delay = BACKOFF_DELAYS[Math.min(s.backoffIndex, BACKOFF_DELAYS.length - 1)]
+  // WHY ?? fallback: index is clamped to the array bounds, but TS cannot see
+  // that through Math.min — fall back to the max delay rather than assert.
+  const baseDelay = BACKOFF_DELAYS[Math.min(s.backoffIndex, BACKOFF_DELAYS.length - 1)] ?? 30_000
+  // WHY jitter (±20%): the server terminates EVERY lagged consumer's stream at
+  // the same instant during a broadcast burst (forced resync). Fixed delays
+  // would reconnect all clients in lockstep — a thundering herd of full query
+  // invalidations and unread-snapshot queries. Randomizing desynchronizes it.
+  const delay = Math.round(baseDelay * (0.8 + Math.random() * 0.4))
   s.backoffIndex = s.backoffIndex + 1
   logger.warn('sse_backoff', { userId: s.userId, delay, attempt: s.backoffIndex })
 
