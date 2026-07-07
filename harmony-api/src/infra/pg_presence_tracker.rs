@@ -43,6 +43,10 @@ pub enum PresenceCommand {
     Connect {
         user_id: UserId,
         server_ids: Vec<ServerId>,
+        /// Effective status after the connection was registered. On a reconnect
+        /// or second tab this is the user's preserved status (e.g. dnd/idle), NOT
+        /// a hardcoded "online" — otherwise remote instances would reset it.
+        status: UserStatus,
     },
     Disconnect {
         user_id: UserId,
@@ -105,34 +109,52 @@ impl PgPresenceTracker {
         (tracker, write_rx)
     }
 
-    /// Register a new SSE connection for a user.
+    /// Register a new SSE connection for a user, returning the user's **effective**
+    /// status after the connection is registered.
     ///
     /// Updates `DashMap` immediately, then sends Connect command to the write worker
-    /// for async Postgres persistence.
-    pub fn connect(&self, user_id: UserId, server_ids: Vec<ServerId>) {
-        self.local_cache
-            .entry(user_id.clone())
-            .and_modify(|entry| {
-                entry.connection_count += 1;
-                entry.server_ids = server_ids.clone();
-                entry.last_heartbeat = Instant::now();
-            })
-            .or_insert(PresenceEntry {
-                status: UserStatus::Online,
-                server_ids: server_ids.clone(),
-                last_heartbeat: Instant::now(),
-                connection_count: 1,
-            });
+    /// for async Postgres persistence. Returns the effective status (a brand-new
+    /// presence is `Online`; a reconnect or second tab keeps the preserved
+    /// dnd/idle) so the caller broadcasts the SAME value the cross-instance NOTIFY
+    /// carries — avoiding a TOCTOU where a concurrent status change between connect
+    /// and a separate `get_status` read would make the two broadcasts disagree.
+    pub fn connect(&self, user_id: UserId, server_ids: Vec<ServerId>) -> UserStatus {
+        // WHY: A new (or_insert) presence starts Online, but a reconnect or a
+        // second tab (and_modify) MUST preserve the user's current status — a
+        // dnd/idle user re-establishing their SSE stream is still dnd/idle. We
+        // read the effective status back so both the local broadcast (in the SSE
+        // handler) and the cross-instance NOTIFY announce the truth instead of a
+        // hardcoded "online" that silently resets DND for every observer.
+        let effective_status = {
+            let entry = self
+                .local_cache
+                .entry(user_id.clone())
+                .and_modify(|entry| {
+                    entry.connection_count += 1;
+                    entry.server_ids = server_ids.clone();
+                    entry.last_heartbeat = Instant::now();
+                })
+                .or_insert(PresenceEntry {
+                    status: UserStatus::Online,
+                    server_ids: server_ids.clone(),
+                    last_heartbeat: Instant::now(),
+                    connection_count: 1,
+                });
+            entry.status.clone()
+        };
 
         if let Err(err) = self.write_tx.send(PresenceCommand::Connect {
             user_id,
             server_ids,
+            status: effective_status.clone(),
         }) {
             tracing::warn!(
                 error = %err,
                 "presence write_tx send failed — write worker may have stopped"
             );
         }
+
+        effective_status
     }
 
     /// Unregister an SSE connection for a user.
@@ -269,7 +291,14 @@ impl PgPresenceTracker {
         Ok(())
     }
 
-    /// Remove stale presence entries from Postgres and local cache.
+    /// Remove stale presence entries from Postgres and local cache, returning the
+    /// users who went **globally** offline (no session left on any instance).
+    ///
+    /// The returned Vec is intentionally NOT every swept user: a user swept here
+    /// may still be live on another instance, in which case they are removed from
+    /// this instance's cache but neither returned (no local offline broadcast) nor
+    /// notified cross-instance. Only fully-gone users are announced offline, on
+    /// both paths.
     ///
     /// WHY: Uses a fixed 90-second interval in SQL rather than the caller's
     /// `max_age` — the Postgres heartbeat cadence is the authoritative timeout.
@@ -291,17 +320,69 @@ impl PgPresenceTracker {
             }
         };
 
-        let removed: Vec<UserId> = rows.iter().map(|r| UserId(r.user_id)).collect();
+        let swept: Vec<UserId> = rows.iter().map(|r| UserId(r.user_id)).collect();
 
-        for uid in &removed {
-            self.local_cache.remove(uid);
+        // WHY: A swept row means the user had no live connection on THIS instance,
+        // but they may still be live on another (the DELETE is table-wide and only
+        // touches rows already stale). Only users with zero sessions ANYWHERE went
+        // truly offline, and ONLY those may be announced offline — both locally
+        // (via the returned Vec, which the sweep loop broadcasts) and cross-instance
+        // (via pg_notify here). Returning every swept user would falsely show a
+        // multi-instance-live user offline to this instance's own clients, and
+        // skipping the cross-instance notify would leave ghost 'online' entries in
+        // other instances' caches forever. Both offline paths share this one gate.
+        let mut went_offline = Vec::new();
+        for uid in swept {
+            self.local_cache.remove(&uid);
+
+            let still_connected = sqlx::query!(
+                r#"SELECT 1 as "exists!" FROM presence_sessions WHERE user_id = $1 LIMIT 1"#,
+                uid.0,
+            )
+            .fetch_optional(&self.pool)
+            .await;
+
+            // WHY: treat a failed existence check as fully-gone. A swept row is
+            // deleted only once, so the sweep gets a single chance to announce the
+            // user offline; skipping on a transient DB error would leave them a
+            // ghost 'online' forever. A still-connected user re-announces on their
+            // next connect/set_status, but a ghost never self-heals — so fail safe.
+            let fully_gone = match still_connected {
+                Ok(None) => true,
+                Ok(Some(_)) => false,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        user_id = %uid,
+                        "sweep_stale existence check failed — assuming offline"
+                    );
+                    true
+                }
+            };
+
+            if fully_gone {
+                notify_presence(
+                    &self.pool,
+                    &PresenceEnvelope {
+                        i: self.instance_id,
+                        u: uid.0,
+                        a: "offline".to_owned(),
+                        s: Vec::new(),
+                    },
+                )
+                .await;
+                went_offline.push(uid);
+            }
         }
 
-        if !removed.is_empty() {
-            tracing::info!(count = removed.len(), "swept stale presence entries");
+        if !went_offline.is_empty() {
+            tracing::info!(
+                count = went_offline.len(),
+                "swept presence entries went offline"
+            );
         }
 
-        removed
+        went_offline
     }
 
     /// Delete all presence rows for this instance (graceful shutdown cleanup).
@@ -387,6 +468,7 @@ pub async fn presence_write_worker(
             PresenceCommand::Connect {
                 user_id,
                 server_ids,
+                status,
             } => {
                 let server_id_uuids: Vec<Uuid> = server_ids.iter().map(|s| s.0).collect();
 
@@ -416,7 +498,10 @@ pub async fn presence_write_worker(
                     &PresenceEnvelope {
                         i: instance_id,
                         u: user_id.0,
-                        a: "online".to_owned(),
+                        // WHY: announce the effective status, not a hardcoded
+                        // "online" — a reconnecting dnd/idle user must not be
+                        // reset to online in every other instance's cache.
+                        a: status_to_action(&status).to_owned(),
                         s: server_id_uuids,
                     },
                 )
@@ -764,6 +849,26 @@ mod tests {
         let presence_11 = t.get_server_presence(&server(11));
         assert_eq!(presence_11.len(), 1);
         assert_eq!(presence_11[0].0, user(1));
+    }
+
+    /// Regression (sweep H2): a reconnect or second tab must PRESERVE a dnd/idle
+    /// status, not reset it to Online. The SSE handler reads this effective status
+    /// back (`get_status`) to broadcast the truth — if `connect()` reset it here,
+    /// every observer would see the user flip to Online on every SSE reconnect.
+    #[tokio::test]
+    async fn reconnect_preserves_dnd_status() {
+        let t = test_tracker();
+        t.connect(user(1), vec![server(10)]);
+        t.set_status(&user(1), UserStatus::DoNotDisturb);
+
+        // Second tab / forced SSE reconnect for the same user.
+        t.connect(user(1), vec![server(10)]);
+
+        assert_eq!(
+            t.get_status(&user(1)),
+            Some(UserStatus::DoNotDisturb),
+            "reconnect/second-tab must not reset dnd to online",
+        );
     }
 
     #[tokio::test]
