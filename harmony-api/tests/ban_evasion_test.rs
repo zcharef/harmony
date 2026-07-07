@@ -18,8 +18,8 @@ use uuid::Uuid;
 
 use harmony_api::domain::errors::DomainError;
 use harmony_api::domain::models::{InviteCode, ServerId, UserId};
-use harmony_api::domain::ports::{BanRepository, InviteRepository};
-use harmony_api::infra::postgres::{PgBanRepository, PgInviteRepository};
+use harmony_api::domain::ports::{BanRepository, InviteRepository, MemberRepository};
+use harmony_api::infra::postgres::{PgBanRepository, PgInviteRepository, PgMemberRepository};
 
 // ── DB pool ─────────────────────────────────────────────────────────────
 
@@ -224,6 +224,34 @@ async fn concurrent_ban_and_join_never_leaves_banned_member() {
     assert!(
         !(banned && member),
         "a banned user must never remain a member (banned={banned}, member={member})"
+    );
+
+    cleanup(&pool, server, owner, joiner).await;
+}
+
+/// `add_member` (the auto-join path) must reject a banned user — otherwise a
+/// banned user is re-added to the official server on their next profile sync.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a running Postgres with the Harmony schema"]
+async fn add_member_rejects_banned_user() {
+    let pool = test_pool().await;
+    let owner = seed_user(&pool).await;
+    let joiner = seed_user(&pool).await;
+    let server = seed_server(&pool, owner).await;
+    insert_ban(&pool, server, joiner).await;
+
+    let member_repo = PgMemberRepository::new(pool.clone());
+    let result = member_repo
+        .add_member(&ServerId::new(server), &UserId::new(joiner))
+        .await;
+
+    assert!(
+        matches!(result, Err(DomainError::Forbidden(_))),
+        "add_member must reject a banned user, got {result:?}"
+    );
+    assert!(
+        !is_member(&pool, server, joiner).await,
+        "a banned user must never be (re-)added as a member"
     );
 
     cleanup(&pool, server, owner, joiner).await;
