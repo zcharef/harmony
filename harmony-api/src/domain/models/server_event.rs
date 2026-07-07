@@ -256,6 +256,17 @@ pub enum ServerEvent {
         sender_id: UserId,
         user_id: UserId,
         status: UserStatus,
+        /// Routing metadata: the subject's server memberships (incl. DM
+        /// servers), used by the SSE layer to deliver presence only to users
+        /// sharing a server or DM.
+        ///
+        /// WHY `default` + `skip_serializing_if empty`: the field must survive
+        /// the cross-instance `pg_notify` serde round-trip (so remote instances
+        /// can scope delivery), but the SSE layer REDACTS it (sets it empty)
+        /// before serializing to clients — an empty vec is omitted entirely, so
+        /// the client payload is unchanged and no membership list leaks.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        server_ids: Vec<ServerId>,
     },
 
     // ── Reactions ────────────────────────────────────────────
@@ -510,6 +521,7 @@ mod tests {
             sender_id: sender,
             user_id: test_user_id(),
             status: UserStatus::Online,
+            server_ids: Vec::new(),
         };
         assert!(presence_event.server_id().is_none());
     }

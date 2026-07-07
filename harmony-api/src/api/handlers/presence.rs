@@ -63,8 +63,8 @@ pub async fn update_presence(
         ));
     }
 
-    // WHY: Each update fans out a PresenceChanged event to every connected
-    // client — a per-user cap keeps a misbehaving client from flooding the bus.
+    // WHY: Each update fans out a PresenceChanged event to every user sharing
+    // a server/DM — a per-user cap keeps a misbehaving client from flooding the bus.
     // Legitimate use is a few manual status changes per minute at most.
     state.spam_guard().check_and_record_action(
         &user_id,
@@ -77,10 +77,30 @@ pub async fn update_presence(
         .presence_tracker()
         .set_status(&user_id, req.status.clone());
 
+    // WHY: Routing metadata so the SSE layer delivers this only to users
+    // sharing a server or DM with the subject (redacted before it reaches
+    // clients). Queried here because the handler, unlike the SSE stream, has
+    // no live membership snapshot.
+    // WHY fail-open (not `?`): set_status above already mutated the tracker —
+    // failing the request here would leave the status changed but the event
+    // unpublished. Empty metadata = broadcast fallback, same pattern as the
+    // presence sweep (ADR-027: never silently lose the signal).
+    let server_ids = match state.server_service().list_all_memberships(&user_id).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "presence update: membership lookup failed — broadcasting unscoped presence event"
+            );
+            Vec::new()
+        }
+    };
+
     let event = ServerEvent::PresenceChanged {
         sender_id: user_id.clone(),
         user_id,
         status: req.status,
+        server_ids,
     };
     state.event_bus().publish(event);
 

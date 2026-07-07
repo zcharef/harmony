@@ -182,6 +182,12 @@ impl VoiceService {
             )
             .await?;
 
+        // WHY: A same-channel rejoin (double-click, token refresh) returns the
+        // just-replaced session as `previous` — reporting it would make the
+        // handler emit Left+Joined for the SAME channel and every viewer would
+        // see the user flash out of and back into the participant list. Only a
+        // genuinely different previous channel warrants the auto-leave event.
+        let previous = previous.filter(|p| p.channel_id != *channel_id);
         let previous_channel_id = previous.as_ref().map(|p| p.channel_id.clone());
         let previous_server_id = previous.map(|p| p.server_id);
 
@@ -1277,6 +1283,35 @@ mod tests {
     }
 
     // 8. Auto-leave: join channel A, then join channel B, previous session has channel A
+    #[tokio::test]
+    async fn join_voice_same_channel_rejoin_reports_no_previous() {
+        let h = build_default_harness();
+        let uid = user_id(1);
+        let sid = server_id(10);
+        let cid = channel_id(100);
+
+        h.channel_repo
+            .insert(make_voice_channel(cid.clone(), sid.clone()))
+            .await;
+        h.member_repo
+            .insert(make_member(uid.clone(), sid.clone()))
+            .await;
+
+        let first = h.service.join_voice(&uid, &cid).await.unwrap();
+        assert!(first.previous_channel_id.is_none());
+
+        // Rejoin the SAME channel (double-click / token refresh): reporting
+        // the replaced session as "previous" would make the handler emit
+        // Left+Joined for the same channel — a visible flash for every viewer.
+        let second = h.service.join_voice(&uid, &cid).await.unwrap();
+        assert!(
+            second.previous_channel_id.is_none(),
+            "same-channel rejoin must not report a previous channel"
+        );
+        assert!(second.previous_server_id.is_none());
+        assert_eq!(second.channel_id, cid);
+    }
+
     #[tokio::test]
     async fn join_voice_auto_leaves_previous_channel() {
         let h = build_default_harness();
