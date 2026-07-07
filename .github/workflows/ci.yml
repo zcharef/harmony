@@ -191,7 +191,9 @@ jobs:
 
       # WHY separate step: integration tests hit real CI Supabase Postgres.
       # Unit tests above use dummy env vars + SQLX_OFFLINE for speed.
+      # Skipped for dependabot: its runs never receive repo secrets, so this step can only fail.
       - name: Run integration tests
+        if: github.actor != 'dependabot[bot]'
         env:
           DATABASE_URL: ${{ secrets.CI_SUPABASE_DB_URL }}
           SUPABASE_JWT_SECRET: ${{ secrets.CI_SUPABASE_JWT_SECRET }}
