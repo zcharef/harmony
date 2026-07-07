@@ -12,6 +12,8 @@ name: Uptime
 on:
   schedule:
     - cron: "*/10 * * * *"
+    # Daily cert-expiry check (see cert-expiry job below)
+    - cron: "17 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -72,4 +74,64 @@ jobs:
 
       - name: Fail run on outage (triggers owner email)
         if: steps.probe.outputs.status == 'down'
+        run: exit 1
+
+  # The June outage was an EXPIRED FLY ORIGIN CERT: invisible from the
+  # Cloudflare edge (its own cert stays valid) until every request 525s.
+  # This job probes the origin cert directly (Fly edge with the custom-domain
+  # SNI) plus the public edge certs, and alerts at <14 days validity.
+  cert-expiry:
+    name: Check TLS cert expiry
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 6 * * *'
+
+    steps:
+      - name: Check certificates (origin + edge)
+        id: certs
+        run: |
+          days_left() {
+            # $1 = connect host, $2 = SNI hostname
+            local end
+            end=$(echo | openssl s_client -connect "$1:443" -servername "$2" 2>/dev/null \
+              | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+            if [ -z "$end" ]; then echo "-1"; return; fi
+            echo $(( ($(date -d "$end" +%s) - $(date +%s)) / 86400 ))
+          }
+          origin=$(days_left "harmony-api.fly.dev" "api.joinharmony.app")
+          edge_api=$(days_left "api.joinharmony.app" "api.joinharmony.app")
+          edge_app=$(days_left "app.joinharmony.app" "app.joinharmony.app")
+          echo "origin Fly cert (api.joinharmony.app SNI): ${origin}d; edge api: ${edge_api}d; edge app: ${edge_app}d"
+          echo "summary=origin=${origin}d edge_api=${edge_api}d edge_app=${edge_app}d" >> "$GITHUB_OUTPUT"
+          if [ "$origin" -lt 14 ] || [ "$edge_api" -lt 14 ] || [ "$edge_app" -lt 14 ]; then
+            echo "status=expiring" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update incident issue
+        if: steps.certs.outputs.status == 'expiring'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUMMARY: ${{ steps.certs.outputs.summary }}
+        run: |
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" \
+            --label incident-uptime --state open --json number --jq '.[0].number')
+          body="TLS certificate approaching expiry (<14 days) or unreadable (-1 = handshake failed, the June-outage signature).
+
+          $SUMMARY
+
+          Renewal path for the Fly origin cert: DNS validation records (_fly-ownership TXT + _acme-challenge CNAME) exist in Cloudflare; check \`flyctl certs show api.joinharmony.app -a harmony-api\` via the Ops — Fly cert workflow.
+          Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "TLS cert expiring soon (origin or edge)" \
+              --label incident-uptime \
+              --body "$body"
+          fi
+
+      - name: Fail run on expiring cert (triggers owner email)
+        if: steps.certs.outputs.status == 'expiring'
         run: exit 1
