@@ -81,10 +81,20 @@ pub async fn update_presence(
     // sharing a server or DM with the subject (redacted before it reaches
     // clients). Queried here because the handler, unlike the SSE stream, has
     // no live membership snapshot.
-    let server_ids = state
-        .server_service()
-        .list_all_memberships(&user_id)
-        .await?;
+    // WHY fail-open (not `?`): set_status above already mutated the tracker —
+    // failing the request here would leave the status changed but the event
+    // unpublished. Empty metadata = broadcast fallback, same pattern as the
+    // presence sweep (ADR-027: never silently lose the signal).
+    let server_ids = match state.server_service().list_all_memberships(&user_id).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "presence update: membership lookup failed — broadcasting unscoped presence event"
+            );
+            Vec::new()
+        }
+    };
 
     let event = ServerEvent::PresenceChanged {
         sender_id: user_id.clone(),
