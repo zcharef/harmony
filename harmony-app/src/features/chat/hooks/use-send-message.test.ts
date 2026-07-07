@@ -326,12 +326,14 @@ describe('useSendMessage', () => {
       expect(encryption.cachePlaintext).toHaveBeenCalledWith('msg-enc-2', CHANNEL_ID, 'cache me')
     })
 
-    it('falls back to plaintext send when encryptFn throws', async () => {
+    it('does NOT send plaintext and rejects the mutation when encryptFn throws', async () => {
+      // WHY regression (privacy-critical): An encryption failure in an encrypted
+      // context must never silently downgrade to a cleartext send. The mutation
+      // must reject so onError surfaces feedback and nothing reaches the server
+      // in plaintext. See use-send-message.ts mutationFn "fail-closed" comment.
       const encryption = buildEncryption({
         encryptFn: vi.fn().mockRejectedValue(new Error('No pre-keys available')),
       })
-      const serverMessage = buildMessage({ id: 'msg-plain', encrypted: false })
-      vi.mocked(sendMessage).mockResolvedValueOnce({ data: serverMessage } as never)
 
       const queryClient = createMutationTestClient()
       queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
@@ -343,27 +345,26 @@ describe('useSendMessage', () => {
       )
 
       await act(async () => {
-        result.current.mutate({ content: 'fallback hello' })
+        result.current.mutate({ content: 'must not leak' })
       })
 
-      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      await waitFor(() => expect(result.current.isError).toBe(true))
 
-      // Should fall back to plaintext send
-      expect(sendMessage).toHaveBeenCalledWith({
-        path: { id: CHANNEL_ID },
-        body: { content: 'fallback hello' },
-        throwOnError: true,
-      })
-      // Should NOT cache plaintext (not encrypted)
+      // The message API must never be invoked once encryption fails: no plaintext
+      // send, no ciphertext send — nothing is persisted server-side.
+      expect(sendMessage).not.toHaveBeenCalled()
+      // Nothing is cached as plaintext either (the message was not sent).
       expect(encryption.cachePlaintext).not.toHaveBeenCalled()
+      // The rejection carries a user-meaningful message for the onError path.
+      expect(result.current.error?.message).toBe(
+        'Message not sent — could not encrypt it. Your recipient may not have encryption set up.',
+      )
     })
 
-    it('logs warning when encryption fails and falls back to plaintext', async () => {
+    it('logs a warning breadcrumb when encryption fails', async () => {
       const encryption = buildEncryption({
         encryptFn: vi.fn().mockRejectedValue(new Error('No pre-keys available')),
       })
-      const serverMessage = buildMessage({ id: 'msg-fallback' })
-      vi.mocked(sendMessage).mockResolvedValueOnce({ data: serverMessage } as never)
 
       const queryClient = createMutationTestClient()
       queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
@@ -378,9 +379,9 @@ describe('useSendMessage', () => {
         result.current.mutate({ content: 'hello' })
       })
 
-      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      await waitFor(() => expect(result.current.isError).toBe(true))
 
-      expect(logger.warn).toHaveBeenCalledWith('dm_encryption_failed_fallback_plaintext', {
+      expect(logger.warn).toHaveBeenCalledWith('dm_encryption_failed_message_not_sent', {
         channelId: CHANNEL_ID,
         error: 'No pre-keys available',
       })
