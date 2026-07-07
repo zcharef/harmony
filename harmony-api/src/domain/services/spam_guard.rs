@@ -1,10 +1,12 @@
 //! In-memory anti-spam guard backed by `DashMap`.
 //!
-//! Provides four protections:
+//! Provides five protections:
 //! - **A1 (Duplicate detection):** Rejects exact same message content within a window.
 //! - **A3 (Flood detection):** Auto-mutes users who send too many messages in a window.
 //! - **A3 (Mute enforcement):** Blocks muted users from sending messages.
 //! - **A4 (ASCII art detection):** Rejects text art, Zalgo text, and symbol spam.
+//! - **Action limiter:** Generic windowed per-user rate limits for lightweight
+//!   actions (typing, presence, reactions).
 //!
 //! All state is instance-local. When Harmony scales past one instance,
 //! this needs a shared store (Redis or Postgres).
@@ -47,6 +49,10 @@ pub struct SpamGuard {
     flood_counts: DashMap<(UserId, ServerId), Vec<Instant>>,
     /// A3: Temporary mutes per (user, server).
     muted_until: DashMap<(UserId, ServerId), Instant>,
+    /// Generic action limiter — timestamps of recent actions per (user, action).
+    /// WHY: The window is stored alongside the timestamps because each action
+    /// has its own window; the sweep needs it to know when an entry is stale.
+    action_counts: DashMap<(UserId, &'static str), (Duration, Vec<Instant>)>,
 }
 
 impl Default for SpamGuard {
@@ -62,7 +68,54 @@ impl SpamGuard {
             recent_hashes: DashMap::new(),
             flood_counts: DashMap::new(),
             muted_until: DashMap::new(),
+            action_counts: DashMap::new(),
         }
+    }
+
+    /// Generic windowed per-user rate limiter for lightweight actions
+    /// (typing signals, presence updates, reactions).
+    ///
+    /// Allows at most `max` actions per `window`. A rejected attempt is NOT
+    /// recorded — a client that keeps retrying recovers as soon as the window
+    /// drains instead of extending its own lockout.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::RateLimited`] if the user already performed
+    /// `max` actions of this kind within `window`.
+    pub fn check_and_record_action(
+        &self,
+        user_id: &UserId,
+        action: &'static str,
+        max: usize,
+        window: Duration,
+    ) -> Result<(), DomainError> {
+        let now = Instant::now();
+        let mut allowed = true;
+        self.action_counts
+            .entry((user_id.clone(), action))
+            .and_modify(|(entry_window, timestamps)| {
+                // WHY: Refresh the stored window in case a call site's window
+                // constant changed — the sweep prunes based on this value.
+                *entry_window = window;
+                // Lazy eviction: drop timestamps older than the window
+                timestamps.retain(|ts| now.duration_since(*ts) < window);
+                if timestamps.len() >= max {
+                    allowed = false;
+                } else {
+                    timestamps.push(now);
+                }
+            })
+            .or_insert_with(|| (window, vec![now]));
+
+        if !allowed {
+            // WHY: No number in the message on purpose — the 429 mapper scrapes
+            // the first number as Retry-After; the 5s default is accurate here.
+            return Err(DomainError::RateLimited(format!(
+                "Too many {action} actions — try again in a few seconds"
+            )));
+        }
+        Ok(())
     }
 
     /// Check if a user is currently auto-muted in a server (A3).
@@ -223,11 +276,21 @@ impl SpamGuard {
         });
         let floods_removed = flood_before.saturating_sub(self.flood_counts.len());
 
-        if mutes_removed > 0 || hashes_removed > 0 || floods_removed > 0 {
+        // Sweep stale action counters (entries with all timestamps expired),
+        // each pruned against its own recorded window.
+        let action_before = self.action_counts.len();
+        self.action_counts.retain(|_, (window, timestamps)| {
+            timestamps.retain(|ts| now.duration_since(*ts) < *window);
+            !timestamps.is_empty()
+        });
+        let actions_removed = action_before.saturating_sub(self.action_counts.len());
+
+        if mutes_removed > 0 || hashes_removed > 0 || floods_removed > 0 || actions_removed > 0 {
             tracing::debug!(
                 mutes_removed,
                 hashes_removed,
                 floods_removed,
+                actions_removed,
                 "Swept expired SpamGuard entries"
             );
         }
@@ -830,6 +893,129 @@ mod tests {
 
         guard.sweep_expired();
         assert!(guard.flood_counts.is_empty());
+    }
+
+    // ── Generic action limiter ─────────────────────────────────────
+
+    #[test]
+    fn action_limiter_allows_under_limit() {
+        let guard = SpamGuard::new();
+        let u = user(1);
+        let window = Duration::from_secs(10);
+
+        for i in 0..5 {
+            assert!(
+                guard
+                    .check_and_record_action(&u, "typing", 5, window)
+                    .is_ok(),
+                "action {i} should be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn action_limiter_rejects_over_limit() {
+        let guard = SpamGuard::new();
+        let u = user(1);
+        let window = Duration::from_secs(10);
+
+        for _ in 0..3 {
+            guard
+                .check_and_record_action(&u, "presence", 3, window)
+                .unwrap();
+        }
+
+        let err = guard
+            .check_and_record_action(&u, "presence", 3, window)
+            .unwrap_err();
+        assert!(matches!(err, DomainError::RateLimited(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn action_limiter_window_expiry_restores_budget() {
+        let guard = SpamGuard::new();
+        let u = user(1);
+        let window = Duration::from_millis(20);
+
+        for _ in 0..2 {
+            guard
+                .check_and_record_action(&u, "typing", 2, window)
+                .unwrap();
+        }
+        assert!(
+            guard
+                .check_and_record_action(&u, "typing", 2, window)
+                .is_err()
+        );
+
+        // WHY: sleep guarantees AT LEAST the duration — after 30ms every
+        // recorded timestamp is outside the 20ms window, deterministically.
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(
+            guard
+                .check_and_record_action(&u, "typing", 2, window)
+                .is_ok(),
+            "budget should be restored after the window expires"
+        );
+    }
+
+    #[test]
+    fn action_limiter_scoped_per_user_and_action() {
+        let guard = SpamGuard::new();
+        let window = Duration::from_secs(10);
+
+        guard
+            .check_and_record_action(&user(1), "typing", 1, window)
+            .unwrap();
+
+        // Same user, different action: independent budget
+        assert!(
+            guard
+                .check_and_record_action(&user(1), "presence", 1, window)
+                .is_ok()
+        );
+        // Different user, same action: independent budget
+        assert!(
+            guard
+                .check_and_record_action(&user(2), "typing", 1, window)
+                .is_ok()
+        );
+        // Exhausted (user, action) budget rejects
+        assert!(
+            guard
+                .check_and_record_action(&user(1), "typing", 1, window)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn sweep_removes_stale_action_entries() {
+        let guard = SpamGuard::new();
+
+        // Insert an entry whose only timestamp is outside its own window
+        guard.action_counts.insert(
+            (user(1), "typing"),
+            (
+                Duration::from_secs(10),
+                vec![Instant::now() - Duration::from_secs(60)],
+            ),
+        );
+
+        guard.sweep_expired();
+        assert!(guard.action_counts.is_empty());
+    }
+
+    #[test]
+    fn sweep_keeps_live_action_entries() {
+        let guard = SpamGuard::new();
+
+        guard.action_counts.insert(
+            (user(1), "typing"),
+            (Duration::from_secs(60), vec![Instant::now()]),
+        );
+
+        guard.sweep_expired();
+        assert_eq!(guard.action_counts.len(), 1);
     }
 
     // ── A4: ASCII art detection ────────────────────────────────────

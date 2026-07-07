@@ -285,6 +285,7 @@ async fn init_app_state(config: &Config) -> AppInit {
         channel_repo.clone(),
         member_repo.clone(),
         message_repo,
+        spam_guard.clone(),
     ));
     let read_state_service = Arc::new(domain::services::ReadStateService::new(
         read_state_repo,

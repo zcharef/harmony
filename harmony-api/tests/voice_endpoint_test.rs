@@ -227,6 +227,7 @@ async fn build_app_state(
         channel_repo.clone(),
         member_repo.clone(),
         message_repo.clone(),
+        spam_guard.clone(),
     ));
     let read_state_service = Arc::new(harmony_api::domain::services::ReadStateService::new(
         read_state_repo,

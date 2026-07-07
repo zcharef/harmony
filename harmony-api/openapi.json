@@ -986,7 +986,7 @@
           "Events"
         ],
         "summary": "Signal that the authenticated user is typing in a channel.",
-        "description": "Validates channel existence and server membership, then emits a\n`TypingStarted` event via the event bus. No database write — purely\nephemeral relay.\n\n# Errors\nReturns `ApiError` if the channel is not found, the user is not a\nmember, or the profile lookup fails.",
+        "description": "Validates channel existence and server membership, then emits a\n`TypingStarted` event via the event bus. No database write — purely\nephemeral relay.\n\n# Errors\nReturns `ApiError` if the channel is not found, the user is not a\nmember, the per-user typing rate limit is exceeded, or the profile\nlookup fails.",
         "operationId": "send_typing",
         "parameters": [
           {
@@ -1971,7 +1971,7 @@
           "Presence"
         ],
         "summary": "Update the authenticated user's presence status.",
-        "description": "Validates that the requested status is user-settable (not `offline`),\nthen emits a `PresenceChanged` event via the event bus so other\nconnected users receive the update through SSE.\n\n# Errors\nReturns `ApiError` on invalid status value.",
+        "description": "Validates that the requested status is user-settable (not `offline`),\nthen emits a `PresenceChanged` event via the event bus so other\nconnected users receive the update through SSE.\n\n# Errors\nReturns `ApiError` on invalid status value or when the per-user\npresence rate limit is exceeded.",
         "operationId": "update_presence",
         "requestBody": {
           "content": {

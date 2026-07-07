@@ -1,6 +1,7 @@
 //! Reaction domain service.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{ChannelId, MessageId, UserId};
@@ -8,9 +9,20 @@ use crate::domain::ports::{
     ChannelRepository, MemberRepository, MessageRepository, ReactionRepository,
 };
 use crate::domain::services::channel_access::ensure_channel_access;
+use crate::domain::services::spam_guard::SpamGuard;
 
 /// Maximum emoji length in characters.
 const MAX_EMOJI_LENGTH: usize = 32;
+
+/// Maximum DISTINCT emoji per message. Adding to an already-present emoji
+/// stays allowed at the cap (it doesn't increase variety).
+const MAX_DISTINCT_EMOJI_PER_MESSAGE: i64 = 20;
+
+/// Maximum reaction additions per user within [`REACTION_RATE_WINDOW`].
+const REACTION_RATE_MAX: usize = 25;
+
+/// Window for the per-user reaction rate limit.
+const REACTION_RATE_WINDOW: Duration = Duration::from_secs(10);
 
 /// Service for message reaction business logic.
 #[derive(Debug)]
@@ -19,6 +31,7 @@ pub struct ReactionService {
     channel_repo: Arc<dyn ChannelRepository>,
     member_repo: Arc<dyn MemberRepository>,
     message_repo: Arc<dyn MessageRepository>,
+    spam_guard: Arc<SpamGuard>,
 }
 
 impl ReactionService {
@@ -28,12 +41,14 @@ impl ReactionService {
         channel_repo: Arc<dyn ChannelRepository>,
         member_repo: Arc<dyn MemberRepository>,
         message_repo: Arc<dyn MessageRepository>,
+        spam_guard: Arc<SpamGuard>,
     ) -> Self {
         Self {
             repo,
             channel_repo,
             member_repo,
             message_repo,
+            spam_guard,
         }
     }
 
@@ -98,8 +113,10 @@ impl ReactionService {
     /// # Errors
     /// Returns `DomainError::Forbidden` if the user is not a server member,
     /// `DomainError::NotFound` if the message is missing, deleted, or not in
-    /// this channel, `DomainError::ValidationError` if the emoji is empty or
-    /// too long.
+    /// this channel, `DomainError::RateLimited` if the per-user reaction rate
+    /// limit is exceeded, `DomainError::ValidationError` if the emoji is empty
+    /// or too long, or if the message already carries the maximum number of
+    /// distinct emoji.
     pub async fn add_reaction(
         &self,
         channel_id: &ChannelId,
@@ -107,10 +124,31 @@ impl ReactionService {
         user_id: &UserId,
         emoji: &str,
     ) -> Result<(), DomainError> {
+        // WHY: Authz first — a rate-limit response must not leak whether the
+        // channel/message exists to users who cannot access them.
         self.verify_channel_membership(channel_id, user_id).await?;
         self.verify_message_in_channel(channel_id, message_id)
             .await?;
+
+        self.spam_guard.check_and_record_action(
+            user_id,
+            "reaction",
+            REACTION_RATE_MAX,
+            REACTION_RATE_WINDOW,
+        )?;
+
         validate_emoji(emoji)?;
+
+        // WHY: Cap DISTINCT emoji per message so a spammer can't grow a
+        // message's reaction bar unboundedly. Piling onto an existing emoji
+        // is always fine — variety stays constant.
+        let variety = self.repo.emoji_variety(message_id, emoji).await?;
+        if variety.distinct_count >= MAX_DISTINCT_EMOJI_PER_MESSAGE && !variety.emoji_present {
+            return Err(DomainError::ValidationError(
+                "Maximum of 20 unique reactions per message".to_string(),
+            ));
+        }
+
         self.repo.add(message_id, user_id, emoji).await
     }
 
@@ -161,8 +199,8 @@ mod tests {
     use uuid::Uuid;
 
     use crate::domain::models::{
-        Channel, ChannelType, Message, MessageType, MessageWithAuthor, ReactionSummary, Role,
-        ServerId, ServerMember,
+        Channel, ChannelType, EmojiVariety, Message, MessageType, MessageWithAuthor,
+        ReactionSummary, Role, ServerId, ServerMember,
     };
 
     fn user_id(n: u128) -> UserId {
@@ -219,9 +257,23 @@ mod tests {
     }
 
     /// Minimal `ReactionRepository` fake: records nothing, always succeeds.
-    /// The tests assert on the authorization gate, not on persistence.
+    /// The tests assert on the authorization/limit gates, not on persistence.
+    /// `variety` configures what `emoji_variety` reports (variety-cap tests).
     #[derive(Debug)]
-    struct FakeReactionRepo;
+    struct FakeReactionRepo {
+        variety: EmojiVariety,
+    }
+
+    impl Default for FakeReactionRepo {
+        fn default() -> Self {
+            Self {
+                variety: EmojiVariety {
+                    distinct_count: 0,
+                    emoji_present: false,
+                },
+            }
+        }
+    }
 
     #[async_trait]
     impl ReactionRepository for FakeReactionRepo {
@@ -232,6 +284,13 @@ mod tests {
             _emoji: &str,
         ) -> Result<(), DomainError> {
             Ok(())
+        }
+        async fn emoji_variety(
+            &self,
+            _message_id: &MessageId,
+            _emoji: &str,
+        ) -> Result<EmojiVariety, DomainError> {
+            Ok(self.variety)
         }
         async fn remove(
             &self,
@@ -472,13 +531,18 @@ mod tests {
     }
 
     fn service(message: Option<Message>) -> ReactionService {
+        service_with_variety(message, FakeReactionRepo::default())
+    }
+
+    fn service_with_variety(message: Option<Message>, repo: FakeReactionRepo) -> ReactionService {
         ReactionService::new(
-            Arc::new(FakeReactionRepo),
+            Arc::new(repo),
             Arc::new(FakeChannelRepo {
                 channel: make_channel(server_id(1)),
             }),
             Arc::new(FakeMemberRepo),
             Arc::new(FakeMessageRepo { message }),
+            Arc::new(SpamGuard::new()),
         )
     }
 
@@ -542,6 +606,107 @@ mod tests {
         );
         assert!(
             svc.remove_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+                .await
+                .is_ok()
+        );
+    }
+
+    /// The per-user reaction rate limit rejects the 26th add within the window.
+    #[tokio::test]
+    async fn add_reaction_over_rate_limit_is_rate_limited() {
+        let svc = service(Some(make_message(channel_id(100))));
+        for i in 0..REACTION_RATE_MAX {
+            assert!(
+                svc.add_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+                    .await
+                    .is_ok(),
+                "reaction {i} should be allowed"
+            );
+        }
+
+        let err = svc
+            .add_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::RateLimited(_)), "got {err:?}");
+    }
+
+    /// `remove_reaction` is not rate limited — undo must always work, even for
+    /// a user who just exhausted their add budget.
+    #[tokio::test]
+    async fn remove_reaction_is_not_rate_limited() {
+        let svc = service(Some(make_message(channel_id(100))));
+        for _ in 0..REACTION_RATE_MAX {
+            svc.add_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+                .await
+                .unwrap();
+        }
+
+        assert!(
+            svc.remove_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+                .await
+                .is_ok()
+        );
+    }
+
+    /// A NOVEL emoji on a message already at the distinct-emoji cap is rejected.
+    #[tokio::test]
+    async fn add_novel_emoji_at_variety_cap_is_rejected() {
+        let svc = service_with_variety(
+            Some(make_message(channel_id(100))),
+            FakeReactionRepo {
+                variety: EmojiVariety {
+                    distinct_count: MAX_DISTINCT_EMOJI_PER_MESSAGE,
+                    emoji_present: false,
+                },
+            },
+        );
+
+        let err = svc
+            .add_reaction(&channel_id(100), &message_id(7), &user_id(42), "🆕")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
+        );
+    }
+
+    /// Piling onto an EXISTING emoji stays allowed at the cap — variety is unchanged.
+    #[tokio::test]
+    async fn add_existing_emoji_at_variety_cap_is_allowed() {
+        let svc = service_with_variety(
+            Some(make_message(channel_id(100))),
+            FakeReactionRepo {
+                variety: EmojiVariety {
+                    distinct_count: MAX_DISTINCT_EMOJI_PER_MESSAGE,
+                    emoji_present: true,
+                },
+            },
+        );
+
+        assert!(
+            svc.add_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+                .await
+                .is_ok()
+        );
+    }
+
+    /// Below the cap, a novel emoji is allowed.
+    #[tokio::test]
+    async fn add_novel_emoji_below_variety_cap_is_allowed() {
+        let svc = service_with_variety(
+            Some(make_message(channel_id(100))),
+            FakeReactionRepo {
+                variety: EmojiVariety {
+                    distinct_count: MAX_DISTINCT_EMOJI_PER_MESSAGE - 1,
+                    emoji_present: false,
+                },
+            },
+        );
+
+        assert!(
+            svc.add_reaction(&channel_id(100), &message_id(7), &user_id(42), "🆕")
                 .await
                 .is_ok()
         );

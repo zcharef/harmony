@@ -168,7 +168,7 @@ impl ProfileService {
     ///
     /// Validates inputs before delegating to the repository:
     /// - At least one field must be provided
-    /// - `avatar_url` must start with `https://`
+    /// - `avatar_url` must start with `https://` and be at most 2048 characters
     /// - `display_name` must be 1-32 characters
     /// - `custom_status` must be at most 128 characters
     ///
@@ -188,12 +188,19 @@ impl ProfileService {
             ));
         }
 
-        if let Some(ref url) = avatar_url
-            && !url.starts_with("https://")
-        {
-            return Err(DomainError::ValidationError(
-                "Avatar URL must use HTTPS".to_string(),
-            ));
+        if let Some(ref url) = avatar_url {
+            if !url.starts_with("https://") {
+                return Err(DomainError::ValidationError(
+                    "Avatar URL must use HTTPS".to_string(),
+                ));
+            }
+            // WHY: 2048 is the conventional browser URL ceiling — anything
+            // longer is not a fetchable avatar, just column bloat.
+            if url.len() > 2048 {
+                return Err(DomainError::ValidationError(
+                    "Avatar URL must be at most 2048 characters".to_string(),
+                ));
+            }
         }
 
         if let Some(ref name) = display_name {
@@ -346,15 +353,119 @@ mod tests {
         assert_ne!(a, b, "different user_ids must produce different usernames");
     }
 
-    // ── Async service methods requiring repos ────────────────────
+    // ── update_profile input validation ──────────────────────────
     //
-    // The following business rules are enforced in async methods that
-    // require repository trait objects (banned by ADR-018: no mocks):
-    //
-    // - upsert_from_auth: reserved check + content filter + fallback + repo upsert
-    // - update_profile: length validation + content filter on display_name
-    //   and custom_status, HTTPS-only avatar_url, then repo update
-    // - get_by_id: delegates to repo + maps None to NotFound
-    //
-    // These are covered by integration tests with real Postgres.
+    // Uses a hand-rolled fake repository (ADR-018 bans mockall, not fakes —
+    // same pattern as reaction_service tests). The persistence paths of
+    // upsert_from_auth / update_profile / get_by_id remain covered by
+    // integration tests with real Postgres.
+
+    use async_trait::async_trait;
+    use chrono::Utc;
+
+    use crate::domain::models::{Profile, UserStatus};
+    use crate::domain::ports::ProfileRepository;
+
+    /// Minimal `ProfileRepository` fake: `update` succeeds with a dummy
+    /// profile; the tests assert on the validation gate, not persistence.
+    #[derive(Debug)]
+    struct FakeProfileRepo;
+
+    fn dummy_profile(user_id: &UserId) -> Profile {
+        let now = Utc::now();
+        Profile {
+            id: user_id.clone(),
+            username: "tester".to_string(),
+            display_name: None,
+            avatar_url: None,
+            status: UserStatus::Offline,
+            custom_status: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[async_trait]
+    impl ProfileRepository for FakeProfileRepo {
+        async fn update(
+            &self,
+            user_id: &UserId,
+            _avatar_url: Option<String>,
+            _display_name: Option<String>,
+            _custom_status: Option<String>,
+        ) -> Result<Profile, DomainError> {
+            Ok(dummy_profile(user_id))
+        }
+
+        // -- unused by update_profile --
+        async fn upsert_from_auth(
+            &self,
+            user_id: UserId,
+            _email: String,
+            _username: String,
+        ) -> Result<Profile, DomainError> {
+            Ok(dummy_profile(&user_id))
+        }
+        async fn get_by_id(&self, _user_id: &UserId) -> Result<Option<Profile>, DomainError> {
+            Ok(None)
+        }
+        async fn is_username_taken(&self, _username: &str) -> Result<bool, DomainError> {
+            Ok(false)
+        }
+        async fn get_profiles_by_ids(&self, _ids: &[UserId]) -> Result<Vec<Profile>, DomainError> {
+            Ok(vec![])
+        }
+    }
+
+    fn profile_service() -> ProfileService {
+        ProfileService::new(Arc::new(FakeProfileRepo), Arc::new(ContentFilter::noop()))
+    }
+
+    #[tokio::test]
+    async fn update_profile_rejects_avatar_url_over_2048_chars() {
+        let svc = profile_service();
+        // 8 ("https://") + 2041 = 2049 chars — one over the cap
+        let too_long = format!("https://{}", "a".repeat(2041));
+
+        let err = svc
+            .update_profile(&UserId::new(Uuid::from_u128(1)), Some(too_long), None, None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_accepts_avatar_url_at_2048_chars() {
+        let svc = profile_service();
+        // 8 ("https://") + 2040 = exactly 2048 chars — at the cap, allowed
+        let at_limit = format!("https://{}", "a".repeat(2040));
+
+        assert!(
+            svc.update_profile(&UserId::new(Uuid::from_u128(1)), Some(at_limit), None, None)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_rejects_non_https_avatar_url() {
+        let svc = profile_service();
+
+        let err = svc
+            .update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                Some("http://example.com/a.png".to_string()),
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
+        );
+    }
 }
