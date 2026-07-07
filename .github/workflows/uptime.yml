@@ -1,0 +1,75 @@
+# Uptime monitoring for production.
+#
+# WHY: on 2026-07-07 we discovered prod had been down for ~8 days (expired
+# Fly cert → 525) with nobody noticing — E2E runs against localhost and no
+# external monitor existed. This scheduled check is the v1 dead-man's-switch:
+# it probes the API health endpoint and the SPA, retries to absorb transient
+# blips (alert on sustained failure, not a single miss), and on real outage
+# fails the run (GitHub emails the repo owner on scheduled-workflow failure)
+# and opens/updates a pinned incident issue for durable visibility.
+name: Uptime
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency: uptime
+
+jobs:
+  probe:
+    name: Probe prod endpoints
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check API + SPA (3 attempts, 60s apart)
+        id: probe
+        run: |
+          check() {
+            local code
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$1") && echo "$code" || echo "000"
+          }
+          for attempt in 1 2 3; do
+            api=$(check "https://api.joinharmony.app/health")
+            spa=$(check "https://app.joinharmony.app")
+            echo "attempt $attempt: api=$api spa=$spa"
+            if [ "$api" = "200" ] && [ "$spa" = "200" ]; then
+              echo "status=up" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            [ "$attempt" -lt 3 ] && sleep 60
+          done
+          echo "status=down" >> "$GITHUB_OUTPUT"
+          echo "api=$api" >> "$GITHUB_OUTPUT"
+          echo "spa=$spa" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update incident issue
+        if: steps.probe.outputs.status == 'down'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_CODE: ${{ steps.probe.outputs.api }}
+          SPA_CODE: ${{ steps.probe.outputs.spa }}
+        run: |
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" \
+            --label incident-uptime --state open --json number --jq '.[0].number')
+          body="Sustained outage detected by the uptime workflow (3 probes over 2 minutes).
+
+          - \`https://api.joinharmony.app/health\` → HTTP $API_CODE
+          - \`https://app.joinharmony.app\` → HTTP $SPA_CODE
+          - Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "Prod outage: uptime probe failing" \
+              --label incident-uptime \
+              --body "$body"
+          fi
+
+      - name: Fail run on outage (triggers owner email)
+        if: steps.probe.outputs.status == 'down'
+        run: exit 1
