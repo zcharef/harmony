@@ -226,9 +226,12 @@ async fn build_app_state(
         reaction_repo,
         channel_repo.clone(),
         member_repo.clone(),
+        message_repo.clone(),
     ));
     let read_state_service = Arc::new(harmony_api::domain::services::ReadStateService::new(
         read_state_repo,
+        channel_repo.clone(),
+        member_repo.clone(),
     ));
     let notification_settings_service = Arc::new(
         harmony_api::domain::services::NotificationSettingsService::new(notification_settings_repo),
@@ -261,6 +264,7 @@ async fn build_app_state(
         notification_settings_service,
         user_preferences_service,
         member_repo,
+        channel_repo,
         ban_repo,
         plan_checker,
         event_bus,

@@ -12,6 +12,7 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::ChannelPayload;
 use crate::domain::models::{ChannelId, Role, ServerEvent, ServerId, VoiceAction};
+use crate::domain::services::ensure_channel_access;
 
 /// List all channels in a server.
 ///
@@ -308,16 +309,17 @@ pub async fn create_megolm_session(
         ));
     }
 
-    // Verify the caller is a member of the server
-    let is_member = state
-        .member_repository()
-        .is_member(&channel.server_id, &user_id)
-        .await?;
-    if !is_member {
-        return Err(ApiError::forbidden(
-            "You must be a server member to register Megolm sessions",
-        ));
-    }
+    // WHY: The previous check verified server membership only — any member could
+    // register a Megolm session on a PRIVATE encrypted channel they had no grant
+    // for. The shared gate enforces membership AND the private-channel role gate,
+    // same as the message/reaction paths (DomainError → ApiError per ADR-021).
+    ensure_channel_access(
+        state.channel_repository(),
+        state.member_repository(),
+        &channel,
+        &user_id,
+    )
+    .await?;
 
     // Validate session_id is not empty
     if req.session_id.trim().is_empty() {

@@ -246,7 +246,7 @@ async fn init_app_state(config: &Config) -> AppInit {
     ));
 
     let message_service = Arc::new(domain::services::MessageService::new(
-        message_repo,
+        message_repo.clone(),
         channel_repo.clone(),
         member_repo.clone(),
         plan_limit_checker.clone(),
@@ -284,8 +284,13 @@ async fn init_app_state(config: &Config) -> AppInit {
         reaction_repo,
         channel_repo.clone(),
         member_repo.clone(),
+        message_repo,
     ));
-    let read_state_service = Arc::new(domain::services::ReadStateService::new(read_state_repo));
+    let read_state_service = Arc::new(domain::services::ReadStateService::new(
+        read_state_repo,
+        channel_repo.clone(),
+        member_repo.clone(),
+    ));
     let megolm_session_repo = Arc::new(infra::postgres::PgMegolmSessionRepository::new(
         pool.clone(),
     ));
@@ -374,6 +379,7 @@ async fn init_app_state(config: &Config) -> AppInit {
         notification_settings_service,
         user_preferences_service,
         member_repo,
+        channel_repo,
         ban_repo,
         plan_limit_checker,
         event_bus,
