@@ -46,3 +46,12 @@ jobs:
         run: |
           flyctl certs show "$CERT_HOSTNAME" -a harmony-api
           flyctl certs list -a harmony-api
+
+      # Behind the Cloudflare proxy, Let's Encrypt HTTP validation fails and
+      # Fly requires DNS records (_fly-ownership TXT / _acme-challenge) —
+      # `certs setup` prints the exact record names and values to create.
+      - name: Print DNS setup instructions
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CERT_HOSTNAME: ${{ inputs.hostname }}
+        run: flyctl certs setup "$CERT_HOSTNAME" -a harmony-api || flyctl certs check "$CERT_HOSTNAME" -a harmony-api || true
