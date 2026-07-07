@@ -182,6 +182,44 @@ impl InviteRepository for PgInviteRepository {
 
         let mut tx = self.pool.begin().await.map_err(super::db_err)?;
 
+        // WHY: Serialize this join against a concurrent ban of the same
+        // (server, user) with a transaction-scoped advisory lock, THEN re-check
+        // the ban inside the lock. The service's earlier is_banned check runs
+        // outside any transaction, so without this a ban committing between that
+        // check and the INSERT below would leave a banned user as a member:
+        // ban_user's membership DELETE can't see this tx's uncommitted INSERT, and
+        // this tx can't see the uncommitted ban. The lock forces ban_user and
+        // complete_join to run one-at-a-time per pair (ban_user takes the same
+        // lock); the in-lock re-check then catches a ban that committed first.
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            format!("member_ban:{sid}:{uid}")
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        let banned = sqlx::query!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM server_bans
+                WHERE server_id = $1 AND user_id = $2
+            ) AS "exists!"
+            "#,
+            sid,
+            uid,
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        if banned.exists {
+            return Err(DomainError::Forbidden(
+                "You are banned from this server".to_string(),
+            ));
+        }
+
         // WHY: Atomic increment — fails if invite is exhausted
         let result = sqlx::query!(
             r#"
