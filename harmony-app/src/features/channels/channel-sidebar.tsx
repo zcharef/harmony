@@ -423,7 +423,7 @@ export function ChannelSidebar({
                     }}
                   />
                   {channel.channelType === 'voice' && (
-                    <VoiceParticipantList channelId={channel.id} />
+                    <VoiceParticipantList channelId={channel.id} serverId={serverId} />
                   )}
                 </div>
               ))}
