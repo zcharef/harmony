@@ -1,6 +1,6 @@
 import { Avatar, Button, Textarea, Tooltip } from '@heroui/react'
 import type { TFunction } from 'i18next'
-import { ArrowRight, Lock, LockOpen, MessageSquare, Pencil, Trash2 } from 'lucide-react'
+import { ArrowRight, Lock, LockOpen, MessageSquare, Pencil, SmilePlus, Trash2 } from 'lucide-react'
 import { memo, useCallback, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
@@ -13,6 +13,7 @@ import { usePreferences } from '@/features/preferences'
 import type { MessageResponse } from '@/lib/api'
 import { isTauri } from '@/lib/platform'
 import { maskProfanity } from '@/lib/profanity-filter'
+import { EmojiPickerPopover } from './emoji-picker-popover'
 import { useEditBuffer } from './hooks/use-edit-buffer'
 
 interface MessageItemProps {
@@ -354,6 +355,9 @@ function ReactionBar({
   onAddReaction?: (emoji: string) => void
   onRemoveReaction?: (emoji: string) => void
 }) {
+  const { t } = useTranslation('chat')
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
+
   if (reactions === undefined || reactions.length === 0 || isDeleted) return null
 
   return (
@@ -371,6 +375,107 @@ function ReactionBar({
           <span>{r.count}</span>
         </button>
       ))}
+      {/* WHY: Second Discord-parity entry point — start ANOTHER reaction from the bar itself. */}
+      {onAddReaction !== undefined && (
+        <EmojiPickerPopover
+          isOpen={isPickerOpen}
+          onOpenChange={setIsPickerOpen}
+          onEmojiSelect={onAddReaction}
+          placement="top-start"
+        >
+          <button
+            type="button"
+            aria-label={t('addReaction')}
+            data-test="reaction-add-button"
+            className="flex items-center rounded-full border border-default-200 bg-default-50 px-2 py-0.5 text-xs text-default-500 transition-colors hover:bg-default-100 hover:text-default-700"
+          >
+            <SmilePlus className="h-3.5 w-3.5" />
+          </button>
+        </EmojiPickerPopover>
+      )}
+    </div>
+  )
+}
+
+// WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
+function MessageActions({
+  isOwnMessage,
+  canModerateMessages,
+  onStartEdit,
+  onDelete,
+  onAddReaction,
+  onReply,
+}: {
+  isOwnMessage: boolean
+  canModerateMessages: boolean
+  onStartEdit: () => void
+  onDelete: () => void
+  onAddReaction?: (emoji: string) => void
+  onReply?: () => void
+}) {
+  const { t } = useTranslation('chat')
+  // WHY local state: the bar is CSS-hidden when the row loses hover, but it must
+  // stay visible while the picker popover it anchors is open — otherwise the
+  // popover would point at a display:none trigger and lose its position.
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
+
+  return (
+    <div
+      data-test="message-actions"
+      className={`absolute -top-3 right-4 gap-0.5 rounded-md border border-divider bg-background shadow-sm${isPickerOpen ? ' flex' : ' hidden group-hover:flex'}`}
+    >
+      {/* WHY first: Discord action order — react, reply, edit, delete. */}
+      {onAddReaction !== undefined && (
+        <EmojiPickerPopover
+          isOpen={isPickerOpen}
+          onOpenChange={setIsPickerOpen}
+          onEmojiSelect={onAddReaction}
+          placement="bottom-end"
+        >
+          <Button
+            variant="light"
+            isIconOnly
+            size="sm"
+            aria-label={t('addReaction')}
+            data-test="message-react-button"
+          >
+            <SmilePlus className="h-4 w-4 text-default-500" />
+          </Button>
+        </EmojiPickerPopover>
+      )}
+      {onReply !== undefined && (
+        <Button
+          variant="light"
+          isIconOnly
+          size="sm"
+          onPress={onReply}
+          data-test="message-reply-button"
+        >
+          <MessageSquare className="h-4 w-4 text-default-500" />
+        </Button>
+      )}
+      {isOwnMessage && (
+        <Button
+          variant="light"
+          isIconOnly
+          size="sm"
+          onPress={onStartEdit}
+          data-test="message-edit-button"
+        >
+          <Pencil className="h-4 w-4 text-default-500" />
+        </Button>
+      )}
+      {(isOwnMessage || canModerateMessages) && (
+        <Button
+          variant="light"
+          isIconOnly
+          size="sm"
+          onPress={onDelete}
+          data-test="message-delete-button"
+        >
+          <Trash2 className="h-4 w-4 text-danger" />
+        </Button>
+      )}
     </div>
   )
 }
@@ -530,47 +635,17 @@ export const MessageItem = memo(function MessageItem({
       </div>
 
       {/* WHY: Actions bar shows for non-deleted, non-pending messages.
-          Reply is available to everyone. Edit is own-message-only.
+          React and reply are available to everyone. Edit is own-message-only.
           Delete shows for own messages OR if moderator+. */}
       {isEditing === false && isPending === false && isDeleted === false && (
-        <div
-          data-test="message-actions"
-          className="absolute -top-3 right-4 hidden gap-0.5 rounded-md border border-divider bg-background shadow-sm group-hover:flex"
-        >
-          {onReply !== undefined && (
-            <Button
-              variant="light"
-              isIconOnly
-              size="sm"
-              onPress={onReply}
-              data-test="message-reply-button"
-            >
-              <MessageSquare className="h-4 w-4 text-default-500" />
-            </Button>
-          )}
-          {isOwnMessage && (
-            <Button
-              variant="light"
-              isIconOnly
-              size="sm"
-              onPress={onStartEdit}
-              data-test="message-edit-button"
-            >
-              <Pencil className="h-4 w-4 text-default-500" />
-            </Button>
-          )}
-          {(isOwnMessage || canModerateMessages) && (
-            <Button
-              variant="light"
-              isIconOnly
-              size="sm"
-              onPress={onDelete}
-              data-test="message-delete-button"
-            >
-              <Trash2 className="h-4 w-4 text-danger" />
-            </Button>
-          )}
-        </div>
+        <MessageActions
+          isOwnMessage={isOwnMessage}
+          canModerateMessages={canModerateMessages}
+          onStartEdit={onStartEdit}
+          onDelete={onDelete}
+          onAddReaction={onAddReaction}
+          onReply={onReply}
+        />
       )}
     </div>
   )

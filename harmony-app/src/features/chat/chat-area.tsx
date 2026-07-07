@@ -1,4 +1,3 @@
-import emojiData from '@emoji-mart/data'
 import {
   Avatar,
   Button,
@@ -24,7 +23,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore, useCurrentProfile } from '@/features/auth'
@@ -50,6 +49,7 @@ import { encrypt } from '@/lib/crypto'
 import { cacheMessage } from '@/lib/crypto-cache'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
+import { EmojiPickerPopover } from './emoji-picker-popover'
 import { useAddReaction } from './hooks/use-add-reaction'
 import { useDeleteMessage } from './hooks/use-delete-message'
 import { useEditMessage } from './hooks/use-edit-message'
@@ -66,8 +66,6 @@ import { useUpdateNotificationSettings } from './hooks/use-update-notification-s
 import { buildVirtualItems } from './lib/build-virtual-items'
 import { MessageItem } from './message-item'
 import { TypingIndicator } from './typing-indicator'
-
-const EmojiPicker = lazy(() => import('@emoji-mart/react'))
 
 interface ChatAreaProps {
   channelId: string | null
@@ -453,17 +451,16 @@ function MessageInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const handleEmojiSelect = useCallback(
-    (emoji: { native: string }) => {
+    (emoji: string) => {
       const textarea = textareaRef.current
       if (textarea) {
         const start = textarea.selectionStart
         const end = textarea.selectionEnd
-        const next = value.slice(0, start) + emoji.native + value.slice(end)
+        const next = value.slice(0, start) + emoji + value.slice(end)
         onValueChange(next)
       } else {
-        onValueChange(value + emoji.native)
+        onValueChange(value + emoji)
       }
-      setIsEmojiOpen(false)
     },
     [value, onValueChange],
   )
@@ -509,18 +506,16 @@ function MessageInput({
             <Button variant="light" isIconOnly size="sm" aria-label={t('stickers')}>
               <Sticker className="h-5 w-5 text-default-500" />
             </Button>
-            <Popover isOpen={isEmojiOpen} onOpenChange={setIsEmojiOpen} placement="top-end">
-              <PopoverTrigger>
-                <Button variant="light" isIconOnly size="sm" aria-label={t('emojiPicker')}>
-                  <SmilePlus className="h-5 w-5 text-default-500" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="p-0">
-                <Suspense fallback={<Spinner size="sm" className="p-4" />}>
-                  <EmojiPicker data={emojiData} onEmojiSelect={handleEmojiSelect} />
-                </Suspense>
-              </PopoverContent>
-            </Popover>
+            <EmojiPickerPopover
+              isOpen={isEmojiOpen}
+              onOpenChange={setIsEmojiOpen}
+              onEmojiSelect={handleEmojiSelect}
+              placement="top-end"
+            >
+              <Button variant="light" isIconOnly size="sm" aria-label={t('emojiPicker')}>
+                <SmilePlus className="h-5 w-5 text-default-500" />
+              </Button>
+            </EmojiPickerPopover>
           </div>
         )}
       </div>
