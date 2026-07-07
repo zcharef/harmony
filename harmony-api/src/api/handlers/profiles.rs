@@ -10,6 +10,7 @@ use crate::api::dto::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, AuthUser};
 use crate::api::state::AppState;
+use crate::domain::errors::DomainError;
 use crate::domain::models::server_event::{MemberPayload, ServerEvent};
 use crate::domain::services::ProfileService;
 use crate::infra::auth::AuthenticatedUser;
@@ -123,18 +124,32 @@ async fn auto_join_official_server(
     user_id: &crate::domain::models::UserId,
 ) {
     // 1. Insert membership (idempotent — ON CONFLICT DO NOTHING).
-    if let Err(e) = state
+    match state
         .member_repository()
         .add_member(official_server_id, user_id)
         .await
     {
-        tracing::warn!(
-            server_id = %official_server_id,
-            user_id = %user_id,
-            error = ?e,
-            "Failed to auto-join official server (best-effort)"
-        );
-        return;
+        Ok(()) => {}
+        // WHY: A banned user is deliberately NOT auto-joined — the expected
+        // outcome, not a failure. Skip the join announcement + SSE and return
+        // quietly (a warn here would fire on every login of a banned user).
+        Err(DomainError::Forbidden(_)) => {
+            tracing::debug!(
+                server_id = %official_server_id,
+                user_id = %user_id,
+                "Skipping auto-join for banned user"
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(
+                server_id = %official_server_id,
+                user_id = %user_id,
+                error = ?e,
+                "Failed to auto-join official server (best-effort)"
+            );
+            return;
+        }
     }
 
     // 2. System message in default channel (best-effort).

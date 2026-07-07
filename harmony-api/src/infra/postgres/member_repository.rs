@@ -219,6 +219,45 @@ impl MemberRepository for PgMemberRepository {
         let sid = server_id.0;
         let uid = user_id.0;
 
+        // WHY: A ban and this membership INSERT must serialize, or a banned user
+        // gets (re-)added. Most visibly on the auto-join path: auto_join_official
+        // _server runs on every profile sync, and once ban_user removed the
+        // membership, is_member is false, so auto-join would re-insert it while the
+        // server_bans row still exists (a deterministic ban evasion, no race even
+        // needed). A bare INSERT also can't see a concurrent ban's uncommitted row.
+        // Take the same per-(server, user) advisory lock ban_user takes and
+        // re-check the ban inside it. Mirrors invite_repository::complete_join.
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
+
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            format!("member_ban:{sid}:{uid}")
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        let banned = sqlx::query!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM server_bans
+                WHERE server_id = $1 AND user_id = $2
+            ) AS "exists!"
+            "#,
+            sid,
+            uid,
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        if banned.exists {
+            return Err(DomainError::Forbidden(
+                "User is banned from this server".to_string(),
+            ));
+        }
+
         sqlx::query!(
             r#"
             INSERT INTO server_members (server_id, user_id, role)
@@ -229,9 +268,11 @@ impl MemberRepository for PgMemberRepository {
             uid,
             Role::Member.as_str(),
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(super::db_err)?;
+
+        tx.commit().await.map_err(super::db_err)?;
 
         Ok(())
     }
