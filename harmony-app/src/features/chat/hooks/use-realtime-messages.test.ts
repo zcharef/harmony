@@ -202,6 +202,40 @@ describe('useRealtimeMessages', () => {
     expect(reply?.parentMessage).toBeUndefined()
   })
 
+  // -- message.created: system messages (auto-join announcement) ---------------
+  // WHY: The official-server auto-join posts a system message. Connected
+  // clients must see it inserted into the cache like any other message.
+
+  it('inserts a system message on message.created (auto-join announcement)', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    queryClient.setQueryData(messageKey, buildCacheData([buildMessage({ id: 'existing-1' })]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent(
+        'message.created',
+        buildMessageEvent({
+          id: 'msg-system',
+          messageType: 'system',
+          content: 'carol joined the server',
+        }),
+      )
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const items = cacheData?.pages[0]?.items ?? []
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({
+      id: 'msg-system',
+      messageType: 'system',
+      content: 'carol joined the server',
+    })
+  })
+
   // -- message.created dedup: duplicate ID is not inserted --------------------
 
   it('does not insert a duplicate message on message.created with existing ID', () => {
