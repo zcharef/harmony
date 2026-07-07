@@ -9,6 +9,7 @@ use crate::domain::models::{Channel, ChannelId, MessageId, MessageWithAuthor, Ro
 use crate::domain::ports::{
     ChannelRepository, MemberRepository, MessageRepository, PlanLimitChecker, ReactionRepository,
 };
+use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
 use crate::domain::services::spam_guard::{self, SpamGuard};
 
@@ -63,13 +64,15 @@ impl MessageService {
     /// Rate limit window in seconds. Max messages per window is plan-derived.
     const RATE_LIMIT_WINDOW_SECS: i64 = 5;
 
-    /// Verify that a user is a member of the server containing a channel.
-    /// Returns the channel on success so callers can inspect its properties
-    /// (e.g. `is_read_only`) without an extra query.
+    /// Verify that a user may access the channel, returning it on success so
+    /// callers can inspect its properties (e.g. `is_read_only`) without an extra
+    /// query. Enforces server membership AND the private-channel role gate via the
+    /// shared [`ensure_channel_access`] helper.
     ///
     /// # Errors
     /// Returns `DomainError::NotFound` if the channel doesn't exist,
-    /// `DomainError::Forbidden` if the user is not a server member.
+    /// `DomainError::Forbidden` if the user is not a server member or lacks access
+    /// to a private channel.
     async fn verify_channel_membership(
         &self,
         channel_id: &ChannelId,
@@ -84,16 +87,7 @@ impl MessageService {
                 id: channel_id.to_string(),
             })?;
 
-        let is_member = self
-            .member_repo
-            .is_member(&channel.server_id, user_id)
-            .await?;
-
-        if !is_member {
-            return Err(DomainError::Forbidden(
-                "You must be a server member to access this channel".to_string(),
-            ));
-        }
+        ensure_channel_access(&*self.channel_repo, &*self.member_repo, &channel, user_id).await?;
 
         Ok(channel)
     }
