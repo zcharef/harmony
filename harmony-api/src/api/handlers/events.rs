@@ -14,11 +14,37 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use tokio::sync::watch;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::AuthUser;
 use crate::api::state::AppState;
 use crate::domain::models::{ServerEvent, ServerId, UserId, UserStatus};
+
+/// Ends the wrapped broadcast stream at the first `Lagged` error.
+///
+/// WHY: A lagged consumer has permanently MISSED events — the broadcast
+/// channel already overwrote them and there is no replay buffer. Skipping
+/// the error and continuing would leave the client silently out of sync
+/// until some unrelated reconnect. Terminating the stream instead makes the
+/// client auto-reconnect, and reconnect IS the resync mechanism: the client
+/// invalidates all queries on reconnect (ADR-SSE-006).
+fn take_until_lagged<T>(
+    stream: impl tokio_stream::Stream<Item = Result<T, BroadcastStreamRecvError>>,
+) -> impl tokio_stream::Stream<Item = T> {
+    stream
+        .take_while(|result| match result {
+            Ok(_) => true,
+            Err(BroadcastStreamRecvError::Lagged(count)) => {
+                tracing::warn!(
+                    missed_events = *count,
+                    "SSE consumer lagged behind broadcast — terminating stream to force client resync"
+                );
+                false
+            }
+        })
+        .filter_map(Result::ok)
+}
 
 /// Guard that decrements a user's connection count when the SSE stream is dropped.
 ///
@@ -214,21 +240,10 @@ pub async fn sse_events(
     });
 
     // ── Stage 2 (filter + serialize): apply server_ids filter ─────────
-    let event_stream = intercept_stream.filter_map(move |result| {
-        let event = match result {
-            Ok(event) => event,
-            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(count)) => {
-                // WHY: Slow consumer missed events. Log and continue —
-                // client will catch up via query invalidation on next
-                // reconnect (ADR-SSE-006).
-                tracing::warn!(
-                    missed_events = count,
-                    "SSE consumer lagged behind broadcast"
-                );
-                return None;
-            }
-        };
-
+    // WHY take_until_lagged between the stages: on broadcast lag the stream
+    // must END (forcing the client to reconnect and resync, ADR-SSE-006)
+    // rather than skip the error and keep a permanently out-of-sync client.
+    let event_stream = take_until_lagged(intercept_stream).filter_map(move |event| {
         // WHY: Read the LATEST server_ids from the watch channel. Stage 1
         // may have just updated it for this very event (e.g. MemberJoined
         // adding a new server_id), so borrow() reflects the new state.
@@ -394,4 +409,35 @@ pub async fn sse_events(
             .interval(Duration::from_secs(30))
             .text("heartbeat"),
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn take_until_lagged_terminates_stream_on_broadcast_lag() {
+        // Tiny capacity so a burst of sends overflows the receiver.
+        let (tx, rx) = tokio::sync::broadcast::channel::<u32>(2);
+        let mut stream = std::pin::pin!(take_until_lagged(BroadcastStream::new(rx)));
+
+        // Within capacity: events pass through unchanged.
+        tx.send(1).unwrap();
+        assert_eq!(stream.next().await, Some(1));
+
+        // Overflow: capacity 2, three sends → the oldest is overwritten and
+        // the receiver observes Lagged on its next poll.
+        tx.send(2).unwrap();
+        tx.send(3).unwrap();
+        tx.send(4).unwrap();
+
+        // The stream must END at the lag (None), not skip it and continue
+        // delivering the still-buffered events.
+        assert_eq!(stream.next().await, None);
+
+        // Terminated for good — later events never resurrect the stream.
+        tx.send(5).unwrap();
+        assert_eq!(stream.next().await, None);
+    }
 }

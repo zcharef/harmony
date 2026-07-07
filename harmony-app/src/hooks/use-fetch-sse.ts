@@ -80,7 +80,10 @@ interface LoopState {
  * WHY extracted: Keeps the main hook under Biome's cognitive complexity limit.
  */
 function parseAndDispatch(eventName: string, data: string) {
-  if (!sseEventNameSet.has(eventName)) return
+  if (!sseEventNameSet.has(eventName)) {
+    logger.warn('sse_unknown_event', { eventName })
+    return
+  }
 
   let rawData: unknown
   try {
