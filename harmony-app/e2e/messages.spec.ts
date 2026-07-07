@@ -479,4 +479,55 @@ test.describe('Messaging', () => {
     // WHY: Server validates max 4000 chars → 400 Bad Request (DomainError::ValidationError)
     expect(response.status()).toBe(400)
   })
+
+  // ── React from hover action bar starts a new reaction ─────────────
+
+  test('react button in hover bar adds a reaction pill', async ({ page }) => {
+    const msg = await sendMessage(member.token, channelId, 'React target message')
+
+    await authenticatePage(page, member)
+    await selectServer(page, server.id)
+    await selectChannel(page, 'general')
+
+    const messageItem = page.locator(`[data-test="message-item"][data-message-id="${msg.id}"]`)
+    await expect(messageItem).toBeVisible({ timeout: 10_000 })
+
+    // Hover to reveal the action bar, then open the emoji picker
+    await messageItem.hover()
+    const reactButton = messageItem.locator('[data-test="message-react-button"]')
+    await expect(reactButton).toBeVisible({ timeout: 5_000 })
+    await reactButton.click()
+
+    // WHY: emoji-mart renders <em-emoji-picker> with an OPEN shadow root —
+    // Playwright CSS locators pierce it automatically.
+    const picker = page.locator('em-emoji-picker')
+    await expect(picker).toBeVisible({ timeout: 10_000 })
+
+    // WHY: Register the response listener BEFORE selecting to avoid missing
+    // the POST on fast connections.
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/messages/${msg.id}/reactions`) &&
+        response.request().method() === 'POST',
+    )
+
+    // WHY search+Enter (not clicking a cell): emoji-mart's grid cells expose
+    // no stable roles/labels in its shadow DOM (verified via a11y snapshot —
+    // they are generic divs). Enter in the search box selects the first
+    // result, which is emoji-mart's supported keyboard path.
+    const searchBox = picker.locator('input[type="search"]')
+    await searchBox.fill('thumbs up')
+    // WHY: emoji-mart debounces search — Enter before results render selects
+    // nothing (flake). Wait for the result row to exist first.
+    await expect(picker.getByText('Thumbs Up').first()).toBeVisible({ timeout: 10_000 })
+    await searchBox.press('Enter')
+
+    const response = await responsePromise
+    expect(response.status()).toBe(204)
+
+    // Reaction pill appears on the message (optimistic cache update)
+    await expect(messageItem.getByText('👍').first()).toBeVisible({ timeout: 10_000 })
+    // The "+" pill (second entry point) now shows at the end of the ReactionBar
+    await expect(messageItem.locator('[data-test="reaction-add-button"]')).toBeVisible()
+  })
 })

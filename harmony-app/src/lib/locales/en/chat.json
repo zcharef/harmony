@@ -23,6 +23,7 @@
   "attachFile": "Attach File",
   "stickers": "Stickers",
   "emojiPicker": "Emoji Picker",
+  "addReaction": "Add Reaction",
   "replyingTo": "Replying to",
   "reply": "Reply",
   "slowModeCooldown": "Slow mode: {{seconds}}s",
@@ -30,5 +31,6 @@
     "all": "All Messages",
     "mentions": "@Mentions Only",
     "none": "Nothing"
-  }
+  },
+  "emojiPickerLoadFailed": "Couldn’t load the emoji picker. Check your connection and try again."
 }
