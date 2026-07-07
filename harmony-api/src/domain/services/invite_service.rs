@@ -175,11 +175,12 @@ impl InviteService {
             ));
         }
 
-        // WHY: TOCTOU race exists between this ban check and add_member below.
-        // A user could be banned between these two calls. This is acceptable:
-        // the UNIQUE constraint on server_members prevents duplicates, and the
-        // ban check is defense-in-depth. A concurrent ban will still atomically
-        // remove the membership via ban_user's transaction.
+        // WHY: This is a fast-path ban check — it fails early with a clear error
+        // before touching the invite. It is NOT the race-safe guard: a ban can
+        // land between here and the membership insert. The authoritative check is
+        // in `complete_join`, which takes a per-(server, user) advisory lock (the
+        // same one `ban_user` takes) and re-checks the ban inside it, so a
+        // concurrent ban cannot leave a banned user as a member.
         let is_banned = self.ban_repo.is_banned(&invite.server_id, user_id).await?;
 
         if is_banned {

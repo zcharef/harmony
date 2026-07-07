@@ -64,6 +64,19 @@ impl BanRepository for PgBanRepository {
         // INSERT ban first — if already banned, abort before touching membership.
         let mut tx = self.pool.begin().await.map_err(super::db_err)?;
 
+        // WHY: Take the same per-(server, user) advisory lock that
+        // invite_repository::complete_join takes, so a ban and a concurrent
+        // invite-join serialize. Without it the join's membership INSERT and this
+        // ban's membership DELETE can interleave such that the banned user remains
+        // a member (neither transaction sees the other's uncommitted rows).
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            format!("member_ban:{sid}:{uid}")
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
         let row = sqlx::query!(
             r#"
             INSERT INTO server_bans (server_id, user_id, banned_by, reason)
