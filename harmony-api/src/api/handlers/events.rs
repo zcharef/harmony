@@ -14,11 +14,37 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use tokio::sync::watch;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::AuthUser;
 use crate::api::state::AppState;
 use crate::domain::models::{ServerEvent, ServerId, UserId, UserStatus};
+
+/// Ends the wrapped broadcast stream at the first `Lagged` error.
+///
+/// WHY: A lagged consumer has permanently MISSED events — the broadcast
+/// channel already overwrote them and there is no replay buffer. Skipping
+/// the error and continuing would leave the client silently out of sync
+/// until some unrelated reconnect. Terminating the stream instead makes the
+/// client auto-reconnect, and reconnect IS the resync mechanism: the client
+/// invalidates all queries on reconnect (ADR-SSE-006).
+fn take_until_lagged<T>(
+    stream: impl tokio_stream::Stream<Item = Result<T, BroadcastStreamRecvError>>,
+) -> impl tokio_stream::Stream<Item = T> {
+    stream
+        .take_while(|result| match result {
+            Ok(_) => true,
+            Err(BroadcastStreamRecvError::Lagged(count)) => {
+                tracing::warn!(
+                    missed_events = *count,
+                    "SSE consumer lagged behind broadcast — terminating stream to force client resync"
+                );
+                false
+            }
+        })
+        .filter_map(Result::ok)
+}
 
 /// Guard that decrements a user's connection count when the SSE stream is dropped.
 ///
@@ -47,6 +73,23 @@ impl Drop for PresenceGuard {
         } else {
             tracing::debug!(user_id = %self.user_id.0, "SSE connection dropped, other connections remain");
         }
+    }
+}
+
+/// Aborts the wrapped task when dropped.
+///
+/// WHY: The presence-touch heartbeat runs as a spawned task, NOT as a stream
+/// merged into the SSE response. A merged `IntervalStream` never completes, and
+/// `merge` only ends when BOTH sides end — it would keep the HTTP response open
+/// after `take_until_lagged` terminates the event stream, defeating the forced
+/// reconnect (the client's keep-alive watchdog stays happy on `:heartbeat`
+/// comments alone). Tying the task to the stream's drop keeps its lifetime
+/// identical to the old merged version.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -214,21 +257,10 @@ pub async fn sse_events(
     });
 
     // ── Stage 2 (filter + serialize): apply server_ids filter ─────────
-    let event_stream = intercept_stream.filter_map(move |result| {
-        let event = match result {
-            Ok(event) => event,
-            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(count)) => {
-                // WHY: Slow consumer missed events. Log and continue —
-                // client will catch up via query invalidation on next
-                // reconnect (ADR-SSE-006).
-                tracing::warn!(
-                    missed_events = count,
-                    "SSE consumer lagged behind broadcast"
-                );
-                return None;
-            }
-        };
-
+    // WHY take_until_lagged between the stages: on broadcast lag the stream
+    // must END (forcing the client to reconnect and resync, ADR-SSE-006)
+    // rather than skip the error and keep a permanently out-of-sync client.
+    let event_stream = take_until_lagged(intercept_stream).filter_map(move |event| {
         // WHY: Read the LATEST server_ids from the watch channel. Stage 1
         // may have just updated it for this very event (e.g. MemberJoined
         // adding a new server_id), so borrow() reflects the new state.
@@ -299,22 +331,23 @@ pub async fn sse_events(
         Some(Ok(Event::default().event(event.event_name()).data(data)))
     });
 
-    // ── Heartbeat stream: calls touch() every 30s ───────────────
+    // ── Heartbeat task: calls touch() every 30s ─────────────────
     // WHY: The background sweep task (main.rs) removes presence entries
     // with last_heartbeat older than 90s. This touch keeps the entry
     // alive as long as the SSE connection is open. The 30s interval
     // matches the SSE keep-alive, giving a 60s buffer before sweep.
+    // WHY a spawned task and not a stream merged into the response: see
+    // `AbortOnDrop` — a merged interval stream never ends and would hold the
+    // response open after the event stream terminates on broadcast lag.
     // WHY: AppState is cheap to clone (all fields are Arc).
     let heartbeat_state = state.clone();
-    let heartbeat_interval = tokio::time::interval(Duration::from_secs(30));
-    let heartbeat_stream = tokio_stream::wrappers::IntervalStream::new(heartbeat_interval)
-        .filter_map(move |_| {
+    let heartbeat_guard = AbortOnDrop(tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            interval.tick().await;
             heartbeat_state.presence_tracker().touch(&heartbeat_user_id);
-            // WHY: Return None — heartbeat touches are side-effects only.
-            // The SSE keep-alive (Axum KeepAlive) handles the actual comment
-            // sent to the client. This stream just refreshes the presence entry.
-            None::<Result<Event, Infallible>>
-        });
+        }
+    }));
 
     // ── Presence snapshot: initial sync event ───────────────────
     // WHY: Clients that connect after other users are already online have no
@@ -381,17 +414,76 @@ pub async fn sse_events(
         state: state.clone(),
     };
 
-    // Merge event delivery with heartbeat touches, prepend presence snapshot.
-    let merged = initial_stream
-        .chain(event_stream.merge(heartbeat_stream))
-        .map(move |item| {
-            let _guard = &guard;
-            item
-        });
+    // Prepend the snapshot events to the live event stream. The composed
+    // stream ENDS when `event_stream` ends (broadcast lag) — that EOF is what
+    // makes the client reconnect and resync (ADR-SSE-006). Both guards ride
+    // the closure so presence disconnect + heartbeat abort fire on drop.
+    let merged = initial_stream.chain(event_stream).map(move |item| {
+        let _guard = &guard;
+        let _heartbeat = &heartbeat_guard;
+        item
+    });
 
     Ok(Sse::new(merged).keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(30))
             .text("heartbeat"),
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn take_until_lagged_terminates_stream_on_broadcast_lag() {
+        // Tiny capacity so a burst of sends overflows the receiver.
+        let (tx, rx) = tokio::sync::broadcast::channel::<u32>(2);
+        let mut stream = std::pin::pin!(take_until_lagged(BroadcastStream::new(rx)));
+
+        // Within capacity: events pass through unchanged.
+        tx.send(1).unwrap();
+        assert_eq!(stream.next().await, Some(1));
+
+        // Overflow: capacity 2, three sends → the oldest is overwritten and
+        // the receiver observes Lagged on its next poll.
+        tx.send(2).unwrap();
+        tx.send(3).unwrap();
+        tx.send(4).unwrap();
+
+        // The stream must END at the lag (None), not skip it and continue
+        // delivering the still-buffered events.
+        assert_eq!(stream.next().await, None);
+
+        // Terminated for good — later events never resurrect the stream.
+        tx.send(5).unwrap();
+        assert_eq!(stream.next().await, None);
+    }
+
+    /// Pins the RESPONSE-BODY composition: snapshot prefix chained onto the
+    /// lag-terminating live stream, with NO merged side-stream. A previous
+    /// version merged an infinite heartbeat interval here, which kept the
+    /// response open after lag and defeated the forced reconnect entirely.
+    #[tokio::test]
+    async fn chained_response_stream_ends_on_broadcast_lag() {
+        let (tx, rx) = tokio::sync::broadcast::channel::<u32>(2);
+        let initial = tokio_stream::iter(vec![100_u32, 101]);
+        let mut stream = std::pin::pin!(initial.chain(take_until_lagged(BroadcastStream::new(rx))));
+
+        // Snapshot events flow first, in order.
+        assert_eq!(stream.next().await, Some(100));
+        assert_eq!(stream.next().await, Some(101));
+
+        // Live events flow after the snapshot.
+        tx.send(1).unwrap();
+        assert_eq!(stream.next().await, Some(1));
+
+        // Overflow the capacity-2 channel → the composed stream must reach
+        // EOF (None), because EOF is what triggers the client reconnect.
+        tx.send(2).unwrap();
+        tx.send(3).unwrap();
+        tx.send(4).unwrap();
+        assert_eq!(stream.next().await, None);
+    }
 }

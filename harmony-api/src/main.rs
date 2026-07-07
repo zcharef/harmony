@@ -562,7 +562,13 @@ fn spawn_moderation_retry_sweep(state: api::AppState) {
                                     Ok(None) => {
                                         // Message already deleted — clean up retry record
                                         tracing::debug!(message_id = %retry.message_id, "Retried message already deleted");
-                                        let _ = retry_repo.delete(&retry.id).await;
+                                        if let Err(e) = retry_repo.delete(&retry.id).await {
+                                            tracing::warn!(
+                                                retry_id = %retry.id,
+                                                error = %e,
+                                                "Failed to delete moderation retry for already-deleted message"
+                                            );
+                                        }
                                         continue;
                                     }
                                     Err(e) => {
@@ -578,7 +584,13 @@ fn spawn_moderation_retry_sweep(state: api::AppState) {
                                         message_id = %retry.message_id,
                                         "Message edited after retry was created — skipping moderation, content changed"
                                     );
-                                    let _ = retry_repo.delete(&retry.id).await;
+                                    if let Err(e) = retry_repo.delete(&retry.id).await {
+                                        tracing::warn!(
+                                            retry_id = %retry.id,
+                                            error = %e,
+                                            "Failed to delete moderation retry for edited message"
+                                        );
+                                    }
                                     continue;
                                 }
 
