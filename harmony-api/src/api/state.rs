@@ -8,9 +8,9 @@ use tokio::sync::Semaphore;
 
 use crate::domain::models::ServerId;
 use crate::domain::ports::{
-    BanRepository, ContentModerator, DesktopAuthRepository, EventBus, MegolmSessionRepository,
-    MemberRepository, MessageRepository, ModerationRetryRepository, PlanLimitChecker,
-    ServerRepository, VoiceSessionRepository,
+    BanRepository, ChannelRepository, ContentModerator, DesktopAuthRepository, EventBus,
+    MegolmSessionRepository, MemberRepository, MessageRepository, ModerationRetryRepository,
+    PlanLimitChecker, ServerRepository, VoiceSessionRepository,
 };
 use crate::domain::services::{
     ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
@@ -65,6 +65,9 @@ pub struct AppState {
     user_preferences_service: Arc<UserPreferencesService>,
     /// Member repository (accessed directly for simple queries; invite logic lives in `InviteService`).
     member_repository: Arc<dyn MemberRepository>,
+    /// Channel repository (accessed directly by handlers that call the shared
+    /// `ensure_channel_access` gate, e.g. Megolm session registration).
+    channel_repository: Arc<dyn ChannelRepository>,
     /// Ban repository (accessed directly by moderation handlers).
     ban_repository: Arc<dyn BanRepository>,
     /// Plan limit checker (self-hosted: always allowed, hosted: Postgres-backed).
@@ -121,6 +124,7 @@ impl std::fmt::Debug for AppState {
             )
             .field("user_preferences_service", &self.user_preferences_service)
             .field("member_repository", &self.member_repository)
+            .field("channel_repository", &self.channel_repository)
             .field("ban_repository", &self.ban_repository)
             .field("plan_limit_checker", &self.plan_limit_checker)
             .field("event_bus", &self.event_bus)
@@ -168,6 +172,7 @@ impl AppState {
         notification_settings_service: Arc<NotificationSettingsService>,
         user_preferences_service: Arc<UserPreferencesService>,
         member_repository: Arc<dyn MemberRepository>,
+        channel_repository: Arc<dyn ChannelRepository>,
         ban_repository: Arc<dyn BanRepository>,
         plan_limit_checker: Arc<dyn PlanLimitChecker>,
         event_bus: Arc<dyn EventBus>,
@@ -202,6 +207,7 @@ impl AppState {
             notification_settings_service,
             user_preferences_service,
             member_repository,
+            channel_repository,
             ban_repository,
             plan_limit_checker,
             event_bus,
@@ -297,6 +303,13 @@ impl AppState {
     #[must_use]
     pub fn member_repository(&self) -> &dyn MemberRepository {
         &*self.member_repository
+    }
+
+    /// Access the channel repository directly (handlers calling the shared
+    /// `ensure_channel_access` gate).
+    #[must_use]
+    pub fn channel_repository(&self) -> &dyn ChannelRepository {
+        &*self.channel_repository
     }
 
     /// Access the ban repository directly (moderation handlers).

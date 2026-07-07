@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{ChannelId, MessageId, UserId};
-use crate::domain::ports::{ChannelRepository, MemberRepository, ReactionRepository};
+use crate::domain::ports::{
+    ChannelRepository, MemberRepository, MessageRepository, ReactionRepository,
+};
 use crate::domain::services::channel_access::ensure_channel_access;
 
 /// Maximum emoji length in characters.
@@ -16,6 +18,7 @@ pub struct ReactionService {
     repo: Arc<dyn ReactionRepository>,
     channel_repo: Arc<dyn ChannelRepository>,
     member_repo: Arc<dyn MemberRepository>,
+    message_repo: Arc<dyn MessageRepository>,
 }
 
 impl ReactionService {
@@ -24,11 +27,13 @@ impl ReactionService {
         repo: Arc<dyn ReactionRepository>,
         channel_repo: Arc<dyn ChannelRepository>,
         member_repo: Arc<dyn MemberRepository>,
+        message_repo: Arc<dyn MessageRepository>,
     ) -> Self {
         Self {
             repo,
             channel_repo,
             member_repo,
+            message_repo,
         }
     }
 
@@ -56,11 +61,45 @@ impl ReactionService {
         ensure_channel_access(&*self.channel_repo, &*self.member_repo, &channel, user_id).await
     }
 
+    /// Verify that the message exists in the PATH channel.
+    ///
+    /// WHY: The channel-access check runs on the path `channel_id`, but the
+    /// reaction row is keyed on `message_id` alone. Without this binding, a user
+    /// could pass any channel they belong to and react to a message in a private
+    /// channel or another server (cross-channel IDOR). A channel mismatch returns
+    /// the same `NotFound` as a missing message so the message's existence is not
+    /// leaked. Soft-deleted messages are covered too: `find_by_id` returns `None`
+    /// for them (port contract).
+    async fn verify_message_in_channel(
+        &self,
+        channel_id: &ChannelId,
+        message_id: &MessageId,
+    ) -> Result<(), DomainError> {
+        let not_found = || DomainError::NotFound {
+            resource_type: "Message",
+            id: message_id.to_string(),
+        };
+
+        let message = self
+            .message_repo
+            .find_by_id(message_id)
+            .await?
+            .ok_or_else(not_found)?;
+
+        if message.channel_id != *channel_id {
+            return Err(not_found());
+        }
+
+        Ok(())
+    }
+
     /// Add a reaction to a message.
     ///
     /// # Errors
     /// Returns `DomainError::Forbidden` if the user is not a server member,
-    /// `DomainError::ValidationError` if the emoji is empty or too long.
+    /// `DomainError::NotFound` if the message is missing, deleted, or not in
+    /// this channel, `DomainError::ValidationError` if the emoji is empty or
+    /// too long.
     pub async fn add_reaction(
         &self,
         channel_id: &ChannelId,
@@ -69,6 +108,8 @@ impl ReactionService {
         emoji: &str,
     ) -> Result<(), DomainError> {
         self.verify_channel_membership(channel_id, user_id).await?;
+        self.verify_message_in_channel(channel_id, message_id)
+            .await?;
         validate_emoji(emoji)?;
         self.repo.add(message_id, user_id, emoji).await
     }
@@ -76,7 +117,9 @@ impl ReactionService {
     /// Remove a reaction from a message.
     ///
     /// # Errors
-    /// Returns `DomainError::Forbidden` if the user is not a server member.
+    /// Returns `DomainError::Forbidden` if the user is not a server member,
+    /// `DomainError::NotFound` if the message is missing, deleted, or not in
+    /// this channel.
     pub async fn remove_reaction(
         &self,
         channel_id: &ChannelId,
@@ -85,6 +128,8 @@ impl ReactionService {
         emoji: &str,
     ) -> Result<(), DomainError> {
         self.verify_channel_membership(channel_id, user_id).await?;
+        self.verify_message_in_channel(channel_id, message_id)
+            .await?;
         self.repo.remove(message_id, user_id, emoji).await
     }
 }
@@ -106,9 +151,401 @@ fn validate_emoji(emoji: &str) -> Result<(), DomainError> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    use async_trait::async_trait;
+    use chrono::{DateTime, Utc};
+    use uuid::Uuid;
+
+    use crate::domain::models::{
+        Channel, ChannelType, Message, MessageType, MessageWithAuthor, ReactionSummary, Role,
+        ServerId, ServerMember,
+    };
+
+    fn user_id(n: u128) -> UserId {
+        UserId::new(Uuid::from_u128(n))
+    }
+    fn server_id(n: u128) -> ServerId {
+        ServerId::new(Uuid::from_u128(n))
+    }
+    fn channel_id(n: u128) -> ChannelId {
+        ChannelId::new(Uuid::from_u128(n))
+    }
+    fn message_id(n: u128) -> MessageId {
+        MessageId::new(Uuid::from_u128(n))
+    }
+
+    fn make_channel(srv: ServerId) -> Channel {
+        let now = Utc::now();
+        Channel {
+            id: channel_id(100),
+            server_id: srv,
+            name: "general".to_string(),
+            topic: None,
+            channel_type: ChannelType::Text,
+            position: 0,
+            category_id: None,
+            is_private: false,
+            is_read_only: false,
+            encrypted: false,
+            slow_mode_seconds: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn make_message(in_channel: ChannelId) -> Message {
+        Message {
+            id: message_id(7),
+            channel_id: in_channel,
+            author_id: user_id(1),
+            content: "hello".to_string(),
+            edited_at: None,
+            deleted_at: None,
+            deleted_by: None,
+            encrypted: false,
+            sender_device_id: None,
+            message_type: MessageType::Default,
+            system_event_key: None,
+            parent_message_id: None,
+            moderated_at: None,
+            moderation_reason: None,
+            original_content: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Minimal `ReactionRepository` fake: records nothing, always succeeds.
+    /// The tests assert on the authorization gate, not on persistence.
+    #[derive(Debug)]
+    struct FakeReactionRepo;
+
+    #[async_trait]
+    impl ReactionRepository for FakeReactionRepo {
+        async fn add(
+            &self,
+            _message_id: &MessageId,
+            _user_id: &UserId,
+            _emoji: &str,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn remove(
+            &self,
+            _message_id: &MessageId,
+            _user_id: &UserId,
+            _emoji: &str,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn batch_for_messages(
+            &self,
+            _message_ids: &[MessageId],
+            _viewer_id: &UserId,
+        ) -> Result<HashMap<MessageId, Vec<ReactionSummary>>, DomainError> {
+            Ok(HashMap::new())
+        }
+    }
+
+    /// Minimal `MemberRepository` fake: caller is always a plain member.
+    /// Membership rejection paths are covered by the `channel_access` tests.
+    #[derive(Debug)]
+    struct FakeMemberRepo;
+
+    #[async_trait]
+    impl MemberRepository for FakeMemberRepo {
+        async fn get_member_role(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<Option<Role>, DomainError> {
+            Ok(Some(Role::Member))
+        }
+
+        // -- unused by add/remove_reaction --
+        async fn list_by_server(
+            &self,
+            _server_id: &ServerId,
+        ) -> Result<Vec<ServerMember>, DomainError> {
+            Ok(vec![])
+        }
+        async fn list_by_server_paginated(
+            &self,
+            _server_id: &ServerId,
+            _cursor: Option<DateTime<Utc>>,
+            _limit: i64,
+        ) -> Result<Vec<ServerMember>, DomainError> {
+            Ok(vec![])
+        }
+        async fn is_member(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<bool, DomainError> {
+            Ok(true)
+        }
+        async fn add_member(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn remove_member(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn get_member(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<Option<ServerMember>, DomainError> {
+            Ok(None)
+        }
+        async fn update_member_role(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+            _new_role: Role,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn count_by_server(&self, _server_id: &ServerId) -> Result<i64, DomainError> {
+            Ok(0)
+        }
+        async fn transfer_ownership(
+            &self,
+            _server_id: &ServerId,
+            _old_owner_id: &UserId,
+            _new_owner_id: &UserId,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+    }
+
+    /// Minimal `ChannelRepository` fake: the path channel exists and is public.
+    #[derive(Debug)]
+    struct FakeChannelRepo {
+        channel: Channel,
+    }
+
+    #[async_trait]
+    impl ChannelRepository for FakeChannelRepo {
+        async fn get_by_id(&self, _channel_id: &ChannelId) -> Result<Option<Channel>, DomainError> {
+            Ok(Some(self.channel.clone()))
+        }
+        async fn has_private_channel_access(
+            &self,
+            _channel_id: &ChannelId,
+            _member_role: Role,
+        ) -> Result<bool, DomainError> {
+            Ok(true)
+        }
+
+        // -- unused by add/remove_reaction --
+        async fn list_for_server(
+            &self,
+            _server_id: &ServerId,
+            _caller_user_id: &UserId,
+        ) -> Result<Vec<Channel>, DomainError> {
+            Ok(vec![])
+        }
+        async fn create_channel(&self, channel: &Channel) -> Result<Channel, DomainError> {
+            Ok(channel.clone())
+        }
+        async fn update_channel(
+            &self,
+            _channel_id: &ChannelId,
+            _name: Option<String>,
+            _topic: Option<Option<String>>,
+            _is_private: Option<bool>,
+            _is_read_only: Option<bool>,
+            _encrypted: Option<bool>,
+            _slow_mode_seconds: Option<i32>,
+        ) -> Result<Channel, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn delete_if_not_last(&self, _channel_id: &ChannelId) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn count_for_server(&self, _server_id: &ServerId) -> Result<i64, DomainError> {
+            Ok(0)
+        }
+        async fn find_default_for_server(
+            &self,
+            _server_id: &ServerId,
+        ) -> Result<Option<Channel>, DomainError> {
+            Ok(None)
+        }
+    }
+
+    /// Minimal `MessageRepository` fake. `find_by_id` returns the configured
+    /// message; `None` models both a missing and a soft-deleted message (the
+    /// real adapter filters `deleted_at IS NULL`, so deleted rows come back as
+    /// `None` — same port contract).
+    #[derive(Debug)]
+    struct FakeMessageRepo {
+        message: Option<Message>,
+    }
+
+    #[async_trait]
+    impl MessageRepository for FakeMessageRepo {
+        async fn find_by_id(
+            &self,
+            _message_id: &MessageId,
+        ) -> Result<Option<Message>, DomainError> {
+            Ok(self.message.clone())
+        }
+
+        // -- unused by add/remove_reaction --
+        #[allow(clippy::too_many_arguments)]
+        async fn send_to_channel(
+            &self,
+            _channel_id: &ChannelId,
+            _author_id: &UserId,
+            _content: String,
+            _encrypted: bool,
+            _sender_device_id: Option<String>,
+            _parent_message_id: Option<MessageId>,
+            _moderated_at: Option<DateTime<Utc>>,
+            _moderation_reason: Option<String>,
+            _original_content: Option<String>,
+            _slow_mode_seconds: i32,
+        ) -> Result<MessageWithAuthor, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn list_for_channel(
+            &self,
+            _channel_id: &ChannelId,
+            _cursor: Option<DateTime<Utc>>,
+            _limit: i64,
+        ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+            Ok(vec![])
+        }
+        async fn update_content(
+            &self,
+            _message_id: &MessageId,
+            _content: String,
+            _moderated_at: Option<DateTime<Utc>>,
+            _moderation_reason: Option<String>,
+            _original_content: Option<String>,
+        ) -> Result<MessageWithAuthor, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn soft_delete(
+            &self,
+            _message_id: &MessageId,
+            _deleted_by: &UserId,
+            _checked_at: Option<DateTime<Utc>>,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn count_recent(
+            &self,
+            _channel_id: &ChannelId,
+            _author_id: &UserId,
+            _window_secs: i64,
+        ) -> Result<i64, DomainError> {
+            Ok(0)
+        }
+        async fn get_last_message_time(
+            &self,
+            _channel_id: &ChannelId,
+            _author_id: &UserId,
+        ) -> Result<Option<DateTime<Utc>>, DomainError> {
+            Ok(None)
+        }
+        async fn create_system(
+            &self,
+            _channel_id: &ChannelId,
+            _author_id: &UserId,
+            _system_event_key: String,
+        ) -> Result<MessageWithAuthor, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+    }
+
+    fn service(message: Option<Message>) -> ReactionService {
+        ReactionService::new(
+            Arc::new(FakeReactionRepo),
+            Arc::new(FakeChannelRepo {
+                channel: make_channel(server_id(1)),
+            }),
+            Arc::new(FakeMemberRepo),
+            Arc::new(FakeMessageRepo { message }),
+        )
+    }
+
+    fn assert_message_not_found(err: &DomainError) {
+        assert!(
+            matches!(
+                err,
+                DomainError::NotFound {
+                    resource_type: "Message",
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
+    }
+
+    /// A message living in ANOTHER channel is rejected as `NotFound` — the
+    /// cross-channel IDOR regression guard. `NotFound` (not `Forbidden`) so the
+    /// message's existence is not leaked.
+    #[tokio::test]
+    async fn add_reaction_to_message_in_another_channel_is_not_found() {
+        let svc = service(Some(make_message(channel_id(999))));
+        let err = svc
+            .add_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+            .await
+            .unwrap_err();
+        assert_message_not_found(&err);
+    }
+
+    /// `remove_reaction` enforces the same message↔channel binding as add.
+    #[tokio::test]
+    async fn remove_reaction_from_message_in_another_channel_is_not_found() {
+        let svc = service(Some(make_message(channel_id(999))));
+        let err = svc
+            .remove_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+            .await
+            .unwrap_err();
+        assert_message_not_found(&err);
+    }
+
+    /// A missing message is `NotFound`. This also covers soft-deleted messages:
+    /// the repository's `find_by_id` returns `None` for `deleted_at IS NOT NULL`.
+    #[tokio::test]
+    async fn add_reaction_to_missing_or_deleted_message_is_not_found() {
+        let svc = service(None);
+        let err = svc
+            .add_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+            .await
+            .unwrap_err();
+        assert_message_not_found(&err);
+    }
+
+    /// Happy path: member reacting to a live message in the path channel.
+    #[tokio::test]
+    async fn add_and_remove_reaction_happy_path() {
+        let svc = service(Some(make_message(channel_id(100))));
+        assert!(
+            svc.add_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+                .await
+                .is_ok()
+        );
+        assert!(
+            svc.remove_reaction(&channel_id(100), &message_id(7), &user_id(42), "👍")
+                .await
+                .is_ok()
+        );
+    }
 
     #[test]
     fn validate_emoji_rejects_empty() {

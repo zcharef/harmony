@@ -20,6 +20,10 @@ pub mod spam_guard;
 mod user_preferences_service;
 mod voice_service;
 
+// WHY: `channel_access` is a private module, so its `pub(crate)` gate is not
+// nameable from the API layer. Re-export the function (not the module) so
+// handlers share the exact same access decision without widening the surface.
+pub(crate) use channel_access::ensure_channel_access;
 pub use channel_service::ChannelService;
 pub use content_filter::ContentFilter;
 pub use content_moderation::{
