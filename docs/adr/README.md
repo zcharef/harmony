@@ -52,6 +52,7 @@ An ADR is a document that captures an important architectural decision made alon
 | [044](./044-heroui-component-library.md) | HeroUI Component Library — Single UI Primitive Source | Accepted |
 | [045](./045-no-usestate-shadow-realtime-data.md) | No useState Shadow for Real-Time Data | Accepted |
 | [046](./046-tracing-severity-sentry-contract.md) | Tracing Severity as Sentry Contract | Accepted |
+| [047](./047-user-preferences.md) | Server-Persisted User Preferences (DND, Hide Profanity) | Accepted |
 
 ## Template
 
