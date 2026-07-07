@@ -1,5 +1,7 @@
 //! Presence handlers.
 
+use std::time::Duration;
+
 use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use serde::Deserialize;
 use utoipa::ToSchema;
@@ -8,6 +10,12 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ServerEvent, UserStatus};
+
+/// Maximum presence updates per user within [`PRESENCE_RATE_WINDOW`].
+const PRESENCE_RATE_MAX: usize = 10;
+
+/// Window for the per-user presence rate limit.
+const PRESENCE_RATE_WINDOW: Duration = Duration::from_secs(60);
 
 /// Request body for updating presence status.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -25,7 +33,8 @@ pub struct UpdatePresenceRequest {
 /// connected users receive the update through SSE.
 ///
 /// # Errors
-/// Returns `ApiError` on invalid status value.
+/// Returns `ApiError` on invalid status value or when the per-user
+/// presence rate limit is exceeded.
 #[utoipa::path(
     post,
     path = "/v1/presence",
@@ -37,6 +46,7 @@ pub struct UpdatePresenceRequest {
         (status = 400, description = "Invalid status (e.g. 'offline' is system-managed)", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
         (status = 422, description = "Unprocessable request body", body = ProblemDetails),
+        (status = 429, description = "Presence rate limit exceeded", body = ProblemDetails),
     )
 )]
 #[tracing::instrument(skip(state))]
@@ -52,6 +62,16 @@ pub async fn update_presence(
             "Cannot set status to 'offline' — it is managed by the server on disconnect",
         ));
     }
+
+    // WHY: Each update fans out a PresenceChanged event to every connected
+    // client — a per-user cap keeps a misbehaving client from flooding the bus.
+    // Legitimate use is a few manual status changes per minute at most.
+    state.spam_guard().check_and_record_action(
+        &user_id,
+        "presence",
+        PRESENCE_RATE_MAX,
+        PRESENCE_RATE_WINDOW,
+    )?;
 
     state
         .presence_tracker()

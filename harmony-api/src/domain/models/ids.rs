@@ -234,12 +234,22 @@ impl From<Uuid> for MegolmSessionId {
 }
 
 /// Device identifier (client-generated string, not a UUID).
+// WHY `try_from`/`into` instead of `serde(transparent)`: every serde
+// deserialization path (JSON bodies, Axum `Path`/`Query` extractors) funnels
+// through `DeviceId::try_new`, so untrusted input cannot bypass validation.
+// Regular comment (not doc) so the rationale stays out of the public OpenAPI
+// schema description.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[schema(example = "ABCDEF123456")]
-#[serde(transparent)]
+#[serde(try_from = "String", into = "String")]
 pub struct DeviceId(pub String);
 
 impl DeviceId {
+    /// Unvalidated construction for TRUSTED sources only (DB rows, tests).
+    ///
+    /// WHY kept: stored device IDs were already validated at registration
+    /// (`try_new` at the API boundary), so re-validating on every row read is
+    /// wasted work. All serde paths validate via `try_new` — see `TryFrom`.
     #[must_use]
     pub fn new(id: String) -> Self {
         Self(id)
@@ -248,9 +258,8 @@ impl DeviceId {
     /// Validated construction — returns error if device ID is empty, too long, or
     /// contains invalid characters.
     ///
-    /// WHY: This is the `SSoT` for `DeviceId` validation. `new()` is kept for backward
-    /// compatibility (deserialization, tests). Prefer `try_new()` at domain entry
-    /// points for defense-in-depth.
+    /// WHY: This is the `SSoT` for `DeviceId` validation. All serde
+    /// deserialization delegates here via `TryFrom<String>`.
     ///
     /// # Errors
     /// Returns a static error message if the ID is empty, exceeds 128 characters,
@@ -281,9 +290,24 @@ impl fmt::Display for DeviceId {
     }
 }
 
-impl From<String> for DeviceId {
-    fn from(id: String) -> Self {
-        Self(id)
+// WHY: Serde's `try_from` hook — makes validation unbypassable for ALL
+// deserialization (Path, Query, JSON). `&'static str` satisfies the
+// `Display` bound serde requires for the error type.
+impl TryFrom<String> for DeviceId {
+    type Error = &'static str;
+
+    fn try_from(id: String) -> Result<Self, Self::Error> {
+        Self::try_new(id)
+    }
+}
+
+// WHY: Serde's `into` hook for serialization (serializes as a plain string).
+// NOTE: `From<String> for DeviceId` is deliberately ABSENT — it would give a
+// blanket `TryFrom<String>` (via core) that conflicts with the validated impl
+// above. Trusted construction (DB rows) uses `new()` instead.
+impl From<DeviceId> for String {
+    fn from(id: DeviceId) -> Self {
+        id.0
     }
 }
 
@@ -459,5 +483,37 @@ mod tests {
             result.unwrap_err(),
             "device_id may only contain alphanumeric characters, hyphens, and underscores"
         );
+    }
+
+    // ── DeviceId serde validation (try_from funnel) ────────────────
+    //
+    // Axum's Path/Query extractors construct DeviceId through serde. These
+    // tests pin that serde deserialization goes through try_new, closing the
+    // former `serde(transparent)` validation bypass.
+
+    #[test]
+    fn device_id_serde_rejects_path_traversal() {
+        let result = serde_json::from_value::<DeviceId>(serde_json::json!("../../etc"));
+        assert!(
+            result.is_err(),
+            "serde must reject invalid device IDs via try_new"
+        );
+    }
+
+    #[test]
+    fn device_id_serde_rejects_empty() {
+        let result = serde_json::from_value::<DeviceId>(serde_json::json!(""));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn device_id_serde_round_trips_valid_id() {
+        let original = DeviceId::try_new("my-device_123".to_string()).unwrap();
+
+        let json = serde_json::to_value(original.clone()).unwrap();
+        assert_eq!(json, serde_json::json!("my-device_123"));
+
+        let parsed: DeviceId = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, original);
     }
 }

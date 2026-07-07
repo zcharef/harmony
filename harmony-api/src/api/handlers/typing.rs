@@ -4,12 +4,20 @@
 //! typing; server emits `TypingStarted` via `EventBus` so other channel
 //! members see the indicator in their SSE stream.
 
+use std::time::Duration;
+
 use axum::{extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ChannelId, ServerEvent};
+
+/// Maximum typing signals per user within [`TYPING_RATE_WINDOW`].
+const TYPING_RATE_MAX: usize = 15;
+
+/// Window for the per-user typing rate limit.
+const TYPING_RATE_WINDOW: Duration = Duration::from_secs(10);
 
 /// Signal that the authenticated user is typing in a channel.
 ///
@@ -19,7 +27,8 @@ use crate::domain::models::{ChannelId, ServerEvent};
 ///
 /// # Errors
 /// Returns `ApiError` if the channel is not found, the user is not a
-/// member, or the profile lookup fails.
+/// member, the per-user typing rate limit is exceeded, or the profile
+/// lookup fails.
 #[utoipa::path(
     post,
     path = "/v1/channels/{id}/typing",
@@ -31,6 +40,7 @@ use crate::domain::models::{ChannelId, ServerEvent};
         (status = 401, description = "Unauthorized", body = ProblemDetails),
         (status = 403, description = "Not a server member", body = ProblemDetails),
         (status = 404, description = "Channel not found", body = ProblemDetails),
+        (status = 429, description = "Typing rate limit exceeded", body = ProblemDetails),
     )
 )]
 #[tracing::instrument(skip(state))]
@@ -51,6 +61,16 @@ pub async fn send_typing(
             "You must be a server member to send typing indicators",
         ));
     }
+
+    // WHY: Typing is fire-and-forget with no DB write — without a per-user cap
+    // a client could flood the event bus. Per-IP limiting is Cloudflare's job
+    // (see router.rs); this is the application-level per-user cap.
+    state.spam_guard().check_and_record_action(
+        &user_id,
+        "typing",
+        TYPING_RATE_MAX,
+        TYPING_RATE_WINDOW,
+    )?;
 
     // WHY: TypingStarted carries the username so clients don't need an extra lookup.
     let profile = state.profile_service().get_by_id(&user_id).await?;

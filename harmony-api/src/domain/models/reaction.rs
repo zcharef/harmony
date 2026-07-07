@@ -15,3 +15,15 @@ pub struct ReactionSummary {
     pub count: i64,
     pub reacted_by_me: bool,
 }
+
+/// Snapshot of emoji variety on a message, used to enforce the per-message
+/// distinct-emoji cap.
+///
+/// Not serialized — internal read model, never exposed through the API.
+#[derive(Debug, Clone, Copy)]
+pub struct EmojiVariety {
+    /// Number of DISTINCT emoji currently reacted on the message.
+    pub distinct_count: i64,
+    /// Whether the candidate emoji is already among them.
+    pub emoji_present: bool,
+}

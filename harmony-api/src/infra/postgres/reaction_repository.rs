@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{MessageId, ReactionSummary, UserId};
+use crate::domain::models::{EmojiVariety, MessageId, ReactionSummary, UserId};
 use crate::domain::ports::ReactionRepository;
 
 /// PostgreSQL-backed reaction repository.
@@ -46,6 +46,35 @@ impl ReactionRepository for PgReactionRepository {
         .map_err(super::db_err)?;
 
         Ok(())
+    }
+
+    async fn emoji_variety(
+        &self,
+        message_id: &MessageId,
+        emoji: &str,
+    ) -> Result<EmojiVariety, DomainError> {
+        // WHY: COUNT(DISTINCT ...) already returns BIGINT (no ::BIGINT cast
+        // needed per ADR-024 — that rule targets SUM); BOOL_OR over zero rows
+        // is NULL, hence the COALESCE.
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                COUNT(DISTINCT emoji) AS "count!",
+                COALESCE(BOOL_OR(emoji = $2), false) AS "exists!"
+            FROM message_reactions
+            WHERE message_id = $1
+            "#,
+            message_id.0,
+            emoji,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(EmojiVariety {
+            distinct_count: row.count,
+            emoji_present: row.exists,
+        })
     }
 
     async fn remove(
