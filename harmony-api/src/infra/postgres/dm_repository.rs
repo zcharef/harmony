@@ -65,11 +65,33 @@ impl DmRepository for PgDmRepository {
         let uid_a = user_a.0;
         let uid_b = user_b.0;
 
-        // WHY: Transaction with a re-check inside prevents the race condition where
-        // two concurrent create_or_get_dm calls both pass the initial find_dm check
-        // and then both try to create a DM. The SERIALIZABLE-like re-check inside the
-        // transaction ensures only one DM is ever created per user pair.
+        // WHY: Transaction with a re-check inside guards against the race where
+        // two concurrent create_or_get_dm calls both pass the initial find_dm
+        // check and then both try to create a DM for the same pair.
         let mut tx = self.pool.begin().await.map_err(super::db_err)?;
+
+        // WHY: Serialize DM creation per user-pair with a transaction-scoped
+        // advisory lock, acquired BEFORE the existence re-check. The re-check's
+        // FOR SHARE can only lock rows that already exist; when no DM exists yet
+        // there are zero server_members rows to lock, so two concurrent
+        // create_dm(a, b) calls both observe "no DM" and both INSERT — producing
+        // duplicate, split-brain DM servers for one pair. The advisory lock has
+        // no such gap: keyed on the canonical (ordered) user pair, the second
+        // caller blocks until the first commits, then its FOR SHARE re-check
+        // finds the DM the first created and returns it. pg_advisory_xact_lock
+        // auto-releases on commit/rollback, so no explicit unlock is needed.
+        let (low, high) = if uid_a <= uid_b {
+            (uid_a, uid_b)
+        } else {
+            (uid_b, uid_a)
+        };
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            format!("{low}:{high}")
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
 
         // 1. Re-check for existing DM inside the transaction with FOR SHARE lock
         //    to prevent concurrent inserts from creating duplicates.
