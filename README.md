@@ -16,7 +16,7 @@
   <a href="https://ko-fi.com/Z8Z11JU7E7"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="ko-fi"></a>
 </p>
 
-> **Status:** Alpha — actively developed. Core chat works. [Try it](https://joinharmony.app) or self-host it.
+> **Status:** Alpha, actively developed. Text chat, voice (LiveKit), DMs, presence, and moderation are live. [Try it](https://joinharmony.app) or self-host it.
 
 <!-- TODO: Add screenshot here -->
 <!-- <p align="center"><img src="mediakit/screenshot.png" alt="Harmony" width="800"></p> -->
@@ -30,23 +30,25 @@
 | Client | Electron (~500 MB RAM) | Solid.js PWA | **Web + Tauri desktop (~80 MB RAM)** |
 | Backend | Proprietary | 6 Rust microservices | **Single Rust binary** |
 | Database | Proprietary | MongoDB + Redis + RabbitMQ | **PostgreSQL only** |
-| Self-host | N/A | 6 services + 4 datastores | **Postgres + one binary** |
+| Self-host | N/A | 6 services + 4 datastores | **One docker compose command** |
 | Privacy | Scans messages, sells data | Good | **No data collection, fully auditable** |
-| E2EE | No | No | **Yes (desktop DMs + opt-in channels)** |
+| E2EE | No | No | **In development (DMs first)** |
 
 ### What makes Harmony different
 
-- **Privacy you can verify** — Fully open source under AGPL-3.0. We don't scan your messages, sell your data, or train AI on your conversations. You can read every line of code that handles your data.
+- **Privacy you can verify.** Fully open source under AGPL-3.0. We don't scan your messages, sell your data, or train AI on your conversations. You can read every line of code that handles your data.
 
-- **End-to-end encrypted** — DMs from the desktop app are automatically encrypted using [vodozemac](https://github.com/matrix-org/vodozemac) (NCC Group audited). Keys live in your OS keychain, cryptography runs natively in Rust — private keys never touch JavaScript. Server owners can enable E2EE per channel too.
+- **The Discord features you expect.** Reactions, replies, unread indicators, emoji picker, avatars, markdown, message grouping, date dividers, per-channel notification settings, presence and DND, moderation and anti-spam. All shipped.
 
-- **Dead simple to self-host** — One Rust binary + PostgreSQL. That's it. No Redis, no message queues, no object storage. Full features, unlimited users, your rules.
+- **E2EE in development.** The crypto foundation is built on [vodozemac](https://github.com/matrix-org/vodozemac) (NCC Group audited). It runs natively in the desktop app's Rust runtime and keys live in your OS keychain, so private keys never touch JavaScript. E2EE DMs are the next milestone. Not live yet.
 
-- **Discord migration tools** — Bring your entire server over: channels, roles, categories, permissions. Migration tooling is in active development.
+- **Simple to self-host.** One docker compose command runs the whole stack: the Harmony Rust binary, PostgreSQL, and Supabase's open-source auth (GoTrue). No Redis, no MongoDB, no RabbitMQ. Full features, unlimited users, your rules.
 
-- **Web + Desktop, same codebase** — Use Harmony in the browser with zero friction, or install the Tauri desktop app for E2EE and native performance (~80 MB RAM vs Electron's ~500 MB).
+- **Discord migration (planned).** The goal: bring your entire server over with channels, roles, categories, and permissions intact. On the roadmap, not built yet.
 
-> **Alpha disclaimer:** E2EE is functional but has not yet had a professional security audit. The underlying crypto library (vodozemac) has been [audited by NCC Group](https://matrix.org/media/Hodgson_vodozemac_audit.pdf). Full integration audit planned before beta.
+- **Web + Desktop, same codebase.** Use Harmony in the browser with zero friction, or install the Tauri desktop app for native performance (~80 MB RAM vs Electron's ~500 MB). E2EE DMs will land on desktop first.
+
+> **Alpha disclaimer:** E2EE is under active development and not yet live in production. The underlying crypto library (vodozemac) has been [audited by NCC Group](https://matrix.org/media/Hodgson_vodozemac_audit.pdf). Full integration audit planned before beta.
 
 ---
 
@@ -80,7 +82,7 @@ cd harmony-app
 pnpm install
 just dev                    # opens http://localhost:1420
 
-# 4b. Or start the Tauri desktop app (for E2EE DMs)
+# 4b. Or start the Tauri desktop app (native desktop build)
 just tauri dev              # opens the native desktop app
 ```
 
@@ -124,15 +126,16 @@ cd harmony-app && just wall
             ┌──────────▼──────────┐
             │   HARMONY RUST API  │
             │   (single binary)   │
+            │  SSE over Postgres  │
+            │    LISTEN/NOTIFY    │
             └───┬────────────┬────┘
                 │            │
-       ┌────────▼──┐   ┌─────────────┐
-       │ Supabase  │   │  LiveKit    │
-       │ ├ Postgres│   │  (planned)  │
-       │ ├ Auth    │   │  Voice      │
-       │ ├ Storage │   │  Video      │
-       │ └ Realtime│   │  Screen     │
-       └───────────┘   └─────────────┘
+     ┌──────────▼─────┐   ┌──▼──────────┐
+     │ Supabase (OSS) │   │  LiveKit    │
+     │ ├ Postgres     │   │  Voice      │
+     │ ├ Auth (GoTrue)│   └─────────────┘
+     │ └ Storage      │
+     └────────────────┘
 ```
 
 ---
@@ -170,7 +173,7 @@ harmony/
 | State | TanStack Query (server), Zustand (client) |
 | Backend | Rust, Axum, SQLx |
 | Database | PostgreSQL (via Supabase) |
-| Real-time | Rust SSE (Server-Sent Events) |
+| Real-time | Rust SSE over Postgres LISTEN/NOTIFY |
 | API contract | Code-first OpenAPI (Rust types → TypeScript client) |
 | Testing | Playwright (E2E), Vitest (unit), cargo test |
 | CI | GitHub Actions |
@@ -184,10 +187,11 @@ harmony/
 | **0** | Sign up, create server, send message | Done |
 | **1** | Live chat, invites, presence | Done |
 | **2** | Roles, permissions, direct messages | Done |
-| **3** | E2EE DMs (desktop), opt-in channel encryption | In Progress |
-| **4** | Voice/video (LiveKit), file uploads | Planned |
-| **5** | Server discovery, push notifications | Planned |
-| **6** | Mobile app, web E2EE (WASM), bot API | Planned |
+| **3** | Voice (LiveKit), Discord-parity QoL, moderation | Done |
+| **4** | E2EE DMs (desktop), opt-in channel encryption | In Progress |
+| **5** | Video/screen share, file uploads | Planned |
+| **6** | Server discovery, push notifications | Planned |
+| **7** | Mobile app, web E2EE (WASM), bot API | Planned |
 
 ---
 
