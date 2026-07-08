@@ -99,10 +99,13 @@ test.describe('Messaging', () => {
     const messageItem = page.locator(`[data-test="message-item"][data-message-id="${msg.id}"]`)
     await expect(messageItem).toBeVisible({ timeout: 10_000 })
 
-    // Verify author is shown
+    // Verify the author row renders the DISPLAY NAME, not the username (P3).
+    // The factory sets display_name to the bare prefix ("msg-member") and
+    // username to "{prefix}-{timestamp}-{rand}" (digits). An exact match on the
+    // prefix proves resolveDisplayName picked displayName over username.
     const authorEl = messageItem.locator('[data-test="message-author"]')
     await expect(authorEl).toBeVisible({ timeout: 5_000 })
-    await expect(authorEl).toContainText(/.+/)
+    await expect(authorEl).toHaveText('msg-member')
 
     // Verify timestamp is shown (format: "HH:MM" or locale date string)
     const timestampEl = messageItem.locator('[data-test="message-timestamp"]')

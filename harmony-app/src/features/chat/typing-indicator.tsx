@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { resolveDisplayName } from '@/lib/display-name'
 import type { TypingUser } from './hooks/use-typing-indicator'
 
 interface TypingIndicatorProps {
@@ -18,11 +19,18 @@ export function TypingIndicator({ typingUsers }: TypingIndicatorProps) {
   const first = typingUsers[0]
   const second = typingUsers[1]
 
+  // WHY resolver: Keeps the typing label on the shared identity chain. The
+  // `typing.started` SSE payload currently carries only `username` (no
+  // displayName/nickname), so this resolves to the username until the backend
+  // adds those tiers to the event — no ad-hoc `.username` label site remains.
   let text: string
   if (typingUsers.length === 1 && first !== undefined) {
-    text = t('typingOne', { username: first.username })
+    text = t('typingOne', { username: resolveDisplayName({ username: first.username }) })
   } else if (typingUsers.length === 2 && first !== undefined && second !== undefined) {
-    text = t('typingTwo', { first: first.username, second: second.username })
+    text = t('typingTwo', {
+      first: resolveDisplayName({ username: first.username }),
+      second: resolveDisplayName({ username: second.username }),
+    })
   } else {
     text = t('typingSeveral')
   }

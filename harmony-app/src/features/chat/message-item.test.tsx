@@ -59,7 +59,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
 function renderMessageItem(message: MessageResponse) {
   const onAddReaction = vi.fn()
   const onRemoveReaction = vi.fn()
-  render(
+  const utils = render(
     <MessageItem
       message={message}
       currentUserId={CURRENT_USER_ID}
@@ -74,8 +74,50 @@ function renderMessageItem(message: MessageResponse) {
       onReply={vi.fn()}
     />,
   )
-  return { onAddReaction, onRemoveReaction }
+  return { onAddReaction, onRemoveReaction, ...utils }
 }
+
+describe('MessageItem identity rendering', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders the author display name over the raw username', () => {
+    renderMessageItem(buildMessage({ authorUsername: 'jsmith', authorDisplayName: 'John Smith' }))
+
+    expect(screen.getByTestId('message-author').textContent).toBe('John Smith')
+  })
+
+  it('falls back to the username when the display name is null', () => {
+    renderMessageItem(buildMessage({ authorUsername: 'jsmith', authorDisplayName: null }))
+
+    expect(screen.getByTestId('message-author').textContent).toBe('jsmith')
+  })
+
+  it('treats an empty-string display name as absent and shows the username', () => {
+    renderMessageItem(buildMessage({ authorUsername: 'jsmith', authorDisplayName: '' }))
+
+    expect(screen.getByTestId('message-author').textContent).toBe('jsmith')
+  })
+
+  it('passes the author avatar URL to the Avatar img', () => {
+    const { container } = renderMessageItem(
+      buildMessage({ authorAvatarUrl: 'https://cdn.example.com/a.webp' }),
+    )
+
+    const img = container.querySelector('img')
+    expect(img?.getAttribute('src')).toBe('https://cdn.example.com/a.webp')
+  })
+
+  it('renders initials only (no img) when the author has no avatar', () => {
+    const { container } = renderMessageItem(buildMessage({ authorAvatarUrl: null }))
+
+    // WHY: HeroUI Avatar only renders <img> when `src` is truthy — its absence
+    // proves the initials fallback is active.
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.getByTestId('message-author').textContent).toBe('test-user')
+  })
+})
 
 describe('MessageItem reactions UX', () => {
   beforeEach(() => {

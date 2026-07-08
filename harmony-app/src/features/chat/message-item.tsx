@@ -11,6 +11,7 @@ import type { DecryptResult } from '@/features/crypto'
 import { EncryptedMessageContent } from '@/features/crypto'
 import { usePreferences } from '@/features/preferences'
 import type { MessageResponse } from '@/lib/api'
+import { resolveDisplayName } from '@/lib/display-name'
 import { isTauri } from '@/lib/platform'
 import { maskProfanity } from '@/lib/profanity-filter'
 import { EmojiPickerPopover } from './emoji-picker-popover'
@@ -565,7 +566,13 @@ export const MessageItem = memo(function MessageItem({
     return <SystemMessageItem message={message} t={t} />
   }
 
-  const authorLabel = message.authorUsername
+  // WHY: Render the account display_name over the raw username. Message payloads
+  // carry authorDisplayName (profile display name) but NOT a per-server nickname,
+  // so the nickname tier is intentionally absent here.
+  const authorLabel = resolveDisplayName({
+    displayName: message.authorDisplayName,
+    username: message.authorUsername,
+  })
 
   // WHY derive from ID: Optimistic messages use `temp-*` IDs. Deriving pending
   // state from the ID avoids an extra prop and stays in sync automatically —
@@ -592,8 +599,10 @@ export const MessageItem = memo(function MessageItem({
       ) : (
         <Avatar
           name={authorLabel}
+          src={message.authorAvatarUrl ?? undefined}
           color="primary"
           size="md"
+          showFallback
           classNames={{
             base: 'mt-0.5 h-10 w-10 shrink-0',
             name: 'text-sm',

@@ -31,6 +31,7 @@ import { useFetchSSE } from '@/hooks/use-fetch-sse'
 import { useNotificationSound } from '@/hooks/use-notification-sound'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import { type ConnectionStatus, useConnectionStatus } from '@/lib/connection-store'
+import { resolveDisplayName } from '@/lib/display-name'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
 import { NAVIGATE_EVENT, navigateDetailSchema } from '@/lib/navigation-events'
@@ -110,7 +111,7 @@ function deriveChatHeader<
   const activeDm = view === 'dms' ? dms?.find((dm) => dm.serverId === selectedServerId) : undefined
   const name =
     view === 'dms' && activeDm !== undefined
-      ? (activeDm.recipient.displayName ?? activeDm.recipient.username)
+      ? resolveDisplayName(activeDm.recipient)
       : (channelName ?? null)
   return { activeDm, chatHeaderName: name }
 }

@@ -39,6 +39,7 @@ import {
   VoiceParticipantList,
 } from '@/features/voice'
 import type { ChannelResponse } from '@/lib/api'
+import { resolveDisplayName } from '@/lib/display-name'
 import { cn } from '@/lib/utils'
 import { CreateChannelDialog } from './create-channel-dialog'
 import { EditChannelDialog } from './edit-channel-dialog'
@@ -234,7 +235,10 @@ function UserControlPanel() {
   const user = useAuthStore((s) => s.user)
   const { data: profile } = useCurrentProfile()
   const status = useUserStatus(user?.id ?? '')
-  const username = profile?.username ?? t('youFallback')
+  const displayName =
+    profile !== undefined
+      ? resolveDisplayName({ displayName: profile.displayName, username: profile.username })
+      : t('youFallback')
   const openProfileSettings = useSettingsUiStore((s) => s.openProfileSettings)
   const isMuted = useVoiceConnectionStore((s) => s.isMuted)
   const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
@@ -256,7 +260,8 @@ function UserControlPanel() {
       <StatusPicker>
         <div className="relative">
           <Avatar
-            name={username}
+            name={displayName}
+            src={profile?.avatarUrl ?? undefined}
             size="sm"
             color="primary"
             showFallback
@@ -270,7 +275,7 @@ function UserControlPanel() {
           </div>
         </div>
         <div className="flex flex-1 flex-col overflow-hidden">
-          <span className="truncate text-sm font-medium text-foreground">{username}</span>
+          <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
           <span className="truncate text-xs text-default-500">{statusLabels[status]}</span>
         </div>
       </StatusPicker>
