@@ -280,12 +280,40 @@ pub enum ServerEvent {
         dm: DmPayload,
     },
 
+    // ── Profiles (user-scoped, not server-scoped) ────────────
+    /// A user's public profile changed (display name / avatar / custom status).
+    /// Carries the NEW current values so every observer can rehydrate the
+    /// subject's identity everywhere it is cached, Discord-style. A `null`
+    /// field means the value was cleared (not "unchanged") — the event is a
+    /// full snapshot, not a patch, so the three fields are serialized even
+    /// when null.
+    ProfileUpdated {
+        sender_id: UserId,
+        user_id: UserId,
+        display_name: Option<String>,
+        avatar_url: Option<String>,
+        custom_status: Option<String>,
+        /// Routing metadata: the subject's server memberships (incl. DM
+        /// servers), used by the SSE layer to deliver profile updates only to
+        /// users sharing a server or DM. Same contract as
+        /// `PresenceChanged.server_ids`: survives the cross-instance
+        /// `pg_notify` round-trip, then REDACTED (emptied) before client
+        /// serialize — an empty vec is omitted entirely.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        server_ids: Vec<ServerId>,
+    },
+
     // ── Ephemeral ────────────────────────────────────────────
     TypingStarted {
         sender_id: UserId,
         server_id: ServerId,
         channel_id: ChannelId,
         username: String,
+        /// Resolved display name (nickname ?? `display_name` ?? username) so the
+        /// typing indicator shows a human name, not the raw username. Optional
+        /// for back-compat with older instances during a rolling deploy.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display_name: Option<String>,
         /// Private-channel access scope (routing metadata). See `MessageCreated`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channel_access: Option<ChannelAccessScope>,
@@ -379,6 +407,7 @@ impl ServerEvent {
             Self::ServerUpdated { .. } => "server.updated",
             Self::ModerationSettingsUpdated { .. } => "server.moderation_settings_updated",
             Self::DmCreated { .. } => "dm.created",
+            Self::ProfileUpdated { .. } => "profile.updated",
             Self::TypingStarted { .. } => "typing.started",
             Self::PresenceChanged { .. } => "presence.changed",
             Self::ReactionAdded { .. } => "reaction.added",
@@ -406,6 +435,7 @@ impl ServerEvent {
             | Self::ServerUpdated { sender_id, .. }
             | Self::ModerationSettingsUpdated { sender_id, .. }
             | Self::DmCreated { sender_id, .. }
+            | Self::ProfileUpdated { sender_id, .. }
             | Self::TypingStarted { sender_id, .. }
             | Self::PresenceChanged { sender_id, .. }
             | Self::ReactionAdded { sender_id, .. }
@@ -437,7 +467,9 @@ impl ServerEvent {
             | Self::ReactionRemoved { server_id, .. }
             | Self::VoiceStateUpdate { server_id, .. }
             | Self::ForceDisconnect { server_id, .. } => Some(server_id),
-            Self::DmCreated { .. } | Self::PresenceChanged { .. } => None,
+            Self::DmCreated { .. } | Self::ProfileUpdated { .. } | Self::PresenceChanged { .. } => {
+                None
+            }
         }
     }
 
@@ -460,6 +492,7 @@ impl ServerEvent {
             | Self::ChannelDeleted { .. }
             | Self::ServerUpdated { .. }
             | Self::ModerationSettingsUpdated { .. }
+            | Self::ProfileUpdated { .. }
             | Self::TypingStarted { .. }
             | Self::PresenceChanged { .. }
             | Self::ReactionAdded { .. }
@@ -493,6 +526,7 @@ impl ServerEvent {
             | Self::ServerUpdated { .. }
             | Self::ModerationSettingsUpdated { .. }
             | Self::DmCreated { .. }
+            | Self::ProfileUpdated { .. }
             | Self::PresenceChanged { .. }
             | Self::VoiceStateUpdate { .. }
             | Self::ForceDisconnect { .. } => None,
@@ -517,7 +551,9 @@ impl ServerEvent {
             | Self::TypingStarted { channel_access, .. }
             | Self::ReactionAdded { channel_access, .. }
             | Self::ReactionRemoved { channel_access, .. } => *channel_access = None,
-            Self::PresenceChanged { server_ids, .. } => server_ids.clear(),
+            Self::PresenceChanged { server_ids, .. } | Self::ProfileUpdated { server_ids, .. } => {
+                server_ids.clear();
+            }
             Self::MemberJoined { .. }
             | Self::MemberRemoved { .. }
             | Self::MemberBanned { .. }
@@ -728,6 +764,7 @@ mod tests {
             server_id: test_server_id(),
             channel_id: test_channel_id(),
             username: "alice".to_string(),
+            display_name: None,
             channel_access: None,
         };
         assert!(event.channel_access().is_none());
@@ -763,5 +800,105 @@ mod tests {
 
         let back: ServerEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(back.channel_access(), Some(&scope));
+    }
+
+    #[test]
+    fn profile_updated_event_name_and_scope_accessors() {
+        let event = ServerEvent::ProfileUpdated {
+            sender_id: test_user_id(),
+            user_id: test_user_id(),
+            display_name: Some("Ada".to_string()),
+            avatar_url: None,
+            custom_status: None,
+            server_ids: vec![test_server_id()],
+        };
+        assert_eq!(event.event_name(), "profile.updated");
+        // User-scoped like PresenceChanged/DmCreated: no server_id, no target.
+        assert!(event.server_id().is_none());
+        assert!(event.target_user_id().is_none());
+        assert!(event.channel_access().is_none());
+    }
+
+    /// The `server_ids` routing field must survive the cross-instance
+    /// (`pg_notify`) serde round-trip, and must be OMITTED once redacted so the
+    /// client payload never carries the subject's membership list.
+    #[test]
+    fn profile_updated_routing_metadata_carried_then_omitted_when_redacted() {
+        let routed = ServerEvent::ProfileUpdated {
+            sender_id: test_user_id(),
+            user_id: test_user_id(),
+            display_name: Some("Ada".to_string()),
+            avatar_url: None,
+            custom_status: None,
+            server_ids: vec![test_server_id()],
+        };
+        let json = serde_json::to_string(&routed).unwrap();
+        assert!(json.contains("serverIds"), "bus path must carry serverIds");
+        let back: ServerEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            back,
+            ServerEvent::ProfileUpdated { ref server_ids, .. } if server_ids.len() == 1
+        ));
+
+        let mut redacted = routed;
+        redacted.redact_routing_metadata();
+        let json = serde_json::to_string(&redacted).unwrap();
+        assert!(
+            !json.contains("serverIds"),
+            "redacted payload leaked serverIds: {json}"
+        );
+    }
+
+    /// The three identity fields are a FULL snapshot, not a patch: a cleared
+    /// value (`None`) must serialize as explicit `null` (camelCase), so the
+    /// client can distinguish "cleared" from "still set".
+    #[test]
+    fn profile_updated_cleared_fields_serialize_as_null() {
+        let event = ServerEvent::ProfileUpdated {
+            sender_id: test_user_id(),
+            user_id: test_user_id(),
+            display_name: None,
+            avatar_url: None,
+            custom_status: None,
+            server_ids: Vec::new(),
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "profileUpdated");
+        assert!(json["displayName"].is_null());
+        assert!(json["avatarUrl"].is_null());
+        assert!(json["customStatus"].is_null());
+        // Empty routing metadata is omitted entirely.
+        assert!(json.get("serverIds").is_none());
+    }
+
+    /// `TypingStarted.display_name` carries the resolved name in camelCase when
+    /// present, and is omitted entirely when absent (back-compat).
+    #[test]
+    fn typing_started_display_name_serialization() {
+        let with_name = ServerEvent::TypingStarted {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            username: "ada".to_string(),
+            display_name: Some("Ada Lovelace".to_string()),
+            channel_access: None,
+        };
+        let json = serde_json::to_value(&with_name).unwrap();
+        assert_eq!(json["displayName"], "Ada Lovelace");
+        assert_eq!(json["username"], "ada");
+
+        let without_name = ServerEvent::TypingStarted {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            username: "ada".to_string(),
+            display_name: None,
+            channel_access: None,
+        };
+        let json = serde_json::to_string(&without_name).unwrap();
+        assert!(
+            !json.contains("displayName"),
+            "absent display name must be omitted: {json}"
+        );
     }
 }

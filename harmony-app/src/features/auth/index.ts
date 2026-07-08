@@ -1,6 +1,7 @@
 export { AuthProvider } from './auth-provider'
 export { DesktopAuthRedirect } from './desktop-auth-redirect'
 export { useCurrentProfile } from './hooks/use-current-profile'
+export { useRealtimeProfile } from './hooks/use-realtime-profile'
 export { useUpdateProfile } from './hooks/use-update-profile'
 export { useUploadAvatar } from './hooks/use-upload-avatar'
 export { AvatarUploadError, type AvatarUploadErrorCode } from './lib/avatar-file'

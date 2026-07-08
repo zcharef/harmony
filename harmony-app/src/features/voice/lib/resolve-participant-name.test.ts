@@ -33,28 +33,27 @@ const members: MemberResponse[] = [
 ]
 
 describe('resolveParticipantName', () => {
-  it('returns displayName when non-empty', () => {
-    const result = resolveParticipantName({ userId: USER_ID, displayName: 'Ali' }, members, UNKNOWN)
-    expect(result).toBe('Ali')
-  })
-
-  it('prefers displayName over the member list', () => {
+  it('prefers the member cache (nickname) over participant.displayName', () => {
+    // WHY the flip: the member cache is reactive (patched live by
+    // use-realtime-profile / use-realtime-members), so it must win over the
+    // participant.displayName snapshot captured at join time. USER_ID has
+    // nickname 'Ali'.
     const result = resolveParticipantName(
       { userId: USER_ID, displayName: 'FromServer' },
       members,
       UNKNOWN,
     )
-    expect(result).toBe('FromServer')
+    expect(result).toBe('Ali')
   })
 
-  it('resolves nickname from the member list when displayName is empty', () => {
+  it('resolves the member nickname even when participant.displayName is empty', () => {
     const result = resolveParticipantName({ userId: USER_ID, displayName: '' }, members, UNKNOWN)
     expect(result).toBe('Ali')
   })
 
   it('falls back to username when the member has no nickname', () => {
     const result = resolveParticipantName(
-      { userId: 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e', displayName: '' },
+      { userId: 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e', displayName: 'ignored' },
       members,
       UNKNOWN,
     )
@@ -67,13 +66,25 @@ describe('resolveParticipantName', () => {
     expect(result).toBe('Carol Danvers')
   })
 
-  it('returns the neutral placeholder when the user is not in the member list', () => {
+  it('falls back to participant.displayName when the user is not in the member list', () => {
+    // WHY: A participant not yet in the roster (optimistic self-insert, or a
+    // cross-server voice room) still shows the join-time token name.
+    const strangerId = 'c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f'
+    const result = resolveParticipantName(
+      { userId: strangerId, displayName: 'FromToken' },
+      members,
+      UNKNOWN,
+    )
+    expect(result).toBe('FromToken')
+  })
+
+  it('returns the neutral placeholder when the user is absent and displayName is empty', () => {
     const strangerId = 'c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f'
     const result = resolveParticipantName({ userId: strangerId, displayName: '' }, members, UNKNOWN)
     expect(result).toBe(UNKNOWN)
   })
 
-  it('returns the neutral placeholder when the member list is undefined', () => {
+  it('returns the neutral placeholder when the member list is undefined and displayName is empty', () => {
     const result = resolveParticipantName({ userId: USER_ID, displayName: '' }, undefined, UNKNOWN)
     expect(result).toBe(UNKNOWN)
   })

@@ -6,7 +6,7 @@ import { Group, Panel, Separator } from 'react-resizable-panels'
 
 import { FeatureErrorBoundary } from '@/components/shared/error-boundary'
 import { ErrorState } from '@/components/shared/error-state'
-import { useAuthStore } from '@/features/auth'
+import { useAuthStore, useRealtimeProfile } from '@/features/auth'
 import {
   ChannelSidebar,
   useChannels,
@@ -414,6 +414,10 @@ export function MainLayout() {
   // torn down — events would be silently missed until the panel re-opens.
   useRealtimeChannels()
   useRealtimeMembers()
+  // WHY: Live identity rehydration — patches every cached member list, DM,
+  // message page, and the own-profile cache on profile.updated. Mounted here
+  // (not in a sidebar) so it survives DM/server view switches (§4.6).
+  useRealtimeProfile(userId)
   // WHY: Mounted here (not in DmSidebar) so dm.created SSE events invalidate
   // the DM list cache even when the DM sidebar is unmounted (user viewing a
   // server). The backend now dynamically updates the server_ids filter via a

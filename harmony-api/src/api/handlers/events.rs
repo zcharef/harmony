@@ -412,6 +412,24 @@ pub async fn sse_events(
             return None;
         }
 
+        // ── Filter: profile scope (shared server / DM / self) ──────
+        // WHY: ProfileUpdated, like PresenceChanged, carries neither
+        // target_user_id nor server_id, so it would otherwise reach EVERY
+        // connected user — leaking a display-name/avatar change (and its
+        // timing) to strangers. It carries the subject's memberships as routing
+        // metadata; reuse the IDENTICAL `presence_visible_to` gate so a profile
+        // change reaches only users sharing a server/DM (or the subject's own
+        // tabs). The metadata is redacted below before serialization.
+        if let ServerEvent::ProfileUpdated {
+            user_id: subject,
+            server_ids: subject_servers,
+            ..
+        } = &event
+            && !presence_visible_to(subject, subject_servers, &user_id, &current_server_ids)
+        {
+            return None;
+        }
+
         // Explicitly drop the borrow before serialization to release the lock.
         drop(current_server_ids);
 

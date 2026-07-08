@@ -73,7 +73,10 @@ pub async fn send_typing(
         TYPING_RATE_WINDOW,
     )?;
 
-    // WHY: TypingStarted carries the username so clients don't need an extra lookup.
+    // WHY: TypingStarted carries the username + display name so clients render a
+    // human name without an extra lookup. Only the profile is in scope here (no
+    // ServerMember fetch), so display_name resolves to the account display name;
+    // the per-server nickname tier is applied client-side from the member cache.
     let profile = state.profile_service().get_by_id(&user_id).await?;
 
     // WHY: Gate the typing indicator to authorized members of a private channel
@@ -84,6 +87,7 @@ pub async fn send_typing(
         sender_id: user_id,
         server_id: channel.server_id,
         channel_id,
+        display_name: profile.display_name,
         username: profile.username,
         channel_access,
     });
