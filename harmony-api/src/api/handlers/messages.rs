@@ -21,6 +21,7 @@ use crate::domain::models::{
 use crate::domain::services::content_moderation::{
     ModerationDecision, SCORE_THRESHOLD, evaluate_moderation,
 };
+use crate::domain::services::{resolve_channel_access, resolve_channel_access_by_id};
 
 /// Maximum time to wait for a moderation semaphore permit before dead-lettering.
 const SEMAPHORE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -60,6 +61,12 @@ pub async fn send_message(
     // avoids a redundant post-commit lookup and guarantees event emission.
     let channel = state.channel_service().get_by_id(&channel_id).await?;
 
+    // WHY: Resolve the private-channel access scope BEFORE the mutation so a
+    // lookup failure fails the request cleanly (no orphaned message with no
+    // SSE event). `None` for public channels. The SSE layer gates delivery on
+    // this and redacts it before any client sees it.
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
+
     let message = state
         .message_service()
         .create(
@@ -78,6 +85,7 @@ pub async fn send_message(
         server_id: channel.server_id.clone(),
         channel_id: channel_id.clone(),
         message: MessagePayload::from(message.clone()),
+        channel_access,
     };
     let receivers = state.event_bus().publish(event);
     tracing::debug!(channel_id = %channel_id, receivers, "emitted message.created");
@@ -192,6 +200,9 @@ pub async fn edit_message(
     // fetching here avoids a redundant post-commit lookup and guarantees event emission.
     let channel = state.channel_service().get_by_id(&path.channel_id).await?;
 
+    // WHY: Resolve private-channel scope before mutation (see `send_message`).
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
+
     let message = state
         .message_service()
         .edit_message(&path.message_id, &user_id, req.content)
@@ -203,6 +214,7 @@ pub async fn edit_message(
         server_id: channel.server_id.clone(),
         channel_id: path.channel_id.clone(),
         message: MessagePayload::from(message.clone()),
+        channel_access,
     };
     let receivers = state.event_bus().publish(event);
     tracing::debug!(
@@ -252,6 +264,11 @@ pub async fn delete_message(
     // guarantees event emission.
     let channel = state.channel_service().get_by_id(&path.channel_id).await?;
 
+    // WHY: Resolve private-channel scope before mutation (see `send_message`).
+    // A delete for a private channel must be gated too — a non-granted member
+    // must not learn a message existed or was removed.
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
+
     state
         .message_service()
         .delete_message(&path.message_id, &user_id)
@@ -263,6 +280,7 @@ pub async fn delete_message(
         channel_id: path.channel_id.clone(),
         message_id: path.message_id.clone(),
         deleted_by: user_id,
+        channel_access,
     };
     let receivers = state.event_bus().publish(event);
     tracing::debug!(
@@ -313,6 +331,9 @@ fn spawn_async_moderation(
         .unwrap_or(message.message.created_at);
     let repo = state.message_repository_for_moderation().clone();
     let server_repo = state.server_repository_for_moderation().clone();
+    // WHY: Needed to resolve the private-channel access scope for the delete
+    // event (the moderation path holds only IDs, not the `Channel`).
+    let channel_repo = state.channel_repository_arc().clone();
     let event_bus = state.event_bus_arc().clone();
     // H2: Acquire semaphore inside the spawned task, not before spawn.
     let semaphore = state.moderation_semaphore().clone();
@@ -507,6 +528,22 @@ fn spawn_async_moderation(
             return;
         }
 
+        // WHY: Resolve the channel-access scope so a moderation delete in a
+        // private channel is gated identically to a user delete. Fail OPEN on
+        // lookup error (ADR-027) — losing the delete is worse than it reaching
+        // a few extra members.
+        let channel_access = resolve_channel_access_by_id(channel_repo.as_ref(), &channel_id)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    message_id = %msg_id,
+                    channel_id = %channel_id,
+                    error = %e,
+                    "Failed to resolve channel access for moderation delete — failing open (public)"
+                );
+                None
+            });
+
         // M5: Use SYSTEM_MODERATOR_ID as sender_id in the SSE event so clients
         // know this deletion was by the moderation system, not a user.
         let event = ServerEvent::MessageDeleted {
@@ -515,6 +552,7 @@ fn spawn_async_moderation(
             channel_id,
             message_id: msg_id.clone(),
             deleted_by: SYSTEM_MODERATOR_ID,
+            channel_access,
         };
         let receivers = event_bus.publish(event);
         tracing::debug!(message_id = %msg_id, receivers, "emitted moderation message.deleted");

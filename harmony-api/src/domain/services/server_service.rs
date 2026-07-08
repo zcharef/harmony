@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Server, ServerId, UserId};
+use crate::domain::models::{Role, Server, ServerId, UserId};
 use crate::domain::ports::{PlanLimitChecker, ServerRepository};
 use crate::domain::services::content_filter::ContentFilter;
 
@@ -112,6 +112,20 @@ impl ServerService {
         user_id: &UserId,
     ) -> Result<Vec<ServerId>, DomainError> {
         self.repo.list_all_memberships(user_id).await
+    }
+
+    /// List ALL memberships (incl. DMs) paired with the user's role in each.
+    ///
+    /// WHY: The SSE handler needs the receiver's per-server role to gate
+    /// private-channel events without a per-event DB lookup.
+    ///
+    /// # Errors
+    /// Returns a repository error on failure.
+    pub async fn list_all_memberships_with_roles(
+        &self,
+        user_id: &UserId,
+    ) -> Result<Vec<(ServerId, Role)>, DomainError> {
+        self.repo.list_all_memberships_with_roles(user_id).await
     }
 
     /// Get a server by ID.

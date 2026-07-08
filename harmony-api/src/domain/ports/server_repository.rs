@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Server, ServerId, UserId};
+use crate::domain::models::{Role, Server, ServerId, UserId};
 
 /// Intent-based repository for servers (guilds).
 #[async_trait]
@@ -28,6 +28,18 @@ pub trait ServerRepository: Send + Sync + std::fmt::Debug {
     /// `list_for_user` excludes DMs (correct for the sidebar), but the SSE
     /// event stream must include DM events.
     async fn list_all_memberships(&self, user_id: &UserId) -> Result<Vec<ServerId>, DomainError>;
+
+    /// List ALL memberships (incl. DMs) paired with the user's role in each.
+    ///
+    /// WHY: The SSE handler needs the receiver's per-server role to gate
+    /// private-channel events. `list_all_memberships` returns only IDs; this
+    /// carries the role so the Stage-2 filter can decide channel access without
+    /// a per-event DB lookup. DM "servers" carry whatever role the row holds —
+    /// irrelevant, since DM channels are never private.
+    async fn list_all_memberships_with_roles(
+        &self,
+        user_id: &UserId,
+    ) -> Result<Vec<(ServerId, Role)>, DomainError>;
 
     /// Get a server by ID. Returns `None` if not found.
     async fn get_by_id(&self, server_id: &ServerId) -> Result<Option<Server>, DomainError>;

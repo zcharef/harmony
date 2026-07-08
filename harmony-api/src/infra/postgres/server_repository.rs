@@ -187,6 +187,45 @@ impl ServerRepository for PgServerRepository {
         Ok(rows.into_iter().map(ServerId).collect())
     }
 
+    async fn list_all_memberships_with_roles(
+        &self,
+        user_id: &UserId,
+    ) -> Result<Vec<(ServerId, Role)>, DomainError> {
+        let uid = user_id.0;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT sm.server_id, sm.role
+            FROM server_members sm
+            WHERE sm.user_id = $1
+            "#,
+            uid,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        // WHY: An unparseable role means schema drift. Default to Member
+        // (least privilege) rather than dropping the membership — dropping it
+        // would silently deny the user ALL events for that server, including
+        // public channels. Member keeps public channels working while denying
+        // private ones the corrupt role can't be shown to grant.
+        let mut memberships = Vec::with_capacity(rows.len());
+        for r in rows {
+            let role = r.role.parse::<Role>().unwrap_or_else(|e| {
+                tracing::warn!(
+                    server_id = %r.server_id,
+                    role = %r.role,
+                    error = %e,
+                    "Unknown role in server_members, defaulting to Member"
+                );
+                Role::Member
+            });
+            memberships.push((ServerId::new(r.server_id), role));
+        }
+        Ok(memberships)
+    }
+
     async fn get_by_id(&self, server_id: &ServerId) -> Result<Option<Server>, DomainError> {
         let sid = server_id.0;
 

@@ -74,4 +74,15 @@ pub trait ChannelRepository: Send + Sync + std::fmt::Debug {
         channel_id: &ChannelId,
         member_role: Role,
     ) -> Result<bool, DomainError>;
+
+    /// List the roles explicitly granted access to a channel via
+    /// `channel_role_access` (the raw rows; Owner/Admin are NOT stored — they
+    /// hold implicit access).
+    ///
+    /// WHY: The SSE layer attaches this bounded set to message/reaction/typing
+    /// events as routing metadata so it can gate delivery to a private channel
+    /// by the receiver's role, without shipping an unbounded user-id list over
+    /// the `pg_notify` payload cap.
+    async fn list_authorized_roles(&self, channel_id: &ChannelId)
+    -> Result<Vec<Role>, DomainError>;
 }
