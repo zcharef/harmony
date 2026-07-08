@@ -29,6 +29,7 @@ use utoipa::ToSchema;
 use crate::api::state::AppState;
 use crate::domain::models::server_event::{MessagePayload, ServerEvent};
 use crate::domain::models::{ServerId, UserId};
+use crate::domain::services::resolve_channel_access;
 use crate::infra::postgres;
 
 /// Fallback handler for unmatched routes.
@@ -161,6 +162,10 @@ pub async fn post_system_message(
         .await?
         .ok_or_else(|| anyhow::anyhow!("No default channel found for server {server_id}"))?;
 
+    // WHY: The default channel is normally public, but resolve the scope so a
+    // private #general still gates its join/leave system messages correctly.
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
+
     let message = state
         .message_service()
         .create_system_message(&channel.id, subject_user_id, system_event_key.to_string())
@@ -171,6 +176,7 @@ pub async fn post_system_message(
         server_id: server_id.clone(),
         channel_id: channel.id.clone(),
         message: MessagePayload::from(message),
+        channel_access,
     };
     let receivers = state.event_bus().publish(event);
     tracing::debug!(

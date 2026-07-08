@@ -334,6 +334,7 @@ mod tests {
                 moderation_reason: None,
                 created_at: Utc::now(),
             },
+            channel_access: None,
         }
     }
 

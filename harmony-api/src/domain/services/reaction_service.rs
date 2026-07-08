@@ -409,6 +409,12 @@ mod tests {
         ) -> Result<bool, DomainError> {
             Ok(true)
         }
+        async fn list_authorized_roles(
+            &self,
+            _channel_id: &ChannelId,
+        ) -> Result<Vec<Role>, DomainError> {
+            Ok(vec![])
+        }
 
         // -- unused by add/remove_reaction --
         async fn list_for_server(

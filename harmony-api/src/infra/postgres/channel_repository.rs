@@ -491,4 +491,41 @@ impl ChannelRepository for PgChannelRepository {
 
         Ok(has_access)
     }
+
+    async fn list_authorized_roles(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Result<Vec<Role>, DomainError> {
+        let cid = channel_id.0;
+
+        let rows = sqlx::query_scalar!(
+            r#"
+            SELECT role
+            FROM channel_role_access
+            WHERE channel_id = $1
+            "#,
+            cid,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        // WHY: The DB CHECK constrains role to admin/moderator/member, all of
+        // which parse. An unparseable value means schema drift — log and skip it
+        // (same warn-and-continue pattern as parse_channel_type) rather than
+        // failing the whole publish.
+        let mut roles = Vec::with_capacity(rows.len());
+        for raw in rows {
+            match raw.parse::<Role>() {
+                Ok(role) => roles.push(role),
+                Err(e) => tracing::warn!(
+                    channel_id = %channel_id,
+                    role = %raw,
+                    error = %e,
+                    "Unknown role in channel_role_access, skipping"
+                ),
+            }
+        }
+        Ok(roles)
+    }
 }

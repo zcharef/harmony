@@ -506,6 +506,7 @@ fn spawn_spam_guard_sweep(spam_guard: std::sync::Arc<domain::services::SpamGuard
 fn spawn_moderation_retry_sweep(state: api::AppState) {
     use domain::models::{SYSTEM_MODERATOR_ID, ServerEvent};
     use domain::services::content_moderation::{SCORE_THRESHOLD, evaluate_moderation};
+    use domain::services::resolve_channel_access_by_id;
 
     const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
     /// Maximum retries per record before alerting operators.
@@ -648,12 +649,31 @@ fn spawn_moderation_retry_sweep(state: api::AppState) {
                                         );
                                     }
                                 } else {
+                                    // WHY: Gate the moderation delete to a private
+                                    // channel's authorized members. Fail OPEN on
+                                    // lookup error (ADR-027) — losing the delete is
+                                    // worse than it reaching a few extra members.
+                                    let channel_access = resolve_channel_access_by_id(
+                                        state.channel_repository(),
+                                        &retry.channel_id,
+                                    )
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        tracing::warn!(
+                                            message_id = %retry.message_id,
+                                            channel_id = %retry.channel_id,
+                                            error = %e,
+                                            "Failed to resolve channel access for retry-sweep delete — failing open (public)"
+                                        );
+                                        None
+                                    });
                                     let event = ServerEvent::MessageDeleted {
                                         sender_id: SYSTEM_MODERATOR_ID,
                                         server_id: retry.server_id.clone(),
                                         channel_id: retry.channel_id.clone(),
                                         message_id: retry.message_id.clone(),
                                         deleted_by: SYSTEM_MODERATOR_ID,
+                                        channel_access,
                                     };
                                     event_bus.publish(event);
                                 }

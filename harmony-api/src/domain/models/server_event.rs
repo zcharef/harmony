@@ -151,6 +151,29 @@ pub struct DmPayload {
     pub other_avatar_url: Option<String>,
 }
 
+/// Bounded routing metadata: the roles explicitly granted access to a PRIVATE
+/// channel (its `channel_role_access` rows). Attached to message/reaction/typing
+/// events so the SSE layer can gate delivery by channel access, not by server
+/// membership alone.
+///
+/// Owner/Admin are NEVER listed — they hold implicit access. The set is bounded
+/// to the three grantable roles (admin/moderator/member), so it stays far under
+/// the `pg_notify` payload cap even though it must survive the cross-instance
+/// serde round-trip.
+///
+/// WHY roles, not user-ids: a user-id list is unbounded and would blow the
+/// 7500-byte NOTIFY limit on large private channels; the grantable role set is ≤3.
+///
+/// REDACTED before serialization to clients — the SSE Stage-2 filter sets
+/// `channel_access` back to `None`, so this authorized-role set never reaches any
+/// client (the field is `skip_serializing_if = "Option::is_none"`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelAccessScope {
+    /// Roles with an explicit `channel_role_access` grant (Owner/Admin excluded).
+    pub authorized_roles: Vec<Role>,
+}
+
 // ── Event enum ───────────────────────────────────────────────────
 
 /// All real-time events pushed to clients via SSE.
@@ -171,12 +194,19 @@ pub enum ServerEvent {
         server_id: ServerId,
         channel_id: ChannelId,
         message: MessagePayload,
+        /// Private-channel access scope (routing metadata). `None` = public
+        /// channel (deliver by server membership). REDACTED before client serialize.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
     },
     MessageUpdated {
         sender_id: UserId,
         server_id: ServerId,
         channel_id: ChannelId,
         message: MessagePayload,
+        /// Private-channel access scope (routing metadata). See `MessageCreated`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
     },
     MessageDeleted {
         sender_id: UserId,
@@ -186,6 +216,9 @@ pub enum ServerEvent {
         /// Who performed the deletion: the author's `UserId` for user-initiated,
         /// `SYSTEM_MODERATOR_ID` for automod deletions.
         deleted_by: UserId,
+        /// Private-channel access scope (routing metadata). See `MessageCreated`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
     },
 
     // ── Members ──────────────────────────────────────────────
@@ -253,6 +286,9 @@ pub enum ServerEvent {
         server_id: ServerId,
         channel_id: ChannelId,
         username: String,
+        /// Private-channel access scope (routing metadata). See `MessageCreated`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
     },
     PresenceChanged {
         sender_id: UserId,
@@ -280,6 +316,9 @@ pub enum ServerEvent {
         emoji: String,
         user_id: UserId,
         username: String,
+        /// Private-channel access scope (routing metadata). See `MessageCreated`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
     },
     ReactionRemoved {
         sender_id: UserId,
@@ -288,6 +327,9 @@ pub enum ServerEvent {
         message_id: MessageId,
         emoji: String,
         user_id: UserId,
+        /// Private-channel access scope (routing metadata). See `MessageCreated`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
     },
 
     // ── Voice ────────────────────────────────────────────────
@@ -425,6 +467,71 @@ impl ServerEvent {
             | Self::VoiceStateUpdate { .. } => None,
         }
     }
+
+    /// Private-channel access scope for channel-scoped events, if any.
+    ///
+    /// `Some` only for the six channel events (message/reaction/typing) that
+    /// target a PRIVATE channel; `None` for public channels and every other
+    /// variant. The SSE Stage-2 filter uses this to gate delivery by channel
+    /// access, then redacts it (sets it to `None`) before serializing to clients.
+    #[must_use]
+    pub fn channel_access(&self) -> Option<&ChannelAccessScope> {
+        match self {
+            Self::MessageCreated { channel_access, .. }
+            | Self::MessageUpdated { channel_access, .. }
+            | Self::MessageDeleted { channel_access, .. }
+            | Self::TypingStarted { channel_access, .. }
+            | Self::ReactionAdded { channel_access, .. }
+            | Self::ReactionRemoved { channel_access, .. } => channel_access.as_ref(),
+            Self::MemberJoined { .. }
+            | Self::MemberRemoved { .. }
+            | Self::MemberBanned { .. }
+            | Self::MemberRoleUpdated { .. }
+            | Self::ChannelCreated { .. }
+            | Self::ChannelUpdated { .. }
+            | Self::ChannelDeleted { .. }
+            | Self::ServerUpdated { .. }
+            | Self::ModerationSettingsUpdated { .. }
+            | Self::DmCreated { .. }
+            | Self::PresenceChanged { .. }
+            | Self::VoiceStateUpdate { .. }
+            | Self::ForceDisconnect { .. } => None,
+        }
+    }
+
+    /// Strip ALL delivery-scoping metadata before serializing to a client.
+    ///
+    /// WHY: `channel_access` (private-channel gate) and `server_ids` (presence
+    /// scope) exist only for the SSE Stage-2 filter to route/gate delivery —
+    /// they must NEVER reach a client. This lives next to the variant
+    /// definitions and is an EXHAUSTIVE match with no `_` arm: a future variant
+    /// that gains scoping metadata forces a compile error here, so redaction can
+    /// never be silently forgotten at a distant call site (the prior footgun).
+    /// `skip_serializing_if` then omits the emptied fields, keeping client JSON
+    /// byte-identical to before scoping.
+    pub fn redact_routing_metadata(&mut self) {
+        match self {
+            Self::MessageCreated { channel_access, .. }
+            | Self::MessageUpdated { channel_access, .. }
+            | Self::MessageDeleted { channel_access, .. }
+            | Self::TypingStarted { channel_access, .. }
+            | Self::ReactionAdded { channel_access, .. }
+            | Self::ReactionRemoved { channel_access, .. } => *channel_access = None,
+            Self::PresenceChanged { server_ids, .. } => server_ids.clear(),
+            Self::MemberJoined { .. }
+            | Self::MemberRemoved { .. }
+            | Self::MemberBanned { .. }
+            | Self::MemberRoleUpdated { .. }
+            | Self::ChannelCreated { .. }
+            | Self::ChannelUpdated { .. }
+            | Self::ChannelDeleted { .. }
+            | Self::ServerUpdated { .. }
+            | Self::ModerationSettingsUpdated { .. }
+            | Self::DmCreated { .. }
+            | Self::VoiceStateUpdate { .. }
+            | Self::ForceDisconnect { .. } => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -475,6 +582,7 @@ mod tests {
                         moderation_reason: None,
                         created_at: Utc::now(),
                     },
+                    channel_access: None,
                 },
                 "message.created",
             ),
@@ -562,6 +670,7 @@ mod tests {
             channel_id: test_channel_id(),
             message_id: MessageId::new(Uuid::new_v4()),
             deleted_by: deleter,
+            channel_access: None,
         };
         let json = serde_json::to_value(&event).unwrap();
         // WHY: `rename_all_fields = "camelCase"` renames all struct variant
@@ -599,6 +708,7 @@ mod tests {
                 moderation_reason: None,
                 created_at: Utc::now(),
             },
+            channel_access: None,
         };
 
         let json = serde_json::to_string(&event).unwrap();
@@ -606,5 +716,52 @@ mod tests {
 
         assert_eq!(deserialized.event_name(), "message.created");
         assert_eq!(deserialized.sender_id(), event.sender_id());
+    }
+
+    /// A public-channel event (`channel_access: None`) MUST omit the key
+    /// entirely — byte-identical to the pre-fix payload — and the accessor
+    /// returns `None`.
+    #[test]
+    fn public_channel_event_omits_channel_access() {
+        let event = ServerEvent::TypingStarted {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            username: "alice".to_string(),
+            channel_access: None,
+        };
+        assert!(event.channel_access().is_none());
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(
+            !json.contains("channelAccess"),
+            "public event leaked channelAccess key: {json}"
+        );
+    }
+
+    /// A private-channel event carries the authorized-role set as camelCase
+    /// routing metadata and survives the cross-instance (`pg_notify`) serde
+    /// round-trip so remote instances can gate delivery.
+    #[test]
+    fn private_channel_event_round_trips_authorized_roles() {
+        let scope = ChannelAccessScope {
+            authorized_roles: vec![Role::Moderator, Role::Member],
+        };
+        let event = ServerEvent::ReactionAdded {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message_id: MessageId::new(Uuid::new_v4()),
+            emoji: "👍".to_string(),
+            user_id: test_user_id(),
+            username: "alice".to_string(),
+            channel_access: Some(scope.clone()),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("channelAccess"));
+        assert!(json.contains("authorizedRoles"));
+
+        let back: ServerEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.channel_access(), Some(&scope));
     }
 }

@@ -12,6 +12,7 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ChannelId, ServerEvent};
+use crate::domain::services::resolve_channel_access;
 
 /// Maximum typing signals per user within [`TYPING_RATE_WINDOW`].
 const TYPING_RATE_MAX: usize = 15;
@@ -75,11 +76,16 @@ pub async fn send_typing(
     // WHY: TypingStarted carries the username so clients don't need an extra lookup.
     let profile = state.profile_service().get_by_id(&user_id).await?;
 
+    // WHY: Gate the typing indicator to authorized members of a private channel
+    // (see `send_message`). `None` for public channels.
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
+
     let receivers = state.event_bus().publish(ServerEvent::TypingStarted {
         sender_id: user_id,
         server_id: channel.server_id,
         channel_id,
         username: profile.username,
+        channel_access,
     });
     tracing::debug!(receivers, "emitted typing.started");
 

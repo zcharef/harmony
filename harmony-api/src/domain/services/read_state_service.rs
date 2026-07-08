@@ -252,6 +252,12 @@ mod tests {
         ) -> Result<bool, DomainError> {
             Ok(member_role == Role::Admin || member_role == Role::Owner || self.grant_extra)
         }
+        async fn list_authorized_roles(
+            &self,
+            _channel_id: &ChannelId,
+        ) -> Result<Vec<Role>, DomainError> {
+            Ok(vec![])
+        }
 
         // -- unused by mark_read --
         async fn list_for_server(

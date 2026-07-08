@@ -43,7 +43,7 @@ pub use reaction::{EmojiVariety, ReactionSummary};
 pub use read_state::ChannelReadState;
 pub use role::Role;
 pub use server::Server;
-pub use server_event::ServerEvent;
+pub use server_event::{ChannelAccessScope, ServerEvent};
 pub use user_preferences::UserPreferences;
 pub use voice_session::{
     NewVoiceSession, VoiceAction, VoiceParticipant, VoiceRefreshToken, VoiceSession, VoiceToken,

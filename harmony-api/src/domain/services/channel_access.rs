@@ -9,7 +9,7 @@
 //! those paths cannot diverge again.
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Channel, UserId};
+use crate::domain::models::{Channel, ChannelAccessScope, ChannelId, UserId};
 use crate::domain::ports::{ChannelRepository, MemberRepository};
 
 /// Ensure `user_id` is allowed to access `channel`.
@@ -48,6 +48,53 @@ pub(crate) async fn ensure_channel_access(
     }
 
     Ok(())
+}
+
+/// Resolve the channel-access routing metadata attached to a channel's events.
+///
+/// Returns `None` for a PUBLIC channel (the SSE layer delivers by server
+/// membership alone) and `Some(scope)` for a PRIVATE channel, where
+/// `scope.authorized_roles` is the explicitly-granted set from
+/// `channel_role_access` (Owner/Admin are implicit and never listed). The SSE
+/// Stage-2 filter uses this to gate delivery, then redacts it before the payload
+/// reaches any client.
+///
+/// WHY a single helper: the seven publish sites that hold a `Channel` must
+/// resolve this identically — one source of truth, as with `ensure_channel_access`.
+///
+/// # Errors
+/// Propagates repository errors from the authorized-role lookup.
+pub(crate) async fn resolve_channel_access(
+    channel_repo: &dyn ChannelRepository,
+    channel: &Channel,
+) -> Result<Option<ChannelAccessScope>, DomainError> {
+    if !channel.is_private {
+        return Ok(None);
+    }
+    let authorized_roles = channel_repo.list_authorized_roles(&channel.id).await?;
+    Ok(Some(ChannelAccessScope { authorized_roles }))
+}
+
+/// Resolve channel-access metadata when the caller holds only the channel ID.
+///
+/// Fetches the channel, then delegates to [`resolve_channel_access`]. Returns
+/// `Ok(None)` when the channel no longer exists (treat as public / fail-open).
+///
+/// WHY: The moderation-delete paths (async moderation, retry sweep) emit
+/// `MessageDeleted` without the `Channel` in hand. Callers fail OPEN on error —
+/// a moderation delete reaching a few extra members is far less bad than losing
+/// the delete.
+///
+/// # Errors
+/// Propagates repository errors from the channel fetch or role lookup.
+pub async fn resolve_channel_access_by_id(
+    channel_repo: &dyn ChannelRepository,
+    channel_id: &ChannelId,
+) -> Result<Option<ChannelAccessScope>, DomainError> {
+    match channel_repo.get_by_id(channel_id).await? {
+        Some(channel) => resolve_channel_access(channel_repo, &channel).await,
+        None => Ok(None),
+    }
 }
 
 #[cfg(test)]
@@ -173,9 +220,10 @@ mod tests {
     /// Minimal `ChannelRepository` fake. `has_private_channel_access` mirrors the
     /// real semantics: admin/owner always pass; member/moderator pass only when
     /// `grant_extra` is set (simulating a `channel_role_access` entry).
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     struct FakeChannelRepo {
         grant_extra: bool,
+        authorized_roles: Vec<Role>,
     }
 
     #[async_trait]
@@ -186,6 +234,13 @@ mod tests {
             member_role: Role,
         ) -> Result<bool, DomainError> {
             Ok(member_role == Role::Admin || member_role == Role::Owner || self.grant_extra)
+        }
+
+        async fn list_authorized_roles(
+            &self,
+            _channel_id: &ChannelId,
+        ) -> Result<Vec<Role>, DomainError> {
+            Ok(self.authorized_roles.clone())
         }
 
         // -- unused by ensure_channel_access --
@@ -235,7 +290,10 @@ mod tests {
     ) -> Result<(), DomainError> {
         let srv = server_id(1);
         let channel = make_channel(srv, is_private);
-        let channel_repo = FakeChannelRepo { grant_extra };
+        let channel_repo = FakeChannelRepo {
+            grant_extra,
+            authorized_roles: vec![],
+        };
         let member_repo = FakeMemberRepo { member };
         ensure_channel_access(&channel_repo, &member_repo, &channel, &user_id(42)).await
     }
@@ -271,5 +329,33 @@ mod tests {
     #[tokio::test]
     async fn member_with_grant_may_access_private_channel() {
         assert!(run(Some(Role::Member), true, true).await.is_ok());
+    }
+
+    /// A PUBLIC channel resolves to `None` (deliver by server membership) and
+    /// never queries the role table.
+    #[tokio::test]
+    async fn resolve_public_channel_is_none() {
+        let channel = make_channel(server_id(1), false);
+        let repo = FakeChannelRepo {
+            authorized_roles: vec![Role::Moderator],
+            ..Default::default()
+        };
+        let scope = resolve_channel_access(&repo, &channel).await.unwrap();
+        assert!(scope.is_none());
+    }
+
+    /// A PRIVATE channel resolves to the explicitly-granted role set.
+    #[tokio::test]
+    async fn resolve_private_channel_carries_authorized_roles() {
+        let channel = make_channel(server_id(1), true);
+        let repo = FakeChannelRepo {
+            authorized_roles: vec![Role::Moderator, Role::Member],
+            ..Default::default()
+        };
+        let scope = resolve_channel_access(&repo, &channel)
+            .await
+            .unwrap()
+            .expect("private channel must carry a scope");
+        assert_eq!(scope.authorized_roles, vec![Role::Moderator, Role::Member]);
     }
 }

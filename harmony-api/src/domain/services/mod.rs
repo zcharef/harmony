@@ -23,7 +23,11 @@ mod voice_service;
 // WHY: `channel_access` is a private module, so its `pub(crate)` gate is not
 // nameable from the API layer. Re-export the function (not the module) so
 // handlers share the exact same access decision without widening the surface.
-pub(crate) use channel_access::ensure_channel_access;
+pub(crate) use channel_access::{ensure_channel_access, resolve_channel_access};
+// WHY pub (not pub(crate)): the moderation-retry sweep in main.rs (the BIN
+// crate, separate from this lib) resolves channel access to scope its
+// MessageDeleted event — pub(crate) is invisible across the crate boundary.
+pub use channel_access::resolve_channel_access_by_id;
 pub use channel_service::ChannelService;
 pub use content_filter::ContentFilter;
 pub use content_moderation::{

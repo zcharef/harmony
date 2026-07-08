@@ -312,6 +312,13 @@ impl AppState {
         &*self.channel_repository
     }
 
+    /// Access the channel repository as a cloneable `Arc` (for `tokio::spawn`
+    /// captures, e.g. resolving channel-access scope in async moderation).
+    #[must_use]
+    pub fn channel_repository_arc(&self) -> &Arc<dyn ChannelRepository> {
+        &self.channel_repository
+    }
+
     /// Access the ban repository directly (moderation handlers).
     #[must_use]
     pub fn ban_repository(&self) -> &dyn BanRepository {

@@ -8,6 +8,7 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ChannelId, MessageId, ServerEvent};
+use crate::domain::services::resolve_channel_access;
 
 /// Path parameters for reaction operations.
 #[derive(Debug, Deserialize)]
@@ -64,6 +65,10 @@ pub async fn add_reaction(
     // WHY: Fetch channel before mutation to capture server_id for the SSE event.
     let channel = state.channel_service().get_by_id(&path.channel_id).await?;
 
+    // WHY: Resolve private-channel scope before mutation so the reaction event
+    // is gated to authorized members only (see `send_message`).
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
+
     state
         .reaction_service()
         .add_reaction(&path.channel_id, &path.message_id, &user_id, &req.emoji)
@@ -81,6 +86,7 @@ pub async fn add_reaction(
         emoji: req.emoji,
         user_id,
         username: profile.username,
+        channel_access,
     };
     let receivers = state.event_bus().publish(event);
     tracing::debug!(
@@ -121,6 +127,9 @@ pub async fn remove_reaction(
 ) -> Result<impl IntoResponse, ApiError> {
     let channel = state.channel_service().get_by_id(&path.channel_id).await?;
 
+    // WHY: Resolve private-channel scope before mutation (see `add_reaction`).
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
+
     state
         .reaction_service()
         .remove_reaction(&path.channel_id, &path.message_id, &user_id, &path.emoji)
@@ -133,6 +142,7 @@ pub async fn remove_reaction(
         message_id: path.message_id.clone(),
         emoji: path.emoji,
         user_id,
+        channel_access,
     };
     let receivers = state.event_bus().publish(event);
     tracing::debug!(

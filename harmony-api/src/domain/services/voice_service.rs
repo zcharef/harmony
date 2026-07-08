@@ -574,6 +574,13 @@ mod tests {
             // do not (no channel_role_access table in the in-memory fake).
             Ok(member_role == Role::Admin || member_role == Role::Owner)
         }
+
+        async fn list_authorized_roles(
+            &self,
+            _channel_id: &ChannelId,
+        ) -> Result<Vec<Role>, DomainError> {
+            Ok(vec![])
+        }
     }
 
     // -- InMemoryMemberRepo --

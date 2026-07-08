@@ -19,7 +19,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::AuthUser;
 use crate::api::state::AppState;
-use crate::domain::models::{ServerEvent, ServerId, UserId, UserStatus};
+use crate::domain::models::{ChannelAccessScope, Role, ServerEvent, ServerId, UserId, UserStatus};
 
 /// Ends the wrapped broadcast stream at the first `Lagged` error.
 ///
@@ -57,9 +57,10 @@ fn take_until_lagged<T>(
 struct PresenceGuard {
     user_id: UserId,
     state: AppState,
-    /// Live view of the user's server memberships (kept current by Stage 1),
-    /// so the offline event carries accurate routing scope at drop time.
-    server_ids: watch::Receiver<HashSet<ServerId>>,
+    /// Live view of the user's server memberships + roles (kept current by
+    /// Stage 1), so the offline event carries accurate routing scope at drop
+    /// time. Only the key set (server IDs) is used for the offline event.
+    server_ids: watch::Receiver<HashMap<ServerId, Role>>,
 }
 
 impl Drop for PresenceGuard {
@@ -70,7 +71,7 @@ impl Drop for PresenceGuard {
                 sender_id: self.user_id.clone(),
                 user_id: self.user_id.clone(),
                 status: UserStatus::Offline,
-                server_ids: self.server_ids.borrow().iter().cloned().collect(),
+                server_ids: self.server_ids.borrow().keys().cloned().collect(),
             };
             self.state.event_bus().publish(event);
             tracing::info!(user_id = %self.user_id.0, "last SSE connection dropped, user marked offline");
@@ -92,7 +93,7 @@ fn presence_visible_to(
     subject: &UserId,
     subject_servers: &[ServerId],
     receiver: &UserId,
-    receiver_servers: &HashSet<ServerId>,
+    receiver_servers: &HashMap<ServerId, Role>,
 ) -> bool {
     if receiver == subject {
         return true;
@@ -102,7 +103,29 @@ fn presence_visible_to(
     }
     subject_servers
         .iter()
-        .any(|sid| receiver_servers.contains(sid))
+        .any(|sid| receiver_servers.contains_key(sid))
+}
+
+/// Decides whether a channel-scoped event is visible to a receiver, given the
+/// channel's access scope and the receiver's role in that server.
+///
+/// Mirrors `presence_visible_to` — a small pure function so the private-channel
+/// gate is unit-testable in isolation (see the falsification test).
+///
+/// - `access == None` ⇒ PUBLIC channel ⇒ visible to every server member.
+/// - `Some(scope)` ⇒ PRIVATE channel ⇒ visible iff the receiver is Owner/Admin
+///   (implicit access) OR their role is in `scope.authorized_roles`.
+/// - `receiver_role == None` (not a member — should not reach here past the
+///   server gate) ⇒ denied for private channels.
+fn channel_visible_to(access: Option<&ChannelAccessScope>, receiver_role: Option<Role>) -> bool {
+    let Some(scope) = access else {
+        return true; // public channel — deliver by server membership
+    };
+    match receiver_role {
+        Some(Role::Owner | Role::Admin) => true,
+        Some(role) => scope.authorized_roles.contains(&role),
+        None => false,
+    }
 }
 
 /// Aborts the wrapped task when dropped.
@@ -165,21 +188,24 @@ pub async fn sse_events(
     AuthUser(user_id): AuthUser,
     State(state): State<AppState>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    // Fetch the user's server memberships to build the filter set.
-    // WHY list_all_memberships (not list_for_user): list_for_user excludes DMs
-    // (correct for the sidebar API), but the SSE stream must include DM events.
-    let server_ids: HashSet<ServerId> = state
+    // Fetch the user's server memberships (with roles) to build the filter set.
+    // WHY list_all_memberships_with_roles (not list_for_user): list_for_user
+    // excludes DMs (correct for the sidebar API), but the SSE stream must include
+    // DM events. The role is needed by Stage 2 to gate private-channel events.
+    let memberships: HashMap<ServerId, Role> = state
         .server_service()
-        .list_all_memberships(&user_id)
+        .list_all_memberships_with_roles(&user_id)
         .await?
         .into_iter()
         .collect();
+    // Key set for the connect-time presence wiring (unchanged behavior).
+    let server_ids: HashSet<ServerId> = memberships.keys().cloned().collect();
 
     // WHY: watch channel allows Stage 1 (intercept) to update server_ids
     // in-flight when the user joins/leaves a server or receives a DM. Stage 2
     // (filter) reads the latest value via borrow(). This eliminates the need
     // for client-side SSE reconnects on membership changes.
-    let (watch_tx, watch_rx) = watch::channel(server_ids.clone());
+    let (watch_tx, watch_rx) = watch::channel(memberships);
     // Second receiver for the disconnect guard: the offline event must carry
     // the CURRENT membership set, not the connect-time snapshot.
     let guard_watch_rx = watch_rx.clone();
@@ -234,16 +260,19 @@ pub async fn sse_events(
         };
 
         match event {
-            // WHY: When THIS user joins a server, add the server_id so
-            // subsequent events (and this MemberJoined itself) pass the filter.
+            // WHY: When THIS user joins a server, add the server_id (with the
+            // joiner's role) so subsequent events (and this MemberJoined itself)
+            // pass the filter. member.role carries the new member's role.
             ServerEvent::MemberJoined {
                 server_id, member, ..
             } if member.user_id == intercept_user_id => {
                 let sid = server_id.clone();
+                let role = member.role;
                 watch_tx.send_modify(|set| {
-                    if set.insert(sid.clone()) {
+                    if set.insert(sid.clone(), role).is_none() {
                         tracing::debug!(
                             %sid,
+                            ?role,
                             "server_ids watch: added (MemberJoined)"
                         );
                     }
@@ -256,7 +285,7 @@ pub async fn sse_events(
             } if *user_id == intercept_user_id => {
                 let sid = server_id.clone();
                 watch_tx.send_modify(|set| {
-                    if set.remove(&sid) {
+                    if set.remove(&sid).is_some() {
                         tracing::debug!(
                             %sid,
                             "server_ids watch: removed (MemberRemoved)"
@@ -264,10 +293,33 @@ pub async fn sse_events(
                     }
                 });
             }
+            // WHY: When THIS user's role changes, update the stored role so
+            // Stage 2's private-channel gate uses the fresh role immediately
+            // (e.g. a demotion Moderator→Member loses access to a moderator-only
+            // channel with no SSE reconnect). member.role is the NEW role; keyed
+            // on member.user_id (the subject). get_mut only updates an EXISTING
+            // membership — a role update never grants membership on its own.
+            ServerEvent::MemberRoleUpdated {
+                server_id, member, ..
+            } if member.user_id == intercept_user_id => {
+                let sid = server_id.clone();
+                let role = member.role;
+                watch_tx.send_modify(|set| {
+                    if let Some(current) = set.get_mut(&sid) {
+                        *current = role;
+                        tracing::debug!(
+                            %sid,
+                            ?role,
+                            "server_ids watch: role updated (MemberRoleUpdated)"
+                        );
+                    }
+                });
+            }
             // WHY: DmCreated carries sender_id (creator) and target_user_id
             // (recipient). Both participants need the DM server_id in their
             // filter sets to receive messages. The recipient matches on
-            // target_user_id; the creator matches on sender_id.
+            // target_user_id; the creator matches on sender_id. Role is
+            // irrelevant (DM channels are never private) — store Member.
             ServerEvent::DmCreated {
                 sender_id,
                 target_user_id,
@@ -275,7 +327,7 @@ pub async fn sse_events(
             } if *target_user_id == intercept_user_id || *sender_id == intercept_user_id => {
                 let sid = dm.server_id.clone();
                 watch_tx.send_modify(|set| {
-                    if set.insert(sid.clone()) {
+                    if set.insert(sid.clone(), Role::Member).is_none() {
                         tracing::debug!(
                             %sid,
                             "server_ids watch: added (DmCreated)"
@@ -322,9 +374,25 @@ pub async fn sse_events(
             }
             // IS for this user — bypass server_ids check
         } else if let Some(event_server_id) = event.server_id()
-            && !current_server_ids.contains(event_server_id)
+            && !current_server_ids.contains_key(event_server_id)
         {
             return None; // User not in this server
+        }
+
+        // ── Filter: private-channel access ─────────────────────────
+        // WHY: A server member WITHOUT a grant to a PRIVATE channel must not
+        // receive its message/reaction/typing events — otherwise plaintext
+        // `MessagePayload.content` (and deletes/typing/reactions) leak. The event
+        // carries the channel's authorized-role set as routing metadata; drop
+        // unless the receiver's role in that server grants access. `None` scope =
+        // public channel = deliver. The metadata is redacted below before serialize.
+        if let Some(scope) = event.channel_access() {
+            let receiver_role = event
+                .server_id()
+                .and_then(|sid| current_server_ids.get(sid).copied());
+            if !channel_visible_to(Some(scope), receiver_role) {
+                return None;
+            }
         }
 
         // ── Filter: presence scope (shared server / DM / self) ─────
@@ -348,24 +416,14 @@ pub async fn sse_events(
         drop(current_server_ids);
 
         // ── Redact routing metadata from the client payload ────────
-        // WHY: server_ids exists for cross-instance routing (pg_notify) only.
-        // An empty vec is skipped by serde, so the client-facing JSON stays
-        // identical to the pre-scoping payload and the subject's full server
-        // list never leaks to receivers.
-        let event = match event {
-            ServerEvent::PresenceChanged {
-                sender_id,
-                user_id,
-                status,
-                ..
-            } => ServerEvent::PresenceChanged {
-                sender_id,
-                user_id,
-                status,
-                server_ids: Vec::new(),
-            },
-            other => other,
-        };
+        // WHY: `channel_access` (private-channel gate) and `server_ids`
+        // (presence scope) are delivery-routing only — never for clients. One
+        // exhaustive method on the event (co-located with the field defs) empties
+        // them; `skip_serializing_if` then omits the emptied fields, keeping the
+        // client JSON byte-identical. Using the method (not a local rebuild)
+        // makes it a compile error to forget a future scoped variant.
+        let mut event = event;
+        event.redact_routing_metadata();
 
         // ── Filter: sender exclusion (create/update only) ──────────
         // WHY: The sender already has optimistic UI for create and update.
@@ -508,10 +566,16 @@ mod tests {
     fn sid(n: u128) -> ServerId {
         ServerId::new(Uuid::from_u128(n))
     }
+    /// Build a membership map where the receiver is a plain `Member` of each
+    /// server — the role is irrelevant to presence visibility (only the key set
+    /// matters), so `Member` keeps these tests focused on server overlap.
+    fn member_map(ids: &[ServerId]) -> HashMap<ServerId, Role> {
+        ids.iter().cloned().map(|s| (s, Role::Member)).collect()
+    }
 
     #[test]
     fn presence_hidden_from_users_with_no_shared_server() {
-        let receiver_servers: HashSet<ServerId> = [sid(1), sid(2)].into();
+        let receiver_servers = member_map(&[sid(1), sid(2)]);
         // Disjoint memberships — the stranger must not learn the status.
         assert!(!presence_visible_to(
             &uid(10),
@@ -523,7 +587,7 @@ mod tests {
 
     #[test]
     fn presence_visible_with_shared_server_or_dm() {
-        let receiver_servers: HashSet<ServerId> = [sid(1), sid(2)].into();
+        let receiver_servers = member_map(&[sid(1), sid(2)]);
         // sid(2) is shared — DMs are servers too, so this covers DM partners.
         assert!(presence_visible_to(
             &uid(10),
@@ -536,7 +600,7 @@ mod tests {
     #[test]
     fn presence_always_visible_to_self() {
         // Multi-device self-sync: even with zero shared/known servers.
-        let receiver_servers: HashSet<ServerId> = HashSet::new();
+        let receiver_servers: HashMap<ServerId, Role> = HashMap::new();
         assert!(presence_visible_to(
             &uid(10),
             &[],
@@ -549,13 +613,67 @@ mod tests {
     fn presence_with_empty_scope_broadcasts() {
         // Empty routing metadata = older instance or lookup failure — fail
         // open to the legacy broadcast behavior, never drop the event.
-        let receiver_servers: HashSet<ServerId> = [sid(1)].into();
+        let receiver_servers = member_map(&[sid(1)]);
         assert!(presence_visible_to(
             &uid(10),
             &[],
             &uid(20),
             &receiver_servers
         ));
+    }
+
+    // ── channel_visible_to: private-channel access gate ────────────────
+
+    /// A PUBLIC channel (`None` scope) is visible to every server member,
+    /// whatever their role — and even to a receiver whose role is unknown.
+    #[test]
+    fn channel_public_visible_to_everyone() {
+        assert!(channel_visible_to(None, Some(Role::Member)));
+        assert!(channel_visible_to(None, Some(Role::Moderator)));
+        assert!(channel_visible_to(None, Some(Role::Admin)));
+        assert!(channel_visible_to(None, Some(Role::Owner)));
+        assert!(channel_visible_to(None, None));
+    }
+
+    /// Owner and Admin hold IMPLICIT access to every private channel — they are
+    /// never listed in `authorized_roles`, so an empty set must still admit them.
+    #[test]
+    fn channel_private_visible_to_admin_and_owner_implicitly() {
+        let scope = ChannelAccessScope {
+            authorized_roles: vec![],
+        };
+        assert!(channel_visible_to(Some(&scope), Some(Role::Admin)));
+        assert!(channel_visible_to(Some(&scope), Some(Role::Owner)));
+    }
+
+    /// A member whose role is in the granted set may see the private channel.
+    #[test]
+    fn channel_private_visible_to_granted_role() {
+        let scope = ChannelAccessScope {
+            authorized_roles: vec![Role::Moderator],
+        };
+        assert!(channel_visible_to(Some(&scope), Some(Role::Moderator)));
+    }
+
+    /// THE LEAK GUARD: a plain Member with NO grant must NOT see a private
+    /// channel's events. If this ever returns true, plaintext message content
+    /// leaks to unauthorized server members.
+    #[test]
+    fn channel_private_hidden_from_ungranted_member() {
+        let scope = ChannelAccessScope {
+            authorized_roles: vec![Role::Moderator],
+        };
+        assert!(!channel_visible_to(Some(&scope), Some(Role::Member)));
+    }
+
+    /// A receiver with no known role (should not happen past the server gate) is
+    /// denied private channels — fail closed.
+    #[test]
+    fn channel_private_hidden_from_unknown_role() {
+        let scope = ChannelAccessScope {
+            authorized_roles: vec![Role::Member],
+        };
+        assert!(!channel_visible_to(Some(&scope), None));
     }
 
     #[test]
