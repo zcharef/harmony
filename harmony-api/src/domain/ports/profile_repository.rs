@@ -31,12 +31,16 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
     /// Order is not guaranteed.
     async fn get_profiles_by_ids(&self, ids: &[UserId]) -> Result<Vec<Profile>, DomainError>;
 
-    /// Update a user's profile fields. `None` means "don't change this field".
+    /// Update a user's profile fields.
+    ///
+    /// Each field uses `Option<Option<String>>`: outer = "was the field
+    /// provided?", inner = the new value (`Some(None)` clears the column).
+    /// Same double-option contract as `ChannelRepository::update` `topic`.
     async fn update(
         &self,
         user_id: &UserId,
-        avatar_url: Option<String>,
-        display_name: Option<String>,
-        custom_status: Option<String>,
+        avatar_url: Option<Option<String>>,
+        display_name: Option<Option<String>>,
+        custom_status: Option<Option<String>>,
     ) -> Result<Profile, DomainError>;
 }

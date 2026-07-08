@@ -166,8 +166,11 @@ impl ProfileService {
 
     /// Update profile fields for the authenticated user.
     ///
+    /// Each field is double-optional: outer `None` = not provided (unchanged),
+    /// `Some(None)` = explicit `null` (clears the column), `Some(Some(v))` = set.
+    ///
     /// Validates inputs before delegating to the repository:
-    /// - At least one field must be provided
+    /// - At least one field must be provided (an explicit `null` counts)
     /// - `avatar_url` must start with `https://` and be at most 2048 characters
     /// - `display_name` must be 1-32 characters
     /// - `custom_status` must be at most 128 characters
@@ -178,9 +181,9 @@ impl ProfileService {
     pub async fn update_profile(
         &self,
         user_id: &UserId,
-        avatar_url: Option<String>,
-        display_name: Option<String>,
-        custom_status: Option<String>,
+        avatar_url: Option<Option<String>>,
+        display_name: Option<Option<String>>,
+        custom_status: Option<Option<String>>,
     ) -> Result<Profile, DomainError> {
         if avatar_url.is_none() && display_name.is_none() && custom_status.is_none() {
             return Err(DomainError::ValidationError(
@@ -188,7 +191,7 @@ impl ProfileService {
             ));
         }
 
-        if let Some(ref url) = avatar_url {
+        if let Some(Some(ref url)) = avatar_url {
             if !url.starts_with("https://") {
                 return Err(DomainError::ValidationError(
                     "Avatar URL must use HTTPS".to_string(),
@@ -203,7 +206,7 @@ impl ProfileService {
             }
         }
 
-        if let Some(ref name) = display_name {
+        if let Some(Some(ref name)) = display_name {
             // WHY: Count chars, not bytes — a 32-char accented or CJK name is a
             // valid display name even though it exceeds 32 bytes in UTF-8.
             let len = name.chars().count();
@@ -215,7 +218,7 @@ impl ProfileService {
             self.content_filter.check_hard(name)?;
         }
 
-        if let Some(ref status) = custom_status {
+        if let Some(Some(ref status)) = custom_status {
             if status.len() > 128 {
                 return Err(DomainError::ValidationError(
                     "Custom status must be at most 128 characters".to_string(),
@@ -392,9 +395,9 @@ mod tests {
         async fn update(
             &self,
             user_id: &UserId,
-            _avatar_url: Option<String>,
-            _display_name: Option<String>,
-            _custom_status: Option<String>,
+            _avatar_url: Option<Option<String>>,
+            _display_name: Option<Option<String>>,
+            _custom_status: Option<Option<String>>,
         ) -> Result<Profile, DomainError> {
             Ok(dummy_profile(user_id))
         }
@@ -430,7 +433,12 @@ mod tests {
         let too_long = format!("https://{}", "a".repeat(2041));
 
         let err = svc
-            .update_profile(&UserId::new(Uuid::from_u128(1)), Some(too_long), None, None)
+            .update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                Some(Some(too_long)),
+                None,
+                None,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -446,9 +454,14 @@ mod tests {
         let at_limit = format!("https://{}", "a".repeat(2040));
 
         assert!(
-            svc.update_profile(&UserId::new(Uuid::from_u128(1)), Some(at_limit), None, None)
-                .await
-                .is_ok()
+            svc.update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                Some(Some(at_limit)),
+                None,
+                None
+            )
+            .await
+            .is_ok()
         );
     }
 
@@ -465,9 +478,14 @@ mod tests {
         );
 
         assert!(
-            svc.update_profile(&UserId::new(Uuid::from_u128(1)), None, Some(name), None)
-                .await
-                .is_ok()
+            svc.update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                Some(Some(name)),
+                None
+            )
+            .await
+            .is_ok()
         );
     }
 
@@ -477,7 +495,12 @@ mod tests {
         let too_long = "a".repeat(33);
 
         let err = svc
-            .update_profile(&UserId::new(Uuid::from_u128(1)), None, Some(too_long), None)
+            .update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                Some(Some(too_long)),
+                None,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -494,7 +517,7 @@ mod tests {
             .update_profile(
                 &UserId::new(Uuid::from_u128(1)),
                 None,
-                Some(String::new()),
+                Some(Some(String::new())),
                 None,
             )
             .await
@@ -512,10 +535,53 @@ mod tests {
         let err = svc
             .update_profile(
                 &UserId::new(Uuid::from_u128(1)),
-                Some("http://example.com/a.png".to_string()),
+                Some(Some("http://example.com/a.png".to_string())),
                 None,
                 None,
             )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_accepts_explicit_null_to_clear_avatar() {
+        let svc = profile_service();
+
+        // WHY: Some(None) = client sent `"avatarUrl": null` — must pass the
+        // "at least one field" gate and skip URL validation (nothing to validate).
+        assert!(
+            svc.update_profile(&UserId::new(Uuid::from_u128(1)), Some(None), None, None)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_accepts_explicit_null_display_name_and_status() {
+        let svc = profile_service();
+
+        assert!(
+            svc.update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                Some(None),
+                Some(None)
+            )
+            .await
+            .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_rejects_all_fields_missing() {
+        let svc = profile_service();
+
+        let err = svc
+            .update_profile(&UserId::new(Uuid::from_u128(1)), None, None, None)
             .await
             .unwrap_err();
         assert!(

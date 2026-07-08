@@ -235,7 +235,8 @@ pub async fn get_my_profile(
 
 /// Update the authenticated user's profile fields (avatar, display name, custom status).
 ///
-/// Patch semantics: only provided fields are updated; omitted fields remain unchanged.
+/// Patch semantics: omitted fields remain unchanged; an explicit `null` clears
+/// the field (e.g. `{"avatarUrl": null}` removes the avatar).
 ///
 /// # Errors
 /// Returns `ApiError` on validation failure or repository error.

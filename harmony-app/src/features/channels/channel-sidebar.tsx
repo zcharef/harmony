@@ -230,10 +230,12 @@ function ServerHeader({
 function UserControlPanel() {
   const { t } = useTranslation('channels')
   const { t: tVoice } = useTranslation('voice')
+  const { t: tSettings } = useTranslation('settings')
   const user = useAuthStore((s) => s.user)
   const { data: profile } = useCurrentProfile()
   const status = useUserStatus(user?.id ?? '')
   const username = profile?.username ?? t('youFallback')
+  const openProfileSettings = useSettingsUiStore((s) => s.openProfileSettings)
   const isMuted = useVoiceConnectionStore((s) => s.isMuted)
   const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
   const toggleMute = useVoiceConnectionStore((s) => s.toggleMute)
@@ -309,9 +311,18 @@ function UserControlPanel() {
             )}
           </Button>
         </Tooltip>
-        <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
-          <Settings className="h-4 w-4 text-default-500" />
-        </Button>
+        <Tooltip content={tSettings('userSettingsTooltip')} placement="top" delay={300}>
+          <Button
+            variant="light"
+            isIconOnly
+            size="sm"
+            className="h-8 w-8"
+            onPress={openProfileSettings}
+            data-test="user-settings-button"
+          >
+            <Settings className="h-4 w-4 text-default-500" />
+          </Button>
+        </Tooltip>
       </div>
     </div>
   )

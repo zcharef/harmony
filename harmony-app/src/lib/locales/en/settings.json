@@ -66,5 +66,25 @@
   "slowMode10m": "10m",
   "slowMode30m": "30m",
   "slowMode1h": "1h",
-  "slowMode6h": "6h"
+  "slowMode6h": "6h",
+
+  "userSettingsTooltip": "User Settings",
+  "profileSettingsTitle": "Profile Settings",
+  "displayNameLabel": "Display Name",
+  "displayNamePlaceholder": "How others see you",
+  "displayNameHelp": "Leave blank to use your username.",
+  "displayNameMaxLength": "Display name must be 32 characters or less",
+  "customStatusLabel": "Custom Status",
+  "customStatusPlaceholder": "What's on your mind?",
+  "customStatusMaxLength": "Custom status must be 128 characters or less",
+  "uploadAvatar": "Upload Avatar",
+  "removeAvatar": "Remove",
+  "avatarHelp": "PNG, JPEG, WebP or GIF — max 5MB (GIF max 2MB).",
+  "profileUpdateFailed": "Could not save your profile. Try again.",
+  "avatarRemoveFailed": "Could not remove your avatar. Try again.",
+  "avatarErrorInvalidType": "Avatar must be a PNG, JPEG, WebP or GIF image.",
+  "avatarErrorTooLarge": "Avatar must be 5MB or less.",
+  "avatarErrorGifTooLarge": "Animated GIF avatars must be 2MB or less.",
+  "avatarErrorProcessingFailed": "Could not process this image. Try a different file.",
+  "avatarErrorUploadFailed": "Avatar upload failed. Try again."
 }

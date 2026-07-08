@@ -16,6 +16,7 @@ import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { useUnreadStore } from '@/features/channels'
 import { StatusPicker } from '@/features/preferences'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
+import { useSettingsUiStore } from '@/features/settings'
 import { useVoiceConnectionStore } from '@/features/voice'
 import type { DmListItem } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -149,6 +150,8 @@ interface DmSidebarProps {
 export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
   const { t } = useTranslation('dms')
   const { t: tVoice } = useTranslation('voice')
+  const { t: tSettings } = useTranslation('settings')
+  const openProfileSettings = useSettingsUiStore((s) => s.openProfileSettings)
   const { data: dms, isPending, isError, refetch, isRefetching } = useDms()
   const closeDmMutation = useCloseDm()
   const [isSearchOpen, setIsSearchOpen] = useState(false)
@@ -299,9 +302,18 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
               )}
             </Button>
           </Tooltip>
-          <Button variant="light" isIconOnly size="sm" className="h-8 w-8">
-            <Settings className="h-4 w-4 text-default-500" />
-          </Button>
+          <Tooltip content={tSettings('userSettingsTooltip')} placement="top" delay={300}>
+            <Button
+              variant="light"
+              isIconOnly
+              size="sm"
+              className="h-8 w-8"
+              onPress={openProfileSettings}
+              data-test="user-settings-button"
+            >
+              <Settings className="h-4 w-4 text-default-500" />
+            </Button>
+          </Tooltip>
         </div>
       </div>
 
