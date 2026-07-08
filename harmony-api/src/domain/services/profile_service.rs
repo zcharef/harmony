@@ -49,6 +49,12 @@ impl ProfileService {
     /// 2. Content filter check → reject (user-chosen) or fallback (system-derived)
     /// 3. Persist via repository upsert
     ///
+    /// `display_name` (optional, from signup metadata) is validated FAIL-SOFT:
+    /// unlike the user-chosen username, an invalid display name never blocks
+    /// signup — it silently degrades to `None` (the profile then renders as the
+    /// username). It is written on INSERT only; the repository's `ON CONFLICT`
+    /// no-op preserves a display name the user later changed in settings.
+    ///
     /// # Errors
     /// Returns `DomainError::Conflict` if a user-chosen username is reserved.
     /// Returns `DomainError::ValidationError` if a user-chosen username is offensive.
@@ -59,6 +65,7 @@ impl ProfileService {
         email: String,
         username: String,
         is_user_chosen: bool,
+        display_name: Option<String>,
     ) -> Result<Profile, DomainError> {
         // Step 1: reserved name check
         let username = if RESERVED_USERNAMES.contains(&username.as_str()) {
@@ -94,8 +101,40 @@ impl ProfileService {
             }
         };
 
-        // Step 3: persist
-        self.repo.upsert_from_auth(user_id, email, username).await
+        // Step 3: validate the optional display name FAIL-SOFT (never blocks signup)
+        let display_name = self.sanitize_signup_display_name(display_name);
+
+        // Step 4: persist
+        self.repo
+            .upsert_from_auth(user_id, email, username, display_name)
+            .await
+    }
+
+    /// Validate an optional signup display name, FAIL-SOFT.
+    ///
+    /// Mirrors the `update_profile` display-name rules (trim, 1-32 chars,
+    /// content filter) but never errors: because a display name at registration
+    /// is optional, any invalid value degrades to `None` instead of locking the
+    /// user out of signup. Returns the trimmed name when valid, else `None`.
+    fn sanitize_signup_display_name(&self, raw: Option<String>) -> Option<String> {
+        let trimmed = raw?.trim().to_string();
+        if trimmed.is_empty() {
+            return None;
+        }
+        // WHY chars not bytes: a 32-char accented/CJK name is valid even though
+        // it exceeds 32 bytes in UTF-8 (mirrors update_profile).
+        if trimmed.chars().count() > 32 {
+            tracing::warn!("signup display_name exceeds 32 chars, dropping (renders as username)");
+            return None;
+        }
+        if let Err(error) = self.content_filter.check_hard(&trimmed) {
+            tracing::warn!(
+                ?error,
+                "signup display_name failed content filter, dropping (renders as username)"
+            );
+            return None;
+        }
+        Some(trimmed)
     }
 
     /// Check whether a username passes the content filter (no banned words).
@@ -402,15 +441,22 @@ mod tests {
             Ok(dummy_profile(user_id))
         }
 
-        // -- unused by update_profile --
         async fn upsert_from_auth(
             &self,
             user_id: UserId,
             _email: String,
             _username: String,
+            display_name: Option<String>,
         ) -> Result<Profile, DomainError> {
-            Ok(dummy_profile(&user_id))
+            // WHY: Echo the display_name the service decided to persist so the
+            // fail-soft tests can assert the outcome (valid → Some, invalid → None).
+            // This models the INSERT path; the ON CONFLICT no-op is a DB property
+            // verified against real Postgres, not this fake.
+            let mut profile = dummy_profile(&user_id);
+            profile.display_name = display_name;
+            Ok(profile)
         }
+        // -- unused by update_profile --
         async fn get_by_id(&self, _user_id: &UserId) -> Result<Option<Profile>, DomainError> {
             Ok(None)
         }
@@ -588,5 +634,183 @@ mod tests {
             matches!(err, DomainError::ValidationError(_)),
             "got {err:?}"
         );
+    }
+
+    // ── upsert_from_auth display_name (signup) ───────────────────
+    //
+    // The FakeProfileRepo echoes back the display_name the service passed to
+    // the repo, so these tests assert the FAIL-SOFT validation outcome. The
+    // ON CONFLICT no-op that preserves an existing profile's display name on
+    // re-login is a Postgres property, exercised by compile-time sqlx + real DB.
+
+    /// Service backed by a filter that rejects the synthetic word `"slurword"`,
+    /// to exercise the content-filter fail-soft branch (`profile_service()` uses
+    /// a no-op filter that never rejects).
+    fn profile_service_rejecting_slurword() -> ProfileService {
+        ProfileService::new(
+            Arc::new(FakeProfileRepo),
+            Arc::new(ContentFilter::from_words(&["slurword"])),
+        )
+    }
+
+    #[tokio::test]
+    async fn upsert_from_auth_sets_valid_display_name() {
+        let svc = profile_service();
+
+        let profile = svc
+            .upsert_from_auth(
+                UserId::new(Uuid::from_u128(1)),
+                "a@b.com".to_string(),
+                "tester".to_string(),
+                true,
+                Some("Cool Name".to_string()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(profile.display_name.as_deref(), Some("Cool Name"));
+    }
+
+    #[tokio::test]
+    async fn upsert_from_auth_trims_display_name() {
+        let svc = profile_service();
+
+        let profile = svc
+            .upsert_from_auth(
+                UserId::new(Uuid::from_u128(1)),
+                "a@b.com".to_string(),
+                "tester".to_string(),
+                true,
+                Some("  Cool Name  ".to_string()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(profile.display_name.as_deref(), Some("Cool Name"));
+    }
+
+    #[tokio::test]
+    async fn upsert_from_auth_none_display_name_stays_none() {
+        let svc = profile_service();
+
+        let profile = svc
+            .upsert_from_auth(
+                UserId::new(Uuid::from_u128(1)),
+                "a@b.com".to_string(),
+                "tester".to_string(),
+                true,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(profile.display_name, None);
+    }
+
+    #[tokio::test]
+    async fn upsert_from_auth_blank_display_name_degrades_to_none() {
+        let svc = profile_service();
+
+        // WHY: A whitespace-only display name is treated as "not provided" →
+        // NULL → renders as the username (per the LOCKED render chain).
+        let profile = svc
+            .upsert_from_auth(
+                UserId::new(Uuid::from_u128(1)),
+                "a@b.com".to_string(),
+                "tester".to_string(),
+                true,
+                Some("   ".to_string()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(profile.display_name, None);
+    }
+
+    #[tokio::test]
+    async fn upsert_from_auth_oversize_display_name_degrades_to_none_without_error() {
+        let svc = profile_service();
+
+        // 33 chars — one over the 32-char cap. FAIL-SOFT: must NOT block signup.
+        let profile = svc
+            .upsert_from_auth(
+                UserId::new(Uuid::from_u128(1)),
+                "a@b.com".to_string(),
+                "tester".to_string(),
+                true,
+                Some("a".repeat(33)),
+            )
+            // FAIL-SOFT: unwrap proves it returned Ok — signup was not blocked.
+            .await
+            .unwrap();
+
+        assert_eq!(profile.display_name, None);
+    }
+
+    #[tokio::test]
+    async fn upsert_from_auth_accepts_display_name_at_32_multibyte_chars() {
+        let svc = profile_service();
+
+        // 32 chars of é = 64 bytes: a byte cap would reject, the char cap accepts.
+        let name = "é".repeat(32);
+        assert!(
+            name.len() > 32,
+            "must exceed 32 bytes to prove chars-not-bytes"
+        );
+
+        let profile = svc
+            .upsert_from_auth(
+                UserId::new(Uuid::from_u128(1)),
+                "a@b.com".to_string(),
+                "tester".to_string(),
+                true,
+                Some(name.clone()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(profile.display_name.as_deref(), Some(name.as_str()));
+    }
+
+    #[tokio::test]
+    async fn upsert_from_auth_offensive_display_name_degrades_to_none_without_error() {
+        let svc = profile_service_rejecting_slurword();
+
+        // WHY: An offensive display name (unlike a user-chosen username) must
+        // NOT lock the user out of signup — it silently degrades to None.
+        let profile = svc
+            .upsert_from_auth(
+                UserId::new(Uuid::from_u128(1)),
+                "a@b.com".to_string(),
+                "tester".to_string(),
+                true,
+                Some("slurword".to_string()),
+            )
+            // FAIL-SOFT: unwrap proves it returned Ok — signup was not blocked.
+            .await
+            .unwrap();
+
+        assert_eq!(profile.display_name, None);
+    }
+
+    #[tokio::test]
+    async fn upsert_from_auth_offensive_display_name_does_not_affect_username() {
+        // WHY: A valid user-chosen username must still succeed even when the
+        // accompanying display name is rejected by the content filter.
+        let svc = profile_service_rejecting_slurword();
+
+        let profile = svc
+            .upsert_from_auth(
+                UserId::new(Uuid::from_u128(1)),
+                "a@b.com".to_string(),
+                "goodname".to_string(),
+                true,
+                Some("slurword".to_string()),
+            )
+            // Valid username + offensive display_name → still Ok, display_name dropped.
+            .await
+            .unwrap();
+
+        assert_eq!(profile.display_name, None);
     }
 }

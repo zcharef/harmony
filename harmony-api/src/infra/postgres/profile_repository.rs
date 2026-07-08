@@ -76,14 +76,19 @@ impl ProfileRepository for PgProfileRepository {
         user_id: UserId,
         _email: String,
         username: String,
+        display_name: Option<String>,
     ) -> Result<Profile, DomainError> {
         let id = user_id.0;
         let status_str = user_status_to_str(&UserStatus::Offline);
 
+        // WHY: `display_name` is set on INSERT only. The `ON CONFLICT (id) DO
+        // UPDATE SET id = profiles.id` branch is an intentional no-op — a
+        // re-login (or concurrent create) never overwrites an existing profile,
+        // so a display name the user later changed in settings is preserved.
         let row = sqlx::query!(
             r#"
-            INSERT INTO profiles (id, username, status)
-            VALUES ($1, $2, $3)
+            INSERT INTO profiles (id, username, status, display_name)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (id) DO UPDATE
                 SET id = profiles.id
             RETURNING
@@ -99,6 +104,7 @@ impl ProfileRepository for PgProfileRepository {
             id,
             username,
             status_str,
+            display_name,
         )
         .fetch_one(&self.pool)
         .await

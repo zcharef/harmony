@@ -10,13 +10,16 @@ use crate::domain::models::{Profile, UserId};
 pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
     /// Create or update a profile from auth provider data (Supabase sign-up/login).
     ///
-    /// Called on first login to ensure a profile row exists. Subsequent calls
-    /// update the email-derived username if needed.
+    /// Called on first login to ensure a profile row exists. `display_name` is
+    /// written on INSERT only — the `ON CONFLICT` branch is a no-op, so an
+    /// existing profile's display name (which the user may have changed in
+    /// settings) is never overwritten by a later login.
     async fn upsert_from_auth(
         &self,
         user_id: UserId,
         email: String,
         username: String,
+        display_name: Option<String>,
     ) -> Result<Profile, DomainError>;
 
     /// Get a profile by user ID. Returns `None` if not found.

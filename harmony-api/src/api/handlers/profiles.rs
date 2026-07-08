@@ -83,6 +83,15 @@ pub async fn sync_profile(
         .and_then(serde_json::Value::as_str)
         .map(String::from);
 
+    // Optional display name from signup metadata. Extracted like the username;
+    // all validation (fail-soft — never blocks signup) lives in the service.
+    let display_name_from_meta: Option<String> = auth_user
+        .user_metadata
+        .as_ref()
+        .and_then(|m: &serde_json::Value| m.get("display_name"))
+        .and_then(serde_json::Value::as_str)
+        .map(String::from);
+
     let (username, is_user_chosen) = if let Some(ref meta_username) = username_from_meta {
         if !is_valid_username(meta_username) {
             tracing::warn!(
@@ -99,7 +108,13 @@ pub async fn sync_profile(
 
     let profile = state
         .profile_service()
-        .upsert_from_auth(user_id.clone(), email, username, is_user_chosen)
+        .upsert_from_auth(
+            user_id.clone(),
+            email,
+            username,
+            is_user_chosen,
+            display_name_from_meta,
+        )
         .await?;
 
     // WHY: Auto-join the official server for new users. Membership creation

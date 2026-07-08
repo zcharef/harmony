@@ -152,6 +152,33 @@ impl ContentFilter {
         }
     }
 
+    /// Build a filter from an explicit word list. Test-only.
+    ///
+    /// WHY: Lets other modules' tests exercise content-filter rejection with a
+    /// controlled synthetic word (e.g. `"slurword"`) instead of loading the full
+    /// abuse lists or embedding real slurs in test source.
+    #[cfg(test)]
+    pub(crate) fn from_words(words: &[&str]) -> Self {
+        let banned_words: HashSet<String> = words.iter().map(|w| w.to_lowercase()).collect();
+        let mut collapsed_banned_words: HashMap<String, usize> = HashMap::new();
+        for word in &banned_words {
+            if word.len() >= 3 {
+                let collapsed = collapse_repeats(word);
+                let min_len = 3.min(word.len());
+                collapsed_banned_words
+                    .entry(collapsed)
+                    .and_modify(|existing| *existing = (*existing).min(min_len))
+                    .or_insert(min_len);
+            }
+        }
+        Self {
+            banned_words,
+            collapsed_banned_words,
+            invite_regex: build_invite_regex(),
+            enabled: true,
+        }
+    }
+
     /// Check if a word's collapsed form matches the collapsed banned set,
     /// respecting the minimum input length guard to prevent false positives.
     fn is_collapsed_match(&self, original_word: &str) -> bool {
@@ -666,26 +693,8 @@ mod tests {
     use super::*;
 
     /// Helper: build a filter with a small custom word list for testing.
-    /// Mirrors `ContentFilter::new()` logic for collapsed set construction.
     fn test_filter(words: &[&str]) -> ContentFilter {
-        let banned_words: HashSet<String> = words.iter().map(|w| w.to_lowercase()).collect();
-        let mut collapsed_banned_words: HashMap<String, usize> = HashMap::new();
-        for word in &banned_words {
-            if word.len() >= 3 {
-                let collapsed = collapse_repeats(word);
-                let min_len = 3.min(word.len());
-                collapsed_banned_words
-                    .entry(collapsed)
-                    .and_modify(|existing| *existing = (*existing).min(min_len))
-                    .or_insert(min_len);
-            }
-        }
-        ContentFilter {
-            banned_words,
-            collapsed_banned_words,
-            invite_regex: build_invite_regex(),
-            enabled: true,
-        }
+        ContentFilter::from_words(words)
     }
 
     // ── check_hard ──────────────────────────────────────────────────
