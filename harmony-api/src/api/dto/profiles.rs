@@ -53,19 +53,38 @@ impl From<bool> for CheckUsernameResponse {
     }
 }
 
+/// WHY: serde cannot distinguish a missing field from an explicit `null` with
+/// a plain `Option<Option<T>>` — both deserialize to `None`. This per-field
+/// deserializer only runs when the key IS present in the JSON, so wrapping the
+/// parsed value in `Some` yields: missing → `None` (via `#[serde(default)]`),
+/// `null` → `Some(None)` (clear the field), `"x"` → `Some(Some("x"))` (set it).
+fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    serde::Deserialize::deserialize(deserializer).map(Some)
+}
+
 /// Request body for updating the authenticated user's profile.
+///
+/// Patch semantics per field: omitted = unchanged, `null` = cleared,
+/// value = replaced (same contract as `UpdateChannelRequest.topic`).
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateProfileRequest {
-    /// Avatar image URL (must be HTTPS).
-    #[serde(default)]
-    pub avatar_url: Option<String>,
-    /// Display name (1-32 characters).
-    #[serde(default)]
-    pub display_name: Option<String>,
-    /// Custom status text (max 128 characters).
-    #[serde(default)]
-    pub custom_status: Option<String>,
+    /// Avatar image URL (must be HTTPS). `null` clears it.
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(value_type = Option<String>)]
+    pub avatar_url: Option<Option<String>>,
+    /// Display name (1-32 characters). `null` clears it (falls back to username).
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(value_type = Option<String>)]
+    pub display_name: Option<Option<String>>,
+    /// Custom status text (max 128 characters). `null` clears it.
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(value_type = Option<String>)]
+    pub custom_status: Option<Option<String>>,
 }
 
 impl From<Profile> for ProfileResponse {

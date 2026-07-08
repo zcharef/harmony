@@ -25,7 +25,7 @@ import {
 } from '@/features/members'
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
-import { ServerSettings, useSettingsUiStore } from '@/features/settings'
+import { ProfileSettingsModal, ServerSettings, useSettingsUiStore } from '@/features/settings'
 import { useVoiceConnection } from '@/features/voice'
 import { useFetchSSE } from '@/hooks/use-fetch-sse'
 import { useNotificationSound } from '@/hooks/use-notification-sound'
@@ -622,6 +622,9 @@ export function MainLayout() {
           </>
         )}
       </Group>
+      {/* WHY here: mounted in MainLayout so the modal survives DM/server view
+          switches — both sidebars' gear buttons open it (CLAUDE.md 4.6). */}
+      <ProfileSettingsModal />
       <AlphaBadge />
     </div>
   )

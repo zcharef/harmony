@@ -222,20 +222,30 @@ impl ProfileRepository for PgProfileRepository {
     async fn update(
         &self,
         user_id: &UserId,
-        avatar_url: Option<String>,
-        display_name: Option<String>,
-        custom_status: Option<String>,
+        avatar_url: Option<Option<String>>,
+        display_name: Option<Option<String>>,
+        custom_status: Option<Option<String>>,
     ) -> Result<Profile, DomainError> {
         let id = user_id.0;
 
-        // WHY COALESCE: patch semantics — `None` in Rust = don't change the field.
+        // WHY CASE WHEN + provided flag: double-option patch semantics — outer
+        // None = keep the column, Some(None) = clear it (explicit JSON null),
+        // Some(Some(v)) = set it. COALESCE cannot express "clear". Mirrors
+        // channel_repository::update_channel's `topic` handling.
+        let should_update_avatar = avatar_url.is_some();
+        let avatar_value = avatar_url.flatten();
+        let should_update_display_name = display_name.is_some();
+        let display_name_value = display_name.flatten();
+        let should_update_custom_status = custom_status.is_some();
+        let custom_status_value = custom_status.flatten();
+
         let row = sqlx::query!(
             r#"
             UPDATE profiles
             SET
-                avatar_url = COALESCE($2, avatar_url),
-                display_name = COALESCE($3, display_name),
-                custom_status = COALESCE($4, custom_status),
+                avatar_url = CASE WHEN $2 THEN $3 ELSE avatar_url END,
+                display_name = CASE WHEN $4 THEN $5 ELSE display_name END,
+                custom_status = CASE WHEN $6 THEN $7 ELSE custom_status END,
                 updated_at = now()
             WHERE id = $1
             RETURNING
@@ -249,9 +259,12 @@ impl ProfileRepository for PgProfileRepository {
                 updated_at
             "#,
             id,
-            avatar_url,
-            display_name,
-            custom_status,
+            should_update_avatar,
+            avatar_value,
+            should_update_display_name,
+            display_name_value,
+            should_update_custom_status,
+            custom_status_value,
         )
         .fetch_optional(&self.pool)
         .await

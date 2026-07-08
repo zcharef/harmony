@@ -2126,7 +2126,7 @@
           "Profiles"
         ],
         "summary": "Update the authenticated user's profile fields (avatar, display name, custom status).",
-        "description": "Patch semantics: only provided fields are updated; omitted fields remain unchanged.\n\n# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "description": "Patch semantics: omitted fields remain unchanged; an explicit `null` clears\nthe field (e.g. `{\"avatarUrl\": null}` removes the avatar).\n\n# Errors\nReturns `ApiError` on validation failure or repository error.",
         "operationId": "update_my_profile",
         "requestBody": {
           "content": {
@@ -5664,28 +5664,28 @@
       },
       "UpdateProfileRequest": {
         "type": "object",
-        "description": "Request body for updating the authenticated user's profile.",
+        "description": "Request body for updating the authenticated user's profile.\n\nPatch semantics per field: omitted = unchanged, `null` = cleared,\nvalue = replaced (same contract as `UpdateChannelRequest.topic`).",
         "properties": {
           "avatarUrl": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Avatar image URL (must be HTTPS)."
+            "description": "Avatar image URL (must be HTTPS). `null` clears it."
           },
           "customStatus": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Custom status text (max 128 characters)."
+            "description": "Custom status text (max 128 characters). `null` clears it."
           },
           "displayName": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Display name (1-32 characters)."
+            "description": "Display name (1-32 characters). `null` clears it (falls back to username)."
           }
         },
         "additionalProperties": false
