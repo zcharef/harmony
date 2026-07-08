@@ -76,7 +76,10 @@ BEGIN
     -- generate_safe_username (user_ + 12 hex) rather than let a reserved handle
     -- be self-assigned. Update v_base too so a collision suffixes the safe base.
     IF v_base = ANY(v_reserved) THEN
-        v_base := 'user_' || left(replace(gen_random_uuid()::text, '-', ''), 12);
+        -- WHY NEW.id (not a fresh uuid): mirrors Rust generate_safe_username
+        -- EXACTLY — user_ + first 12 hex of the user's own id — so the two
+        -- fallbacks are deterministic and identical if the Rust path ever runs.
+        v_base := 'user_' || left(replace(NEW.id::text, '-', ''), 12);
     END IF;
     v_username := v_base;
 
