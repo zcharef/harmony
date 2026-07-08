@@ -39,6 +39,9 @@ DECLARE
     -- WHY: mirrors RESERVED_USERNAMES in profile_service.rs. sync_profile's
     -- reserved-name gate is skipped for trigger-created rows (early return), so
     -- without this a user could self-assign 'admin'/'system'/etc at signup.
+    -- KEEP IN SYNC with harmony-api/src/domain/services/profile_service.rs
+    -- (RESERVED_USERNAMES). Follow-up: promote to a shared reserved_usernames
+    -- table both the trigger and the Rust service query (removes the drift risk).
     v_reserved TEXT[] := ARRAY[
         'admin','administrator','system','everyone','here','moderator','mod',
         'harmony','support','deleted','root','bot','official'
@@ -52,7 +55,11 @@ BEGIN
     END IF;
 
     -- ── Prefer the chosen username when valid + not reserved (BUGFIX) ──
-    v_chosen := NEW.raw_user_meta_data ->> 'username';
+    -- WHY lower(): usernames are lowercase-only. The web form already
+    -- lowercases input, but the trigger is the last line of defense — an OAuth
+    -- provider or a direct API client could send "Zayd_Cool"; normalize it
+    -- rather than silently dropping it to the email-derived fallback.
+    v_chosen := lower(NEW.raw_user_meta_data ->> 'username');
     IF v_chosen IS NOT NULL
        AND v_chosen ~ '^[a-z0-9_]{3,32}$'
        AND NOT (v_chosen = ANY(v_reserved))
