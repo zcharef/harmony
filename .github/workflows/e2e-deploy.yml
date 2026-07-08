@@ -72,6 +72,11 @@ jobs:
       SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
       ENVIRONMENT: test
       SERVER_PORT: "3000"
+      # WHY: The E2E suite seeds many messages as one test user; the flood
+      # auto-mute (15/30s → 5-min mute) would intermittently 429 the seeding
+      # and, with --retries=1 --fail-on-flaky-tests, freeze the whole deploy.
+      # Anti-abuse heuristics have their own unit coverage; disable in E2E.
+      SPAM_GUARD_ENABLED: "false"
       # Vite SPA
       VITE_API_URL: http://localhost:3000
       VITE_SUPABASE_URL: http://127.0.0.1:64321

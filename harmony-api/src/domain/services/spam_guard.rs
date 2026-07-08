@@ -43,6 +43,13 @@ pub const MAX_MENTIONS: usize = 10;
 /// zero I/O. Same reasoning as `ContentFilter` — no polymorphism benefit.
 #[derive(Debug)]
 pub struct SpamGuard {
+    /// WHY: When false, every guard check is a no-op. Anti-abuse heuristics
+    /// (flood auto-mute, duplicate detection, per-action rate limits) are
+    /// hostile to legitimate high-volume automation — E2E suites seed many
+    /// messages as one user and would trip the 5-min flood mute. Disabled in
+    /// the E2E/test environment (`SPAM_GUARD_ENABLED=false`) and available to
+    /// single-user self-hosted deployments; ON by default in prod.
+    enabled: bool,
     /// A1: Recent message hashes per (user, channel). Lazy eviction.
     recent_hashes: DashMap<(UserId, ChannelId), Vec<(Instant, u64)>>,
     /// A3: Flood counter — timestamps of recent messages per (user, server).
@@ -64,7 +71,14 @@ impl Default for SpamGuard {
 impl SpamGuard {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_enabled(true)
+    }
+
+    /// Construct a guard that is enabled or fully bypassed.
+    #[must_use]
+    pub fn with_enabled(enabled: bool) -> Self {
         Self {
+            enabled,
             recent_hashes: DashMap::new(),
             flood_counts: DashMap::new(),
             muted_until: DashMap::new(),
@@ -90,6 +104,9 @@ impl SpamGuard {
         max: usize,
         window: Duration,
     ) -> Result<(), DomainError> {
+        if !self.enabled {
+            return Ok(());
+        }
         let now = Instant::now();
         let mut allowed = true;
         self.action_counts
@@ -124,6 +141,9 @@ impl SpamGuard {
     ///
     /// Returns [`DomainError::RateLimited`] if the user is currently muted.
     pub fn check_muted(&self, user_id: &UserId, server_id: &ServerId) -> Result<(), DomainError> {
+        if !self.enabled {
+            return Ok(());
+        }
         let key = (user_id.clone(), server_id.clone());
         if let Some(entry) = self.muted_until.get(&key)
             && Instant::now() < *entry
@@ -156,7 +176,7 @@ impl SpamGuard {
         content: &str,
         skip: bool,
     ) -> Result<(), DomainError> {
-        if skip {
+        if !self.enabled || skip {
             return Ok(());
         }
 
@@ -194,6 +214,9 @@ impl SpamGuard {
         content: &str,
         encrypted: bool,
     ) -> Result<(), DomainError> {
+        if !self.enabled {
+            return Ok(());
+        }
         let now = Instant::now();
 
         // A1: Record hash (skip for encrypted — different ciphertext each time)
@@ -691,6 +714,36 @@ mod tests {
 
     fn server(n: u32) -> ServerId {
         ServerId::new(uuid::Uuid::from_u128(u128::from(n)))
+    }
+
+    // ── Disabled guard bypasses every check ─────────────────────────
+
+    #[test]
+    fn disabled_guard_bypasses_all_checks() {
+        let guard = SpamGuard::with_enabled(false);
+        let u = user(1);
+        let c = channel(1);
+        let s = server(1);
+
+        // Duplicate detection off: same content twice is fine.
+        assert!(guard.check_duplicate(&u, &c, "hello", false).is_ok());
+        guard.record_message(&u, &c, &s, "hello", false).unwrap();
+        assert!(guard.check_duplicate(&u, &c, "hello", false).is_ok());
+
+        // Flood off: far more than FLOOD_THRESHOLD messages never auto-mutes.
+        for _ in 0..(FLOOD_THRESHOLD + 10) {
+            guard.record_message(&u, &c, &s, "flood", false).unwrap();
+        }
+        assert!(guard.check_muted(&u, &s).is_ok());
+
+        // Action limiter off: past-limit actions still pass.
+        for _ in 0..50 {
+            assert!(
+                guard
+                    .check_and_record_action(&u, "typing", 5, Duration::from_secs(10))
+                    .is_ok()
+            );
+        }
     }
 
     // ── A1: Duplicate detection ─────────────────────────────────────
