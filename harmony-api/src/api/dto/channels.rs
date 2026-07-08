@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use super::serde_helpers::double_option;
 use crate::domain::models::{
     CategoryId, Channel, ChannelId, ChannelType, MegolmSession, MegolmSessionId, ServerId,
 };
@@ -91,7 +92,10 @@ pub struct UpdateChannelRequest {
     #[serde(default)]
     pub name: Option<String>,
     /// New channel topic (if provided; null clears it).
-    #[serde(default)]
+    /// WHY `double_option`: a plain `Option<Option<String>>` deserializes `null`
+    /// and an omitted key both to `None`, so the repo's `topic.is_some()` gate
+    /// never fires for a clear — `{"topic": null}` was silently a no-op.
+    #[serde(default, deserialize_with = "double_option")]
     pub topic: Option<Option<String>>,
     /// Update private flag (if provided).
     #[serde(default)]
@@ -134,5 +138,34 @@ impl From<MegolmSession> for MegolmSessionResponse {
             session_id: s.session_id,
             created_at: s.created_at,
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::UpdateChannelRequest;
+
+    /// The three-way topic PATCH contract: omitted = keep, null = clear, value = set.
+    /// Regression guard for F4 — a plain `Option<Option<String>>` collapsed
+    /// null and omitted to `None`, silently making `{"topic": null}` a no-op.
+    #[test]
+    fn topic_distinguishes_null_from_omitted() {
+        let omitted: UpdateChannelRequest = serde_json::from_str("{}").unwrap();
+        assert_eq!(omitted.topic, None, "omitted topic must be None (keep)");
+
+        let cleared: UpdateChannelRequest = serde_json::from_str(r#"{"topic": null}"#).unwrap();
+        assert_eq!(
+            cleared.topic,
+            Some(None),
+            "null topic must clear (Some(None))"
+        );
+
+        let set: UpdateChannelRequest = serde_json::from_str(r#"{"topic": "hi"}"#).unwrap();
+        assert_eq!(
+            set.topic,
+            Some(Some("hi".to_string())),
+            "value topic must set"
+        );
     }
 }
