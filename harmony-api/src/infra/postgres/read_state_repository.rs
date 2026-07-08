@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{ChannelId, ChannelReadState, MessageId, UserId};
+use crate::domain::models::{ChannelId, ChannelReadState, MessageId, Role, UserId};
 use crate::domain::ports::ReadStateRepository;
 
 /// PostgreSQL-backed read state repository.
@@ -57,6 +57,13 @@ impl ReadStateRepository for PgReadStateRepository {
         // WHY message_type != 'system': system messages (join/leave announcements)
         // should not count as unread — matches Discord behavior.
         // WHY HAVING: only return channels with unread > 0 to minimize payload size.
+        // WHY the private-channel access predicate: channel access = membership +
+        // (for private channels) admin/owner or a channel_role_access grant. Without
+        // it this query leaks phantom unread counts for private channels a member
+        // cannot open — and mark_read 403s on those channels (ensure_channel_access),
+        // so the badge would be permanently unclearable. Mirrors the inline predicate
+        // in channel_repository.rs list_for_server. $2 = 'owner', $3 = 'admin'
+        // (Role::as_str, same style as list_for_server).
         let rows = sqlx::query!(
             r#"
             SELECT
@@ -75,10 +82,20 @@ impl ReadStateRepository for PgReadStateRepository {
                 AND m.message_type != 'system'
                 AND (crs.last_read_at IS NULL OR m.created_at > crs.last_read_at)
             WHERE sm.user_id = $1
+              AND (
+                  c.is_private = false
+                  OR sm.role IN ($2, $3)
+                  OR EXISTS (
+                      SELECT 1 FROM channel_role_access cra
+                      WHERE cra.channel_id = c.id AND cra.role = sm.role
+                  )
+              )
             GROUP BY c.id, crs.last_read_at, crs.last_message_id
             HAVING COALESCE(COUNT(m.id)::BIGINT, 0) > 0
             "#,
             user_id.0,
+            Role::Owner.as_str(),
+            Role::Admin.as_str(),
         )
         .fetch_all(&self.pool)
         .await
