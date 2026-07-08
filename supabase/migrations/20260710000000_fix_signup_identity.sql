@@ -66,6 +66,18 @@ BEGIN
     THEN
         v_base := v_chosen;
     END IF;
+
+    -- ── Final reserved guard (covers the EMAIL-DERIVED path) ──
+    -- WHY: the chosen-username branch already excludes reserved names, but an
+    -- email-derived base can itself BE reserved — e.g. admin@<attacker-domain>
+    -- with no username metadata would yield username 'admin'. sync_profile's
+    -- Rust reserved check is dead code here (it early-returns once this row
+    -- exists), so the trigger is the only enforcer. Mirror Rust
+    -- generate_safe_username (user_ + 12 hex) rather than let a reserved handle
+    -- be self-assigned. Update v_base too so a collision suffixes the safe base.
+    IF v_base = ANY(v_reserved) THEN
+        v_base := 'user_' || left(replace(gen_random_uuid()::text, '-', ''), 12);
+    END IF;
     v_username := v_base;
 
     -- ── Display name: metadata only; blank/whitespace/absent → NULL (BUGFIX) ──

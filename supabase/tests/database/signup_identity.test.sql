@@ -10,7 +10,7 @@
 -- =============================================================
 BEGIN;
 
-SELECT plan(15);
+SELECT plan(17);
 
 -- Helper shape for auth.users inserts (full NOT NULL column list, mirrors
 -- plan_constraints.test.sql). The AFTER INSERT trigger creates the profile.
@@ -94,6 +94,16 @@ VALUES ('51630000-0000-4e57-a000-000000000010', '00000000-0000-0000-0000-0000000
 
 SELECT is((SELECT username FROM public.profiles WHERE id = '51630000-0000-4e57-a000-000000000010'),
     'zayd_upper', 'uppercase chosen username is lowercased and honored');
+
+-- §11: an email-derived RESERVED handle (admin@, no metadata) must NOT become
+--      'admin' — the final reserved guard rewrites it to a safe user_ name.
+INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, is_sso_user, is_anonymous, confirmation_token, recovery_token, email_change_token_new, email_change)
+VALUES ('51630000-0000-4e57-a000-000000000011', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@attacker.test', crypt('pw', gen_salt('bf')), now(), '{}', '{}', now(), now(), false, false, '', '', '', '');
+
+SELECT isnt((SELECT username FROM public.profiles WHERE id = '51630000-0000-4e57-a000-000000000011'),
+    'admin', 'email-derived reserved handle is NOT self-assigned');
+SELECT matches((SELECT username FROM public.profiles WHERE id = '51630000-0000-4e57-a000-000000000011'),
+    '^user_', 'email-derived reserved handle → safe user_ username');
 
 SELECT * FROM finish();
 
