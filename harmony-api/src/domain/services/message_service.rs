@@ -4,8 +4,12 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
+use std::collections::{HashMap, HashSet};
+
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Channel, ChannelId, MessageId, MessageWithAuthor, Role, UserId};
+use crate::domain::models::{
+    Channel, ChannelId, MentionedUser, MessageId, MessageWithAuthor, Role, UserId,
+};
 use crate::domain::ports::{
     ChannelRepository, MemberRepository, MessageRepository, PlanLimitChecker, ReactionRepository,
 };
@@ -100,6 +104,7 @@ impl MessageService {
     /// `DomainError::ValidationError` if content is empty,
     /// `DomainError::RateLimited` if the author exceeds the plan's message rate limit,
     /// or a repository error on failure.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         channel_id: &ChannelId,
@@ -108,6 +113,7 @@ impl MessageService {
         encrypted: bool,
         sender_device_id: Option<String>,
         parent_message_id: Option<MessageId>,
+        mentioned_user_ids: Option<Vec<UserId>>,
     ) -> Result<MessageWithAuthor, DomainError> {
         let channel = self
             .verify_channel_membership(channel_id, author_id)
@@ -246,16 +252,29 @@ impl MessageService {
         self.spam_guard
             .check_duplicate(author_id, channel_id, &content, encrypted)?;
 
-        // A3: Mention limit (unencrypted only — can't inspect ciphertext).
-        if !encrypted {
-            let mention_count = spam_guard::count_mentions(&content);
-            if mention_count > spam_guard::MAX_MENTIONS {
-                return Err(DomainError::ValidationError(format!(
-                    "Too many mentions (max {})",
-                    spam_guard::MAX_MENTIONS
-                )));
-            }
+        // §2.4 mention resolution (step 1): plaintext parses the content markers
+        // (server-authoritative — the request sidecar is ignored); encrypted trusts
+        // the client sidecar (the server can't read ciphertext). The pre-dedupe
+        // count is the limit. WHY here: this runs BEFORE the AutoMod masking block
+        // below, so masking can never corrupt a `<@uuid>` marker (parse-before-mask).
+        let raw_mentions: Vec<UserId> = if encrypted {
+            mentioned_user_ids.unwrap_or_default()
+        } else {
+            spam_guard::extract_mentions(&content)
+        };
+        if raw_mentions.len() > spam_guard::MAX_MENTIONS {
+            return Err(DomainError::ValidationError(format!(
+                "Too many mentions (max {})",
+                spam_guard::MAX_MENTIONS
+            )));
         }
+        // Step 1 (dedupe, first appearance) + step 2 (strip self — self-mentions
+        // never notify), in one order-preserving pass.
+        let mut seen = HashSet::new();
+        let candidate_ids: Vec<UserId> = raw_mentions
+            .into_iter()
+            .filter(|id| id != author_id && seen.insert(id.clone()))
+            .collect();
 
         // A4: ASCII art / text art / Zalgo detection (unencrypted only).
         // WHY: Admin+ bypass consistent with flood mute bypass — admins may
@@ -290,7 +309,36 @@ impl MessageService {
             }
         };
 
-        let message = self
+        // §2.4 steps 3-4: drop non-members and private-channel non-grantees
+        // (silent — no error, no access oracle: the sender already passed
+        // ensure_channel_access), then apply the per-sender-per-channel mention
+        // budget. Both preserve first-appearance order. Dropped mentions are not
+        // persisted, so computed counts, events and rendering stay consistent.
+        let mentionable: HashSet<UserId> = self
+            .member_repo
+            .filter_mentionable(&channel, &candidate_ids)
+            .await?
+            .into_iter()
+            .collect();
+        let mut mentioned: Vec<UserId> = candidate_ids
+            .into_iter()
+            .filter(|id| mentionable.contains(id))
+            .collect();
+        let granted =
+            self.spam_guard
+                .consume_mention_budget(author_id, channel_id, mentioned.len());
+        if granted < mentioned.len() {
+            tracing::warn!(
+                sender_id = %author_id,
+                channel_id = %channel_id,
+                requested = mentioned.len(),
+                granted,
+                "mention budget exceeded — excess mentions dropped"
+            );
+            mentioned.truncate(granted);
+        }
+
+        let mut message = self
             .repo
             .send_to_channel(
                 channel_id,
@@ -302,8 +350,16 @@ impl MessageService {
                 mod_at,
                 mod_reason,
                 orig_content,
+                mentioned,
                 effective_slow_mode,
             )
+            .await?;
+
+        // §2.4 step 5: resolve the persisted mention ids to display data (the
+        // Discord `mentions` array) for the response + SSE payload.
+        message.mentions = self
+            .member_repo
+            .resolve_mentioned_users(&channel.server_id, &message.message.mentioned_user_ids)
             .await?;
 
         // A1+A3: Record message for duplicate detection + flood tracking.
@@ -341,7 +397,7 @@ impl MessageService {
         cursor: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<MessageWithAuthor>, DomainError> {
-        let _channel = self.verify_channel_membership(channel_id, user_id).await?;
+        let channel = self.verify_channel_membership(channel_id, user_id).await?;
 
         let mut messages = self
             .repo
@@ -357,6 +413,32 @@ impl MessageService {
         for msg in &mut messages {
             if let Some(reactions) = reactions_map.remove(&msg.message.id) {
                 msg.reactions = reactions;
+            }
+        }
+
+        // WHY: Resolve mention display data for the whole page in a single
+        // server-scoped query so history pills render without a members-cache
+        // dependency (§2.3). Skipped entirely when no message mentions anyone.
+        let mention_ids: Vec<UserId> = messages
+            .iter()
+            .flat_map(|m| m.message.mentioned_user_ids.iter().cloned())
+            .collect();
+        if !mention_ids.is_empty() {
+            let resolved = self
+                .member_repo
+                .resolve_mentioned_users(&channel.server_id, &mention_ids)
+                .await?;
+            let by_id: HashMap<UserId, MentionedUser> = resolved
+                .into_iter()
+                .map(|u| (u.user_id.clone(), u))
+                .collect();
+            for msg in &mut messages {
+                msg.mentions = msg
+                    .message
+                    .mentioned_user_ids
+                    .iter()
+                    .filter_map(|id| by_id.get(id).cloned())
+                    .collect();
             }
         }
 
@@ -442,6 +524,55 @@ impl MessageService {
             )));
         }
 
+        // §2.4 edits: re-parse mentions (plaintext) so rendering and future
+        // read-state queries stay correct. Discord parity — the handler emits only
+        // MessageUpdated, NO mention.received / live badge deltas for edits. Runs
+        // BEFORE the masking block below (parse-before-mask). Behavior change: a
+        // plaintext edit producing >10 valid markers now returns 400. Encrypted
+        // edits pass None (the column is left untouched via COALESCE in the repo).
+        let mentioned_user_ids: Option<Vec<UserId>> = if message.encrypted {
+            None
+        } else {
+            let raw = spam_guard::extract_mentions(&content);
+            if raw.len() > spam_guard::MAX_MENTIONS {
+                return Err(DomainError::ValidationError(format!(
+                    "Too many mentions (max {})",
+                    spam_guard::MAX_MENTIONS
+                )));
+            }
+            let mut seen = HashSet::new();
+            let candidate_ids: Vec<UserId> = raw
+                .into_iter()
+                .filter(|id| *id != message.author_id && seen.insert(id.clone()))
+                .collect();
+            let mentionable: HashSet<UserId> = self
+                .member_repo
+                .filter_mentionable(&channel, &candidate_ids)
+                .await?
+                .into_iter()
+                .collect();
+            let mut mentioned: Vec<UserId> = candidate_ids
+                .into_iter()
+                .filter(|id| mentionable.contains(id))
+                .collect();
+            let granted = self.spam_guard.consume_mention_budget(
+                &message.author_id,
+                &message.channel_id,
+                mentioned.len(),
+            );
+            if granted < mentioned.len() {
+                tracing::warn!(
+                    sender_id = %message.author_id,
+                    channel_id = %message.channel_id,
+                    requested = mentioned.len(),
+                    granted,
+                    "mention budget exceeded on edit — excess mentions dropped"
+                );
+                mentioned.truncate(granted);
+            }
+            Some(mentioned)
+        };
+
         // WHY: Re-check content moderation on edits — a user could send a clean
         // message then edit it to add banned words. Skip for encrypted messages.
         let (final_content, mod_at, mod_reason, orig_content) = if message.encrypted {
@@ -472,9 +603,25 @@ impl MessageService {
             }
         };
 
-        self.repo
-            .update_content(message_id, final_content, mod_at, mod_reason, orig_content)
-            .await
+        let mut updated = self
+            .repo
+            .update_content(
+                message_id,
+                final_content,
+                mod_at,
+                mod_reason,
+                orig_content,
+                mentioned_user_ids,
+            )
+            .await?;
+
+        // Resolve the persisted mention ids (post-COALESCE) for the response and
+        // MessageUpdated payload. Encrypted edits reflect the unchanged column.
+        updated.mentions = self
+            .member_repo
+            .resolve_mentioned_users(&channel.server_id, &updated.message.mentioned_user_ids)
+            .await?;
+        Ok(updated)
     }
 
     /// Soft-delete a message. The author or moderator+ can delete (ADR-038).
@@ -686,6 +833,7 @@ mod tests {
             moderated_at: None,
             moderation_reason: None,
             original_content: None,
+            mentioned_user_ids: vec![],
             created_at: Utc::now(),
         };
 

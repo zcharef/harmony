@@ -28,6 +28,8 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         moderated_at: Option<DateTime<Utc>>,
         moderation_reason: Option<String>,
         original_content: Option<String>,
+        // Server-validated mention targets to persist in `mentioned_user_ids`.
+        mentioned_user_ids: Vec<UserId>,
         slow_mode_seconds: i32,
     ) -> Result<MessageWithAuthor, DomainError>;
 
@@ -46,6 +48,10 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
 
     /// Update message content. Sets `is_edited=true`, `edited_at=now()`.
     /// Returns the updated message.
+    ///
+    /// `mentioned_user_ids`: `Some` = plaintext edit re-parse result (overwrites
+    /// the column); `None` = encrypted edit (leaves the column unchanged via
+    /// `COALESCE`).
     async fn update_content(
         &self,
         message_id: &MessageId,
@@ -53,6 +59,7 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         moderated_at: Option<DateTime<Utc>>,
         moderation_reason: Option<String>,
         original_content: Option<String>,
+        mentioned_user_ids: Option<Vec<UserId>>,
     ) -> Result<MessageWithAuthor, DomainError>;
 
     /// Soft-delete a message (ADR-038). Sets `deleted_at=now()` and `deleted_by`.

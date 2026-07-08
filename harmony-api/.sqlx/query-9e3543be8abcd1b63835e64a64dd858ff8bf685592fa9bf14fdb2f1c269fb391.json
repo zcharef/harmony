@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT sm.user_id\n            FROM server_members sm\n            WHERE sm.server_id = $1\n              AND sm.user_id = ANY($2)\n              AND (\n                  $3 = false\n                  OR sm.role IN ($5, $6)\n                  OR EXISTS (\n                      SELECT 1 FROM channel_role_access cra\n                      WHERE cra.channel_id = $4 AND cra.role = sm.role\n                  )\n              )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Bool",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9e3543be8abcd1b63835e64a64dd858ff8bf685592fa9bf14fdb2f1c269fb391"
+}

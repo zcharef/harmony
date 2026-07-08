@@ -3209,6 +3209,15 @@
               "type": "integer",
               "format": "int64"
             }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Autocomplete search: substring match on `username`/`display_name`/`nickname`,\nprefix matches ranked first (max length 32 -- the username DB cap).\n`nextCursor` is always null for search results, and combining `q` with\n`before` is a 400.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4803,6 +4812,13 @@
             ],
             "format": "int64",
             "description": "Maximum number of members to return (1-100, default 50)."
+          },
+          "q": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Autocomplete search: substring match on `username`/`display_name`/`nickname`,\nprefix matches ranked first (max length 32 -- the username DB cap).\n`nextCursor` is always null for search results, and combining `q` with\n`before` is a 400."
           }
         }
       },
@@ -4872,6 +4888,34 @@
           }
         }
       },
+      "MentionedUserResponse": {
+        "type": "object",
+        "description": "A user mentioned in a message, resolved to display data (mirrors\n`MemberResponse` field naming).",
+        "required": [
+          "userId",
+          "username"
+        ],
+        "properties": {
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nickname": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "MessageId": {
         "type": "string",
         "format": "uuid",
@@ -4932,6 +4976,7 @@
           "content",
           "encrypted",
           "messageType",
+          "mentions",
           "createdAt"
         ],
         "properties": {
@@ -4990,6 +5035,13 @@
           },
           "id": {
             "$ref": "#/components/schemas/MessageId"
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MentionedUserResponse"
+            },
+            "description": "Users mentioned in this message, resolved to display data (server-validated:\ndeduplicated, author-stripped, channel-access-gated). Drives pill labels,\nthe mention row highlight and the `mentions` notification level. Users who\nleft the server still appear (nickname null); deleted accounts are omitted."
           },
           "messageType": {
             "$ref": "#/components/schemas/MessageType",
@@ -5468,6 +5520,16 @@
               "null"
             ],
             "description": "Whether this message contains E2EE ciphertext. Defaults to `false`."
+          },
+          "mentionedUserIds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/UserId"
+            },
+            "description": "Users mentioned in this message. ONLY honored when `encrypted = true`\n(the server cannot parse ciphertext, so the client parses pre-encryption).\nFor plaintext messages the server parses `<@user_id>` markers itself and\nthis field is IGNORED. Max 10 entries (`MAX_MENTIONS`).\n\nClients MUST omit this key entirely when there are no mentions — never send\n`[]` or `null` (house rule; also minimizes the `deny_unknown_fields`\nversion-skew surface, spec §8)."
           },
           "parentMessageId": {
             "oneOf": [

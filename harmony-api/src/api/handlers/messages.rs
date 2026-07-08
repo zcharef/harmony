@@ -76,6 +76,7 @@ pub async fn send_message(
             req.encrypted.unwrap_or(false),
             req.sender_device_id,
             req.parent_message_id,
+            req.mentioned_user_ids,
         )
         .await?;
 
@@ -89,6 +90,28 @@ pub async fn send_message(
     };
     let receivers = state.event_bus().publish(event);
     tracing::debug!(channel_id = %channel_id, receivers, "emitted message.created");
+
+    // §4.1: one targeted MentionReceived per mentioned user (≤10). Rides the
+    // target_user_id SSE path — delivered only to each mentioned user's devices.
+    // The persisted list already passed filter_mentionable, so no event ever
+    // targets a user who cannot see the channel. Author is stripped server-side,
+    // so no self-targeted event is published.
+    for target_user_id in &message.message.mentioned_user_ids {
+        state.event_bus().publish(ServerEvent::MentionReceived {
+            sender_id: user_id.clone(),
+            target_user_id: target_user_id.clone(),
+            server_id: channel.server_id.clone(),
+            channel_id: channel_id.clone(),
+            message_id: message.message.id.clone(),
+        });
+    }
+    if !message.message.mentioned_user_ids.is_empty() {
+        tracing::debug!(
+            channel_id = %channel_id,
+            count = message.message.mentioned_user_ids.len(),
+            "emitted mention.received"
+        );
+    }
 
     // B4: Async content moderation (unencrypted only, ADR-027 compliant).
     // Message is already delivered; background task checks and soft-deletes if flagged.

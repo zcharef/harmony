@@ -63,6 +63,30 @@ pub async fn list_members(
         .unwrap_or(DEFAULT_MEMBER_LIMIT)
         .clamp(1, MAX_MEMBER_LIMIT);
 
+    // §3.4 autocomplete search: `q` short-circuits cursor pagination. Prefix
+    // matches rank first; nextCursor is always null (top-N, no pagination).
+    if let Some(q) = query.q {
+        if query.before.is_some() {
+            return Err(ApiError::bad_request(
+                "Cannot combine the 'q' search with the 'before' cursor",
+            ));
+        }
+        // WHY 32: the username DB cap — a longer query can never match.
+        if q.chars().count() > 32 {
+            return Err(ApiError::bad_request(
+                "Search query 'q' must not exceed 32 characters",
+            ));
+        }
+        let members = state
+            .member_repository()
+            .search_by_server(&server_id, &q, limit)
+            .await?;
+        return Ok((
+            StatusCode::OK,
+            Json(MemberListResponse::from_members(members, None)),
+        ));
+    }
+
     let cursor = query
         .before
         .map(|s| {

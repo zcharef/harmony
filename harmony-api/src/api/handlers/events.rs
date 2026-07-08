@@ -524,12 +524,19 @@ pub async fn sse_events(
         .list_all_for_user(&unread_user_id)
         .await?;
     let mut unread_channels: HashMap<String, i64> = HashMap::new();
+    let mut mention_channels: HashMap<String, i64> = HashMap::new();
     for rs in &unread_states {
         unread_channels.insert(rs.channel_id.0.to_string(), rs.unread_count);
+        // WHY only > 0: keep the mentions map sparse — most channels have no
+        // mention, and clients treat an absent entry as zero (§4.3).
+        if rs.mention_count > 0 {
+            mention_channels.insert(rs.channel_id.0.to_string(), rs.mention_count);
+        }
     }
     let unread_data = serde_json::json!({
         "type": "unreadSynced",
         "channels": unread_channels,
+        "mentions": mention_channels,
     });
     let unread_event = Event::default()
         .event("unread.sync")

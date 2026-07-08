@@ -41,7 +41,8 @@ pub use members::{
     TransferOwnershipRequest,
 };
 pub use messages::{
-    EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, SendMessageRequest,
+    EditMessageRequest, MentionedUserResponse, MessageListQuery, MessageListResponse,
+    MessageResponse, SendMessageRequest,
 };
 pub use moderation_settings::{ModerationSettingsResponse, UpdateModerationSettingsRequest};
 pub use pagination::PaginatedResponse;

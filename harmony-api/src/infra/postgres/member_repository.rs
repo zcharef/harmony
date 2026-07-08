@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Role, ServerId, ServerMember, UserId};
+use crate::domain::models::{Channel, MentionedUser, Role, ServerId, ServerMember, UserId};
 use crate::domain::ports::MemberRepository;
 
 /// PostgreSQL-backed member repository.
@@ -485,5 +485,159 @@ impl MemberRepository for PgMemberRepository {
         tx.commit().await.map_err(super::db_err)?;
 
         Ok(())
+    }
+
+    async fn filter_mentionable(
+        &self,
+        channel: &Channel,
+        user_ids: &[UserId],
+    ) -> Result<Vec<UserId>, DomainError> {
+        // WHY: Empty input needs no round-trip (the common no-mention path).
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let sid = channel.server_id.0;
+        let cid = channel.id.0;
+        let ids: Vec<Uuid> = user_ids.iter().map(|u| u.0).collect();
+
+        // Mirrors ensure_channel_access / has_private_channel_access: server
+        // membership, plus for private channels admin/owner OR a channel_role_access
+        // grant for the member's role. $5 = 'admin', $6 = 'owner'.
+        let rows = sqlx::query_scalar!(
+            r#"
+            SELECT sm.user_id
+            FROM server_members sm
+            WHERE sm.server_id = $1
+              AND sm.user_id = ANY($2)
+              AND (
+                  $3 = false
+                  OR sm.role IN ($5, $6)
+                  OR EXISTS (
+                      SELECT 1 FROM channel_role_access cra
+                      WHERE cra.channel_id = $4 AND cra.role = sm.role
+                  )
+              )
+            "#,
+            sid,
+            &ids,
+            channel.is_private,
+            cid,
+            Role::Admin.as_str(),
+            Role::Owner.as_str(),
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(rows.into_iter().map(UserId::new).collect())
+    }
+
+    async fn resolve_mentioned_users(
+        &self,
+        server_id: &ServerId,
+        user_ids: &[UserId],
+    ) -> Result<Vec<MentionedUser>, DomainError> {
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let sid = server_id.0;
+        let ids: Vec<Uuid> = user_ids.iter().map(|u| u.0).collect();
+
+        // profiles is the driving table: users who LEFT the server still resolve
+        // (nickname NULL via LEFT JOIN); deleted accounts (no profile row) drop out.
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                p.id AS "id!",
+                p.username AS "username!",
+                p.display_name,
+                sm.nickname
+            FROM profiles p
+            LEFT JOIN server_members sm
+                ON sm.user_id = p.id AND sm.server_id = $1
+            WHERE p.id = ANY($2)
+            "#,
+            sid,
+            &ids,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| MentionedUser {
+                user_id: UserId::new(r.id),
+                username: r.username,
+                display_name: r.display_name,
+                nickname: r.nickname,
+            })
+            .collect())
+    }
+
+    async fn search_by_server(
+        &self,
+        server_id: &ServerId,
+        q: &str,
+        limit: i64,
+    ) -> Result<Vec<ServerMember>, DomainError> {
+        let sid = server_id.0;
+        // WHY: Escape LIKE wildcards so a literal % or _ in the query matches
+        // literally (default ILIKE escape char is backslash).
+        let escaped = q
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let substring = format!("%{escaped}%");
+        let prefix = format!("{escaped}%");
+
+        // Substring match across username/display_name/nickname; prefix matches
+        // ranked first. YAGNI: top-N, no pagination (nextCursor is always null).
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                sm.user_id,
+                sm.server_id,
+                p.username,
+                p.display_name,
+                p.avatar_url,
+                sm.nickname,
+                sm.role as "role!",
+                sm.joined_at
+            FROM server_members sm
+            INNER JOIN profiles p ON p.id = sm.user_id
+            WHERE sm.server_id = $1
+              AND (
+                  p.username ILIKE $2
+                  OR p.display_name ILIKE $2
+                  OR sm.nickname ILIKE $2
+              )
+            ORDER BY (p.username ILIKE $3) DESC, sm.joined_at ASC
+            LIMIT $4
+            "#,
+            sid,
+            substring,
+            prefix,
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        rows.into_iter()
+            .map(|r| {
+                MemberRow {
+                    user_id: r.user_id,
+                    server_id: r.server_id,
+                    username: r.username,
+                    display_name: r.display_name,
+                    avatar_url: r.avatar_url,
+                    nickname: r.nickname,
+                    role: r.role,
+                    joined_at: r.joined_at,
+                }
+                .into_member()
+            })
+            .collect()
     }
 }

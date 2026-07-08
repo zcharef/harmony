@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH updated AS (\n                UPDATE messages\n                SET content = $2, is_edited = true, edited_at = now(), moderated_at = $3, moderation_reason = $4, original_content = $5\n                WHERE id = $1 AND deleted_at IS NULL\n                RETURNING\n                    id,\n                    channel_id,\n                    author_id,\n                    content,\n                    edited_at,\n                    deleted_at,\n                    deleted_by,\n                    encrypted,\n                    sender_device_id,\n                    message_type,\n                    system_event_key,\n                    parent_message_id,\n                    moderated_at,\n                    moderation_reason,\n                    original_content,\n                    created_at\n            )\n            SELECT\n                u.id as \"id!\",\n                u.channel_id as \"channel_id!\",\n                u.author_id as \"author_id!\",\n                u.content,\n                u.edited_at,\n                u.deleted_at,\n                u.deleted_by,\n                u.encrypted as \"encrypted!\",\n                u.sender_device_id,\n                u.message_type as \"message_type!: String\",\n                u.system_event_key,\n                u.parent_message_id,\n                u.moderated_at,\n                u.moderation_reason,\n                u.original_content,\n                u.created_at as \"created_at!\",\n                p.username AS \"author_username?\",\n                p.display_name AS \"author_display_name?\",\n                p.avatar_url AS \"author_avatar_url?\",\n                parent_p.username AS \"parent_author_username?\",\n                LEFT(parent_m.content, 100) AS \"parent_content_preview?\",\n                (parent_m.deleted_at IS NOT NULL) AS \"parent_deleted?\"\n            FROM updated u\n            LEFT JOIN profiles p ON p.id = u.author_id\n            LEFT JOIN messages parent_m ON parent_m.id = u.parent_message_id\n            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id\n            ",
+  "query": "\n            WITH inserted AS (\n                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id, moderated_at, moderation_reason, original_content, mentioned_user_ids)\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n                RETURNING\n                    id,\n                    channel_id,\n                    author_id,\n                    content,\n                    edited_at,\n                    deleted_at,\n                    deleted_by,\n                    encrypted,\n                    sender_device_id,\n                    message_type,\n                    system_event_key,\n                    parent_message_id,\n                    moderated_at,\n                    moderation_reason,\n                    original_content,\n                    mentioned_user_ids,\n                    created_at\n            )\n            SELECT\n                i.id as \"id!\",\n                i.channel_id as \"channel_id!\",\n                i.author_id as \"author_id!\",\n                i.content,\n                i.edited_at,\n                i.deleted_at,\n                i.deleted_by,\n                i.encrypted as \"encrypted!\",\n                i.sender_device_id,\n                i.message_type as \"message_type!: String\",\n                i.system_event_key,\n                i.parent_message_id,\n                i.moderated_at,\n                i.moderation_reason,\n                i.original_content,\n                i.mentioned_user_ids as \"mentioned_user_ids!\",\n                i.created_at as \"created_at!\",\n                p.username AS \"author_username?\",\n                p.display_name AS \"author_display_name?\",\n                p.avatar_url AS \"author_avatar_url?\",\n                parent_p.username AS \"parent_author_username?\",\n                LEFT(parent_m.content, 100) AS \"parent_content_preview?\",\n                (parent_m.deleted_at IS NOT NULL) AS \"parent_deleted?\"\n            FROM inserted i\n            LEFT JOIN profiles p ON p.id = i.author_id\n            LEFT JOIN messages parent_m ON parent_m.id = i.parent_message_id\n            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id\n            ",
   "describe": {
     "columns": [
       {
@@ -90,36 +90,41 @@
       },
       {
         "ordinal": 15,
+        "name": "mentioned_user_ids!",
+        "type_info": "UuidArray"
+      },
+      {
+        "ordinal": 16,
         "name": "created_at!",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "author_username?",
         "type_info": "Text"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "author_display_name?",
         "type_info": "Text"
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "author_avatar_url?",
         "type_info": "Text"
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "parent_author_username?",
         "type_info": "Text"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "parent_content_preview?",
         "type_info": "Text"
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "parent_deleted?",
         "type_info": "Bool"
       }
@@ -127,10 +132,15 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "Uuid",
         "Text",
+        "Bool",
+        "Text",
+        "Uuid",
         "Timestamptz",
         "Text",
-        "Text"
+        "Text",
+        "UuidArray"
       ]
     },
     "nullable": [
@@ -150,6 +160,7 @@
       true,
       true,
       false,
+      false,
       true,
       true,
       true,
@@ -158,5 +169,5 @@
       null
     ]
   },
-  "hash": "0abec1f0ca9bd9f5627275b007850b3b88577be8463e46f8e63c198cc80d2c68"
+  "hash": "8040b8537c3d0cb6737fdfc1922c1f51b789ad284da37f42dc0e057d4e906a26"
 }

@@ -37,6 +37,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     encrypted: false,
     senderDeviceId: null,
     messageType: 'default',
+    mentions: [],
     ...overrides,
   }
 }

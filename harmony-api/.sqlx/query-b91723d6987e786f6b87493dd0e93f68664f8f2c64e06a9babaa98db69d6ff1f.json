@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                p.id AS \"id!\",\n                p.username AS \"username!\",\n                p.display_name,\n                sm.nickname\n            FROM profiles p\n            LEFT JOIN server_members sm\n                ON sm.user_id = p.id AND sm.server_id = $1\n            WHERE p.id = ANY($2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "username!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "nickname",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "b91723d6987e786f6b87493dd0e93f68664f8f2c64e06a9babaa98db69d6ff1f"
+}

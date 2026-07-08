@@ -34,8 +34,17 @@ const FLOOD_THRESHOLD: usize = 15;
 /// Duration of an auto-mute (A3).
 const MUTE_DURATION: Duration = Duration::from_secs(300); // 5 minutes
 
-/// Maximum number of `@` mentions per message (A3).
+/// Maximum number of `@` mentions per message (A3). Counts only valid markers,
+/// pre-dedupe.
 pub const MAX_MENTIONS: usize = 10;
+
+/// Rolling window for the per-sender-per-channel mention budget.
+const MENTION_BUDGET_WINDOW: Duration = Duration::from_secs(60);
+
+/// Maximum mentions a sender may emit into one channel within
+/// [`MENTION_BUDGET_WINDOW`]. Bounds E2EE ghost-ping abuse below the raw message
+/// rate limit (spec §6.8).
+const MENTION_BUDGET_MAX: usize = 30;
 
 /// Stateful in-memory anti-spam guard.
 ///
@@ -60,6 +69,9 @@ pub struct SpamGuard {
     /// WHY: The window is stored alongside the timestamps because each action
     /// has its own window; the sweep needs it to know when an entry is stale.
     action_counts: DashMap<(UserId, &'static str), (Duration, Vec<Instant>)>,
+    /// Mention budget — timestamps of recently granted mentions per (user, channel).
+    /// Bounds ghost-ping abuse in E2EE channels (spec §6.8).
+    mention_budget: DashMap<(UserId, ChannelId), Vec<Instant>>,
 }
 
 impl Default for SpamGuard {
@@ -83,7 +95,45 @@ impl SpamGuard {
             flood_counts: DashMap::new(),
             muted_until: DashMap::new(),
             action_counts: DashMap::new(),
+            mention_budget: DashMap::new(),
         }
+    }
+
+    /// Consume up to `requested` mentions from the sender's rolling budget for
+    /// this channel, returning how many were GRANTED (the rest are dropped by the
+    /// caller). A disabled guard grants everything.
+    ///
+    /// WHY here and not an HTTP limit: E2EE sidecars let a modified client ping
+    /// members without visible content. This bounds the volume below the message
+    /// rate limit without rejecting the whole message (the message still sends;
+    /// only the excess pings are dropped, §2.4 step 4).
+    #[must_use]
+    pub fn consume_mention_budget(
+        &self,
+        user_id: &UserId,
+        channel_id: &ChannelId,
+        requested: usize,
+    ) -> usize {
+        if !self.enabled || requested == 0 {
+            return requested;
+        }
+        let now = Instant::now();
+        let mut granted = 0;
+        self.mention_budget
+            .entry((user_id.clone(), channel_id.clone()))
+            .and_modify(|timestamps| {
+                timestamps.retain(|ts| now.duration_since(*ts) < MENTION_BUDGET_WINDOW);
+                let remaining = MENTION_BUDGET_MAX.saturating_sub(timestamps.len());
+                granted = requested.min(remaining);
+                for _ in 0..granted {
+                    timestamps.push(now);
+                }
+            })
+            .or_insert_with(|| {
+                granted = requested.min(MENTION_BUDGET_MAX);
+                vec![now; granted]
+            });
+        granted
     }
 
     /// Generic windowed per-user rate limiter for lightweight actions
@@ -308,12 +358,26 @@ impl SpamGuard {
         });
         let actions_removed = action_before.saturating_sub(self.action_counts.len());
 
-        if mutes_removed > 0 || hashes_removed > 0 || floods_removed > 0 || actions_removed > 0 {
+        // Sweep stale mention-budget entries (all timestamps outside the window).
+        let mention_before = self.mention_budget.len();
+        self.mention_budget.retain(|_, timestamps| {
+            timestamps.retain(|ts| now.duration_since(*ts) < MENTION_BUDGET_WINDOW);
+            !timestamps.is_empty()
+        });
+        let mentions_removed = mention_before.saturating_sub(self.mention_budget.len());
+
+        if mutes_removed > 0
+            || hashes_removed > 0
+            || floods_removed > 0
+            || actions_removed > 0
+            || mentions_removed > 0
+        {
             tracing::debug!(
                 mutes_removed,
                 hashes_removed,
                 floods_removed,
                 actions_removed,
+                mentions_removed,
                 "Swept expired SpamGuard entries"
             );
         }
@@ -327,14 +391,53 @@ fn hash_content(content: &str) -> u64 {
     hasher.finish()
 }
 
-/// Count `@` mentions in message content using the `<@uuid>` format.
+/// Length of a canonical hyphenated UUID string (`8-4-4-4-12`).
+const MENTION_UUID_LEN: usize = 36;
+
+/// True for the bytes allowed inside a canonical lowercase-hex UUID: `0-9`,
+/// `a-f`, and the four hyphens.
+fn is_mention_uuid_byte(b: u8) -> bool {
+    b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || b == b'-'
+}
+
+/// Extract valid `<@uuid>` mention markers from message content.
 ///
-/// Returns the number of mention markers found (not deduplicated). Used for A3 mention limits.
+/// Returns every mentioned [`UserId`] in order of appearance, WITH duplicates —
+/// deduplication is the caller's responsibility (`MessageService`). Strict: the
+/// 36 bytes between `<@` and `>` must be a lowercase-hex canonical UUID. Uppercase
+/// hex, wrong length, a missing `>`, and a non-UUID hyphen layout are all rejected
+/// (`Uuid::parse_str` enforces the layout; the charset check enforces lowercase).
+///
+/// WHY a hand-rolled scanner instead of a regex: the `<@` prefix + fixed-width
+/// UUID is an unambiguous fixed pattern, so scanning it directly avoids pulling in
+/// a regex dependency — the same deliberate choice the deleted `count_mentions`
+/// made, and the mirror of the frontend `MENTION_MARKER_RE` (spec §1).
 #[must_use]
-pub fn count_mentions(content: &str) -> usize {
-    // WHY: Simple substring scan instead of regex — avoids regex dependency
-    // for a fixed pattern. The <@ prefix is unambiguous in message content.
-    content.matches("<@").count()
+pub fn extract_mentions(content: &str) -> Vec<UserId> {
+    let bytes = content.as_bytes();
+    let mut mentions = Vec::new();
+
+    // `<@` is ASCII, so match_indices yields byte offsets at char boundaries. A
+    // valid marker's UUID bytes are all hex/hyphen, so they can never contain a
+    // nested `<@` — non-overlapping scanning loses nothing.
+    for (idx, _) in content.match_indices("<@") {
+        let start = idx + 2;
+        let end = start + MENTION_UUID_LEN;
+        // Need exactly 36 marker bytes followed by a closing `>`.
+        if end < bytes.len() && bytes[end] == b'>' {
+            let candidate = &bytes[start..end];
+            if candidate.iter().all(|&b| is_mention_uuid_byte(b))
+                // Charset is ASCII, so from_utf8 never fails; parse_str then
+                // rejects any non-canonical hyphen layout.
+                && let Ok(s) = std::str::from_utf8(candidate)
+                && let Ok(uuid) = uuid::Uuid::parse_str(s)
+            {
+                mentions.push(UserId::new(uuid));
+            }
+        }
+    }
+
+    mentions
 }
 
 // ── ASCII art / text art detection ─────────────────────────────────
@@ -872,22 +975,146 @@ mod tests {
         );
     }
 
-    // ── A3: Mention counting ────────────────────────────────────────
+    // ── A3: Mention extraction (strict <@uuid> scanner) ─────────────
 
-    #[test]
-    fn count_mentions_basic() {
-        assert_eq!(count_mentions("hello <@abc-def> and <@xyz-123>"), 2);
+    const UUID_A: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+    const UUID_B: &str = "550e8400-e29b-41d4-a716-446655440000";
+
+    fn parse_uid(s: &str) -> UserId {
+        UserId::new(uuid::Uuid::parse_str(s).unwrap())
     }
 
     #[test]
-    fn count_mentions_none() {
-        assert_eq!(count_mentions("hello world"), 0);
+    fn extract_mentions_valid_pair_in_order() {
+        let ids = extract_mentions(&format!("hi <@{UUID_A}> and <@{UUID_B}>!"));
+        assert_eq!(ids, vec![parse_uid(UUID_A), parse_uid(UUID_B)]);
     }
 
     #[test]
-    fn count_mentions_at_sign_without_bracket() {
-        // Plain @ signs are NOT mentions (only <@ format)
-        assert_eq!(count_mentions("hello @everyone"), 0);
+    fn extract_mentions_none() {
+        assert!(extract_mentions("hello world").is_empty());
+    }
+
+    #[test]
+    fn extract_mentions_at_sign_without_bracket() {
+        // Bare @everyone / @role are never parsed — only the <@uuid> form counts.
+        assert!(extract_mentions("hello @everyone").is_empty());
+    }
+
+    #[test]
+    fn extract_mentions_rejects_uppercase_hex() {
+        // Strict lowercase: the uppercase form is rejected by the charset check.
+        assert!(extract_mentions("<@F47AC10B-58CC-4372-A567-0E02B2C3D479>").is_empty());
+    }
+
+    #[test]
+    fn extract_mentions_rejects_non_uuid() {
+        assert!(extract_mentions("<@not-a-uuid>").is_empty());
+        // 36 chars but non-hex payload → Uuid::parse_str rejects it.
+        assert!(extract_mentions("<@zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz>").is_empty());
+    }
+
+    #[test]
+    fn extract_mentions_rejects_truncated_or_unterminated() {
+        assert!(extract_mentions("<@f47ac10b").is_empty());
+        // 36 valid bytes but no closing '>'.
+        assert!(extract_mentions(&format!("<@{UUID_A}")).is_empty());
+        // '>' one byte too early (35-byte candidate).
+        assert!(extract_mentions("<@f47ac10b-58cc-4372-a567-0e02b2c3d47>").is_empty());
+    }
+
+    #[test]
+    fn extract_mentions_keeps_duplicates_in_order() {
+        // Dedupe is the service's job, not the scanner's.
+        let ids = extract_mentions(&format!("<@{UUID_A}> <@{UUID_A}>"));
+        assert_eq!(ids, vec![parse_uid(UUID_A), parse_uid(UUID_A)]);
+    }
+
+    #[test]
+    fn extract_mentions_counts_at_the_10_11_boundary() {
+        let marker = format!("<@{UUID_A}>");
+        assert_eq!(
+            extract_mentions(&marker.repeat(MAX_MENTIONS)).len(),
+            MAX_MENTIONS
+        );
+        assert_eq!(
+            extract_mentions(&marker.repeat(MAX_MENTIONS + 1)).len(),
+            MAX_MENTIONS + 1
+        );
+    }
+
+    #[test]
+    fn extract_mentions_garbage_tokens_yield_zero() {
+        // The inverted `count_mentions` pin: 11 `<@abc-def>` tokens counted as 11
+        // and 400'd the send; the strict scanner now extracts ZERO (spec §1).
+        let garbage = "<@abc-def>".repeat(11);
+        assert!(extract_mentions(&garbage).is_empty());
+    }
+
+    // ── Mention budget ─────────────────────────────────────────────
+
+    #[test]
+    fn mention_budget_grants_full_request_under_budget() {
+        let guard = SpamGuard::new();
+        assert_eq!(guard.consume_mention_budget(&user(1), &channel(1), 5), 5);
+    }
+
+    #[test]
+    fn mention_budget_truncates_at_the_window_cap() {
+        let guard = SpamGuard::new();
+        let u = user(1);
+        let c = channel(1);
+        // 30 fit, then the window is exhausted.
+        assert_eq!(guard.consume_mention_budget(&u, &c, 30), 30);
+        assert_eq!(guard.consume_mention_budget(&u, &c, 5), 0);
+
+        // Partial fit: 28 used → a request for 5 grants only the remaining 2.
+        let guard2 = SpamGuard::new();
+        assert_eq!(guard2.consume_mention_budget(&u, &c, 28), 28);
+        assert_eq!(guard2.consume_mention_budget(&u, &c, 5), 2);
+    }
+
+    #[test]
+    fn mention_budget_is_isolated_per_channel() {
+        let guard = SpamGuard::new();
+        let u = user(1);
+        assert_eq!(guard.consume_mention_budget(&u, &channel(1), 30), 30);
+        // A different channel keeps a full independent budget.
+        assert_eq!(guard.consume_mention_budget(&u, &channel(2), 30), 30);
+    }
+
+    #[test]
+    fn mention_budget_disabled_guard_grants_everything() {
+        let guard = SpamGuard::with_enabled(false);
+        assert_eq!(
+            guard.consume_mention_budget(&user(1), &channel(1), 1000),
+            1000
+        );
+    }
+
+    #[test]
+    fn mention_budget_window_slides() {
+        let guard = SpamGuard::new();
+        let u = user(1);
+        let c = channel(1);
+        // Seed a full budget of already-expired grants.
+        guard.mention_budget.insert(
+            (u.clone(), c.clone()),
+            vec![Instant::now() - Duration::from_secs(120); MENTION_BUDGET_MAX],
+        );
+        // The window has fully slid → the request is granted again.
+        assert_eq!(guard.consume_mention_budget(&u, &c, 10), 10);
+    }
+
+    #[test]
+    fn sweep_removes_stale_mention_budget_entries() {
+        let guard = SpamGuard::new();
+        guard.mention_budget.insert(
+            (user(1), channel(1)),
+            vec![Instant::now() - Duration::from_secs(120)],
+        );
+        guard.sweep_expired();
+        assert!(guard.mention_budget.is_empty());
     }
 
     // ── Sweep ───────────────────────────────────────────────────────

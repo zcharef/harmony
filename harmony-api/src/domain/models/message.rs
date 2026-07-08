@@ -54,7 +54,26 @@ pub struct Message {
     /// NOT exposed through any API endpoint — reserved for future appeals.
     #[serde(skip_serializing)]
     pub original_content: Option<String>,
+    /// Server-validated mention targets (deduped, author-stripped,
+    /// channel-access-gated). For plaintext messages the server parses the
+    /// `<@uuid>` markers; for E2EE messages it stores the client-provided
+    /// sidecar (deliberate metadata leak — see spec §6). Drives targeted
+    /// `mention.received` events and the computed mention badge counts.
+    pub mentioned_user_ids: Vec<UserId>,
     pub created_at: DateTime<Utc>,
+}
+
+/// A user mentioned in a message, resolved to display data for the response
+/// `mentions` array (the Discord model). Resolved at read time so labels are
+/// always current. Users who left the server still resolve (`nickname = None`);
+/// deleted accounts (no profile row) are omitted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentionedUser {
+    pub user_id: UserId,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub nickname: Option<String>,
 }
 
 /// Lightweight preview of a parent message for reply display.

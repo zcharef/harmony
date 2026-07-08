@@ -215,6 +215,28 @@ mod tests {
         ) -> Result<(), DomainError> {
             Ok(())
         }
+        async fn filter_mentionable(
+            &self,
+            _channel: &Channel,
+            _user_ids: &[UserId],
+        ) -> Result<Vec<UserId>, DomainError> {
+            Ok(vec![])
+        }
+        async fn resolve_mentioned_users(
+            &self,
+            _server_id: &ServerId,
+            _user_ids: &[UserId],
+        ) -> Result<Vec<crate::domain::models::MentionedUser>, DomainError> {
+            Ok(vec![])
+        }
+        async fn search_by_server(
+            &self,
+            _server_id: &ServerId,
+            _q: &str,
+            _limit: i64,
+        ) -> Result<Vec<ServerMember>, DomainError> {
+            Ok(vec![])
+        }
     }
 
     /// Minimal `ChannelRepository` fake. `has_private_channel_access` mirrors the

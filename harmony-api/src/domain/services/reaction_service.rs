@@ -255,6 +255,7 @@ mod tests {
             moderated_at: None,
             moderation_reason: None,
             original_content: None,
+            mentioned_user_ids: vec![],
             created_at: Utc::now(),
         }
     }
@@ -389,6 +390,28 @@ mod tests {
         ) -> Result<(), DomainError> {
             Ok(())
         }
+        async fn filter_mentionable(
+            &self,
+            _channel: &Channel,
+            _user_ids: &[UserId],
+        ) -> Result<Vec<UserId>, DomainError> {
+            Ok(vec![])
+        }
+        async fn resolve_mentioned_users(
+            &self,
+            _server_id: &ServerId,
+            _user_ids: &[UserId],
+        ) -> Result<Vec<crate::domain::models::MentionedUser>, DomainError> {
+            Ok(vec![])
+        }
+        async fn search_by_server(
+            &self,
+            _server_id: &ServerId,
+            _q: &str,
+            _limit: i64,
+        ) -> Result<Vec<ServerMember>, DomainError> {
+            Ok(vec![])
+        }
     }
 
     /// Minimal `ChannelRepository` fake: the path channel exists and is public.
@@ -484,6 +507,7 @@ mod tests {
             _moderated_at: Option<DateTime<Utc>>,
             _moderation_reason: Option<String>,
             _original_content: Option<String>,
+            _mentioned_user_ids: Vec<UserId>,
             _slow_mode_seconds: i32,
         ) -> Result<MessageWithAuthor, DomainError> {
             Err(DomainError::Internal("not implemented".to_string()))
@@ -503,6 +527,7 @@ mod tests {
             _moderated_at: Option<DateTime<Utc>>,
             _moderation_reason: Option<String>,
             _original_content: Option<String>,
+            _mentioned_user_ids: Option<Vec<UserId>>,
         ) -> Result<MessageWithAuthor, DomainError> {
             Err(DomainError::Internal("not implemented".to_string()))
         }

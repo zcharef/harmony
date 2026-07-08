@@ -70,6 +70,11 @@ pub struct MemberListQuery {
     pub before: Option<String>,
     /// Maximum number of members to return (1-100, default 50).
     pub limit: Option<i64>,
+    /// Autocomplete search: substring match on `username`/`display_name`/`nickname`,
+    /// prefix matches ranked first (max length 32 -- the username DB cap).
+    /// `nextCursor` is always null for search results, and combining `q` with
+    /// `before` is a 400.
+    pub q: Option<String>,
 }
 
 /// Request body for assigning a role to a server member.
