@@ -199,7 +199,14 @@ async fn init_app_state(config: &Config) -> AppInit {
         plan_limit_checker.clone(),
         content_filter.clone(),
     ));
-    let spam_guard = Arc::new(domain::services::SpamGuard::new());
+    let spam_guard = Arc::new(domain::services::SpamGuard::with_enabled(
+        config.spam_guard_enabled,
+    ));
+    if !config.spam_guard_enabled {
+        tracing::warn!(
+            "SpamGuard DISABLED (SPAM_GUARD_ENABLED=false) — anti-abuse checks bypassed"
+        );
+    }
     // WHY: Clone before message_repo is moved into MessageService.
     // Needed for async moderation soft-delete in the handler layer.
     let message_repo_for_moderation: Arc<dyn domain::ports::MessageRepository> =

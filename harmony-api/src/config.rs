@@ -51,6 +51,14 @@ pub struct Config {
     #[serde(default = "default_content_moderation")]
     pub content_moderation_enabled: bool,
 
+    /// Enable the anti-abuse `SpamGuard` (default: true).
+    /// When true, flood auto-mute, duplicate detection, and per-action rate
+    /// limits are enforced. When false, every check is a no-op — set
+    /// `SPAM_GUARD_ENABLED=false` for E2E suites (which seed many messages as
+    /// one user and would trip the flood mute) and single-user self-hosting.
+    #[serde(default = "default_spam_guard")]
+    pub spam_guard_enabled: bool,
+
     /// `OpenAI` API key for the Moderation API (optional).
     /// When absent, async content moderation is disabled (graceful degradation).
     pub openai_api_key: Option<SecretString>,
@@ -102,6 +110,10 @@ fn default_plan_enforcement() -> bool {
 }
 
 fn default_content_moderation() -> bool {
+    true
+}
+
+fn default_spam_guard() -> bool {
     true
 }
 
@@ -164,6 +176,7 @@ impl std::fmt::Debug for Config {
                 "content_moderation_enabled",
                 &self.content_moderation_enabled,
             )
+            .field("spam_guard_enabled", &self.spam_guard_enabled)
             .field(
                 "openai_api_key",
                 &self.openai_api_key.as_ref().map(|_| "[REDACTED]"),
