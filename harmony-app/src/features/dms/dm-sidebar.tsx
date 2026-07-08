@@ -19,6 +19,7 @@ import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { useSettingsUiStore } from '@/features/settings'
 import { useVoiceConnectionStore } from '@/features/voice'
 import type { DmListItem } from '@/lib/api'
+import { resolveDisplayName } from '@/lib/display-name'
 import { cn } from '@/lib/utils'
 import { useCloseDm } from './hooks/use-close-dm'
 import { useDms } from './hooks/use-dms'
@@ -59,7 +60,7 @@ function DmConversationItem({
   onClose: () => void
 }) {
   const { t } = useTranslation('dms')
-  const displayName = dm.recipient.displayName ?? dm.recipient.username
+  const displayName = resolveDisplayName(dm.recipient)
   const status = useUserStatus(dm.recipient.id)
   const unreadCount = useUnreadStore((s) => s.counts[dm.channelId] ?? 0)
 
@@ -158,7 +159,10 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
   const user = useAuthStore((s) => s.user)
   const { data: profile } = useCurrentProfile()
   const status = useUserStatus(user?.id ?? '')
-  const username = profile?.username ?? t('you')
+  const displayName =
+    profile !== undefined
+      ? resolveDisplayName({ displayName: profile.displayName, username: profile.username })
+      : t('you')
 
   const isMuted = useVoiceConnectionStore((s) => s.isMuted)
   const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
@@ -243,7 +247,8 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
         <StatusPicker>
           <div className="relative">
             <Avatar
-              name={username}
+              name={displayName}
+              src={profile?.avatarUrl ?? undefined}
               size="sm"
               color="primary"
               showFallback
@@ -257,7 +262,7 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
             </div>
           </div>
           <div className="flex flex-1 flex-col overflow-hidden">
-            <span className="truncate text-sm font-medium text-foreground">{username}</span>
+            <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
             <span className="truncate text-xs text-default-500">{statusLabels[status]}</span>
           </div>
         </StatusPicker>

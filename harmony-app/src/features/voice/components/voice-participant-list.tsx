@@ -16,7 +16,10 @@ import type { VoiceParticipantResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useRealtimeVoice } from '../hooks/use-realtime-voice'
 import { useVoiceParticipants } from '../hooks/use-voice-participants'
-import { resolveParticipantName } from '../lib/resolve-participant-name'
+import {
+  resolveParticipantAvatarUrl,
+  resolveParticipantName,
+} from '../lib/resolve-participant-name'
 import { useVoiceConnectionStore } from '../stores/voice-connection-store'
 
 interface VoiceParticipantListProps {
@@ -51,6 +54,7 @@ export function VoiceParticipantList({ channelId, serverId }: VoiceParticipantLi
             membersData?.items,
             t('unknownParticipant'),
           )}
+          avatarUrl={resolveParticipantAvatarUrl(participant, membersData?.items)}
           isSpeaking={activeSpeakers.has(participant.userId)}
         />
       ))}
@@ -69,12 +73,15 @@ interface VoiceParticipantRowProps {
   participant: VoiceParticipantResponse
   /** WHY: Pre-resolved by the parent (member cache + i18n fallback) — never a raw UUID. */
   displayName: string
+  /** WHY: Resolved from the member cache by the parent; undefined → initials fallback. */
+  avatarUrl: string | undefined
   isSpeaking: boolean
 }
 
 const VoiceParticipantRow = memo(function VoiceParticipantRow({
   participant,
   displayName,
+  avatarUrl,
   isSpeaking,
 }: VoiceParticipantRowProps) {
   return (
@@ -84,6 +91,7 @@ const VoiceParticipantRow = memo(function VoiceParticipantRow({
     >
       <Avatar
         name={displayName}
+        src={avatarUrl}
         size="sm"
         showFallback
         classNames={{

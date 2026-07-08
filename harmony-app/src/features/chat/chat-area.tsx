@@ -47,6 +47,7 @@ import { StatusIndicator, useUserStatus } from '@/features/presence'
 import type { DmRecipientResponse, MessageResponse } from '@/lib/api'
 import { encrypt } from '@/lib/crypto'
 import { cacheMessage } from '@/lib/crypto-cache'
+import { resolveDisplayName } from '@/lib/display-name'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
 import { EmojiPickerPopover } from './emoji-picker-popover'
@@ -304,7 +305,7 @@ function DmChatHeader({
   recipient: DmRecipientResponse
   onOpenVerify: () => void
 }) {
-  const displayName = recipient.displayName ?? recipient.username
+  const displayName = resolveDisplayName(recipient)
   const status = useUserStatus(recipient.id)
   const { t } = useTranslation('crypto')
   const { trustLevel } = useTrustLevel(isTauri() ? recipient.id : null)
@@ -542,7 +543,7 @@ function ChatWelcome({
   const { t: tDms } = useTranslation('dms')
 
   if (isDm && dmRecipient !== null) {
-    const displayName = dmRecipient.displayName ?? dmRecipient.username
+    const displayName = resolveDisplayName(dmRecipient)
     return (
       <>
         <Avatar
@@ -588,8 +589,7 @@ function useInputPlaceholder(
     return t('settings:announcementPlaceholder')
   }
 
-  const dmDisplayName =
-    dmRecipient !== null ? (dmRecipient.displayName ?? dmRecipient.username) : null
+  const dmDisplayName = dmRecipient !== null ? resolveDisplayName(dmRecipient) : null
 
   if (isDm && dmDisplayName !== null) {
     return tDms('dmChatPlaceholder', { username: dmDisplayName })

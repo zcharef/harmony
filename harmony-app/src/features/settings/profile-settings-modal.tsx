@@ -24,6 +24,7 @@ import {
 } from '@/features/auth'
 import type { ProfileResponse } from '@/lib/api'
 import { getApiErrorDetail } from '@/lib/api-error'
+import { resolveDisplayName } from '@/lib/display-name'
 import { useSettingsUiStore } from './stores/settings-ui-store'
 
 const DISPLAY_NAME_MAX = 32
@@ -160,7 +161,10 @@ function ProfileSettingsForm({
         <div className="flex items-center gap-4">
           <Avatar
             src={avatarUrl ?? undefined}
-            name={profile.displayName ?? profile.username}
+            name={resolveDisplayName({
+              displayName: profile.displayName,
+              username: profile.username,
+            })}
             size="lg"
             color="primary"
             showFallback

@@ -25,6 +25,7 @@ import {
   useMembers,
 } from '@/features/members'
 import type { MemberResponse } from '@/lib/api'
+import { resolveDisplayName } from '@/lib/display-name'
 import { useTransferOwnership } from './hooks/use-transfer-ownership'
 
 /** WHY: Static map avoids dynamic i18n key construction (no `as Type` needed). */
@@ -68,7 +69,7 @@ function MemberRoleRow({
   const { t } = useTranslation('settings')
   const changeRole = useChangeRole(serverId)
   const assignableRoles = getAssignableRoles(callerRole)
-  const displayName = member.nickname ?? member.username
+  const displayName = resolveDisplayName(member)
 
   /** WHY: Cannot change own role, cannot change role of someone at or above your rank. */
   const canChangeRole =
@@ -176,7 +177,7 @@ function TransferOwnershipModal({
           >
             {candidates.map((m) => (
               <SelectItem key={m.userId} data-test={`transfer-option-${m.userId}`}>
-                {m.nickname ?? m.username}
+                {resolveDisplayName(m)}
               </SelectItem>
             ))}
           </Select>
@@ -219,7 +220,7 @@ export function RolesTab({ serverId, callerRole }: RolesTabProps) {
     if (search.trim().length === 0) return members
     const lower = search.toLowerCase()
     return members.filter((m) => {
-      const name = (m.nickname ?? m.username).toLowerCase()
+      const name = resolveDisplayName(m).toLowerCase()
       return name.includes(lower)
     })
   }, [members, search])

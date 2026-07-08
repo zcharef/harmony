@@ -6,6 +6,7 @@ import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
 import { StatusIndicator, usePresenceStore } from '@/features/presence'
 import type { MemberResponse, UserStatus } from '@/lib/api'
+import { resolveDisplayName } from '@/lib/display-name'
 import { cn } from '@/lib/utils'
 import { BanDialog } from './ban-dialog'
 import { useMembers } from './hooks/use-members'
@@ -53,8 +54,8 @@ function useGroupedMembers(members: MemberResponse[]) {
     // WHY: Sort alphabetically within each role group.
     for (const role of ROLE_SECTIONS) {
       groups[role].sort((a, b) => {
-        const nameA = (a.nickname ?? a.username).toLowerCase()
-        const nameB = (b.nickname ?? b.username).toLowerCase()
+        const nameA = resolveDisplayName(a).toLowerCase()
+        const nameB = resolveDisplayName(b).toLowerCase()
         return nameA.localeCompare(nameB)
       })
     }
@@ -218,7 +219,7 @@ function MemberRow({
   onBan: (target: { id: string; username: string }) => void
   onNavigateDm: (serverId: string, channelId: string) => void
 }) {
-  const displayName = member.nickname ?? member.username
+  const displayName = resolveDisplayName(member)
   const isSelf = member.userId === currentUserId
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false)
 

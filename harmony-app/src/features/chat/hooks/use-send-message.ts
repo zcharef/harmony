@@ -1,7 +1,7 @@
 import type { InfiniteData } from '@tanstack/react-query'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
-import type { DmListItem, MessageListResponse, MessageResponse } from '@/lib/api'
+import type { DmListItem, MessageListResponse, MessageResponse, ProfileResponse } from '@/lib/api'
 import { sendMessage } from '@/lib/api'
 import { getApiErrorDetail, isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
@@ -102,6 +102,12 @@ export function useSendMessage(
 
       const optimisticId = `${OPTIMISTIC_ID_PREFIX}${crypto.randomUUID()}`
 
+      // WHY: Seed the optimistic row with the sender's display name + avatar from
+      // the profile cache (SSoT) so their own message renders identically to the
+      // server echo — no username/initials flash before onSuccess swaps in the
+      // real message. Absent cache (cold start) falls back to null → username.
+      const selfProfile = queryClient.getQueryData<ProfileResponse>(queryKeys.profiles.me())
+
       // WHY: Build parentMessage preview from cached messages so the ParentQuote
       // renders immediately in the optimistic entry, not only after invalidation.
       const parentMessage =
@@ -114,6 +120,8 @@ export function useSendMessage(
         channelId: channelId,
         authorId: userId,
         authorUsername: username,
+        authorDisplayName: selfProfile?.displayName ?? null,
+        authorAvatarUrl: selfProfile?.avatarUrl ?? null,
         // WHY: Show plaintext in optimistic entry so user sees their message immediately.
         // The encrypted version is what goes to the API, not what displays.
         // WHY encrypted: false: The optimistic message contains plaintext. Setting

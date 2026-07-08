@@ -16,6 +16,7 @@ import { useAuthStore } from '@/features/auth'
 import { useServers } from '@/features/server-nav'
 import type { MemberResponse } from '@/lib/api'
 import { listMembers } from '@/lib/api'
+import { resolveDisplayName } from '@/lib/display-name'
 import { queryKeys } from '@/lib/query-keys'
 import { useCreateDm } from './hooks/use-create-dm'
 
@@ -136,7 +137,7 @@ export function UserSearchDialog({ isOpen, onClose, onDmCreated }: UserSearchDia
             )}
 
             {filteredUsers.map((user) => {
-              const displayName = user.nickname ?? user.username
+              const displayName = resolveDisplayName(user)
               return (
                 <Button
                   key={user.userId}
@@ -156,7 +157,10 @@ export function UserSearchDialog({ isOpen, onClose, onDmCreated }: UserSearchDia
                   />
                   <div className="flex flex-col items-start overflow-hidden">
                     <span className="truncate text-sm text-foreground">{displayName}</span>
-                    {user.nickname !== undefined && user.nickname !== null && (
+                    {/* WHY: Surface the immutable @username whenever the label
+                        shown differs from it, so searchers can still identify by
+                        username (matches Discord's nickname/username subtitle). */}
+                    {displayName !== user.username && (
                       <span className="truncate text-xs text-default-500">{user.username}</span>
                     )}
                   </div>
