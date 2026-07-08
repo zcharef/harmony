@@ -16,10 +16,26 @@
   <a href="https://ko-fi.com/Z8Z11JU7E7"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="ko-fi"></a>
 </p>
 
-> **Status:** Alpha, actively developed. Text chat, voice (LiveKit), DMs, presence, and moderation are live. [Try it](https://joinharmony.app) or self-host it.
+> **Status:** Alpha, actively developed. Text chat, voice (LiveKit), DMs, presence, and moderation are live in production.
 
-<!-- TODO: Add screenshot here -->
-<!-- <p align="center"><img src="mediakit/screenshot.png" alt="Harmony" width="800"></p> -->
+<!-- TODO(launch-assets): hero screenshot + demo GIF go here — see dev/active/tickets/launch-assets.md -->
+<!-- <p align="center"><img src="mediakit/screenshot-hero.png" alt="Harmony" width="800"></p> -->
+
+---
+
+## Try it
+
+Three ways in, pick your poison:
+
+- **Browser** — [app.joinharmony.app](https://app.joinharmony.app). No download, no phone number, no ID verification. Chatting in under a minute.
+- **Self-host** — the full stack on your own machine with one command. Unlimited users, every feature, no strings:
+  ```bash
+  git clone https://github.com/zcharef/harmony.git && cd harmony
+  cp .env.example .env   # fill in the 5 required values (see docs)
+  docker compose up -d --build
+  ```
+  Full guide (env vars, keys, TLS, upgrades): **[docs/self-hosting.md](docs/self-hosting.md)**
+- **Desktop** — native Tauri app (~80 MB RAM vs Electron's ~500 MB), built from source today; packaged releases are on the roadmap. See [Development](#development).
 
 ---
 
@@ -36,23 +52,23 @@
 
 ### What makes Harmony different
 
-- **Privacy you can verify.** Fully open source under AGPL-3.0. We don't scan your messages, sell your data, or train AI on your conversations. You can read every line of code that handles your data.
+- **Privacy you can verify.** Fully open source under AGPL-3.0. We don't scan your messages, sell your data, or train AI on your conversations. You can read every line of code that handles your data. Self-hosted instances send us nothing — there is no telemetry to turn off.
 
-- **The Discord features you expect.** Reactions, replies, unread indicators, emoji picker, avatars, markdown, message grouping, date dividers, per-channel notification settings, presence and DND, moderation and anti-spam. All shipped.
+- **The Discord features you expect.** Reactions, replies, unread indicators, emoji picker, avatars, markdown, message grouping, date dividers, per-channel notification settings, presence and DND, voice channels, moderation and anti-spam. All shipped.
 
 - **E2EE in development.** The crypto foundation is built on [vodozemac](https://github.com/matrix-org/vodozemac) (NCC Group audited). It runs natively in the desktop app's Rust runtime and keys live in your OS keychain, so private keys never touch JavaScript. E2EE DMs are the next milestone. Not live yet.
 
 - **Simple to self-host.** One docker compose command runs the whole stack: the Harmony Rust binary, PostgreSQL, and Supabase's open-source auth (GoTrue). No Redis, no MongoDB, no RabbitMQ. Full features, unlimited users, your rules.
 
-- **Discord migration (planned).** The goal: bring your entire server over with channels, roles, categories, and permissions intact. On the roadmap, not built yet.
+- **Your community can't be taken from you.** No arbitrary bans, no ID demands, no platform risk. Move to your own hardware any time — same codebase, same features. Discord migration tooling is on the roadmap; until then we help movers by hand ([migrate@joinharmony.app](mailto:migrate@joinharmony.app)).
 
-- **Web + Desktop, same codebase.** Use Harmony in the browser with zero friction, or install the Tauri desktop app for native performance (~80 MB RAM vs Electron's ~500 MB). E2EE DMs will land on desktop first.
+- **Web + Desktop, same codebase.** Use Harmony in the browser with zero friction, or run the Tauri desktop app for native performance. E2EE DMs will land on desktop first.
 
 > **Alpha disclaimer:** E2EE is under active development and not yet live in production. The underlying crypto library (vodozemac) has been [audited by NCC Group](https://matrix.org/media/Hodgson_vodozemac_audit.pdf). Full integration audit planned before beta.
 
 ---
 
-## Quick Start
+## Development
 
 ### Prerequisites
 
@@ -188,26 +204,10 @@ harmony/
 | **1** | Live chat, invites, presence | Done |
 | **2** | Roles, permissions, direct messages | Done |
 | **3** | Voice (LiveKit), Discord-parity QoL, moderation | Done |
-| **4** | E2EE DMs (desktop), opt-in channel encryption | In Progress |
-| **5** | Video/screen share, file uploads | Planned |
-| **6** | Server discovery, push notifications | Planned |
+| **4** | Attachments, notifications, mentions, onboarding | In Progress |
+| **5** | E2EE DMs (desktop), opt-in channel encryption | In Progress |
+| **6** | Server discovery, custom emoji, push notifications | Planned |
 | **7** | Mobile app, web E2EE (WASM), bot API | Planned |
-
----
-
-## Self-Hosting
-
-Run the full Harmony stack on your own infrastructure — no Supabase Cloud account required.
-
-```bash
-git clone https://github.com/zcharef/harmony.git && cd harmony
-cp .env.example .env   # fill in the 5 required values (see docs)
-docker compose up -d --build
-# Web app: http://your-server:8080
-# Supabase Studio: http://your-server:3001
-```
-
-For full instructions — env vars, key generation, TLS, upgrading, troubleshooting — see **[docs/self-hosting.md](docs/self-hosting.md)**.
 
 ---
 
@@ -219,6 +219,8 @@ Before submitting a PR:
 1. Run `just wall` in the project you changed
 2. Follow [conventional commits](https://www.conventionalcommits.org/)
 3. One concern per PR
+
+If you want software like this to exist and can't contribute code, a GitHub star helps people find the project.
 
 ## Security
 
