@@ -311,6 +311,9 @@ export function LoginPage() {
   const { t } = useTranslation('auth')
   const [mode, setMode] = useState<AuthMode>('login')
   const [username, setUsername] = useState('')
+  // WHY: Optional at signup. Blank → omitted from metadata → NULL in DB →
+  // renders as the username (per the LOCKED nickname ?? displayName ?? username chain).
+  const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [honeypot, setHoneypot] = useState('')
@@ -437,6 +440,14 @@ export function LoginPage() {
         return
       }
 
+      // WHY: Only attach display_name when the user actually typed one —
+      // omitting the key (vs sending "") keeps the auth metadata clean so a
+      // blank display name lands as NULL and renders as the username.
+      const signupMetadata: Record<string, string> =
+        displayName.trim().length > 0
+          ? { username, display_name: displayName.trim() }
+          : { username }
+
       const result =
         mode === 'login'
           ? await supabase.auth.signInWithPassword({
@@ -449,7 +460,7 @@ export function LoginPage() {
               password,
               options: {
                 captchaToken,
-                data: { username },
+                data: signupMetadata,
               },
             })
 
@@ -507,6 +518,7 @@ export function LoginPage() {
   function toggleMode() {
     setMode((prev) => (prev === 'login' ? 'signup' : 'login'))
     setUsername('')
+    setDisplayName('')
     setPassword('')
     setUsernameStatus('idle')
     setError(null)
@@ -588,11 +600,24 @@ export function LoginPage() {
             <>
               <form data-test="login-form" onSubmit={handleSubmit} className="flex flex-col gap-4">
                 {mode === 'signup' && (
-                  <UsernameField
-                    username={username}
-                    onValueChange={(v) => setUsername(v.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                    usernameStatus={usernameStatus}
-                  />
+                  <>
+                    <UsernameField
+                      username={username}
+                      onValueChange={(v) => setUsername(v.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                      usernameStatus={usernameStatus}
+                    />
+                    <Input
+                      data-test="login-display-name-input"
+                      label={t('displayName')}
+                      type="text"
+                      placeholder={t('displayNamePlaceholder')}
+                      description={t('displayNameHelp')}
+                      value={displayName}
+                      onValueChange={setDisplayName}
+                      autoComplete="name"
+                      maxLength={32}
+                    />
+                  </>
                 )}
 
                 <Input
