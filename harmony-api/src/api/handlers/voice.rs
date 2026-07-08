@@ -241,9 +241,12 @@ pub async fn list_voice_participants(
     let participants: Vec<_> = sessions
         .into_iter()
         .map(|session| {
+            // WHY display_name ?? username: this REST path has the Profile
+            // (no per-server nickname in scope); the client resolver layers
+            // nickname on top from the member cache.
             let display_name = profiles_by_id
                 .get(&session.user_id)
-                .map(|p| p.username.clone())
+                .map(|p| p.display_name.clone().unwrap_or_else(|| p.username.clone()))
                 .unwrap_or_else(|| session.user_id.to_string());
 
             VoiceParticipant {

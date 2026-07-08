@@ -136,8 +136,12 @@ impl VoiceService {
         //    duplicate get_server_limits query from check_voice_concurrent).
         let limits = self.plan_checker.get_server_plan_limits(server_id).await?;
 
-        // 5. Build display name: prefer nickname, fall back to username.
-        let display_name = member.nickname.as_deref().unwrap_or(&member.username);
+        // 5. Build display name: nickname (per-server) → display_name → username.
+        let display_name = member
+            .nickname
+            .as_deref()
+            .or(member.display_name.as_deref())
+            .unwrap_or(&member.username);
 
         // 6. Generate LiveKit token.
         let room_name = format!("harmony_{}", channel_id);
@@ -281,7 +285,11 @@ impl VoiceService {
 
         // 5. Generate fresh token (same logic as join_voice, no DB mutation).
         let limits = self.plan_checker.get_server_plan_limits(server_id).await?;
-        let display_name = member.nickname.as_deref().unwrap_or(&member.username);
+        let display_name = member
+            .nickname
+            .as_deref()
+            .or(member.display_name.as_deref())
+            .unwrap_or(&member.username);
         let room_name = format!("harmony_{}", channel_id);
         #[allow(clippy::cast_sign_loss)]
         let plan_duration_secs = (limits.voice_max_duration_hours as u64).saturating_mul(3600);
