@@ -5610,7 +5610,7 @@
               "string",
               "null"
             ],
-            "description": "New channel topic (if provided; null clears it)."
+            "description": "New channel topic (if provided; null clears it).\nWHY `double_option`: a plain `Option<Option<String>>` deserializes `null`\nand an omitted key both to `None`, so the repo's `topic.is_some()` gate\nnever fires for a clear — `{\"topic\": null}` was silently a no-op."
           }
         },
         "additionalProperties": false

@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use super::serde_helpers::double_option;
 use crate::domain::models::{Profile, UserId, UserStatus};
 
 /// Profile response returned to API consumers.
@@ -51,19 +52,6 @@ impl From<bool> for CheckUsernameResponse {
             available: !is_taken,
         }
     }
-}
-
-/// WHY: serde cannot distinguish a missing field from an explicit `null` with
-/// a plain `Option<Option<T>>` — both deserialize to `None`. This per-field
-/// deserializer only runs when the key IS present in the JSON, so wrapping the
-/// parsed value in `Some` yields: missing → `None` (via `#[serde(default)]`),
-/// `null` → `Some(None)` (clear the field), `"x"` → `Some(Some("x"))` (set it).
-fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
-where
-    T: serde::Deserialize<'de>,
-    D: serde::Deserializer<'de>,
-{
-    serde::Deserialize::deserialize(deserializer).map(Some)
 }
 
 /// Request body for updating the authenticated user's profile.

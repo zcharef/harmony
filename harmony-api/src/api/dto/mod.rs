@@ -13,6 +13,7 @@ pub mod notification_settings;
 pub mod pagination;
 pub mod profiles;
 pub mod read_states;
+pub mod serde_helpers;
 pub mod servers;
 pub mod user_preferences;
 pub mod voice;
