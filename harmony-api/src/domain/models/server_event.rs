@@ -498,6 +498,40 @@ impl ServerEvent {
             | Self::ForceDisconnect { .. } => None,
         }
     }
+
+    /// Strip ALL delivery-scoping metadata before serializing to a client.
+    ///
+    /// WHY: `channel_access` (private-channel gate) and `server_ids` (presence
+    /// scope) exist only for the SSE Stage-2 filter to route/gate delivery —
+    /// they must NEVER reach a client. This lives next to the variant
+    /// definitions and is an EXHAUSTIVE match with no `_` arm: a future variant
+    /// that gains scoping metadata forces a compile error here, so redaction can
+    /// never be silently forgotten at a distant call site (the prior footgun).
+    /// `skip_serializing_if` then omits the emptied fields, keeping client JSON
+    /// byte-identical to before scoping.
+    pub fn redact_routing_metadata(&mut self) {
+        match self {
+            Self::MessageCreated { channel_access, .. }
+            | Self::MessageUpdated { channel_access, .. }
+            | Self::MessageDeleted { channel_access, .. }
+            | Self::TypingStarted { channel_access, .. }
+            | Self::ReactionAdded { channel_access, .. }
+            | Self::ReactionRemoved { channel_access, .. } => *channel_access = None,
+            Self::PresenceChanged { server_ids, .. } => server_ids.clear(),
+            Self::MemberJoined { .. }
+            | Self::MemberRemoved { .. }
+            | Self::MemberBanned { .. }
+            | Self::MemberRoleUpdated { .. }
+            | Self::ChannelCreated { .. }
+            | Self::ChannelUpdated { .. }
+            | Self::ChannelDeleted { .. }
+            | Self::ServerUpdated { .. }
+            | Self::ModerationSettingsUpdated { .. }
+            | Self::DmCreated { .. }
+            | Self::VoiceStateUpdate { .. }
+            | Self::ForceDisconnect { .. } => {}
+        }
+    }
 }
 
 #[cfg(test)]

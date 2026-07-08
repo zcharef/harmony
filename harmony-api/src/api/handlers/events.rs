@@ -416,115 +416,14 @@ pub async fn sse_events(
         drop(current_server_ids);
 
         // ── Redact routing metadata from the client payload ────────
-        // WHY: `server_ids` (presence) and `channel_access` (channel events)
-        // exist for delivery scoping only — never for clients. Rebuild the event
-        // with them emptied so the authorized-role set and the subject's full
-        // server list never reach any receiver. `skip_serializing_if` then omits
-        // the fields entirely, keeping the client JSON byte-identical to before.
-        let event = match event {
-            ServerEvent::PresenceChanged {
-                sender_id,
-                user_id,
-                status,
-                ..
-            } => ServerEvent::PresenceChanged {
-                sender_id,
-                user_id,
-                status,
-                server_ids: Vec::new(),
-            },
-            ServerEvent::MessageCreated {
-                sender_id,
-                server_id,
-                channel_id,
-                message,
-                ..
-            } => ServerEvent::MessageCreated {
-                sender_id,
-                server_id,
-                channel_id,
-                message,
-                channel_access: None,
-            },
-            ServerEvent::MessageUpdated {
-                sender_id,
-                server_id,
-                channel_id,
-                message,
-                ..
-            } => ServerEvent::MessageUpdated {
-                sender_id,
-                server_id,
-                channel_id,
-                message,
-                channel_access: None,
-            },
-            ServerEvent::MessageDeleted {
-                sender_id,
-                server_id,
-                channel_id,
-                message_id,
-                deleted_by,
-                ..
-            } => ServerEvent::MessageDeleted {
-                sender_id,
-                server_id,
-                channel_id,
-                message_id,
-                deleted_by,
-                channel_access: None,
-            },
-            ServerEvent::TypingStarted {
-                sender_id,
-                server_id,
-                channel_id,
-                username,
-                ..
-            } => ServerEvent::TypingStarted {
-                sender_id,
-                server_id,
-                channel_id,
-                username,
-                channel_access: None,
-            },
-            ServerEvent::ReactionAdded {
-                sender_id,
-                server_id,
-                channel_id,
-                message_id,
-                emoji,
-                user_id,
-                username,
-                ..
-            } => ServerEvent::ReactionAdded {
-                sender_id,
-                server_id,
-                channel_id,
-                message_id,
-                emoji,
-                user_id,
-                username,
-                channel_access: None,
-            },
-            ServerEvent::ReactionRemoved {
-                sender_id,
-                server_id,
-                channel_id,
-                message_id,
-                emoji,
-                user_id,
-                ..
-            } => ServerEvent::ReactionRemoved {
-                sender_id,
-                server_id,
-                channel_id,
-                message_id,
-                emoji,
-                user_id,
-                channel_access: None,
-            },
-            other => other,
-        };
+        // WHY: `channel_access` (private-channel gate) and `server_ids`
+        // (presence scope) are delivery-routing only — never for clients. One
+        // exhaustive method on the event (co-located with the field defs) empties
+        // them; `skip_serializing_if` then omits the emptied fields, keeping the
+        // client JSON byte-identical. Using the method (not a local rebuild)
+        // makes it a compile error to forget a future scoped variant.
+        let mut event = event;
+        event.redact_routing_metadata();
 
         // ── Filter: sender exclusion (create/update only) ──────────
         // WHY: The sender already has optimistic UI for create and update.
