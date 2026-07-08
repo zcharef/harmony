@@ -39,6 +39,7 @@ export const SSE_EVENT_NAMES = [
   'unread.sync',
   'reaction.added',
   'reaction.removed',
+  'mention.received',
   'voice.state_update',
   'force.disconnect',
 ] as const
@@ -66,6 +67,17 @@ export const messagePayloadSchema = z.object({
   systemEventKey: z.string().nullable().optional(),
   moderatedAt: z.string().nullable().optional(),
   moderationReason: z.string().nullable().optional(),
+  // WHY optional: older API instances omit the field during rollout (spec §4.4).
+  mentions: z
+    .array(
+      z.object({
+        userId: z.string(),
+        username: z.string(),
+        displayName: z.string().nullable().optional(),
+        nickname: z.string().nullable().optional(),
+      }),
+    )
+    .optional(),
   createdAt: z.string(),
 })
 
@@ -257,6 +269,8 @@ export const serverEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('unreadSynced'),
     channels: z.record(z.string(), z.number()),
+    // WHY optional: older API instances omit the mentions map during rollout.
+    mentions: z.record(z.string(), z.number()).optional(),
   }),
 
   // Reactions
@@ -278,6 +292,16 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     messageId: z.string(),
     emoji: z.string(),
     userId: z.string(),
+  }),
+
+  // Mentions (user-targeted)
+  z.object({
+    type: z.literal('mentionReceived'),
+    senderId: z.string(),
+    targetUserId: z.string(),
+    serverId: z.string(),
+    channelId: z.string(),
+    messageId: z.string(),
   }),
 
   // Voice

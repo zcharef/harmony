@@ -64,14 +64,24 @@ impl ReadStateRepository for PgReadStateRepository {
         // so the badge would be permanently unclearable. Mirrors the inline predicate
         // in channel_repository.rs list_for_server. $2 = 'owner', $3 = 'admin'
         // (Role::as_str, same style as list_for_server).
+        // WHY mention_count is a computed FILTER, not a stored counter: mentions
+        // are a strict subset of unreads, so the same scan yields both with one
+        // extra aggregate — zero extra writes on send, zero drift on soft-delete,
+        // and mark_read (moving last_read_at) resets it for free. Mention-equivalence
+        // (§1/§2.2): a message counts when it mentions $1 OR the server is a DM
+        // (s.is_dm) — the DM disjunct is why the DM home button shows a count.
         let rows = sqlx::query!(
             r#"
             SELECT
                 c.id AS "channel_id!",
                 crs.last_read_at AS "last_read_at?",
                 crs.last_message_id,
-                LEAST(COALESCE(COUNT(m.id)::BIGINT, 0), 999) AS "unread_count!"
+                LEAST(COALESCE(COUNT(m.id)::BIGINT, 0), 999) AS "unread_count!",
+                LEAST(COALESCE((COUNT(m.id) FILTER (
+                    WHERE s.is_dm OR m.mentioned_user_ids @> ARRAY[$1]::uuid[]
+                ))::BIGINT, 0), 999) AS "mention_count!"
             FROM server_members sm
+            JOIN servers s ON s.id = sm.server_id
             JOIN channels c ON c.server_id = sm.server_id
             LEFT JOIN channel_read_states crs
                 ON crs.channel_id = c.id AND crs.user_id = $1
@@ -106,6 +116,7 @@ impl ReadStateRepository for PgReadStateRepository {
             .map(|r| ChannelReadState {
                 channel_id: ChannelId::new(r.channel_id),
                 unread_count: r.unread_count,
+                mention_count: r.mention_count,
                 last_read_at: r.last_read_at,
                 last_message_id: r.last_message_id.map(MessageId::new),
             })

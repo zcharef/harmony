@@ -59,6 +59,7 @@ struct MessageRow {
     moderated_at: Option<DateTime<Utc>>,
     moderation_reason: Option<String>,
     original_content: Option<String>,
+    mentioned_user_ids: Vec<Uuid>,
     created_at: DateTime<Utc>,
 }
 
@@ -80,6 +81,11 @@ impl MessageRow {
             moderated_at: self.moderated_at,
             moderation_reason: self.moderation_reason,
             original_content: self.original_content,
+            mentioned_user_ids: self
+                .mentioned_user_ids
+                .into_iter()
+                .map(UserId::new)
+                .collect(),
             created_at: self.created_at,
         }
     }
@@ -105,6 +111,7 @@ struct MessageWithAuthorRow {
     moderated_at: Option<DateTime<Utc>>,
     moderation_reason: Option<String>,
     original_content: Option<String>,
+    mentioned_user_ids: Vec<Uuid>,
     created_at: DateTime<Utc>,
     // Author profile fields from JOIN.
     author_username: Option<String>,
@@ -159,6 +166,11 @@ impl MessageWithAuthorRow {
             moderated_at: self.moderated_at,
             moderation_reason: self.moderation_reason,
             original_content: self.original_content,
+            mentioned_user_ids: self
+                .mentioned_user_ids
+                .into_iter()
+                .map(UserId::new)
+                .collect(),
             created_at: self.created_at,
         };
 
@@ -176,6 +188,9 @@ impl MessageWithAuthorRow {
             // not by the repository query. Default to empty here.
             reactions: vec![],
             parent_message,
+            // WHY: Mentions are resolved by MessageService from
+            // message.mentioned_user_ids, not by the repository query.
+            mentions: vec![],
         }
     }
 }
@@ -193,6 +208,7 @@ impl MessageRepository for PgMessageRepository {
         moderated_at: Option<DateTime<Utc>>,
         moderation_reason: Option<String>,
         original_content: Option<String>,
+        mentioned_user_ids: Vec<UserId>,
         slow_mode_seconds: i32,
     ) -> Result<MessageWithAuthor, DomainError> {
         let cid = channel_id.0;
@@ -201,6 +217,7 @@ impl MessageRepository for PgMessageRepository {
         let mod_at = moderated_at;
         let mod_reason = moderation_reason;
         let orig_content = original_content;
+        let mentions: Vec<Uuid> = mentioned_user_ids.into_iter().map(|u| u.0).collect();
 
         // WHY: When slow_mode_seconds > 0, we must atomically check the user's last
         // message time AND insert in the same transaction, using pg_advisory_xact_lock
@@ -261,8 +278,8 @@ impl MessageRepository for PgMessageRepository {
             let row = sqlx::query!(
             r#"
             WITH inserted AS (
-                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id, moderated_at, moderation_reason, original_content)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id, moderated_at, moderation_reason, original_content, mentioned_user_ids)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 RETURNING
                     id,
                     channel_id,
@@ -279,6 +296,7 @@ impl MessageRepository for PgMessageRepository {
                     moderated_at,
                     moderation_reason,
                     original_content,
+                    mentioned_user_ids,
                     created_at
             )
             SELECT
@@ -297,6 +315,7 @@ impl MessageRepository for PgMessageRepository {
                 i.moderated_at,
                 i.moderation_reason,
                 i.original_content,
+                i.mentioned_user_ids as "mentioned_user_ids!",
                 i.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.display_name AS "author_display_name?",
@@ -318,6 +337,7 @@ impl MessageRepository for PgMessageRepository {
                 mod_at,
                 mod_reason,
                 orig_content,
+                &mentions,
             )
             .fetch_one(&mut *tx)
             .await
@@ -341,6 +361,7 @@ impl MessageRepository for PgMessageRepository {
                 moderated_at: row.moderated_at,
                 moderation_reason: row.moderation_reason,
                 original_content: row.original_content,
+                mentioned_user_ids: row.mentioned_user_ids,
                 created_at: row.created_at,
                 author_username: row.author_username,
                 author_display_name: row.author_display_name,
@@ -357,8 +378,8 @@ impl MessageRepository for PgMessageRepository {
         let row = sqlx::query!(
             r#"
             WITH inserted AS (
-                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id, moderated_at, moderation_reason, original_content)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id, moderated_at, moderation_reason, original_content, mentioned_user_ids)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 RETURNING
                     id,
                     channel_id,
@@ -375,6 +396,7 @@ impl MessageRepository for PgMessageRepository {
                     moderated_at,
                     moderation_reason,
                     original_content,
+                    mentioned_user_ids,
                     created_at
             )
             SELECT
@@ -393,6 +415,7 @@ impl MessageRepository for PgMessageRepository {
                 i.moderated_at,
                 i.moderation_reason,
                 i.original_content,
+                i.mentioned_user_ids as "mentioned_user_ids!",
                 i.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.display_name AS "author_display_name?",
@@ -414,6 +437,7 @@ impl MessageRepository for PgMessageRepository {
             mod_at,
             mod_reason,
             orig_content,
+            &mentions,
         )
         .fetch_one(&self.pool)
         .await
@@ -435,6 +459,7 @@ impl MessageRepository for PgMessageRepository {
             moderated_at: row.moderated_at,
             moderation_reason: row.moderation_reason,
             original_content: row.original_content,
+            mentioned_user_ids: row.mentioned_user_ids,
             created_at: row.created_at,
             author_username: row.author_username,
             author_display_name: row.author_display_name,
@@ -475,6 +500,7 @@ impl MessageRepository for PgMessageRepository {
                 m.moderated_at,
                 m.moderation_reason,
                 m.original_content,
+                m.mentioned_user_ids as "mentioned_user_ids!",
                 m.created_at,
                 p.username AS "author_username?",
                 p.display_name AS "author_display_name?",
@@ -519,6 +545,7 @@ impl MessageRepository for PgMessageRepository {
                     moderated_at: r.moderated_at,
                     moderation_reason: r.moderation_reason,
                     original_content: r.original_content,
+                    mentioned_user_ids: r.mentioned_user_ids,
                     created_at: r.created_at,
                     author_username: r.author_username,
                     author_display_name: r.author_display_name,
@@ -555,6 +582,7 @@ impl MessageRepository for PgMessageRepository {
                 moderated_at,
                 moderation_reason,
                 original_content,
+                mentioned_user_ids,
                 created_at
             FROM messages
             WHERE id = $1 AND deleted_at IS NULL
@@ -582,6 +610,7 @@ impl MessageRepository for PgMessageRepository {
                 moderated_at: r.moderated_at,
                 moderation_reason: r.moderation_reason,
                 original_content: r.original_content,
+                mentioned_user_ids: r.mentioned_user_ids,
                 created_at: r.created_at,
             }
             .into_message()
@@ -595,17 +624,23 @@ impl MessageRepository for PgMessageRepository {
         moderated_at: Option<DateTime<Utc>>,
         moderation_reason: Option<String>,
         original_content: Option<String>,
+        mentioned_user_ids: Option<Vec<UserId>>,
     ) -> Result<MessageWithAuthor, DomainError> {
         let mid = message_id.0;
         let mod_at = moderated_at;
         let mod_reason = moderation_reason;
         let orig_content = original_content;
+        // WHY: None = encrypted edit → leave the column untouched via COALESCE.
+        // Some = plaintext re-parse → overwrite. The `$6::uuid[]` cast is required
+        // so Postgres can type the NULL branch.
+        let mentioned_opt: Option<Vec<Uuid>> =
+            mentioned_user_ids.map(|v| v.into_iter().map(|u| u.0).collect());
 
         let row = sqlx::query!(
             r#"
             WITH updated AS (
                 UPDATE messages
-                SET content = $2, is_edited = true, edited_at = now(), moderated_at = $3, moderation_reason = $4, original_content = $5
+                SET content = $2, is_edited = true, edited_at = now(), moderated_at = $3, moderation_reason = $4, original_content = $5, mentioned_user_ids = COALESCE($6::uuid[], mentioned_user_ids)
                 WHERE id = $1 AND deleted_at IS NULL
                 RETURNING
                     id,
@@ -623,6 +658,7 @@ impl MessageRepository for PgMessageRepository {
                     moderated_at,
                     moderation_reason,
                     original_content,
+                    mentioned_user_ids,
                     created_at
             )
             SELECT
@@ -641,6 +677,7 @@ impl MessageRepository for PgMessageRepository {
                 u.moderated_at,
                 u.moderation_reason,
                 u.original_content,
+                u.mentioned_user_ids as "mentioned_user_ids!",
                 u.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.display_name AS "author_display_name?",
@@ -658,6 +695,7 @@ impl MessageRepository for PgMessageRepository {
             mod_at,
             mod_reason,
             orig_content,
+            mentioned_opt.as_deref(),
         )
         .fetch_optional(&self.pool)
         .await
@@ -683,6 +721,7 @@ impl MessageRepository for PgMessageRepository {
             moderated_at: row.moderated_at,
             moderation_reason: row.moderation_reason,
             original_content: row.original_content,
+            mentioned_user_ids: row.mentioned_user_ids,
             created_at: row.created_at,
             author_username: row.author_username,
             author_display_name: row.author_display_name,
@@ -892,6 +931,9 @@ impl MessageRepository for PgMessageRepository {
             moderated_at: row.moderated_at,
             moderation_reason: row.moderation_reason,
             original_content: row.original_content,
+            // WHY: System messages never mention anyone; the create_system query
+            // does not select the column, so default to empty.
+            mentioned_user_ids: Vec::new(),
             created_at: row.created_at,
             author_username: row.author_username,
             author_display_name: row.author_display_name,

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Role, ServerId, ServerMember, UserId};
+use crate::domain::models::{Channel, MentionedUser, Role, ServerId, ServerMember, UserId};
 
 /// Intent-based repository for server members.
 #[async_trait]
@@ -74,4 +74,36 @@ pub trait MemberRepository: Send + Sync + std::fmt::Debug {
         old_owner_id: &UserId,
         new_owner_id: &UserId,
     ) -> Result<(), DomainError>;
+
+    /// Filter candidate mention targets down to users who can SEE the channel:
+    /// server members, and for private channels, admin/owner or a
+    /// `channel_role_access` grant for their role. MUST match
+    /// `ensure_channel_access` semantics (`channel_access.rs`) — a silent drop,
+    /// never an error (no membership/access oracle). Returned order is not
+    /// significant; the service re-orders against the candidate list.
+    async fn filter_mentionable(
+        &self,
+        channel: &Channel,
+        user_ids: &[UserId],
+    ) -> Result<Vec<UserId>, DomainError>;
+
+    /// Batch-resolve mentioned users for response building: `profiles` LEFT JOIN
+    /// `server_members` (nickname). Users who left the server still resolve
+    /// (`nickname = None`); deleted accounts (no profile row) are omitted.
+    async fn resolve_mentioned_users(
+        &self,
+        server_id: &ServerId,
+        user_ids: &[UserId],
+    ) -> Result<Vec<MentionedUser>, DomainError>;
+
+    /// Search members by a query string (substring `ILIKE` on `username`,
+    /// `display_name` and `nickname`), prefix matches ranked first, capped at
+    /// `limit`. Powers the autocomplete `q` param past the first member page
+    /// (§3.4). No pagination — top-N only.
+    async fn search_by_server(
+        &self,
+        server_id: &ServerId,
+        q: &str,
+        limit: i64,
+    ) -> Result<Vec<ServerMember>, DomainError>;
 }

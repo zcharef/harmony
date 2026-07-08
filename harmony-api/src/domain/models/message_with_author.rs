@@ -7,6 +7,7 @@
 //!
 //! The core [`Message`] entity remains unchanged.
 
+use crate::domain::models::MentionedUser;
 use crate::domain::models::Message;
 use crate::domain::models::ParentMessagePreview;
 use crate::domain::models::ReactionSummary;
@@ -30,4 +31,8 @@ pub struct MessageWithAuthor {
     pub reactions: Vec<ReactionSummary>,
     /// Preview of the parent message when this is a reply.
     pub parent_message: Option<ParentMessagePreview>,
+    /// Server-resolved mentioned users (the Discord `mentions` array). Populated
+    /// by `MessageService` (not the repository), resolved from
+    /// `message.mentioned_user_ids` at read time so pill labels stay current.
+    pub mentions: Vec<MentionedUser>,
 }

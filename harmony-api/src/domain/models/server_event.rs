@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Channel;
 use super::ChannelType;
+use super::MentionedUser;
 use super::MessageWithAuthor;
 use super::UserStatus;
 use super::ids::{ChannelId, MessageId, ServerId, UserId};
@@ -46,11 +47,21 @@ pub struct MessagePayload {
     /// Why `AutoMod` flagged this message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub moderation_reason: Option<String>,
+    /// Server-resolved mentioned users (the Discord `mentions` array). Rides both
+    /// `message.created` and `message.updated` so pills render and the `mentions`
+    /// notification level applies without a second lookup.
+    ///
+    /// WHY `default`: during the rollout window an older instance publishes this
+    /// payload WITHOUT the field over `pg_notify`; `default` lets a new instance
+    /// deserialize it (empty mentions) instead of dropping the event.
+    #[serde(default)]
+    pub mentions: Vec<MentionedUser>,
     pub created_at: DateTime<Utc>,
 }
 
 impl From<MessageWithAuthor> for MessagePayload {
     fn from(mwa: MessageWithAuthor) -> Self {
+        let mentions = mwa.mentions;
         let m = mwa.message;
         Self {
             id: m.id,
@@ -68,6 +79,7 @@ impl From<MessageWithAuthor> for MessagePayload {
             system_event_key: m.system_event_key,
             moderated_at: m.moderated_at,
             moderation_reason: m.moderation_reason,
+            mentions,
             created_at: m.created_at,
         }
     }
@@ -360,6 +372,23 @@ pub enum ServerEvent {
         channel_access: Option<ChannelAccessScope>,
     },
 
+    // ── Mentions (user-targeted) ─────────────────────────────
+    /// Targeted ping for a mentioned user. Rides the `target_user_id` delivery
+    /// path: delivered ONLY to the target (all their devices), bypassing
+    /// sender-exclusion and server-scope filtering edge cases. Because the
+    /// persisted mention list passed `filter_mentionable`, no event ever targets
+    /// a user who cannot see the channel — so `channel_id`/`message_id`/`sender`
+    /// never leak to a user without access (no `channel_access` routing needed).
+    MentionReceived {
+        /// The message author.
+        sender_id: UserId,
+        /// The mentioned user (delivery target).
+        target_user_id: UserId,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        message_id: MessageId,
+    },
+
     // ── Voice ────────────────────────────────────────────────
     VoiceStateUpdate {
         sender_id: UserId,
@@ -412,6 +441,7 @@ impl ServerEvent {
             Self::PresenceChanged { .. } => "presence.changed",
             Self::ReactionAdded { .. } => "reaction.added",
             Self::ReactionRemoved { .. } => "reaction.removed",
+            Self::MentionReceived { .. } => "mention.received",
             Self::VoiceStateUpdate { .. } => "voice.state_update",
             Self::ForceDisconnect { .. } => "force.disconnect",
         }
@@ -440,6 +470,7 @@ impl ServerEvent {
             | Self::PresenceChanged { sender_id, .. }
             | Self::ReactionAdded { sender_id, .. }
             | Self::ReactionRemoved { sender_id, .. }
+            | Self::MentionReceived { sender_id, .. }
             | Self::VoiceStateUpdate { sender_id, .. }
             | Self::ForceDisconnect { sender_id, .. } => sender_id,
         }
@@ -466,6 +497,7 @@ impl ServerEvent {
             | Self::ReactionAdded { server_id, .. }
             | Self::ReactionRemoved { server_id, .. }
             | Self::VoiceStateUpdate { server_id, .. }
+            | Self::MentionReceived { server_id, .. }
             | Self::ForceDisconnect { server_id, .. } => Some(server_id),
             Self::DmCreated { .. } | Self::ProfileUpdated { .. } | Self::PresenceChanged { .. } => {
                 None
@@ -480,6 +512,7 @@ impl ServerEvent {
         match self {
             Self::DmCreated { target_user_id, .. }
             | Self::MemberBanned { target_user_id, .. }
+            | Self::MentionReceived { target_user_id, .. }
             | Self::ForceDisconnect { target_user_id, .. } => Some(target_user_id),
             Self::MessageCreated { .. }
             | Self::MessageUpdated { .. }
@@ -529,6 +562,7 @@ impl ServerEvent {
             | Self::ProfileUpdated { .. }
             | Self::PresenceChanged { .. }
             | Self::VoiceStateUpdate { .. }
+            | Self::MentionReceived { .. }
             | Self::ForceDisconnect { .. } => None,
         }
     }
@@ -564,6 +598,7 @@ impl ServerEvent {
             | Self::ServerUpdated { .. }
             | Self::ModerationSettingsUpdated { .. }
             | Self::DmCreated { .. }
+            | Self::MentionReceived { .. }
             | Self::VoiceStateUpdate { .. }
             | Self::ForceDisconnect { .. } => {}
         }
@@ -616,6 +651,7 @@ mod tests {
                         system_event_key: None,
                         moderated_at: None,
                         moderation_reason: None,
+                        mentions: vec![],
                         created_at: Utc::now(),
                     },
                     channel_access: None,
@@ -742,6 +778,7 @@ mod tests {
                 system_event_key: None,
                 moderated_at: None,
                 moderation_reason: None,
+                mentions: vec![],
                 created_at: Utc::now(),
             },
             channel_access: None,
@@ -752,6 +789,48 @@ mod tests {
 
         assert_eq!(deserialized.event_name(), "message.created");
         assert_eq!(deserialized.sender_id(), event.sender_id());
+    }
+
+    #[test]
+    fn mention_received_event_name_and_routing() {
+        let sender = test_user_id();
+        let target = test_user_id();
+        let event = ServerEvent::MentionReceived {
+            sender_id: sender.clone(),
+            target_user_id: target.clone(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message_id: MessageId::new(Uuid::new_v4()),
+        };
+        assert_eq!(event.event_name(), "mention.received");
+        // Targeted: rides the target_user_id delivery path.
+        assert_eq!(event.target_user_id(), Some(&target));
+        assert_eq!(event.sender_id(), &sender);
+        // Server-scoped id present but the SSE filter checks target first.
+        assert!(event.server_id().is_some());
+        // Never carries private-channel routing metadata.
+        assert!(event.channel_access().is_none());
+    }
+
+    #[test]
+    fn mention_received_tagged_union_round_trip() {
+        let event = ServerEvent::MentionReceived {
+            sender_id: test_user_id(),
+            target_user_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message_id: MessageId::new(Uuid::new_v4()),
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "mentionReceived");
+        assert!(json["senderId"].is_string());
+        assert!(json["targetUserId"].is_string());
+        assert!(json["channelId"].is_string());
+        assert!(json["messageId"].is_string());
+
+        let back: ServerEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(back.event_name(), "mention.received");
+        assert_eq!(back.target_user_id(), event.target_user_id());
     }
 
     /// A public-channel event (`channel_access: None`) MUST omit the key

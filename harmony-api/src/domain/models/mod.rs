@@ -34,7 +34,7 @@ pub use ids::{
 pub use invite::Invite;
 pub use megolm_session::MegolmSession;
 pub use member::ServerMember;
-pub use message::{Message, MessageType, ParentMessagePreview};
+pub use message::{MentionedUser, Message, MessageType, ParentMessagePreview};
 pub use message_with_author::MessageWithAuthor;
 pub use moderation::{ModerationRetry, ServerModerationSettings};
 pub use plan::{Plan, PlanLimits, ResourceKind};

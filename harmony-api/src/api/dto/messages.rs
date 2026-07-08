@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::domain::models::{
-    ChannelId, MessageId, MessageType, MessageWithAuthor, ParentMessagePreview, ReactionSummary,
-    UserId,
+    ChannelId, MentionedUser, MessageId, MessageType, MessageWithAuthor, ParentMessagePreview,
+    ReactionSummary, UserId,
 };
 
 /// Request body for sending a new message.
@@ -22,6 +22,16 @@ pub struct SendMessageRequest {
     /// Parent message ID for reply threading. Omit for top-level messages.
     #[serde(default)]
     pub parent_message_id: Option<MessageId>,
+    /// Users mentioned in this message. ONLY honored when `encrypted = true`
+    /// (the server cannot parse ciphertext, so the client parses pre-encryption).
+    /// For plaintext messages the server parses `<@user_id>` markers itself and
+    /// this field is IGNORED. Max 10 entries (`MAX_MENTIONS`).
+    ///
+    /// Clients MUST omit this key entirely when there are no mentions — never send
+    /// `[]` or `null` (house rule; also minimizes the `deny_unknown_fields`
+    /// version-skew surface, spec §8).
+    #[serde(default)]
+    pub mentioned_user_ids: Option<Vec<UserId>>,
 }
 
 /// Request body for editing a message.
@@ -83,19 +93,56 @@ pub struct MessageResponse {
     /// Why `AutoMod` flagged this message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub moderation_reason: Option<String>,
+    /// Users mentioned in this message, resolved to display data (server-validated:
+    /// deduplicated, author-stripped, channel-access-gated). Drives pill labels,
+    /// the mention row highlight and the `mentions` notification level. Users who
+    /// left the server still appear (nickname null); deleted accounts are omitted.
+    pub mentions: Vec<MentionedUserResponse>,
     pub created_at: DateTime<Utc>,
+}
+
+/// A user mentioned in a message, resolved to display data (mirrors
+/// `MemberResponse` field naming).
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MentionedUserResponse {
+    pub user_id: UserId,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub nickname: Option<String>,
+}
+
+impl From<MentionedUser> for MentionedUserResponse {
+    fn from(m: MentionedUser) -> Self {
+        Self {
+            user_id: m.user_id,
+            username: m.username,
+            display_name: m.display_name,
+            nickname: m.nickname,
+        }
+    }
 }
 
 impl From<MessageWithAuthor> for MessageResponse {
     fn from(mwa: MessageWithAuthor) -> Self {
+        let mentions = mwa
+            .mentions
+            .into_iter()
+            .map(MentionedUserResponse::from)
+            .collect();
+        let reactions = mwa.reactions;
+        let parent_message = mwa.parent_message;
+        let author_username = mwa.author_username;
+        let author_display_name = mwa.author_display_name;
+        let author_avatar_url = mwa.author_avatar_url;
         let m = mwa.message;
         Self {
             id: m.id,
             channel_id: m.channel_id,
             author_id: m.author_id,
-            author_username: mwa.author_username,
-            author_display_name: mwa.author_display_name,
-            author_avatar_url: mwa.author_avatar_url,
+            author_username,
+            author_display_name,
+            author_avatar_url,
             content: m.content,
             edited_at: m.edited_at,
             deleted_by: m.deleted_by,
@@ -103,11 +150,12 @@ impl From<MessageWithAuthor> for MessageResponse {
             sender_device_id: m.sender_device_id,
             message_type: m.message_type,
             system_event_key: m.system_event_key,
-            reactions: mwa.reactions,
+            reactions,
             parent_message_id: m.parent_message_id,
-            parent_message: mwa.parent_message,
+            parent_message,
             moderated_at: m.moderated_at,
             moderation_reason: m.moderation_reason,
+            mentions,
             created_at: m.created_at,
         }
     }
@@ -175,6 +223,7 @@ mod tests {
                 moderated_at: None,
                 moderation_reason: None,
                 original_content: None,
+                mentioned_user_ids: vec![],
                 created_at: Utc::now(),
             },
             author_username: "alice".to_string(),
@@ -182,6 +231,7 @@ mod tests {
             author_avatar_url: None,
             reactions: vec![],
             parent_message: None,
+            mentions: vec![],
         }
     }
 

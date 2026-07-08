@@ -132,6 +132,9 @@ export function useSendMessage(
         encrypted: false,
         messageType: 'default',
         reactions: [],
+        // WHY: The optimistic entry has no resolved mentions yet; the server
+        // echo populates them. Empty keeps the type satisfied (spec §5.2).
+        mentions: [],
         parentMessageId: input.parentMessageId,
         parentMessage,
       } satisfies MessageResponse

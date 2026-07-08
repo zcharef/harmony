@@ -1,0 +1,67 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                sm.user_id,\n                sm.server_id,\n                p.username,\n                p.display_name,\n                p.avatar_url,\n                sm.nickname,\n                sm.role as \"role!\",\n                sm.joined_at\n            FROM server_members sm\n            INNER JOIN profiles p ON p.id = sm.user_id\n            WHERE sm.server_id = $1\n              AND (\n                  p.username ILIKE $2\n                  OR p.display_name ILIKE $2\n                  OR sm.nickname ILIKE $2\n              )\n            ORDER BY (p.username ILIKE $3) DESC, sm.joined_at ASC\n            LIMIT $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "nickname",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "role!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b40bd396ba3d3e5b60f959783fa60e4b78e8c486a1be8438b77ea7817ebdd9ef"
+}

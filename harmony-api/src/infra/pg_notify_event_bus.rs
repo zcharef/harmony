@@ -332,6 +332,7 @@ mod tests {
                 system_event_key: None,
                 moderated_at: None,
                 moderation_reason: None,
+                mentions: vec![],
                 created_at: Utc::now(),
             },
             channel_access: None,

@@ -16,8 +16,8 @@ use super::dto::{
     DeviceListResponse, DeviceResponse, DmLastMessageResponse, DmListItem, DmListQuery,
     DmListResponse, DmRecipientResponse, DmResponse, EditMessageRequest, InvitePreviewResponse,
     InviteResponse, JoinServerRequest, KeyCountResponse, MarkReadRequest, MegolmSessionResponse,
-    MemberListQuery, MemberListResponse, MemberResponse, MessageListQuery, MessageListResponse,
-    MessageResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
+    MemberListQuery, MemberListResponse, MemberResponse, MentionedUserResponse, MessageListQuery,
+    MessageListResponse, MessageResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
     RedeemDesktopAuthRequest, RedeemDesktopAuthResponse, RegisterDeviceRequest, SendMessageRequest,
     ServerListResponse, ServerResponse, TransferOwnershipRequest, UpdateChannelRequest,
     UpdateProfileRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
@@ -186,6 +186,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             MessageResponse,
             MessageListResponse,
             MessageListQuery,
+            MentionedUserResponse,
             // Reaction DTOs
             super::handlers::reactions::AddReactionRequest,
             ReactionSummary,

@@ -46,6 +46,9 @@ function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): Messa
     moderatedAt: payload.moderatedAt ?? undefined,
     moderationReason: payload.moderationReason ?? undefined,
     reactions: [],
+    // WHY: The server-resolved mentions ride the SSE payload; default to []
+    // for older instances that omit the field during rollout (spec §5.3).
+    mentions: payload.mentions ?? [],
   }
 }
 
