@@ -283,6 +283,36 @@ pub async fn update_my_profile(
         )
         .await?;
 
+    // WHY: Routing metadata so the SSE layer delivers this only to users
+    // sharing a server or DM with the subject (redacted before it reaches
+    // clients). Queried here because the handler, unlike the SSE stream, has no
+    // live membership snapshot.
+    // WHY fail-open (not `?`): the profile is already persisted — failing the
+    // request here would leave the DB updated but the event unpublished. Empty
+    // metadata = broadcast fallback, same pattern as presence.rs (ADR-027:
+    // never silently lose the signal).
+    let server_ids = match state.server_service().list_all_memberships(&user_id).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "profile update: membership lookup failed — broadcasting unscoped profile event"
+            );
+            Vec::new()
+        }
+    };
+
+    // WHY: The event carries the NEW current values (a full snapshot) so every
+    // observer rehydrates the subject's identity everywhere it is cached.
+    state.event_bus().publish(ServerEvent::ProfileUpdated {
+        sender_id: user_id.clone(),
+        user_id,
+        display_name: profile.display_name.clone(),
+        avatar_url: profile.avatar_url.clone(),
+        custom_status: profile.custom_status.clone(),
+        server_ids,
+    });
+
     Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
 }
 

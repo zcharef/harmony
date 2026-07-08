@@ -32,6 +32,7 @@ export const SSE_EVENT_NAMES = [
   'server.moderation_settings_updated',
   'server.updated',
   'dm.created',
+  'profile.updated',
   'typing.started',
   'presence.changed',
   'presence.sync',
@@ -213,6 +214,18 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     dm: dmPayloadSchema,
   }),
 
+  // Profiles — live identity rehydration (display name / avatar / custom status).
+  // WHY optional+nullable: the three fields are a FULL snapshot, so `null` means
+  // cleared; older API instances may omit a field during a rolling deploy.
+  z.object({
+    type: z.literal('profileUpdated'),
+    senderId: z.string(),
+    userId: z.string(),
+    displayName: z.string().optional().nullable(),
+    avatarUrl: z.string().optional().nullable(),
+    customStatus: z.string().optional().nullable(),
+  }),
+
   // Ephemeral
   z.object({
     type: z.literal('typingStarted'),
@@ -220,6 +233,9 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     serverId: z.string(),
     channelId: z.string(),
     username: z.string(),
+    // WHY optional+nullable: resolved display name for the typing indicator;
+    // omitted by older API instances during a rolling deploy.
+    displayName: z.string().optional().nullable(),
   }),
   z.object({
     type: z.literal('presenceChanged'),
