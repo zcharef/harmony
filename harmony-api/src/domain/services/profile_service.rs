@@ -124,6 +124,12 @@ impl ProfileService {
     /// account) returns the profile unchanged — the same contract the
     /// `sync_profile` early return protects.
     ///
+    /// "Chosen at THIS signup" also covers the trigger's collision-suffixed
+    /// variant (`left(chosen, ..) || '_<hex>'`): a second signup with the same
+    /// offensive chosen name stores e.g. `slurword_ab12`, which never equals
+    /// the metadata — without this match the suffixed slur would escape
+    /// remediation forever. See [`is_collision_suffixed_variant`].
+    ///
     /// # Errors
     /// Returns a repository error if persisting the regenerated username fails.
     /// Deliberately NOT swallowed: a silent failure would leave the offensive
@@ -140,7 +146,10 @@ impl ProfileService {
         // WHY lowercased: the JWT carries the raw client value (may be
         // mixed-case) while the trigger stores lower(...); the stored username
         // is always lowercase (DB CHECK constraint).
-        if meta_username.to_lowercase() != profile.username {
+        let meta_lower = meta_username.to_lowercase();
+        if meta_lower != profile.username
+            && !is_collision_suffixed_variant(&profile.username, &meta_lower)
+        {
             return Ok(profile);
         }
 
@@ -336,6 +345,48 @@ impl ProfileService {
 fn generate_safe_username(user_id: &UserId) -> String {
     let hex = user_id.0.as_simple().to_string();
     format!("user_{}", &hex[..12])
+}
+
+/// Whether `stored` is the signup trigger's collision-suffixed variant of the
+/// freshly-chosen `meta_lower` username.
+///
+/// The trigger's unique-violation retry persists
+/// `left(chosen, 32 - length(suffix)) || '_' || <hex>` where the hex run is
+/// `left(gen_random_uuid()..., 3 + attempt)` — 4 to 6 chars across the 3
+/// retries. Treating that shape as "chosen at this signup" closes the F7 hole
+/// where a SECOND direct-signup with an already-taken offensive name stores
+/// `slurword_ab12`, which never equals the JWT metadata and would otherwise
+/// skip remediation forever.
+///
+/// Safe for grandfathered accounts: a shape match alone never remediates —
+/// the caller still requires the stored value to be reserved or to fail
+/// `check_hard`, and a coincidental `name_cafe`-style match only fires when
+/// the metadata prefix ALSO lines up.
+fn is_collision_suffixed_variant(stored: &str, meta_lower: &str) -> bool {
+    // The trigger only honors (and thus only collision-suffixes) a chosen
+    // username matching ^[a-z0-9_]{3,32}$; anything else fell back to the
+    // email-derived base. Checking it here also guarantees `meta_lower` is
+    // ASCII, making the byte slice below panic-free.
+    let meta_is_honorable = (3..=32).contains(&meta_lower.len())
+        && meta_lower
+            .chars()
+            .all(|c| matches!(c, 'a'..='z' | '0'..='9' | '_'));
+    if !meta_is_honorable {
+        return false;
+    }
+
+    let Some((base, hex)) = stored.rsplit_once('_') else {
+        return false;
+    };
+    let hex_is_suffix_shaped =
+        (4..=6).contains(&hex.len()) && hex.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'));
+    if !hex_is_suffix_shaped {
+        return false;
+    }
+
+    // Mirror the trigger's truncation: left(chosen, 32 - length('_' || hex)).
+    let truncated_len = (32 - 1 - hex.len()).min(meta_lower.len());
+    base == &meta_lower[..truncated_len]
 }
 
 #[cfg(test)]
@@ -1029,5 +1080,113 @@ mod tests {
             profile.username
         );
         assert_eq!(repo.update_username_calls.load(Ordering::SeqCst), 1);
+    }
+
+    // ── collision-suffixed variants (second signup with the same name) ────
+    //
+    // The trigger's unique-violation retry stores `left(chosen, ..) || '_<hex>'`,
+    // so the SECOND direct-signup with an already-taken offensive name persists
+    // e.g. `slurword_ab12` — which never equals the JWT metadata. These tests
+    // pin that the suffixed shape still counts as "chosen at this signup".
+
+    #[tokio::test]
+    async fn remediate_regenerates_collision_suffixed_offensive_name() {
+        let (svc, repo) = remediation_fixture(ContentFilter::from_words(&["slurword"]));
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let profile = svc
+            .remediate_bypassed_username(profile_named(&user_id, "slurword_ab12"), Some("slurword"))
+            .await
+            .unwrap();
+
+        assert!(
+            profile.username.starts_with("user_"),
+            "collision-suffixed slur must be regenerated: {}",
+            profile.username
+        );
+        assert_eq!(repo.update_username_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn remediate_regenerates_collision_suffixed_truncated_base() {
+        // A 32-char chosen name gets truncated by the trigger to make room for
+        // the suffix: stored = left(chosen, 32 - 5) || '_ab12'.
+        let (svc, repo) = remediation_fixture(ContentFilter::from_words(&["slurword"]));
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let chosen = format!("slurword{}", "a".repeat(24)); // 32 chars
+        let stored = format!("{}_ab12", &chosen[..27]); // 32 chars total
+
+        let profile = svc
+            .remediate_bypassed_username(profile_named(&user_id, &stored), Some(&chosen))
+            .await
+            .unwrap();
+
+        assert!(
+            profile.username.starts_with("user_"),
+            "truncated collision-suffixed slur must be regenerated: {}",
+            profile.username
+        );
+        assert_eq!(repo.update_username_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn remediate_noop_collision_suffixed_but_clean() {
+        // Shape match alone must never remediate — the stored value still has
+        // to be reserved or offensive.
+        let (svc, repo) = remediation_fixture(ContentFilter::from_words(&["slurword"]));
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let profile = svc
+            .remediate_bypassed_username(profile_named(&user_id, "goodname_ab12"), Some("goodname"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            profile.username, "goodname_ab12",
+            "clean suffixed name must pass through"
+        );
+        assert_eq!(repo.update_username_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn remediate_noop_when_suffix_not_hex_shaped() {
+        // Grandfathered protection: a rename that merely ends in `_word` is NOT
+        // the trigger's shape (suffix must be 4-6 lowercase hex chars).
+        let (svc, repo) = remediation_fixture(ContentFilter::from_words(&["slurword"]));
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let profile = svc
+            .remediate_bypassed_username(profile_named(&user_id, "slurword_wxyz"), Some("slurword"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            profile.username, "slurword_wxyz",
+            "non-hex suffix must be untouched"
+        );
+        assert_eq!(repo.update_username_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn remediate_noop_when_suffixed_base_differs_from_metadata() {
+        // Grandfathered protection: the prefix must line up with the metadata,
+        // otherwise the account renamed since signup and is never touched.
+        let (svc, repo) = remediation_fixture(ContentFilter::from_words(&["slurword"]));
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let profile = svc
+            .remediate_bypassed_username(
+                profile_named(&user_id, "slurword_ab12"),
+                Some("othername"),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            profile.username, "slurword_ab12",
+            "prefix mismatch must be untouched"
+        );
+        assert_eq!(repo.update_username_calls.load(Ordering::SeqCst), 0);
     }
 }
