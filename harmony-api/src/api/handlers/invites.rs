@@ -10,7 +10,9 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::MemberPayload;
-use crate::domain::models::{InviteCode, ServerEvent, ServerId};
+use crate::domain::models::{
+    AnalyticsEvent, AnalyticsEventName, InviteCode, ServerEvent, ServerId,
+};
 
 /// Create a new invite for a server.
 ///
@@ -63,8 +65,17 @@ pub async fn create_invite(
 
     let invite = state
         .invite_service()
-        .create_invite(server_id, user_id, req.max_uses, expires_at)
+        .create_invite(server_id.clone(), user_id.clone(), req.max_uses, expires_at)
         .await?;
+
+    // §10 referral funnel: K-factor numerator (fire-and-forget).
+    super::track(
+        &state,
+        AnalyticsEvent::new(AnalyticsEventName::InviteCreated)
+            .user(user_id)
+            .server(server_id)
+            .properties(serde_json::json!({ "code": invite.code.clone() })),
+    );
 
     Ok((StatusCode::CREATED, Json(InviteResponse::from(invite))))
 }
@@ -148,6 +159,24 @@ pub async fn join_server(
         .invite_service()
         .join_via_invite(&code, &user_id)
         .await?;
+
+    // §10 referral + activation funnel: invite conversion and the joined-a-
+    // server milestone (fire-and-forget). The inviter is derivable from the
+    // code via the invites/events log — no duplication here.
+    super::track(
+        &state,
+        AnalyticsEvent::new(AnalyticsEventName::InviteRedeemed)
+            .user(user_id.clone())
+            .server(server_id.clone())
+            .properties(serde_json::json!({ "code": code })),
+    );
+    super::track(
+        &state,
+        AnalyticsEvent::new(AnalyticsEventName::ServerJoined)
+            .user(user_id.clone())
+            .server(server_id.clone())
+            .properties(serde_json::json!({ "via": "invite" })),
+    );
 
     // WHY: Best-effort system message — announce the join in the default channel.
     // Must never fail the join itself. If the announcement fails (e.g. no default

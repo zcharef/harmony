@@ -11,7 +11,9 @@ use crate::api::dto::voice::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::{ChannelId, ServerEvent, VoiceAction, VoiceParticipant};
+use crate::domain::models::{
+    AnalyticsEvent, AnalyticsEventName, ChannelId, ServerEvent, VoiceAction, VoiceParticipant,
+};
 use crate::domain::services::resolve_channel_access_by_id;
 
 /// Join a voice channel. Returns a `LiveKit` token for the client.
@@ -141,6 +143,16 @@ pub async fn join_voice(
         user_id = %user_id,
         receivers,
         "emitted voice.state_update (joined)"
+    );
+
+    // §10 retention/WCU: voice joins are ephemeral in voice_sessions, so
+    // the durable trace lives in the analytics log (fire-and-forget).
+    super::track(
+        &state,
+        AnalyticsEvent::new(AnalyticsEventName::VoiceJoined)
+            .user(user_id)
+            .server(voice_token.server_id.clone())
+            .channel(voice_token.channel_id.clone()),
     );
 
     Ok((StatusCode::OK, Json(VoiceTokenResponse::from(voice_token))))

@@ -19,7 +19,10 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::AuthUser;
 use crate::api::state::AppState;
-use crate::domain::models::{ChannelAccessScope, Role, ServerEvent, ServerId, UserId, UserStatus};
+use crate::domain::models::{
+    AnalyticsEvent, AnalyticsEventName, ChannelAccessScope, Role, ServerEvent, ServerId, UserId,
+    UserStatus,
+};
 
 /// Ends the wrapped broadcast stream at the first `Lagged` error.
 ///
@@ -268,6 +271,14 @@ pub async fn sse_events(
         receivers,
         status = ?effective_status,
         "SSE connection established, presence broadcast"
+    );
+
+    // §10 traffic signal: session connect (fire-and-forget). Deliberately
+    // NOT a retention "meaningful action" — connecting to browse an empty
+    // server is not retention (Tempo).
+    super::track(
+        &state,
+        AnalyticsEvent::new(AnalyticsEventName::SessionConnected).user(user_id.clone()),
     );
 
     // Clone user_id for the heartbeat stream, guard, and unread query before moving into event closures.

@@ -1,0 +1,107 @@
+//! Analytics funnel events (growth-plan §10).
+//!
+//! Privacy contract: events carry IDs and small flag bags ONLY — never
+//! message content, IP addresses, user agents, or any other PII. The
+//! `user_signed_up` event is emitted by a DB trigger on profile creation
+//! (the one funnel point the API does not own) and is therefore absent
+//! from this enum.
+
+use std::fmt;
+
+use serde_json::Value;
+
+use crate::domain::models::{ChannelId, ServerId, UserId};
+
+/// Stable analytics event names (§10: "stable event names").
+///
+/// WHY an enum instead of strings: a typo'd event name silently fragments
+/// funnel data; the compiler is the cheapest guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalyticsEventName {
+    /// A user created a server (activation funnel: owner path).
+    ServerCreated,
+    /// A user joined a server (invite redemption or official auto-join).
+    ServerJoined,
+    /// A user sent their very first message (once per user, DB-deduped).
+    FirstMessage,
+    /// A member created an invite (referral funnel: K-factor numerator).
+    InviteCreated,
+    /// A user joined a server through an invite (K-factor conversion).
+    InviteRedeemed,
+    /// A user joined a voice channel (WCU + retention meaningful action).
+    VoiceJoined,
+    /// A user added a reaction (retention meaningful action).
+    ReactionAdded,
+    /// A user opened an SSE connection (traffic signal; NOT retention).
+    SessionConnected,
+}
+
+impl AnalyticsEventName {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ServerCreated => "server_created",
+            Self::ServerJoined => "server_joined",
+            Self::FirstMessage => "first_message",
+            Self::InviteCreated => "invite_created",
+            Self::InviteRedeemed => "invite_redeemed",
+            Self::VoiceJoined => "voice_joined",
+            Self::ReactionAdded => "reaction_added",
+            Self::SessionConnected => "session_connected",
+        }
+    }
+}
+
+impl fmt::Display for AnalyticsEventName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// One append-only funnel event row.
+#[derive(Debug, Clone)]
+pub struct AnalyticsEvent {
+    pub name: AnalyticsEventName,
+    pub user_id: Option<UserId>,
+    pub server_id: Option<ServerId>,
+    pub channel_id: Option<ChannelId>,
+    /// Small JSON bag of IDs/flags (e.g. `{"via":"invite"}`). Never PII.
+    pub properties: Value,
+}
+
+impl AnalyticsEvent {
+    #[must_use]
+    pub fn new(name: AnalyticsEventName) -> Self {
+        Self {
+            name,
+            user_id: None,
+            server_id: None,
+            channel_id: None,
+            properties: Value::Object(serde_json::Map::new()),
+        }
+    }
+
+    #[must_use]
+    pub fn user(mut self, user_id: UserId) -> Self {
+        self.user_id = Some(user_id);
+        self
+    }
+
+    #[must_use]
+    pub fn server(mut self, server_id: ServerId) -> Self {
+        self.server_id = Some(server_id);
+        self
+    }
+
+    #[must_use]
+    pub fn channel(mut self, channel_id: ChannelId) -> Self {
+        self.channel_id = Some(channel_id);
+        self
+    }
+
+    #[must_use]
+    pub fn properties(mut self, properties: Value) -> Self {
+        self.properties = properties;
+        self
+    }
+}

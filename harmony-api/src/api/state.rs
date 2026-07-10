@@ -8,9 +8,9 @@ use tokio::sync::Semaphore;
 
 use crate::domain::models::ServerId;
 use crate::domain::ports::{
-    BanRepository, ChannelRepository, ContentModerator, DesktopAuthRepository, EventBus,
-    MegolmSessionRepository, MemberRepository, MessageRepository, ModerationRetryRepository,
-    PlanLimitChecker, ServerRepository, VoiceSessionRepository,
+    AnalyticsRecorder, BanRepository, ChannelRepository, ContentModerator, DesktopAuthRepository,
+    EventBus, MegolmSessionRepository, MemberRepository, MessageRepository,
+    ModerationRetryRepository, PlanLimitChecker, ServerRepository, VoiceSessionRepository,
 };
 use crate::domain::services::{
     ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
@@ -100,6 +100,8 @@ pub struct AppState {
     voice_session_repository: Option<Arc<dyn VoiceSessionRepository>>,
     /// Official Harmony server ID. When set, `sync_profile` auto-joins new users.
     official_server_id: Option<ServerId>,
+    /// Append-only analytics event recorder (growth-plan §10 funnel).
+    analytics_recorder: Arc<dyn AnalyticsRecorder>,
 }
 
 // WHY: Manual Debug because `dyn MemberRepository` needs explicit impl through Arc.
@@ -146,6 +148,7 @@ impl std::fmt::Debug for AppState {
                 &self.voice_session_repository.is_some(),
             )
             .field("official_server_id", &self.official_server_id)
+            .field("analytics_recorder", &self.analytics_recorder)
             .finish()
     }
 }
@@ -188,6 +191,7 @@ impl AppState {
         voice_service: Option<Arc<VoiceService>>,
         voice_session_repository: Option<Arc<dyn VoiceSessionRepository>>,
         official_server_id: Option<ServerId>,
+        analytics_recorder: Arc<dyn AnalyticsRecorder>,
     ) -> Self {
         Self {
             pool,
@@ -224,6 +228,7 @@ impl AppState {
             voice_service,
             voice_session_repository,
             official_server_id,
+            analytics_recorder,
         }
     }
 
@@ -419,6 +424,13 @@ impl AppState {
     #[must_use]
     pub fn official_server_id(&self) -> Option<&ServerId> {
         self.official_server_id.as_ref()
+    }
+
+    /// Access the analytics recorder as a cloneable `Arc` (for `tokio::spawn`
+    /// captures in the fire-and-forget `track` helper).
+    #[must_use]
+    pub fn analytics_recorder(&self) -> &Arc<dyn AnalyticsRecorder> {
+        &self.analytics_recorder
     }
 
     /// Access the Postgres connection pool.

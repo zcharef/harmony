@@ -11,7 +11,9 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::{ChannelAccessScope, ServerPayload};
-use crate::domain::models::{ChannelId, Role, ServerEvent, ServerId, VoiceAction};
+use crate::domain::models::{
+    AnalyticsEvent, AnalyticsEventName, ChannelId, Role, ServerEvent, ServerId, VoiceAction,
+};
 use crate::domain::services::resolve_channel_access_by_id;
 
 /// Create a new server.
@@ -41,8 +43,16 @@ pub async fn create_server(
 ) -> Result<impl IntoResponse, ApiError> {
     let server = state
         .server_service()
-        .create_server(req.name, user_id)
+        .create_server(req.name, user_id.clone())
         .await?;
+
+    // §10 funnel: owner activation path (fire-and-forget).
+    super::track(
+        &state,
+        AnalyticsEvent::new(AnalyticsEventName::ServerCreated)
+            .user(user_id)
+            .server(server.id.clone()),
+    );
 
     Ok((StatusCode::CREATED, Json(ServerResponse::from(server))))
 }

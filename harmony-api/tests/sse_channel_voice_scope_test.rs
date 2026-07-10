@@ -417,6 +417,10 @@ async fn build_handler_app_state(pool: PgPool) -> AppState {
     let (presence_inner, _presence_write_rx) = PgPresenceTracker::new(instance_id, pool.clone());
     let presence_tracker = Arc::new(presence_inner);
 
+    let analytics_recorder: Arc<dyn harmony_api::domain::ports::AnalyticsRecorder> = Arc::new(
+        harmony_api::infra::postgres::PgAnalyticsRecorder::new(pool.clone()),
+    );
+
     AppState::new(
         pool,
         SecretString::from(TEST_JWT_SECRET.to_string()),
@@ -451,6 +455,7 @@ async fn build_handler_app_state(pool: PgPool) -> AppState {
         voice_service,
         Some(voice_repo),
         None, // official_server_id
+        analytics_recorder,
     )
 }
 

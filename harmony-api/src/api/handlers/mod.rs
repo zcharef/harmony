@@ -20,6 +20,7 @@ pub mod typing;
 pub mod user_preferences;
 pub mod voice;
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
@@ -28,9 +29,29 @@ use utoipa::ToSchema;
 
 use crate::api::state::AppState;
 use crate::domain::models::server_event::{MessagePayload, ServerEvent};
-use crate::domain::models::{ServerId, UserId};
+use crate::domain::models::{AnalyticsEvent, ServerId, UserId};
 use crate::domain::services::resolve_channel_access;
 use crate::infra::postgres;
+
+/// Fire-and-forget funnel event emission (growth-plan §10).
+///
+/// WHY spawn: analytics must NEVER fail or slow down the user action it
+/// instruments (ADR-027). The insert runs detached; failures are logged
+/// as warnings and the event is dropped — metrics tolerate gaps, user
+/// actions do not tolerate failures.
+pub(crate) fn track(state: &AppState, event: AnalyticsEvent) {
+    let recorder = Arc::clone(state.analytics_recorder());
+    tokio::spawn(async move {
+        let name = event.name;
+        if let Err(error) = recorder.record(event).await {
+            tracing::warn!(
+                event = %name,
+                error = %error,
+                "analytics event insert failed — event dropped"
+            );
+        }
+    });
+}
 
 /// Fallback handler for unmatched routes.
 ///

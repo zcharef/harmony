@@ -7,7 +7,9 @@ use utoipa::ToSchema;
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::{ChannelId, MessageId, ServerEvent};
+use crate::domain::models::{
+    AnalyticsEvent, AnalyticsEventName, ChannelId, MessageId, ServerEvent,
+};
 use crate::domain::services::resolve_channel_access;
 
 /// Path parameters for reaction operations.
@@ -80,11 +82,11 @@ pub async fn add_reaction(
 
     let event = ServerEvent::ReactionAdded {
         sender_id: user_id.clone(),
-        server_id: channel.server_id,
+        server_id: channel.server_id.clone(),
         channel_id: path.channel_id.clone(),
         message_id: path.message_id.clone(),
         emoji: req.emoji,
-        user_id,
+        user_id: user_id.clone(),
         username: profile.username,
         channel_access,
     };
@@ -94,6 +96,17 @@ pub async fn add_reaction(
         message_id = %path.message_id,
         receivers,
         "emitted reaction.added"
+    );
+
+    // §10 retention: reactions are a meaningful action, and reaction rows
+    // are deleted on un-react — the durable trace is the analytics log
+    // (fire-and-forget). No emoji in the payload: IDs only.
+    super::track(
+        &state,
+        AnalyticsEvent::new(AnalyticsEventName::ReactionAdded)
+            .user(user_id)
+            .server(channel.server_id)
+            .channel(path.channel_id),
     );
 
     Ok(StatusCode::NO_CONTENT)
