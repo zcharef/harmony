@@ -2,10 +2,12 @@ import type { InfiniteData } from '@tanstack/react-query'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import type {
+  AttachmentResponse,
   DmListItem,
   MentionedUserResponse,
   MessageListResponse,
   MessageResponse,
+  NewAttachmentRequest,
   ProfileResponse,
 } from '@/lib/api'
 import { sendMessage } from '@/lib/api'
@@ -28,6 +30,33 @@ export interface SendMessageInput {
    * carries the ids (plaintext is re-parsed server-side, authoritatively).
    */
   mentions?: MentionedUserResponse[]
+  /**
+   * Files already uploaded to the `attachments` bucket by the composer tray
+   * (spec §5.2). The key is OMITTED entirely when empty — never [] or null
+   * (minimizes the deny_unknown_fields version-skew surface, §8). Plaintext
+   * channels only; the composer hides attach UI in encrypted contexts (D7).
+   */
+  attachments?: NewAttachmentRequest[]
+}
+
+/**
+ * Builds an optimistic `AttachmentResponse` from the uploaded metadata so the
+ * sender's own images render instantly; the server echo swaps in the real row
+ * (with its authoritative AttachmentId) on success.
+ */
+function toOptimisticAttachment(attachment: NewAttachmentRequest): AttachmentResponse {
+  return {
+    id: `${OPTIMISTIC_ID_PREFIX}${crypto.randomUUID()}`,
+    url: attachment.url,
+    mime: attachment.mime,
+    size: attachment.size,
+    ...(attachment.width !== undefined && attachment.width !== null
+      ? { width: attachment.width }
+      : {}),
+    ...(attachment.height !== undefined && attachment.height !== null
+      ? { height: attachment.height }
+      : {}),
+  }
 }
 
 export interface SendMessageEncryption {
@@ -90,6 +119,7 @@ export function useSendMessage(
         // The key is OMITTED entirely when empty — never [] or null (spec §3.1;
         // minimizes the deny_unknown_fields version-skew surface, §8).
         const mentionedUserIds = (input.mentions ?? []).map((m) => m.userId)
+        const attachments = input.attachments ?? []
         const { data } = await sendMessage({
           path: { id: channelId },
           body: {
@@ -98,6 +128,7 @@ export function useSendMessage(
             senderDeviceId: encrypted.senderDeviceId,
             parentMessageId: input.parentMessageId,
             ...(mentionedUserIds.length > 0 ? { mentionedUserIds } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
           },
           throwOnError: true,
         })
@@ -110,9 +141,14 @@ export function useSendMessage(
       // WHY plaintext here is intentional: no encryption context means a channel
       // message or a web DM (plaintext by design). No mention field either —
       // the server parses `<@uuid>` markers itself, authoritatively (spec §3.1).
+      const attachments = input.attachments ?? []
       const { data } = await sendMessage({
         path: { id: channelId },
-        body: { content: input.content, parentMessageId: input.parentMessageId },
+        body: {
+          content: input.content,
+          parentMessageId: input.parentMessageId,
+          ...(attachments.length > 0 ? { attachments } : {}),
+        },
         throwOnError: true,
       })
       return data
@@ -161,9 +197,10 @@ export function useSendMessage(
         // render instantly (spec §5.2); the server echo swaps in the
         // authoritative (validated, access-gated) list on success.
         mentions: input.mentions ?? [],
-        // WHY empty: the composer attachment pipeline lands in part 2; text
-        // sends carry no attachments and the server echo is authoritative.
-        attachments: [],
+        // WHY seed from the uploaded metadata: the sender's own images render
+        // instantly (temp AttachmentIds); the server echo swaps in the real
+        // rows on success (REACTIVITY — no refresh, spec §5.2).
+        attachments: (input.attachments ?? []).map(toOptimisticAttachment),
         parentMessageId: input.parentMessageId,
         parentMessage,
       } satisfies MessageResponse

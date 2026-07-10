@@ -36,6 +36,45 @@ export const ALLOWED_ATTACHMENT_TYPES: readonly string[] = [
  */
 export const ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
 
+/**
+ * Hard local cap on the number of files per message — the Creator tier
+ * ceiling. Lower per-plan caps (Free 1 / Supporter 5) are enforced by the
+ * API at send time and surfaced inline; the composer only mirrors the ceiling
+ * the bucket/API would reject anyway (spec §5.1 — no client-side plan query).
+ */
+export const MAX_ATTACHMENTS_PER_MESSAGE = 10
+
+export type AttachmentUploadErrorCode =
+  | 'invalidType'
+  | 'tooLarge'
+  | 'processingFailed'
+  | 'uploadFailed'
+
+/**
+ * Typed error for the attachment upload pipeline so the composer can map each
+ * failure to a specific i18n message (inline feedback, ADR-045). Mirrors
+ * `AvatarUploadError`.
+ */
+export class AttachmentUploadError extends Error {
+  readonly code: AttachmentUploadErrorCode
+
+  constructor(code: AttachmentUploadErrorCode) {
+    super(`attachment_upload_${code}`)
+    this.name = 'AttachmentUploadError'
+    this.code = code
+  }
+}
+
+/**
+ * Validates an attachment candidate file against the bucket allowlist and the
+ * hard 100MB ceiling. Returns the error code, or `null` when acceptable.
+ */
+export function validateAttachmentFile(file: File): AttachmentUploadErrorCode | null {
+  if (ALLOWED_ATTACHMENT_TYPES.includes(file.type) === false) return 'invalidType'
+  if (file.size > ATTACHMENT_MAX_BYTES) return 'tooLarge'
+  return null
+}
+
 /** Public URL marker for objects in the attachments bucket. */
 const ATTACHMENT_PUBLIC_PATH_MARKER = '/storage/v1/object/public/attachments/'
 

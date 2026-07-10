@@ -2,12 +2,26 @@ import { describe, expect, it } from 'vitest'
 import {
   ALLOWED_ATTACHMENT_TYPES,
   ATTACHMENT_MAX_BYTES,
+  AttachmentUploadError,
   attachmentFilename,
   humanFileSize,
   isEmbeddableImageUrl,
   isImageMime,
+  MAX_ATTACHMENTS_PER_MESSAGE,
   parseAttachmentStoragePath,
+  validateAttachmentFile,
 } from './attachment-file'
+
+function makeFile(sizeBytes: number, type: string, name = 'f.png'): File {
+  return new File([new Uint8Array(Math.min(sizeBytes, 8))], name, { type })
+}
+
+/** WHY size override: allocating 100MB in a test is wasteful — stub .size. */
+function makeSizedFile(sizeBytes: number, type: string): File {
+  const file = new File([new Uint8Array(8)], 'big.png', { type })
+  Object.defineProperty(file, 'size', { value: sizeBytes })
+  return file
+}
 
 const BUCKET_URL =
   'https://xyz.supabase.co/storage/v1/object/public/attachments/user-uuid/file-uuid.webp'
@@ -95,9 +109,39 @@ describe('humanFileSize', () => {
   })
 })
 
+describe('validateAttachmentFile', () => {
+  it('accepts an allowlisted image under the hard cap', () => {
+    expect(validateAttachmentFile(makeFile(1024, 'image/png'))).toBeNull()
+  })
+
+  it('accepts an allowlisted non-image (pdf)', () => {
+    expect(validateAttachmentFile(makeFile(1024, 'application/pdf', 'r.pdf'))).toBeNull()
+  })
+
+  it('rejects a non-allowlisted mime as invalidType', () => {
+    expect(validateAttachmentFile(makeFile(1024, 'image/svg+xml', 'x.svg'))).toBe('invalidType')
+  })
+
+  it('rejects a file over the 100MB ceiling as tooLarge', () => {
+    expect(validateAttachmentFile(makeSizedFile(ATTACHMENT_MAX_BYTES + 1, 'image/png'))).toBe(
+      'tooLarge',
+    )
+  })
+})
+
+describe('AttachmentUploadError', () => {
+  it('carries the code for inline i18n mapping', () => {
+    const err = new AttachmentUploadError('processingFailed')
+    expect(err).toBeInstanceOf(Error)
+    expect(err.code).toBe('processingFailed')
+    expect(err.name).toBe('AttachmentUploadError')
+  })
+})
+
 describe('constants', () => {
   it('mirrors the bucket hard cap (100 MB) and allowlist shape', () => {
     expect(ATTACHMENT_MAX_BYTES).toBe(104857600)
+    expect(MAX_ATTACHMENTS_PER_MESSAGE).toBe(10)
     // Every entry the render path special-cases is allowlisted.
     for (const mime of ['image/png', 'image/gif', 'application/pdf', 'application/zip']) {
       expect(ALLOWED_ATTACHMENT_TYPES).toContain(mime)

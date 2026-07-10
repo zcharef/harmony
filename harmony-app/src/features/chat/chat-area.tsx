@@ -46,14 +46,17 @@ import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
 import { useChannelNotificationLevel } from '@/features/notifications'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import type { DmRecipientResponse, MessageResponse } from '@/lib/api'
+import { getApiErrorDetail } from '@/lib/api-error'
 import { encrypt } from '@/lib/crypto'
 import { cacheMessage } from '@/lib/crypto-cache'
 import { resolveDisplayName } from '@/lib/display-name'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
+import { AttachmentTray } from './components/attachment-tray'
 import { MentionAutocomplete, mentionOptionId } from './components/mention-autocomplete'
 import { EmojiPickerPopover } from './emoji-picker-popover'
 import { useAddReaction } from './hooks/use-add-reaction'
+import { type ComposerAttachments, useComposerAttachments } from './hooks/use-composer-attachments'
 import { useDeleteMessage } from './hooks/use-delete-message'
 import { useEditMessage } from './hooks/use-edit-message'
 import type { UseMentionAutocompleteResult } from './hooks/use-mention-autocomplete'
@@ -67,6 +70,7 @@ import { OPTIMISTIC_ID_PREFIX, useSendMessage } from './hooks/use-send-message'
 import { useSlowMode } from './hooks/use-slow-mode'
 import { useTypingIndicator } from './hooks/use-typing-indicator'
 import { useUpdateNotificationSettings } from './hooks/use-update-notification-settings'
+import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE } from './lib/attachment-file'
 import { buildVirtualItems } from './lib/build-virtual-items'
 import { applyMentionMap } from './lib/mention-tokens'
 import { MessageItem } from './message-item'
@@ -442,6 +446,22 @@ function DateDivider({ label }: { label: string }) {
 }
 
 // WHY extracted: Keeps ChatArea below Biome's cognitive complexity limit of 15.
+/** Maps the composer's inline attachment error state to a localized string. */
+function useAttachmentInlineError(attachments: ComposerAttachments): string | null {
+  const { t } = useTranslation('chat')
+  if (attachments.sendError !== null) return attachments.sendError
+  switch (attachments.capError) {
+    case 'tooMany':
+      return t('attachTooMany', { max: MAX_ATTACHMENTS_PER_MESSAGE })
+    case 'tooLarge':
+      return t('attachTooLarge')
+    case 'unsupported':
+      return t('attachUnsupported')
+    default:
+      return null
+  }
+}
+
 function MessageInput({
   isInputDisabled,
   placeholder,
@@ -451,6 +471,8 @@ function MessageInput({
   onSendTyping,
   mention,
   textareaRef,
+  attachments,
+  attachmentsEnabled,
 }: {
   isInputDisabled: boolean
   placeholder: string
@@ -462,10 +484,85 @@ function MessageInput({
   mention: UseMentionAutocompleteResult
   /** WHY lifted: the autocomplete hook reads the caret from this node. */
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  /** Pending-attachment tray state (spec §5.2). */
+  attachments: ComposerAttachments
+  /** WHY a flag (not just isInputDisabled): attach UI is hidden in encrypted contexts (D7). */
+  attachmentsEnabled: boolean
 }) {
   const { t } = useTranslation('chat')
   const [isEmojiOpen, setIsEmojiOpen] = useState(false)
+  const [isDragActive, setIsDragActive] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const highlightedCandidate = mention.results[mention.highlightIndex]
+  const inlineError = useAttachmentInlineError(attachments)
+
+  // WHY canAttach gate: paste/drop/picker all vanish exactly when send does
+  // (read-only / no-permission → isInputDisabled) and in encrypted contexts.
+  const canAttach = attachmentsEnabled && !isInputDisabled
+  const { enqueueFiles } = attachments
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (!canAttach) return
+      // WHY not preventDefault unconditionally: a text paste must still paste
+      // text — only a file/image paste is intercepted (Discord parity, §6.3).
+      if (e.clipboardData.files.length > 0) {
+        e.preventDefault()
+        enqueueFiles(e.clipboardData.files)
+      }
+    },
+    [canAttach, enqueueFiles],
+  )
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      if (!canAttach) return
+      e.preventDefault()
+      setIsDragActive(true)
+    },
+    [canAttach],
+  )
+
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent) => {
+      if (!canAttach) return
+      e.preventDefault()
+      // WHY relatedTarget check: dragleave also fires when the cursor crosses
+      // onto a child (textarea, buttons) — only clear when the drag truly left
+      // the composer, otherwise the overlay flickers.
+      const related = e.relatedTarget
+      if (related instanceof Node && e.currentTarget.contains(related)) return
+      setIsDragActive(false)
+    },
+    [canAttach],
+  )
+
+  // WHY reset on gate close: if canAttach flips false mid-drag (channel switch
+  // to an encrypted context), the drop handlers detach and no dragleave fires —
+  // clear the overlay so it can't get stuck visible.
+  useEffect(() => {
+    if (!canAttach) setIsDragActive(false)
+  }, [canAttach])
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!canAttach) return
+      e.preventDefault()
+      setIsDragActive(false)
+      if (e.dataTransfer.files.length > 0) enqueueFiles(e.dataTransfer.files)
+    },
+    [canAttach, enqueueFiles],
+  )
+
+  const handlePick = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files
+      if (files !== null && files.length > 0) enqueueFiles(files)
+      // WHY reset: re-picking the same file must fire onChange again.
+      e.target.value = ''
+    },
+    [enqueueFiles],
+  )
 
   const handleEmojiSelect = useCallback(
     (emoji: string) => {
@@ -484,7 +581,30 @@ function MessageInput({
 
   return (
     <div className="px-4 pb-6 pt-1">
-      <div className="relative flex items-center rounded-lg bg-default-100">
+      {canAttach && (
+        <AttachmentTray items={attachments.items} onRemove={attachments.removeAttachment} />
+      )}
+      {inlineError !== null && (
+        <p role="alert" data-test="attachment-error" className="mb-1 px-1 text-xs text-danger">
+          {inlineError}
+        </p>
+      )}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: drop-zone wraps the composer; keyboard users attach via the picker button. */}
+      <div
+        className="relative flex items-center rounded-lg bg-default-100"
+        onDragOver={canAttach ? handleDragOver : undefined}
+        onDragLeave={canAttach ? handleDragLeave : undefined}
+        onDrop={canAttach ? handleDrop : undefined}
+      >
+        {isDragActive && (
+          <div
+            data-test="attachment-dropzone"
+            aria-live="polite"
+            className="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-primary bg-primary-50/90 text-sm font-medium text-primary"
+          >
+            {t('dropToAttach')}
+          </div>
+        )}
         <MentionAutocomplete
           isOpen={mention.isOpen}
           isLoading={mention.isLoading}
@@ -493,16 +613,32 @@ function MessageInput({
           onSelect={mention.insertMention}
           onClose={mention.close}
         />
-        {!isInputDisabled && (
-          <Button
-            variant="light"
-            isIconOnly
-            size="sm"
-            className="ml-1 shrink-0"
-            aria-label={t('attachFile')}
-          >
-            <PlusCircle className="h-5 w-5 text-default-500" />
-          </Button>
+        {canAttach && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              // WHY derive from the allowlist: the OS picker and the client
+              // validator agree, so a picked file is never rejected as
+              // "unsupported" right after the user chose it.
+              accept={ALLOWED_ATTACHMENT_TYPES.join(',')}
+              className="hidden"
+              data-test="attachment-file-input"
+              onChange={handlePick}
+            />
+            <Button
+              variant="light"
+              isIconOnly
+              size="sm"
+              className="ml-1 shrink-0"
+              aria-label={t('attachFile')}
+              data-test="attachment-picker"
+              onPress={() => fileInputRef.current?.click()}
+            >
+              <PlusCircle className="h-5 w-5 text-default-500" />
+            </Button>
+          </>
         )}
         <Textarea
           ref={textareaRef}
@@ -518,6 +654,7 @@ function MessageInput({
             onValueChange(v)
             onSendTyping()
           }}
+          onPaste={handlePaste}
           onKeyDown={isInputDisabled ? undefined : onKeyDown}
           aria-autocomplete="list"
           aria-expanded={mention.isOpen}
@@ -750,6 +887,8 @@ function ChatInputSection({
   onSendTyping,
   mention,
   textareaRef,
+  attachments,
+  attachmentsEnabled,
 }: {
   isBlocked: boolean
   isInputDisabled: boolean
@@ -764,6 +903,8 @@ function ChatInputSection({
   onSendTyping: () => void
   mention: UseMentionAutocompleteResult
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  attachments: ComposerAttachments
+  attachmentsEnabled: boolean
 }) {
   const { t: tCrypto } = useTranslation('crypto')
 
@@ -789,6 +930,8 @@ function ChatInputSection({
         onSendTyping={onSendTyping}
         mention={mention}
         textareaRef={textareaRef}
+        attachments={attachments}
+        attachmentsEnabled={attachmentsEnabled}
       />
     </>
   )
@@ -1056,9 +1199,16 @@ export function ChatArea({
     activeEncryption,
     syncFromServer,
   )
+  const { t } = useTranslation('chat')
   const [messageContent, setMessageContent] = useState('')
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null)
   const [isVerifyOpen, setIsVerifyOpen] = useState(false)
+
+  const attachments = useComposerAttachments()
+  // WHY hide attach UI in encrypted contexts: v1 ships plaintext attachments
+  // only; the API rejects attachments on encrypted messages (Decision D7).
+  // `activeEncryption` is defined exactly when the send path encrypts.
+  const attachmentsEnabled = activeEncryption === undefined
 
   // WHY here (not MessageInput): the send transform needs the mention map, and
   // the keyboard reducer must run BEFORE the Enter-to-send handler below.
@@ -1121,20 +1271,56 @@ export function ChatArea({
     channelName,
   )
 
-  function handleSend() {
+  async function handleSend() {
+    if (channelId === null || isInCooldown) return
     const trimmed = messageContent.trim()
-    if (trimmed.length === 0 || channelId === null || isInCooldown) return
+    const hasAttachments = attachments.isEmpty === false
+    // WHY allow empty content when files are attached: image-only messages are
+    // valid (Decision D10). Otherwise an empty send is a no-op.
+    if (trimmed.length === 0 && hasAttachments === false) return
+    // WHY block on a failed upload: never post a message referencing a file
+    // that never reached Storage — the user removes/retries the failed tile
+    // first (spec §6.2). Surfaced inline, not as a toast (ADR-028).
+    if (attachments.hasFailedUpload === true) {
+      attachments.setSendError(t('attachRemoveFailed'))
+      return
+    }
     const parentId = replyingTo?.id
+    // WHY await before clearing: resolveUploaded waits for every in-flight
+    // upload so the request never references an un-uploaded URL (spec §6.2).
+    // A null return means an upload failed (possibly during the await) → block
+    // the send and keep the tray so the user retries/removes the failed tile.
+    const uploaded = hasAttachments ? await attachments.resolveUploaded() : []
+    if (uploaded === null) {
+      attachments.setSendError(t('attachRemoveFailed'))
+      return
+    }
     setMessageContent('')
     setReplyingTo(null)
     // WHY at send time: the textarea always shows human-readable `@username`;
     // the `<@uuid>` markers exist only at rest and on the wire (spec §5.2).
     const { content, mentionedUsers } = applyMentionMap(trimmed, mention.mentionMapRef.current)
-    sendMessage.mutate({
-      content,
-      parentMessageId: parentId,
-      ...(mentionedUsers.length > 0 ? { mentions: mentionedUsers } : {}),
-    })
+    sendMessage.mutate(
+      {
+        content,
+        parentMessageId: parentId,
+        ...(mentionedUsers.length > 0 ? { mentions: mentionedUsers } : {}),
+        ...(uploaded.length > 0 ? { attachments: uploaded } : {}),
+      },
+      {
+        // WHY clear only on success: on failure the tray is kept so the
+        // already-uploaded URLs are reused on retry (no re-upload, §6.1).
+        onSuccess: () => attachments.clear(),
+        onError: (error) => {
+          // WHY surface inline here (in addition to the hook's generic toast):
+          // a plan-cap rejection is an explicit user action failing — the
+          // composer shows the actionable detail next to the tray (ADR-028).
+          if (hasAttachments === true) {
+            attachments.setSendError(getApiErrorDetail(error, t('attachSendFailed')))
+          }
+        },
+      },
+    )
     // WHY: Start cooldown optimistically right after sending. If the send fails
     // with 429, the timer is already running. Matches Discord's behavior.
     startCooldown()
@@ -1146,7 +1332,7 @@ export function ChatArea({
     if (mention.handleKeyDown(e)) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      void handleSend()
     }
   }
 
@@ -1269,6 +1455,8 @@ export function ChatArea({
         onSendTyping={() => sendTyping(currentUser.username)}
         mention={mention}
         textareaRef={composerRef}
+        attachments={attachments}
+        attachmentsEnabled={attachmentsEnabled}
       />
 
       {/* Verify identity modal — only rendered on desktop DMs */}
