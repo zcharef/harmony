@@ -37,6 +37,7 @@
     "goBack": "Go Back",
     "continue": "Continue to Site"
   },
+  "jumpToRepliedMessage": "Jump to replied message",
   "unknownMention": "unknown-user",
   "attachmentUnavailable": "Image unavailable",
   "downloadAttachment": "Download {{filename}}",

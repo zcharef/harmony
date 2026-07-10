@@ -194,21 +194,38 @@ pub async fn list_messages(
         .unwrap_or(DEFAULT_MESSAGE_LIMIT)
         .clamp(1, MAX_MESSAGE_LIMIT);
 
-    let cursor = query
-        .before
-        .map(|s| {
-            s.parse::<chrono::DateTime<chrono::Utc>>()
-                .map_err(|_| "Invalid 'before' cursor: expected ISO 8601 timestamp")
-        })
-        .transpose()
-        .map_err(ApiError::bad_request)?;
+    // WHY mutually exclusive: `around` centers a window on a target message and
+    // `before` pages backward from a cursor — combining them is ambiguous.
+    if query.around.is_some() && query.before.is_some() {
+        return Err(ApiError::bad_request(
+            "`around` and `before` are mutually exclusive",
+        ));
+    }
 
-    let messages = state
-        .message_service()
-        .list_for_channel(&channel_id, &user_id, cursor, limit)
-        .await?;
+    let messages = if let Some(anchor_id) = query.around {
+        state
+            .message_service()
+            .list_around(&channel_id, &user_id, &anchor_id, limit)
+            .await?
+    } else {
+        let cursor = query
+            .before
+            .map(|s| {
+                s.parse::<chrono::DateTime<chrono::Utc>>()
+                    .map_err(|_| "Invalid 'before' cursor: expected ISO 8601 timestamp")
+            })
+            .transpose()
+            .map_err(ApiError::bad_request)?;
 
-    // WHY: If we received exactly `limit` rows, there may be more — provide a cursor.
+        state
+            .message_service()
+            .list_for_channel(&channel_id, &user_id, cursor, limit)
+            .await?
+    };
+
+    // WHY: If we received exactly `limit` rows, there may be more older history —
+    // provide the oldest row's timestamp as the `before` cursor. Same rule for
+    // the around window so scrolling further up keeps working (§3.2).
     let next_cursor = if i64::try_from(messages.len()).unwrap_or(0) == limit {
         messages.last().map(|m| m.message.created_at.to_rfc3339())
     } else {

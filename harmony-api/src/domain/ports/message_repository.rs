@@ -51,6 +51,24 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
     /// Find a message by ID (returns `None` if not found OR soft-deleted).
     async fn find_by_id(&self, message_id: &MessageId) -> Result<Option<Message>, DomainError>;
 
+    /// Fetch a window of messages centered on `anchor_id` (jump-to-message).
+    ///
+    /// Returns up to `before_limit` strictly-older rows, the anchor itself, and
+    /// up to `after_limit` strictly-newer rows, all ordered `created_at DESC`
+    /// (same shape as [`list_for_channel`](Self::list_for_channel) so the client
+    /// reverse keeps working). Soft-deleted rows are excluded EXCEPT the anchor,
+    /// which is always included so a jump can land on a tombstone.
+    ///
+    /// Returns `None` when `anchor_id` does not exist or does not belong to
+    /// `channel_id` — the service maps that to `NotFound`.
+    async fn list_around(
+        &self,
+        channel_id: &ChannelId,
+        anchor_id: &MessageId,
+        before_limit: i64,
+        after_limit: i64,
+    ) -> Result<Option<Vec<MessageWithAuthor>>, DomainError>;
+
     /// Update message content. Sets `is_edited=true`, `edited_at=now()`.
     /// Returns the updated message.
     ///

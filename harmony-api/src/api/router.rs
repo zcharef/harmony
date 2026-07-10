@@ -181,7 +181,8 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
         // Read States
         .route(
             "/v1/channels/{id}/read-state",
-            patch(handlers::read_states::mark_channel_read),
+            get(handlers::read_states::get_channel_read_state)
+                .patch(handlers::read_states::mark_channel_read),
         )
         // Messages
         .route(

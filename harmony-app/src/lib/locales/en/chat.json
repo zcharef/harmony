@@ -60,5 +60,9 @@
     "retry": "Try again",
     "rateLimited": "Too many searches — slow down a moment.",
     "poweredBy": "Powered by KLIPY"
-  }
+  },
+  "newMessages": "New messages",
+  "jumpToNewMessages": "New messages",
+  "jumpToPresent": "Jump to present",
+  "jumpTargetGone": "This message is no longer available"
 }

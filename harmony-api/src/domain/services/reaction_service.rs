@@ -529,6 +529,15 @@ mod tests {
         ) -> Result<Vec<MessageWithAuthor>, DomainError> {
             Ok(vec![])
         }
+        async fn list_around(
+            &self,
+            _channel_id: &ChannelId,
+            _anchor_id: &MessageId,
+            _before_limit: i64,
+            _after_limit: i64,
+        ) -> Result<Option<Vec<MessageWithAuthor>>, DomainError> {
+            Ok(None)
+        }
         async fn update_content(
             &self,
             _message_id: &MessageId,

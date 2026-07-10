@@ -165,3 +165,95 @@ describe('buildVirtualItems', () => {
     ])
   })
 })
+
+// -- "New messages" divider (unread-divider ticket §1.2 / §7.3) ---------------
+
+const ME = 'me'
+
+/** Index of the divider row, or -1 when absent. */
+function dividerIndex(items: ReturnType<typeof buildVirtualItems>) {
+  return items.findIndex((item) => item.type === 'new-messages')
+}
+
+/** The message id immediately after the divider row (what the divider sits above). */
+function idAfterDivider(items: ReturnType<typeof buildVirtualItems>) {
+  const idx = dividerIndex(items)
+  const next = idx === -1 ? undefined : items[idx + 1]
+  return next?.type === 'message' ? next.msg.id : undefined
+}
+
+describe('buildVirtualItems — new-messages divider', () => {
+  it('renders no divider when opts is null', () => {
+    const items = buildVirtualItems([messageAt(0, { id: 'a1', authorId: 'other' })])
+    expect(dividerIndex(items)).toBe(-1)
+  })
+
+  it('renders no divider when never-read but every message is the caller’s own', () => {
+    const items = buildVirtualItems(
+      [messageAt(0, { id: 'a1', authorId: ME }), messageAt(10_000, { id: 'a2', authorId: ME })],
+      { dividerAnchorAt: null, currentUserId: ME },
+    )
+    expect(dividerIndex(items)).toBe(-1)
+  })
+
+  it('inserts the divider before the first message newer than the anchor from another author', () => {
+    const items = buildVirtualItems(
+      [
+        messageAt(0, { id: 'read', authorId: 'other' }),
+        messageAt(20_000, { id: 'unread', authorId: 'other' }),
+      ],
+      { dividerAnchorAt: new Date(BASE_TIME + 10_000).toISOString(), currentUserId: ME },
+    )
+    expect(idAfterDivider(items)).toBe('unread')
+  })
+
+  it('skips the caller’s own newer messages and places the divider before the next author’s', () => {
+    const items = buildVirtualItems(
+      [
+        messageAt(20_000, { id: 'mine', authorId: ME }),
+        messageAt(40_000, { id: 'theirs', authorId: 'other' }),
+      ],
+      { dividerAnchorAt: new Date(BASE_TIME + 10_000).toISOString(), currentUserId: ME },
+    )
+    expect(idAfterDivider(items)).toBe('theirs')
+  })
+
+  it('does not trigger on a system message newer than the anchor', () => {
+    const items = buildVirtualItems(
+      [messageAt(20_000, { id: 'sys', authorId: 'other', messageType: 'system' })],
+      { dividerAnchorAt: new Date(BASE_TIME + 10_000).toISOString(), currentUserId: ME },
+    )
+    expect(dividerIndex(items)).toBe(-1)
+  })
+
+  it('emits exactly one divider even with many unread messages', () => {
+    const items = buildVirtualItems(
+      [
+        messageAt(20_000, { id: 'u1', authorId: 'other' }),
+        messageAt(30_000, { id: 'u2', authorId: 'other' }),
+        messageAt(40_000, { id: 'u3', authorId: 'other' }),
+      ],
+      { dividerAnchorAt: new Date(BASE_TIME + 10_000).toISOString(), currentUserId: ME },
+    )
+    expect(items.filter((i) => i.type === 'new-messages')).toHaveLength(1)
+    expect(idAfterDivider(items)).toBe('u1')
+  })
+
+  it('orders a date separator before the divider when both precede the first unread', () => {
+    // First message of the loaded window is unread → a date row is emitted for
+    // it, then the divider, then the message. Deterministic: date, divider, msg.
+    const items = buildVirtualItems([messageAt(20_000, { id: 'u1', authorId: 'other' })], {
+      dividerAnchorAt: new Date(BASE_TIME + 10_000).toISOString(),
+      currentUserId: ME,
+    })
+    expect(items.map((i) => i.type)).toEqual(['date', 'new-messages', 'message'])
+  })
+
+  it('places the divider at the very top when the channel was never read', () => {
+    const items = buildVirtualItems([messageAt(0, { id: 'first', authorId: 'other' })], {
+      dividerAnchorAt: null,
+      currentUserId: ME,
+    })
+    expect(idAfterDivider(items)).toBe('first')
+  })
+})

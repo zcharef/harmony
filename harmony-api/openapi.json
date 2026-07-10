@@ -707,6 +707,15 @@
             }
           },
           {
+            "name": "around",
+            "in": "query",
+            "description": "Center the returned window on this message (jump-to-message). Mutually\nexclusive with `before`; sending both is a 400. The anchor is included\neven when soft-deleted so a jump lands on the tombstone.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MessageId"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "description": "Maximum number of messages to return (1-100, default 50).",
@@ -960,6 +969,72 @@
       }
     },
     "/v1/channels/{id}/read-state": {
+      "get": {
+        "tags": [
+          "ReadStates"
+        ],
+        "summary": "Read the caller's read position for a single channel.",
+        "description": "Powers the \"new messages\" divider anchor: the client snapshots\n`lastReadAt` once on channel open and freezes the divider boundary there.\n\n# Errors\nReturns `ApiError` when the channel does not exist (404), the caller may not\naccess it (403), or on a repository error.",
+        "operationId": "get_channel_read_state",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channel read state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelReadStateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No access to channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
       "patch": {
         "tags": [
           "ReadStates"
@@ -4873,6 +4948,47 @@
           }
         }
       },
+      "ChannelReadStateResponse": {
+        "type": "object",
+        "description": "The caller's read position for a single channel — powers the \"new messages\"\ndivider anchor (unread-divider ticket §3.1).",
+        "required": [
+          "channelId",
+          "unreadCount",
+          "mentionCount"
+        ],
+        "properties": {
+          "channelId": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "lastReadAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "RFC 3339 timestamp of the last read position. `None` = never read."
+          },
+          "lastReadMessageId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MessageId"
+              }
+            ]
+          },
+          "mentionCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unreadCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unread count, capped at 999 (matches the SSE `unread.sync` snapshot)."
+          }
+        }
+      },
       "ChannelResponse": {
         "type": "object",
         "description": "Channel response returned to API consumers.",
@@ -5942,6 +6058,17 @@
         "type": "object",
         "description": "Query parameters for listing messages (cursor-based pagination).",
         "properties": {
+          "around": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MessageId",
+                "description": "Center the returned window on this message (jump-to-message). Mutually\nexclusive with `before`; sending both is a 400. The anchor is included\neven when soft-deleted so a jump lands on the tombstone."
+              }
+            ]
+          },
           "before": {
             "type": [
               "string",

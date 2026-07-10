@@ -10,14 +10,14 @@ use super::dto::voice::{
 };
 use super::dto::{
     AssignRoleRequest, AttachmentResponse, BanListQuery, BanListResponse, BanResponse,
-    BanUserRequest, ChannelListResponse, ChannelResponse, ChannelRoleAccessResponse,
-    CheckUsernameQuery, CheckUsernameResponse, ClaimedKeyResponse, CreateChannelRequest,
-    CreateDesktopAuthRequest, CreateDesktopAuthResponse, CreateDmRequest, CreateInviteRequest,
-    CreateMegolmSessionRequest, CreateServerRequest, DeviceListResponse, DeviceResponse,
-    DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse, DmRecipientResponse,
-    DmResponse, EditMessageRequest, GifItem, GifListResponse, GifSearchQuery, GifTrendingQuery,
-    InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse, MarkReadRequest,
-    MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
+    BanUserRequest, ChannelListResponse, ChannelReadStateResponse, ChannelResponse,
+    ChannelRoleAccessResponse, CheckUsernameQuery, CheckUsernameResponse, ClaimedKeyResponse,
+    CreateChannelRequest, CreateDesktopAuthRequest, CreateDesktopAuthResponse, CreateDmRequest,
+    CreateInviteRequest, CreateMegolmSessionRequest, CreateServerRequest, DeviceListResponse,
+    DeviceResponse, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,
+    DmRecipientResponse, DmResponse, EditMessageRequest, GifItem, GifListResponse, GifSearchQuery,
+    GifTrendingQuery, InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse,
+    MarkReadRequest, MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
     MentionedUserResponse, MessageListQuery, MessageListResponse, MessageResponse,
     NewAttachmentRequest, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
     RedeemDesktopAuthRequest, RedeemDesktopAuthResponse, RegisterDeviceRequest, SendMessageRequest,
@@ -103,6 +103,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         handlers::gifs::trending_gifs,
         // Read States
         handlers::read_states::mark_channel_read,
+        handlers::read_states::get_channel_read_state,
         // Notification Settings
         handlers::notification_settings::get_notification_settings,
         handlers::notification_settings::update_notification_settings,
@@ -234,6 +235,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             super::dto::moderation_settings::UpdateModerationSettingsRequest,
             // Read State DTOs
             MarkReadRequest,
+            ChannelReadStateResponse,
             // DM DTOs
             CreateDmRequest,
             DmResponse,

@@ -269,6 +269,10 @@ impl MessageListResponse {
 pub struct MessageListQuery {
     /// ISO 8601 timestamp cursor — fetch messages created before this time.
     pub before: Option<String>,
+    /// Center the returned window on this message (jump-to-message). Mutually
+    /// exclusive with `before`; sending both is a 400. The anchor is included
+    /// even when soft-deleted so a jump lands on the tombstone.
+    pub around: Option<MessageId>,
     /// Maximum number of messages to return (1-100, default 50).
     pub limit: Option<i64>,
 }
