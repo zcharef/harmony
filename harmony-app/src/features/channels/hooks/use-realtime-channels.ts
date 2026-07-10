@@ -1,8 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { z } from 'zod'
+import { useAuthStore } from '@/features/auth'
+import { getMemberRole, type MemberRole } from '@/features/members'
 import { useServerEvent } from '@/hooks/use-server-event'
-import type { ChannelResponse } from '@/lib/api'
+import type { ChannelResponse, MemberListResponse } from '@/lib/api'
 import { zChannelType } from '@/lib/api/zod.gen'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
@@ -39,6 +41,17 @@ const channelEventSchema = z.object({
 const channelDeletedSchema = z.object({
   serverId: z.string(),
   channelId: z.string(),
+})
+
+/**
+ * WHY: channel.access_updated carries the channel id + the granted role set
+ * only (NOT name/topic — bounded metadata, no content leak). The client
+ * re-evaluates visibility of a PRIVATE channel whose grants changed.
+ */
+const channelAccessUpdatedSchema = z.object({
+  serverId: z.string(),
+  channelId: z.string(),
+  authorizedRoles: z.array(z.enum(['moderator', 'member'])),
 })
 
 /**
@@ -86,6 +99,7 @@ function toChannelResponse(
  */
 export function useRealtimeChannels() {
   const queryClient = useQueryClient()
+  const currentUserId = useAuthStore((s) => s.user?.id ?? '')
 
   const handleChannelCreated = useCallback(
     (payload: unknown) => {
@@ -168,7 +182,62 @@ export function useRealtimeChannels() {
     [queryClient],
   )
 
+  const handleChannelAccessUpdated = useCallback(
+    (payload: unknown) => {
+      const parsed = channelAccessUpdatedSchema.safeParse(payload)
+      if (!parsed.success) {
+        logger.warn('Malformed channel.access_updated SSE payload', {
+          error: parsed.error.message,
+        })
+        return
+      }
+
+      const { serverId, channelId, authorizedRoles } = parsed.data
+      const channelsKey = queryKeys.channels.byServer(serverId)
+      const present =
+        queryClient.getQueryData<ChannelResponse[]>(channelsKey)?.some((c) => c.id === channelId) ??
+        false
+
+      // Resolve my role in that server from the members cache. When it is
+      // unknown (cache cold), we can't decide locally — invalidate and let the
+      // access-gated list_channels refetch be the authority (it never returns a
+      // channel the caller cannot see, so there is no leak either way).
+      const members = queryClient.getQueryData<MemberListResponse>(
+        queryKeys.servers.members(serverId),
+      )
+      const self = members?.items.find((m) => m.userId === currentUserId)
+      const myRole: MemberRole | null = self === undefined ? null : getMemberRole(self)
+
+      if (myRole === null) {
+        queryClient.invalidateQueries({ queryKey: channelsKey })
+        return
+      }
+
+      // Admin/owner always qualify; others need their role in the granted set.
+      const qualifies =
+        myRole === 'admin' || myRole === 'owner' || authorizedRoles.some((r) => r === myRole)
+
+      if (qualifies) {
+        // Newly (or still) granted: if the channel isn't in the cache yet, the
+        // gated refetch pulls it in with its real name/topic — no leak.
+        if (!present) {
+          queryClient.invalidateQueries({ queryKey: channelsKey })
+        }
+      } else if (present) {
+        // Access revoked: evict it immediately (mirror channel.deleted).
+        queryClient.setQueryData<ChannelResponse[]>(channelsKey, (old) => {
+          if (!old) return undefined
+          const filtered = old.filter((c) => c.id !== channelId)
+          if (filtered.length === old.length) return old
+          return filtered
+        })
+      }
+    },
+    [queryClient, currentUserId],
+  )
+
   useServerEvent('channel.created', handleChannelCreated)
   useServerEvent('channel.updated', handleChannelUpdated)
   useServerEvent('channel.deleted', handleChannelDeleted)
+  useServerEvent('channel.access_updated', handleChannelAccessUpdated)
 }

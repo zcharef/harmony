@@ -29,6 +29,7 @@ export const SSE_EVENT_NAMES = [
   'channel.created',
   'channel.updated',
   'channel.deleted',
+  'channel.access_updated',
   'server.moderation_settings_updated',
   'server.updated',
   'dm.created',
@@ -216,6 +217,15 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     senderId: z.string(),
     serverId: z.string(),
     channelId: z.string(),
+  }),
+  // WHY only moderator/member: admin/owner hold implicit access and are never
+  // stored as grants, so the wire set is bounded to the two grantable roles.
+  z.object({
+    type: z.literal('channelAccessUpdated'),
+    senderId: z.string(),
+    serverId: z.string(),
+    channelId: z.string(),
+    authorizedRoles: z.array(z.enum(['moderator', 'member'])),
   }),
 
   // Server
