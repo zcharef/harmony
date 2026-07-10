@@ -153,7 +153,11 @@ async fn app_state(pool: PgPool, trusted_proxy_secret: Option<SecretString>) -> 
         member_repo.clone(),
     ));
     let notification_settings_service = Arc::new(
-        harmony_api::domain::services::NotificationSettingsService::new(notification_settings_repo),
+        harmony_api::domain::services::NotificationSettingsService::new(
+            notification_settings_repo,
+            channel_repo.clone(),
+            member_repo.clone(),
+        ),
     );
     let user_preferences_service = Arc::new(
         harmony_api::domain::services::UserPreferencesService::new(user_preferences_repo),

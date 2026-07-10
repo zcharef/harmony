@@ -240,6 +240,11 @@ impl SpamGuard {
             // the first number as Retry-After; the 5s default is accurate here.
             return Err(DomainError::RateLimited(format!(
                 "Too many {action} actions — try again in a few seconds"
+            )));
+        }
+        Ok(())
+    }
+
     /// Windowed rate limiter for UNAUTHENTICATED endpoints (invite preview).
     ///
     /// Same semantics as [`Self::check_and_record_action`], but keyed by a
