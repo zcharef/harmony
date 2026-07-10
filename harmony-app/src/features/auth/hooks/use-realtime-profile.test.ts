@@ -120,6 +120,8 @@ function buildEvent(overrides: Record<string, unknown> = {}) {
     displayName: 'New Name',
     avatarUrl: 'https://cdn.example.com/new.webp',
     customStatus: 'new status',
+    bio: 'New bio',
+    bannerUrl: 'https://cdn.example.com/new-banner.webp',
     ...overrides,
   }
 }
@@ -295,5 +297,65 @@ describe('useRealtimeProfile', () => {
     })
 
     expect(queryClient.getQueryData(queryKeys.servers.members(SERVER_A))).toBeUndefined()
+  })
+
+  // -- Profile detail cache (the hover card's tier-2 source) ------------------
+  //
+  // The card reads queryKeys.profiles.detail(id); a live bio/banner/status edit
+  // must patch that cache so an open card rehydrates over SSE without refetch.
+
+  it('patches the profile detail cache (bio + banner) for any observed user', () => {
+    const queryClient = createTestQueryClient()
+    // A card was opened for the subject → detail cache is populated (not "me").
+    queryClient.setQueryData(queryKeys.profiles.detail(SUBJECT_ID), buildProfile())
+
+    renderHook(() => useRealtimeProfile(OTHER_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('profile.updated', buildEvent())
+    })
+
+    const data = queryClient.getQueryData<ProfileResponse>(queryKeys.profiles.detail(SUBJECT_ID))
+    expect(data?.displayName).toBe('New Name')
+    expect(data?.avatarUrl).toBe('https://cdn.example.com/new.webp')
+    expect(data?.customStatus).toBe('new status')
+    expect(data?.bio).toBe('New bio')
+    expect(data?.bannerUrl).toBe('https://cdn.example.com/new-banner.webp')
+    // Non-identity fields survive.
+    expect(data?.username).toBe('subject')
+  })
+
+  it('writes null to the detail cache when bio and banner were cleared', () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(queryKeys.profiles.detail(SUBJECT_ID), buildProfile())
+
+    renderHook(() => useRealtimeProfile(OTHER_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('profile.updated', buildEvent({ bio: null, bannerUrl: null }))
+    })
+
+    const data = queryClient.getQueryData<ProfileResponse>(queryKeys.profiles.detail(SUBJECT_ID))
+    expect(data?.bio).toBeNull()
+    expect(data?.bannerUrl).toBeNull()
+  })
+
+  it('does not seed a phantom detail cache entry for an un-opened card', () => {
+    const queryClient = createTestQueryClient()
+    // No detail cache seeded → nothing to patch, must stay undefined.
+
+    renderHook(() => useRealtimeProfile(OTHER_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('profile.updated', buildEvent())
+    })
+
+    expect(queryClient.getQueryData(queryKeys.profiles.detail(SUBJECT_ID))).toBeUndefined()
   })
 })

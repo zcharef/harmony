@@ -30,6 +30,8 @@ struct ProfileRow {
     avatar_url: Option<String>,
     status: Option<String>,
     custom_status: Option<String>,
+    bio: Option<String>,
+    banner_url: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -43,6 +45,8 @@ impl ProfileRow {
             avatar_url: self.avatar_url,
             status: parse_user_status(self.status.as_deref()),
             custom_status: self.custom_status,
+            bio: self.bio,
+            banner_url: self.banner_url,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -98,6 +102,8 @@ impl ProfileRepository for PgProfileRepository {
                 avatar_url,
                 status,
                 custom_status,
+                bio,
+                banner_url,
                 created_at,
                 updated_at
             "#,
@@ -122,6 +128,8 @@ impl ProfileRepository for PgProfileRepository {
             avatar_url: row.avatar_url,
             status: row.status,
             custom_status: row.custom_status,
+            bio: row.bio,
+            banner_url: row.banner_url,
             created_at: row.created_at,
             updated_at: row.updated_at,
         };
@@ -153,6 +161,8 @@ impl ProfileRepository for PgProfileRepository {
                 avatar_url,
                 status,
                 custom_status,
+                bio,
+                banner_url,
                 created_at,
                 updated_at
             FROM profiles
@@ -172,6 +182,8 @@ impl ProfileRepository for PgProfileRepository {
                 avatar_url: r.avatar_url,
                 status: r.status,
                 custom_status: r.custom_status,
+                bio: r.bio,
+                banner_url: r.banner_url,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             }
@@ -196,6 +208,8 @@ impl ProfileRepository for PgProfileRepository {
                 avatar_url,
                 status,
                 custom_status,
+                bio,
+                banner_url,
                 created_at,
                 updated_at
             FROM profiles
@@ -217,6 +231,8 @@ impl ProfileRepository for PgProfileRepository {
                     avatar_url: r.avatar_url,
                     status: r.status,
                     custom_status: r.custom_status,
+                    bio: r.bio,
+                    banner_url: r.banner_url,
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                 }
@@ -231,6 +247,8 @@ impl ProfileRepository for PgProfileRepository {
         avatar_url: Option<Option<String>>,
         display_name: Option<Option<String>>,
         custom_status: Option<Option<String>>,
+        bio: Option<Option<String>>,
+        banner_url: Option<Option<String>>,
     ) -> Result<Profile, DomainError> {
         let id = user_id.0;
 
@@ -244,6 +262,10 @@ impl ProfileRepository for PgProfileRepository {
         let display_name_value = display_name.flatten();
         let should_update_custom_status = custom_status.is_some();
         let custom_status_value = custom_status.flatten();
+        let should_update_bio = bio.is_some();
+        let bio_value = bio.flatten();
+        let should_update_banner = banner_url.is_some();
+        let banner_value = banner_url.flatten();
 
         let row = sqlx::query!(
             r#"
@@ -252,6 +274,8 @@ impl ProfileRepository for PgProfileRepository {
                 avatar_url = CASE WHEN $2 THEN $3 ELSE avatar_url END,
                 display_name = CASE WHEN $4 THEN $5 ELSE display_name END,
                 custom_status = CASE WHEN $6 THEN $7 ELSE custom_status END,
+                bio = CASE WHEN $8 THEN $9 ELSE bio END,
+                banner_url = CASE WHEN $10 THEN $11 ELSE banner_url END,
                 updated_at = now()
             WHERE id = $1
             RETURNING
@@ -261,6 +285,8 @@ impl ProfileRepository for PgProfileRepository {
                 avatar_url,
                 status,
                 custom_status,
+                bio,
+                banner_url,
                 created_at,
                 updated_at
             "#,
@@ -271,6 +297,10 @@ impl ProfileRepository for PgProfileRepository {
             display_name_value,
             should_update_custom_status,
             custom_status_value,
+            should_update_bio,
+            bio_value,
+            should_update_banner,
+            banner_value,
         )
         .fetch_optional(&self.pool)
         .await
@@ -287,6 +317,8 @@ impl ProfileRepository for PgProfileRepository {
             avatar_url: row.avatar_url,
             status: row.status,
             custom_status: row.custom_status,
+            bio: row.bio,
+            banner_url: row.banner_url,
             created_at: row.created_at,
             updated_at: row.updated_at,
         };
@@ -315,6 +347,8 @@ impl ProfileRepository for PgProfileRepository {
                 avatar_url,
                 status,
                 custom_status,
+                bio,
+                banner_url,
                 created_at,
                 updated_at
             "#,
@@ -344,6 +378,8 @@ impl ProfileRepository for PgProfileRepository {
             avatar_url: row.avatar_url,
             status: row.status,
             custom_status: row.custom_status,
+            bio: row.bio,
+            banner_url: row.banner_url,
             created_at: row.created_at,
             updated_at: row.updated_at,
         };

@@ -143,6 +143,8 @@ mod tests {
             avatar_url: Some("https://cdn.example.com/maya.png".to_string()),
             status: UserStatus::Offline,
             custom_status: None,
+            bio: None,
+            banner_url: None,
             created_at: now,
             updated_at: now,
         }

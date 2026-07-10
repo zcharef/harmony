@@ -240,9 +240,10 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     dm: dmPayloadSchema,
   }),
 
-  // Profiles — live identity rehydration (display name / avatar / custom status).
-  // WHY optional+nullable: the three fields are a FULL snapshot, so `null` means
-  // cleared; older API instances may omit a field during a rolling deploy.
+  // Profiles — live identity rehydration (display name / avatar / custom status
+  // / bio / banner). WHY optional+nullable: the fields are a FULL snapshot, so
+  // `null` means cleared; older API instances may omit a field during a rolling
+  // deploy.
   z.object({
     type: z.literal('profileUpdated'),
     senderId: z.string(),
@@ -250,6 +251,8 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     displayName: z.string().optional().nullable(),
     avatarUrl: z.string().optional().nullable(),
     customStatus: z.string().optional().nullable(),
+    bio: z.string().optional().nullable(),
+    bannerUrl: z.string().optional().nullable(),
   }),
 
   // Ephemeral

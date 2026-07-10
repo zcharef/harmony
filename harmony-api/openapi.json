@@ -2244,6 +2244,64 @@
         ]
       }
     },
+    "/v1/profiles/{id}": {
+      "get": {
+        "tags": [
+          "Profiles"
+        ],
+        "summary": "Get any user's public profile by ID (for the profile hover card).",
+        "description": "Auth required (Bearer). Profiles are semi-public (RLS `profiles_select_all`);\nthere is no per-viewer gate in v1 (ticket §10 — blocking/privacy is T2.1).\n\n# Errors\nReturns `ApiError` 404 if no profile exists for the ID (never existed or a\ndeleted account), or a repository error.",
+        "operationId": "get_profile_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Profile found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Profile not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/servers": {
       "get": {
         "tags": [
@@ -5929,6 +5987,18 @@
               "null"
             ]
           },
+          "bannerUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bio": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -6375,6 +6445,20 @@
               "null"
             ],
             "description": "Avatar image URL (must be HTTPS). `null` clears it."
+          },
+          "bannerUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Banner image URL (must be HTTPS, avatars bucket). `null` clears it."
+          },
+          "bio": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Bio (markdown-lite, links only, max 190 characters). `null` clears it."
           },
           "customStatus": {
             "type": [

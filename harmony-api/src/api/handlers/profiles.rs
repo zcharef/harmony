@@ -1,7 +1,8 @@
 //! Profile handlers.
 
 use axum::{
-    Extension, Json, extract::Query, extract::State, http::StatusCode, response::IntoResponse,
+    Extension, Json, extract::Path, extract::Query, extract::State, http::StatusCode,
+    response::IntoResponse,
 };
 
 use crate::api::dto::{
@@ -12,7 +13,7 @@ use crate::api::extractors::{ApiJson, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::errors::DomainError;
 use crate::domain::models::server_event::{MemberPayload, ServerEvent};
-use crate::domain::models::{AnalyticsEvent, AnalyticsEventName};
+use crate::domain::models::{AnalyticsEvent, AnalyticsEventName, UserId};
 use crate::domain::services::ProfileService;
 use crate::infra::auth::AuthenticatedUser;
 
@@ -306,6 +307,8 @@ pub async fn update_my_profile(
             req.avatar_url,
             req.display_name,
             req.custom_status,
+            req.bio,
+            req.banner_url,
         )
         .await?;
 
@@ -338,8 +341,44 @@ pub async fn update_my_profile(
         display_name: profile.display_name.clone(),
         avatar_url: profile.avatar_url.clone(),
         custom_status: profile.custom_status.clone(),
+        bio: profile.bio.clone(),
+        banner_url: profile.banner_url.clone(),
         server_ids,
     });
+
+    Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
+}
+
+/// Get any user's public profile by ID (for the profile hover card).
+///
+/// Auth required (Bearer). Profiles are semi-public (RLS `profiles_select_all`);
+/// there is no per-viewer gate in v1 (ticket §10 — blocking/privacy is T2.1).
+///
+/// # Errors
+/// Returns `ApiError` 404 if no profile exists for the ID (never existed or a
+/// deleted account), or a repository error.
+#[utoipa::path(
+    get,
+    path = "/v1/profiles/{id}",
+    tag = "Profiles",
+    security(("bearer_auth" = [])),
+    params(("id" = String, Path, description = "User ID")),
+    responses(
+        (status = 200, description = "Profile found", body = ProfileResponse),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 404, description = "Profile not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn get_profile_by_id(
+    // WHY caller unused: auth is required (semi-public, not anonymous) but there
+    // is no per-viewer permission gate in v1 — every authenticated user may read
+    // any profile, matching the `profiles_select_all` RLS policy.
+    AuthUser(_caller): AuthUser,
+    State(state): State<AppState>,
+    Path(user_id): Path<UserId>,
+) -> Result<impl IntoResponse, ApiError> {
+    let profile = state.profile_service().get_by_id(&user_id).await?;
 
     Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
 }

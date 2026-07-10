@@ -94,6 +94,10 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             "/v1/profiles/me",
             get(handlers::profiles::get_my_profile).patch(handlers::profiles::update_my_profile),
         )
+        .route(
+            "/v1/profiles/{id}",
+            get(handlers::profiles::get_profile_by_id),
+        )
         // Servers
         .route(
             "/v1/servers",

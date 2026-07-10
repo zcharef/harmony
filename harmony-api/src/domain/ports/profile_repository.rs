@@ -45,6 +45,8 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
         avatar_url: Option<Option<String>>,
         display_name: Option<Option<String>>,
         custom_status: Option<Option<String>>,
+        bio: Option<Option<String>>,
+        banner_url: Option<Option<String>>,
     ) -> Result<Profile, DomainError>;
 
     /// Overwrite a user's username with a server-chosen safe value.

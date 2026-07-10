@@ -355,18 +355,23 @@ pub enum ServerEvent {
     },
 
     // ── Profiles (user-scoped, not server-scoped) ────────────
-    /// A user's public profile changed (display name / avatar / custom status).
-    /// Carries the NEW current values so every observer can rehydrate the
-    /// subject's identity everywhere it is cached, Discord-style. A `null`
-    /// field means the value was cleared (not "unchanged") — the event is a
-    /// full snapshot, not a patch, so the three fields are serialized even
-    /// when null.
+    /// A user's public profile changed (display name / avatar / custom status /
+    /// bio / banner). Carries the NEW current values so every observer can
+    /// rehydrate the subject's identity everywhere it is cached, Discord-style.
+    /// A `null` field means the value was cleared (not "unchanged") — the event
+    /// is a full snapshot, not a patch, so the identity fields are serialized
+    /// even when null.
     ProfileUpdated {
         sender_id: UserId,
         user_id: UserId,
         display_name: Option<String>,
         avatar_url: Option<String>,
         custom_status: Option<String>,
+        /// Bio (full snapshot; `null` = cleared). Same sensitivity class as the
+        /// other identity fields — client-facing, survives redaction.
+        bio: Option<String>,
+        /// Banner URL (full snapshot; `null` = cleared). Client-facing.
+        banner_url: Option<String>,
         /// Routing metadata: the subject's server memberships (incl. DM
         /// servers), used by the SSE layer to deliver profile updates only to
         /// users sharing a server or DM. Like `PresenceChanged.server_ids` it
@@ -1091,6 +1096,8 @@ mod tests {
             display_name: Some("Ada".to_string()),
             avatar_url: None,
             custom_status: None,
+            bio: None,
+            banner_url: None,
             server_ids: vec![test_server_id()],
         };
         assert_eq!(event.event_name(), "profile.updated");
@@ -1111,6 +1118,8 @@ mod tests {
             display_name: Some("Ada".to_string()),
             avatar_url: None,
             custom_status: None,
+            bio: Some("hello world".to_string()),
+            banner_url: Some("https://cdn.example/banner.png".to_string()),
             server_ids: vec![test_server_id()],
         };
         let json = serde_json::to_string(&routed).unwrap();
@@ -1128,6 +1137,12 @@ mod tests {
             !json.contains("serverIds"),
             "redacted payload leaked serverIds: {json}"
         );
+        // WHY (security): bio/banner are client-facing profile data — redaction
+        // strips ONLY routing metadata, never the snapshot the client rehydrates.
+        assert!(
+            json.contains("hello world") && json.contains("banner.png"),
+            "redaction must preserve client-facing bio/banner: {json}"
+        );
     }
 
     /// The three identity fields are a FULL snapshot, not a patch: a cleared
@@ -1141,6 +1156,8 @@ mod tests {
             display_name: None,
             avatar_url: None,
             custom_status: None,
+            bio: None,
+            banner_url: None,
             server_ids: Vec::new(),
         };
         let json = serde_json::to_value(&event).unwrap();
@@ -1148,6 +1165,8 @@ mod tests {
         assert!(json["displayName"].is_null());
         assert!(json["avatarUrl"].is_null());
         assert!(json["customStatus"].is_null());
+        assert!(json["bio"].is_null());
+        assert!(json["bannerUrl"].is_null());
         // Empty routing metadata is omitted entirely.
         assert!(json.get("serverIds").is_none());
     }

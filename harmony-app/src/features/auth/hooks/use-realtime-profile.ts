@@ -26,6 +26,8 @@ const profileUpdatedSchema = z.object({
   displayName: z.string().optional().nullable(),
   avatarUrl: z.string().optional().nullable(),
   customStatus: z.string().optional().nullable(),
+  bio: z.string().optional().nullable(),
+  bannerUrl: z.string().optional().nullable(),
 })
 
 /** The subject's new identity, normalized so cleared fields are `null`. */
@@ -34,6 +36,8 @@ interface Identity {
   displayName: string | null
   avatarUrl: string | null
   customStatus: string | null
+  bio: string | null
+  bannerUrl: string | null
 }
 
 // ── Cache patchers (module-level so the hook stays under Biome's complexity cap) ──
@@ -120,6 +124,29 @@ function patchOwnProfile(queryClient: QueryClient, id: Identity) {
       displayName: id.displayName,
       avatarUrl: id.avatarUrl,
       customStatus: id.customStatus,
+      bio: id.bio,
+      bannerUrl: id.bannerUrl,
+    }
+  })
+}
+
+/**
+ * Detail cache backing the profile hover card (`queryKeys.profiles.detail(id)`).
+ * WHY unconditional (any observed user, not just self): an open card for user A
+ * must rehydrate live when A edits their bio/banner/status — the popover reads
+ * this cache. Only patches an already-present entry (never seeds one) so we
+ * don't fabricate profiles the viewer never fetched.
+ */
+function patchProfileDetail(queryClient: QueryClient, id: Identity) {
+  queryClient.setQueryData<ProfileResponse>(queryKeys.profiles.detail(id.userId), (old) => {
+    if (old === undefined) return old
+    return {
+      ...old,
+      displayName: id.displayName,
+      avatarUrl: id.avatarUrl,
+      customStatus: id.customStatus,
+      bio: id.bio,
+      bannerUrl: id.bannerUrl,
     }
   })
 }
@@ -153,11 +180,14 @@ export function useRealtimeProfile(currentUserId: string | null) {
         displayName: parsed.data.displayName ?? null,
         avatarUrl: parsed.data.avatarUrl ?? null,
         customStatus: parsed.data.customStatus ?? null,
+        bio: parsed.data.bio ?? null,
+        bannerUrl: parsed.data.bannerUrl ?? null,
       }
 
       patchMemberLists(queryClient, id)
       patchDmList(queryClient, id)
       patchMessagePages(queryClient, id)
+      patchProfileDetail(queryClient, id)
 
       // WHY guard: only the current user's own-profile cache should track this.
       if (currentUserId !== null && id.userId === currentUserId) {

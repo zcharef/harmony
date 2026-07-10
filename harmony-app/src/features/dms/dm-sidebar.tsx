@@ -16,6 +16,7 @@ import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { useUnreadStore } from '@/features/channels'
 import { StatusPicker } from '@/features/preferences'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
+import { ProfilePopover } from '@/features/profiles'
 import { useSettingsUiStore } from '@/features/settings'
 import { useVoiceConnectionStore } from '@/features/voice'
 import type { DmListItem } from '@/lib/api'
@@ -80,18 +81,30 @@ function DmConversationItem({
           isActive ? 'bg-default-200' : 'hover:bg-default-200/50',
         )}
       >
-        <div className="relative shrink-0">
-          <Avatar
-            name={displayName}
-            src={dm.recipient.avatarUrl ?? undefined}
-            size="sm"
-            showFallback
-            classNames={{ base: 'h-8 w-8', name: 'text-xs' }}
-          />
-          <div className="absolute -bottom-0.5 -right-0.5">
-            <StatusIndicator status={status} size="sm" />
+        {/* WHY stopPropagation: the avatar opens the profile card; the rest of
+            the row still navigates to the DM (the row is a button). */}
+        <ProfilePopover userId={dm.recipient.id} serverId={null}>
+          {/* biome-ignore lint/a11y/useSemanticElements: HeroUI PopoverTrigger adds pressable/keyboard/aria semantics at runtime */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: onClick only stops row-nav bubbling; PopoverTrigger owns keyboard */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={(e) => e.stopPropagation()}
+            className="relative shrink-0 cursor-pointer"
+            data-test="dm-recipient-avatar"
+          >
+            <Avatar
+              name={displayName}
+              src={dm.recipient.avatarUrl ?? undefined}
+              size="sm"
+              showFallback
+              classNames={{ base: 'h-8 w-8', name: 'text-xs' }}
+            />
+            <div className="absolute -bottom-0.5 -right-0.5">
+              <StatusIndicator status={status} size="sm" />
+            </div>
           </div>
-        </div>
+        </ProfilePopover>
         <div className="flex flex-1 flex-col overflow-hidden">
           <span
             className={cn(

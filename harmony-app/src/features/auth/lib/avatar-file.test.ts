@@ -2,8 +2,10 @@ import {
   AVATAR_GIF_MAX_BYTES,
   AVATAR_MAX_BYTES,
   AvatarUploadError,
+  BANNER_MAX_BYTES,
   parseAvatarStoragePath,
   validateAvatarFile,
+  validateBannerFile,
 } from './avatar-file'
 
 function makeFile(sizeBytes: number, type: string, name = 'avatar'): File {
@@ -38,6 +40,29 @@ describe('validateAvatarFile', () => {
 
   it('accepts a gif at exactly 2MB', () => {
     expect(validateAvatarFile(makeFile(AVATAR_GIF_MAX_BYTES, 'image/gif'))).toBeNull()
+  })
+})
+
+describe('validateBannerFile', () => {
+  it('accepts png, jpeg, webp and gif within the 2MB cap', () => {
+    expect(validateBannerFile(makeFile(1024, 'image/png'))).toBeNull()
+    expect(validateBannerFile(makeFile(1024, 'image/jpeg'))).toBeNull()
+    expect(validateBannerFile(makeFile(1024, 'image/webp'))).toBeNull()
+    expect(validateBannerFile(makeFile(1024, 'image/gif'))).toBeNull()
+  })
+
+  it('rejects disallowed mime types', () => {
+    expect(validateBannerFile(makeFile(1024, 'image/svg+xml'))).toBe('invalidType')
+    expect(validateBannerFile(makeFile(1024, ''))).toBe('invalidType')
+  })
+
+  it('rejects files over 2MB (single flat cap, no gif tier)', () => {
+    expect(validateBannerFile(makeFile(BANNER_MAX_BYTES + 1, 'image/png'))).toBe('tooLarge')
+    expect(validateBannerFile(makeFile(BANNER_MAX_BYTES + 1, 'image/gif'))).toBe('tooLarge')
+  })
+
+  it('accepts a file at exactly 2MB', () => {
+    expect(validateBannerFile(makeFile(BANNER_MAX_BYTES, 'image/png'))).toBeNull()
   })
 })
 
