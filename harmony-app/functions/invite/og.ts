@@ -8,12 +8,17 @@
  * (growth-plan §7.2: every shared invite is an ad).
  */
 
+// WHY type-only import from the generated client (ADR-015): the API contract
+// is the SSoT — a hand-rolled shape would silently drift when the Rust DTO
+// changes. `import type` is fully elided at build time (verbatimModuleSyntax),
+// so none of the browser-targeting client runtime leaks into the Workers bundle.
+import type { InvitePreviewResponse } from '../../src/lib/api'
+
 /** The subset of the public preview response the OG card needs. */
-export interface InviteOgPreview {
-  serverName: string
-  serverIconUrl: string | null
-  memberCount: number
-}
+export type InviteOgPreview = Pick<
+  InvitePreviewResponse,
+  'serverName' | 'serverIconUrl' | 'memberCount'
+>
 
 /** Mirrors the API's invite-code format (1-32 alphanumeric chars). */
 const INVITE_CODE_REGEX = /^[A-Za-z0-9]{1,32}$/
