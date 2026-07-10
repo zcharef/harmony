@@ -391,7 +391,20 @@ describe('useMentionAutocomplete — keyboard reducer', () => {
     expect(consumed).toBe(true)
     expect(onValueChange).toHaveBeenCalledWith('@alice ')
     // The inserted member is recorded in the map for the send transform.
-    expect(result.current.mentionMapRef.current.alice?.userId).toBe('user-alice')
+    expect(result.current.mentionMapRef.current.get('alice')?.userId).toBe('user-alice')
+  })
+
+  it('inserting a __proto__ username stores plain map data (no prototype mutation)', async () => {
+    const { result } = await openWithMembers([
+      buildMember({ userId: 'user-proto', username: '__proto__', displayName: 'Proto' }),
+    ])
+
+    act(() => {
+      result.current.handleKeyDown(keyEvent('Enter'))
+    })
+
+    expect(result.current.mentionMapRef.current.get('__proto__')?.userId).toBe('user-proto')
+    expect(Object.getPrototypeOf(result.current.mentionMapRef.current)).toBe(Map.prototype)
   })
 
   it('Tab inserts like Enter', async () => {

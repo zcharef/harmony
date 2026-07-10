@@ -175,8 +175,11 @@ export function useMentionAutocomplete({
    * `@username` of a PREVIOUSLY popup-inserted user still converts. Accepted:
    * usernames are globally unique and immutable, so the mapping can never
    * point at the wrong user. Entries never collide across channels either.
+   * WHY Map (not Record): 'constructor'/'__proto__' are registrable usernames
+   * (DB charset ^[a-z0-9_]{3,32}$) — Map keeps them plain data, a plain-object
+   * write for '__proto__' would mutate the prototype instead.
    */
-  const mentionMapRef = useRef<Record<string, MentionCandidate>>({})
+  const mentionMapRef = useRef<Map<string, MentionCandidate>>(new Map())
 
   // WHY effect (not derived): the caret lives outside React state. Reading it
   // after the controlled value lands keeps trigger detection cursor-accurate.
@@ -285,7 +288,7 @@ export function useMentionAutocomplete({
   const insertMention = useCallback(
     (candidate: MentionCandidate) => {
       if (trigger === null) return
-      mentionMapRef.current[candidate.username] = candidate
+      mentionMapRef.current.set(candidate.username, candidate)
       const caret = textareaRef.current?.selectionStart ?? value.length
       const inserted = `@${candidate.username} `
       const next = value.slice(0, trigger.start) + inserted + value.slice(caret)

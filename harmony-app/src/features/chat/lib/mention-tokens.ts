@@ -57,17 +57,24 @@ const MENTION_TOKEN_RE = /(^|\s)@([a-z0-9_]{3,32})/g
  * WHY generic: the composer map stores MentionCandidate (a superset carrying
  * avatarUrl); the generic preserves the caller's exact value type instead of
  * silently widening — no `as` casts at call sites (ADR-035).
+ *
+ * WHY Map (not Record): usernames are user-controlled keys, and the DB charset
+ * `^[a-z0-9_]{3,32}$` permits 'constructor' and '__proto__'. A plain-object
+ * lookup walks the prototype chain — `({})['constructor']` is a Function, so
+ * '@constructor' in plain text would convert to '<@undefined>' even with an
+ * empty map. Map.get has no prototype chain, and Map.set cannot mutate a
+ * prototype the way `obj['__proto__'] = x` does.
  */
 export function applyMentionMap<T extends MentionedUserResponse>(
   text: string,
-  map: Record<string, T>,
+  map: ReadonlyMap<string, T>,
 ): { content: string; mentionedUserIds: string[]; mentionedUsers: T[] } {
   const mentionedUserIds: string[] = []
   const mentionedUsers: T[] = []
   const content = text.replace(
     MENTION_TOKEN_RE,
     (token, boundary: string, username: string): string => {
-      const entry = map[username]
+      const entry = map.get(username)
       if (entry === undefined) return token
       if (mentionedUserIds.includes(entry.userId) === false) {
         mentionedUserIds.push(entry.userId)
@@ -95,12 +102,8 @@ export function markersToEditable(content: string, mentions: MentionedUserRespon
 /** Build the `username → user` map `applyMentionMap` expects from a message's `mentions`. */
 export function mentionsToMap(
   mentions: MentionedUserResponse[],
-): Record<string, MentionedUserResponse> {
-  const map: Record<string, MentionedUserResponse> = {}
-  for (const mention of mentions) {
-    map[mention.username] = mention
-  }
-  return map
+): Map<string, MentionedUserResponse> {
+  return new Map(mentions.map((mention) => [mention.username, mention]))
 }
 
 /**

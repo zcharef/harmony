@@ -25,7 +25,10 @@ const BOB: MentionedUserResponse = {
   displayName: null,
   nickname: 'Bobby',
 }
-const MAP = { alice: ALICE, bob_42: BOB }
+const MAP = new Map([
+  ['alice', ALICE],
+  ['bob_42', BOB],
+])
 
 // ── extractMentionIds ─────────────────────────────────────────────────
 
@@ -101,10 +104,36 @@ describe('applyMentionMap', () => {
   })
 
   it('does not convert uppercase or invalid-charset tokens (username charset is [a-z0-9_])', () => {
-    const result = applyMentionMap('@Alice @al', { ...MAP, al: ALICE })
+    const result = applyMentionMap('@Alice @al', new Map([...MAP, ['al', ALICE]]))
     // @Alice: uppercase never matches the token grammar. @al: too short (<3).
     expect(result.content).toBe('@Alice @al')
     expect(result.mentionedUserIds).toEqual([])
+  })
+
+  // WHY these regressions: 'constructor' and '__proto__' are valid usernames
+  // (^[a-z0-9_]{3,32}$). A Record-backed map resolved them through the
+  // prototype chain — '@constructor' with an EMPTY map became '<@undefined>'.
+  it('leaves @constructor and @__proto__ plain with an empty map (no prototype-chain hit)', () => {
+    const result = applyMentionMap(
+      'hey @constructor and @__proto__ look',
+      new Map<string, MentionedUserResponse>(),
+    )
+    expect(result.content).toBe('hey @constructor and @__proto__ look')
+    expect(result.mentionedUserIds).toEqual([])
+    expect(result.mentionedUsers).toEqual([])
+  })
+
+  it('converts @constructor and @__proto__ when registered as real map keys', () => {
+    const constructorUser: MentionedUserResponse = { ...ALICE, username: 'constructor' }
+    const protoUser: MentionedUserResponse = { ...BOB, username: '__proto__' }
+    const map = mentionsToMap([constructorUser, protoUser])
+
+    const result = applyMentionMap('@constructor @__proto__', map)
+
+    expect(result.content).toBe(`<@${UUID_A}> <@${UUID_B}>`)
+    expect(result.mentionedUserIds).toEqual([UUID_A, UUID_B])
+    // The map stays plain data — no prototype mutation from the '__proto__' key.
+    expect(Object.getPrototypeOf(map)).toBe(Map.prototype)
   })
 
   it('handles consecutive mentions separated by single spaces', () => {
@@ -159,7 +188,12 @@ describe('markersToEditable', () => {
 
 describe('mentionsToMap', () => {
   it('keys mention objects by username', () => {
-    expect(mentionsToMap([ALICE, BOB])).toEqual({ alice: ALICE, bob_42: BOB })
+    expect(mentionsToMap([ALICE, BOB])).toEqual(
+      new Map([
+        ['alice', ALICE],
+        ['bob_42', BOB],
+      ]),
+    )
   })
 })
 
