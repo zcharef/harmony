@@ -29,9 +29,12 @@ export function useUpdatePreferences() {
         queryKeys.preferences.me(),
       )
 
+      // WHY every field: this literal rebuilds the whole cache entry — omitting
+      // a field here would erase it on the next unrelated toggle (§5.7).
       queryClient.setQueryData<UserPreferencesResponse>(queryKeys.preferences.me(), (old) => ({
         dndEnabled: patch.dndEnabled ?? old?.dndEnabled ?? false,
         hideProfanity: patch.hideProfanity ?? old?.hideProfanity ?? true,
+        onboardingCompleted: patch.onboardingCompleted ?? old?.onboardingCompleted ?? false,
         updatedAt: new Date().toISOString(),
       }))
 
@@ -45,6 +48,7 @@ export function useUpdatePreferences() {
         context?.previousData ?? {
           dndEnabled: false,
           hideProfanity: true,
+          onboardingCompleted: false,
           updatedAt: new Date().toISOString(),
         },
       )

@@ -32,6 +32,7 @@ function buildPreferences(
   return {
     dndEnabled: false,
     hideProfanity: true,
+    onboardingCompleted: false,
     updatedAt: '2026-04-02T00:00:00.000Z',
     ...overrides,
   }
@@ -112,6 +113,35 @@ describe('useUpdatePreferences', () => {
 
     await waitFor(() => expect(result.current.preferences.data?.hideProfanity).toBe(false))
     expect(result.current.preferences.data?.dndEnabled).toBe(true)
+  })
+
+  // WHY: The optimistic setter rebuilds the whole cache literal — if it
+  // dropped onboardingCompleted, any unrelated toggle after completing
+  // onboarding would flip the flag back to false in cache and re-show the
+  // flow (§5.7 regression guard, client twin of the COALESCE server test).
+  it('preserves onboardingCompleted when patching an unrelated field', async () => {
+    vi.mocked(updatePreferences).mockReturnValueOnce(new Promise(() => {}) as never)
+
+    const { result } = renderPreferencesHooks(buildPreferences({ onboardingCompleted: true }))
+
+    await act(async () => {
+      result.current.update.mutate({ dndEnabled: true })
+    })
+
+    await waitFor(() => expect(result.current.preferences.data?.dndEnabled).toBe(true))
+    expect(result.current.preferences.data?.onboardingCompleted).toBe(true)
+  })
+
+  it('optimistically sets onboardingCompleted when patched', async () => {
+    vi.mocked(updatePreferences).mockReturnValueOnce(new Promise(() => {}) as never)
+
+    const { result } = renderPreferencesHooks(buildPreferences({ onboardingCompleted: false }))
+
+    await act(async () => {
+      result.current.update.mutate({ onboardingCompleted: true })
+    })
+
+    await waitFor(() => expect(result.current.preferences.data?.onboardingCompleted).toBe(true))
   })
 
   it('rolls back to the previous cache value on error and toasts', async () => {

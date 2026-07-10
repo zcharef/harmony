@@ -220,6 +220,16 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
               <MessageSquarePlus className="h-10 w-10 text-default-300" />
               <p className="text-sm text-default-500">{t('noConversationsYet')}</p>
               <p className="text-xs text-default-400">{t('startConversation')}</p>
+              <Button
+                data-test="dm-empty-start-cta"
+                size="sm"
+                color="primary"
+                variant="flat"
+                className="mt-2"
+                onPress={() => setIsSearchOpen(true)}
+              >
+                {t('startConversationCta')}
+              </Button>
             </div>
           )}
 

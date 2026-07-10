@@ -21,6 +21,7 @@ describe('usePreferences', () => {
     const serverPreferences: UserPreferencesResponse = {
       dndEnabled: true,
       hideProfanity: false,
+      onboardingCompleted: true,
       updatedAt: '2026-04-02T00:00:00.000Z',
     }
     vi.mocked(getPreferences).mockResolvedValueOnce({ data: serverPreferences } as never)

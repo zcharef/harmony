@@ -1,5 +1,6 @@
 {
   "selectChannel": "Select a channel to start chatting",
+  "selectChannelHint": "Pick a channel from the sidebar — messages you send there reach everyone in it.",
   "welcomeToChannel": "Welcome to #{{channelName}}",
   "channelStart": "This is the start of the #{{channelName}} channel.",
   "failedToLoadMessages": "Failed to load messages",

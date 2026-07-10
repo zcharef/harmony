@@ -908,6 +908,7 @@ function ChatPlaceholder({ isDm }: { isDm: boolean }) {
     >
       <PlaceholderIcon className="h-16 w-16 text-default-300" />
       <p className="mt-2 text-default-500">{t('selectChannel')}</p>
+      <p className="mt-1 max-w-sm text-center text-sm text-default-400">{t('selectChannelHint')}</p>
     </div>
   )
 }
