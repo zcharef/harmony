@@ -26,6 +26,18 @@ function useServerHasUnread(serverId: string): boolean {
 }
 
 /**
+ * WHY: Sums mention counts across a server's channels. When > 0 the plain
+ * unread dot is replaced by a count pill (spec §1: dot = unreads,
+ * pill with number = mentions — no ambiguity).
+ */
+function useServerMentionCount(serverId: string): number {
+  const { data: channels } = useChannels(serverId)
+  const mentionCounts = useUnreadStore((s) => s.mentionCounts)
+  if (channels === undefined) return 0
+  return channels.reduce((sum, c) => sum + (mentionCounts[c.id] ?? 0), 0)
+}
+
+/**
  * WHY: Checks if any DM conversation has unread messages. Used to show
  * an unread dot on the DM home button when the user is in server view.
  */
@@ -34,6 +46,30 @@ function useDmsHaveUnread(): boolean {
   const counts = useUnreadStore((s) => s.counts)
   if (dms === undefined) return false
   return dms.some((dm) => (counts[dm.channelId] ?? 0) > 0)
+}
+
+/**
+ * WHY: Sums mention counts across DM channels — every unread DM message is
+ * mention-equivalent (spec §1 rule 2), which is what makes the DM home
+ * button show a red count like Discord's.
+ */
+function useDmsMentionCount(): number {
+  const { data: dms } = useDms()
+  const mentionCounts = useUnreadStore((s) => s.mentionCounts)
+  if (dms === undefined) return 0
+  return dms.reduce((sum, dm) => sum + (mentionCounts[dm.channelId] ?? 0), 0)
+}
+
+/** Red count pill layered on a nav icon — shared by server icons and the DM home button. */
+function MentionCountBadge({ count, testId }: { count: number; testId: string }) {
+  return (
+    <div
+      data-test={testId}
+      className="absolute -bottom-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-content1 bg-danger px-1 text-[10px] font-semibold text-danger-foreground"
+    >
+      {count > 99 ? '99+' : count}
+    </div>
+  )
 }
 
 function ServerIcon({
@@ -55,6 +91,7 @@ function ServerIcon({
     .toUpperCase()
 
   const hasUnread = useServerHasUnread(server.id)
+  const mentionCount = useServerMentionCount(server.id)
 
   return (
     <Tooltip content={server.name} placement="right" offset={8}>
@@ -92,8 +129,13 @@ function ServerIcon({
           }}
         />
 
+        {/* Mention count pill replaces the plain dot when any channel has mentions (spec §1) */}
+        {mentionCount > 0 && !isActive && (
+          <MentionCountBadge count={mentionCount} testId="server-mention-badge" />
+        )}
+
         {/* Unread dot — shows when any channel in this server has unread messages */}
-        {hasUnread && !isActive && (
+        {mentionCount === 0 && hasUnread && !isActive && (
           <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-content1 bg-danger" />
         )}
       </button>
@@ -123,6 +165,7 @@ export function ServerList({
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isJoinOpen, setIsJoinOpen] = useState(false)
   const hasDmUnread = useDmsHaveUnread()
+  const dmMentionCount = useDmsMentionCount()
 
   if (isPending) {
     return (
@@ -178,8 +221,13 @@ export function ServerList({
             }}
           />
 
+          {/* Mention count pill — every unread DM message is mention-equivalent (spec §1) */}
+          {dmMentionCount > 0 && !isDmView && (
+            <MentionCountBadge count={dmMentionCount} testId="dm-mention-badge" />
+          )}
+
           {/* Unread dot — shows when any DM has unread messages */}
-          {hasDmUnread && !isDmView && (
+          {dmMentionCount === 0 && hasDmUnread && !isDmView && (
             <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-content1 bg-danger" />
           )}
         </button>

@@ -47,7 +47,10 @@ import { useChannels } from './hooks/use-channels'
 import { useDeleteChannel } from './hooks/use-delete-channel'
 import { useUnreadStore } from './stores/unread-store'
 
-function ChannelButton({
+// WHY export: unit-tested directly (channel-sidebar.test.tsx) — rendering the
+// whole ChannelSidebar would require mocking five unrelated feature barrels.
+// Intentionally NOT in the feature barrel: not part of the public API.
+export function ChannelButton({
   channel,
   isActive,
   canManageChannels,
@@ -64,6 +67,12 @@ function ChannelButton({
 }) {
   const { t } = useTranslation('channels')
   const unreadCount = useUnreadStore((s) => s.counts[channel.id] ?? 0)
+  const mentionCount = useUnreadStore((s) => s.mentionCounts[channel.id] ?? 0)
+  // WHY the number stays unreadCount (spec §1): swapping it for mentionCount
+  // would read as the count going DOWN. Mentions add a distinct treatment
+  // instead: `@` prefix + bold.
+  const hasMentions = mentionCount > 0
+  const unreadLabel = unreadCount > 99 ? '99+' : `${unreadCount}`
 
   return (
     <div data-test="channel-item" className="group flex items-center">
@@ -90,8 +99,25 @@ function ChannelButton({
         {channel.isPrivate && <Lock className="h-3 w-3 shrink-0 text-default-400" />}
         {channel.isReadOnly && <Megaphone className="h-3 w-3 shrink-0 text-default-400" />}
         {unreadCount > 0 && (
-          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-xs text-danger-foreground">
-            {unreadCount > 99 ? '99+' : unreadCount}
+          <span
+            data-test="channel-unread-pill"
+            data-test-has-mentions={hasMentions ? 'true' : undefined}
+            className={cn(
+              'ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-xs text-danger-foreground',
+              hasMentions && 'font-bold',
+            )}
+          >
+            {/* WHY sr-only twin: ARIA prohibits naming on generic-role spans
+                (lint/a11y/useAriaPropsSupportedByRole), so no aria-label here —
+                screen readers get a full sentence, sighted users the compact
+                pill. The twin renders in BOTH branches: hiding the visible
+                count without it would silence the pill entirely. */}
+            <span aria-hidden="true">{hasMentions ? `@ ${unreadLabel}` : unreadLabel}</span>
+            <span className="sr-only">
+              {hasMentions
+                ? t('unreadWithMentions', { unread: unreadCount, mentions: mentionCount })
+                : t('unreadOnly', { unread: unreadCount })}
+            </span>
           </span>
         )}
       </Button>

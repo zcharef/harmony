@@ -1,7 +1,7 @@
 import { Avatar, Button, Textarea, Tooltip } from '@heroui/react'
 import type { TFunction } from 'i18next'
 import { ArrowRight, Lock, LockOpen, MessageSquare, Pencil, SmilePlus, Trash2 } from 'lucide-react'
-import { memo, useCallback, useRef, useState } from 'react'
+import { type ComponentPropsWithoutRef, memo, useCallback, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
@@ -14,12 +14,17 @@ import type { MessageResponse } from '@/lib/api'
 import { resolveDisplayName } from '@/lib/display-name'
 import { isTauri } from '@/lib/platform'
 import { maskProfanity } from '@/lib/profanity-filter'
+import { MentionPill } from './components/mention-pill'
+import { MentionText } from './components/mention-text'
 import { EmojiPickerPopover } from './emoji-picker-popover'
 import { useEditBuffer } from './hooks/use-edit-buffer'
+import { mentionSanitizeSchema, remarkMentions } from './lib/mention-tokens'
 
 interface MessageItemProps {
   message: MessageResponse
   currentUserId: string
+  /** WHY: Server context for the mention pill's members-cache fallback. Null in DMs. */
+  serverId?: string | null
   /** WHY: When true, the delete button appears on ALL messages (not just own). */
   canModerateMessages: boolean
   isEditing: boolean
@@ -79,9 +84,20 @@ function normalizeUrl(url: string): string {
   return url
 }
 
+/**
+ * WHY: The remark plugin emits spans with `data-mention-id`; hast property
+ * names reach React props in their hyphenated attribute form, so the override
+ * reads the hyphenated key. `node` is react-markdown's ExtraProps.
+ */
+type MarkdownSpanProps = ComponentPropsWithoutRef<'span'> & {
+  node?: unknown
+  'data-mention-id'?: string
+}
+
 // WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
 function MessageContent({
   message,
+  serverId,
   isEncrypted,
   isDeleted,
   isModeratorDeleted,
@@ -94,6 +110,7 @@ function MessageContent({
   getCachedPlaintext,
 }: {
   message: MessageResponse
+  serverId: string | null
   isEncrypted: boolean
   isDeleted: boolean
   isModeratorDeleted: boolean
@@ -213,6 +230,12 @@ function MessageContent({
           message={message}
           decryptMessage={decryptMessage}
           getCachedPlaintext={getCachedPlaintext}
+          // WHY render prop (not a crypto→chat import): E2EE messages parse
+          // mentions post-decrypt (spec §5.3), and injecting the renderer from
+          // chat avoids a circular feature dependency (chat already imports crypto).
+          renderPlaintext={(plaintext) => (
+            <MentionText content={plaintext} mentions={message.mentions} serverId={serverId} />
+          )}
         />
         {message.editedAt !== undefined && message.editedAt !== null && (
           <span className="ml-1 text-xs text-default-400" data-test="message-edited-indicator">
@@ -240,11 +263,19 @@ function MessageContent({
   return (
     <div data-test="message-content" className="text-sm text-foreground/90">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeSanitize]}
+        remarkPlugins={[remarkGfm, remarkMentions]}
+        rehypePlugins={[[rehypeSanitize, mentionSanitizeSchema]]}
         urlTransform={normalizeUrl}
         components={{
           p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+          // WHY: remarkMentions emits spans carrying data-mention-id — render
+          // them as pills; any other span falls through untouched.
+          span: ({ node: _node, 'data-mention-id': mentionId, ...rest }: MarkdownSpanProps) =>
+            mentionId !== undefined ? (
+              <MentionPill userId={mentionId} mentions={message.mentions} serverId={serverId} />
+            ) : (
+              <span {...rest} />
+            ),
           strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
           code: ({ className, children }) => {
             const isBlock = className?.includes('language-')
@@ -538,6 +569,7 @@ function MessageHeader({
 export const MessageItem = memo(function MessageItem({
   message,
   currentUserId,
+  serverId = null,
   canModerateMessages,
   isEditing,
   isGrouped = false,
@@ -588,11 +620,18 @@ export const MessageItem = memo(function MessageItem({
   // WHY: Use channel decryption for encrypted channels, Olm decryption for DMs.
   const activeDecryptFn = isChannelEncrypted ? decryptChannelMessage : decryptMessage
 
+  // WHY derive from the server-validated field (not rendered pills): E2EE
+  // "ghost pings" (sidecar without visible markers) must still tint the row so
+  // they are visible and reportable (spec §5.3). Deleted messages never tint.
+  const mentionsMe =
+    isDeleted === false && message.mentions?.some((m) => m.userId === currentUserId) === true
+
   return (
     <div
       data-test="message-item"
       data-message-id={message.id}
-      className={`group relative flex gap-4 px-4 hover:bg-default-200/50${isPending ? ' opacity-60' : ''}${isGrouped ? ' py-0.5' : ' pt-3 pb-0.5'}`}
+      data-test-mentions-me={mentionsMe ? 'true' : undefined}
+      className={`group relative flex gap-4 px-4 hover:bg-default-200/50${mentionsMe ? ' border-l-2 border-warning bg-warning/10' : ''}${isPending ? ' opacity-60' : ''}${isGrouped ? ' py-0.5' : ' pt-3 pb-0.5'}`}
     >
       {isGrouped ? (
         <div className="w-10 shrink-0" />
@@ -623,6 +662,7 @@ export const MessageItem = memo(function MessageItem({
 
         <MessageContent
           message={message}
+          serverId={serverId}
           isEncrypted={isEncrypted}
           isDeleted={isDeleted}
           isModeratorDeleted={isModeratorDeleted}

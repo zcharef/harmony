@@ -12,6 +12,7 @@ import {
   useChannels,
   useDesktopNotifications,
   useRealtimeChannels,
+  useRealtimeMentions,
   useRealtimeUnread,
   useUnreadSync,
 } from '@/features/channels'
@@ -428,6 +429,10 @@ export function MainLayout() {
   // previous approach coupled incrementing to useRealtimeMessages(channelId)
   // which only subscribed when channelId was non-empty.
   useRealtimeUnread(selectedChannelId)
+  // WHY: Mention badge deltas (mention.received + DM mention-equivalence rule).
+  // Mounted here beside useRealtimeUnread so mention badges move even when no
+  // channel is selected (global-listener rule §4.6).
+  useRealtimeMentions(selectedChannelId, userId)
   // WHY: Handles the SSE unread.sync snapshot on connect/reconnect.
   // Replaces N per-server REST calls with a single SSE initial event.
   useUnreadSync(userId)
@@ -601,6 +606,7 @@ export function MainLayout() {
             <ChatArea
               channelId={selectedChannelId}
               channelName={chatHeaderName}
+              serverId={selectedServerId}
               currentUserRole={currentUserRole}
               isDm={chatProps.isDm}
               dmRecipient={chatProps.dmRecipient}
