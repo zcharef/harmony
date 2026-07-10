@@ -17,6 +17,23 @@ use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
 use crate::domain::services::spam_guard::{self, SpamGuard};
 
+/// Mention targets present in `current` but absent from `previous`,
+/// first-appearance order preserved.
+///
+/// WHY: edits must not re-charge the mention budget for users who were
+/// already mentioned before the edit (polish #9) — only this diff consumes
+/// budget. NO `mention.received` is ever emitted for edits (§2.4, Discord
+/// parity: edit-in mentions don't ping) — this diff exists purely for
+/// budget accounting.
+fn diff_new_mentions(previous: &[UserId], current: &[UserId]) -> Vec<UserId> {
+    let previous: HashSet<&UserId> = previous.iter().collect();
+    current
+        .iter()
+        .filter(|id| !previous.contains(id))
+        .cloned()
+        .collect()
+}
+
 /// Service for message-related business logic.
 #[derive(Debug)]
 pub struct MessageService {
@@ -447,12 +464,18 @@ impl MessageService {
 
     /// Edit a message's content. Only the author can edit.
     ///
+    /// Plaintext edits re-parse mentions and persist the new list; only
+    /// mentions NEWLY added by the edit consume budget (polish #9). No
+    /// `mention.received` is emitted for edits (§2.4, Discord parity).
+    ///
     /// # Errors
     /// Returns `DomainError::ValidationError` if content is empty,
-    /// `DomainError::NotFound` if the message doesn't exist or is deleted,
+    /// `DomainError::NotFound` if the message doesn't exist, is deleted, or
+    /// does not belong to `channel_id` (path-scope binding),
     /// `DomainError::Forbidden` if the caller is not the author.
     pub async fn edit_message(
         &self,
+        channel_id: &ChannelId,
         message_id: &MessageId,
         user_id: &UserId,
         content: String,
@@ -479,6 +502,19 @@ impl MessageService {
                     resource_type: "Message",
                     id: message_id.to_string(),
                 })?;
+
+        // WHY: bind the URL path to the message — without this, an author could
+        // PATCH their message through ANY existing channel id and the handler
+        // would stamp SSE events (message.updated) with the attacker-chosen
+        // channel/server scope. 404 (not 400) so a mismatched path leaks
+        // nothing about the message's real location. Mirrors the cross-channel
+        // parent check in `create`.
+        if message.channel_id != *channel_id {
+            return Err(DomainError::NotFound {
+                resource_type: "Message",
+                id: message_id.to_string(),
+            });
+        }
 
         if message.author_id != *user_id {
             return Err(DomainError::Forbidden(
@@ -525,11 +561,15 @@ impl MessageService {
         }
 
         // §2.4 edits: re-parse mentions (plaintext) so rendering and future
-        // read-state queries stay correct. Discord parity — the handler emits only
-        // MessageUpdated, NO mention.received / live badge deltas for edits. Runs
-        // BEFORE the masking block below (parse-before-mask). Behavior change: a
-        // plaintext edit producing >10 valid markers now returns 400. Encrypted
-        // edits pass None (the column is left untouched via COALESCE in the repo).
+        // read-state queries stay correct. Discord parity — the handler emits
+        // only MessageUpdated, NO mention.received / live badge deltas for
+        // edits. Runs BEFORE the masking block below (parse-before-mask).
+        // Polish #9: only mentions NEWLY ADDED by this edit (absent from the
+        // pre-edit persisted list) consume the mention budget — pre-existing
+        // mentions were charged when first sent, so an edit must not re-charge
+        // them. Behavior change (step 2): a plaintext edit producing >10 valid
+        // markers returns 400. Encrypted edits pass None (the column is left
+        // untouched via COALESCE in the repo) and never add mentions.
         let mentioned_user_ids: Option<Vec<UserId>> = if message.encrypted {
             None
         } else {
@@ -555,20 +595,24 @@ impl MessageService {
                 .into_iter()
                 .filter(|id| mentionable.contains(id))
                 .collect();
+            let mut new_ids = diff_new_mentions(&message.mentioned_user_ids, &mentioned);
             let granted = self.spam_guard.consume_mention_budget(
                 &message.author_id,
                 &message.channel_id,
-                mentioned.len(),
+                new_ids.len(),
             );
-            if granted < mentioned.len() {
+            if granted < new_ids.len() {
                 tracing::warn!(
                     sender_id = %message.author_id,
                     channel_id = %message.channel_id,
-                    requested = mentioned.len(),
+                    requested = new_ids.len(),
                     granted,
-                    "mention budget exceeded on edit — excess mentions dropped"
+                    "mention budget exceeded on edit — excess new mentions dropped"
                 );
-                mentioned.truncate(granted);
+                // Keep every pre-existing mention plus the first `granted`
+                // new ones (first-appearance order) — drop only the excess.
+                let dropped: HashSet<UserId> = new_ids.split_off(granted).into_iter().collect();
+                mentioned.retain(|id| !dropped.contains(id));
             }
             Some(mentioned)
         };
@@ -716,6 +760,81 @@ mod tests {
     #[test]
     fn max_message_length_constant() {
         assert_eq!(MAX_MESSAGE_LENGTH, 8000);
+    }
+
+    // ── diff_new_mentions (polish #9: edit budget/notify diff) ────
+
+    /// WHY: an edit that keeps the same mentions must produce an EMPTY diff —
+    /// this is what guarantees no budget re-charge for users already
+    /// mentioned before the edit.
+    #[test]
+    fn diff_new_mentions_same_mentions_yields_empty() {
+        let a = UserId::from(uuid::Uuid::new_v4());
+        let b = UserId::from(uuid::Uuid::new_v4());
+        let previous = vec![a.clone(), b.clone()];
+        let current = vec![a, b];
+
+        let diff = diff_new_mentions(&previous, &current);
+        assert!(
+            diff.is_empty(),
+            "unchanged mentions must not be treated as new"
+        );
+    }
+
+    /// WHY: only the users ADDED by the edit may consume budget —
+    /// pre-existing ones are excluded from the diff.
+    #[test]
+    fn diff_new_mentions_returns_only_added_users() {
+        let existing = UserId::from(uuid::Uuid::new_v4());
+        let added = UserId::from(uuid::Uuid::new_v4());
+        let previous = vec![existing.clone()];
+        let current = vec![existing, added.clone()];
+
+        let diff = diff_new_mentions(&previous, &current);
+        assert_eq!(
+            diff,
+            vec![added],
+            "only the newly-added user is in the diff"
+        );
+    }
+
+    /// WHY: removing a mention is not an addition — the diff stays empty and
+    /// nothing is charged. (The removal itself is persisted via the new list.)
+    #[test]
+    fn diff_new_mentions_removal_yields_empty() {
+        let a = UserId::from(uuid::Uuid::new_v4());
+        let b = UserId::from(uuid::Uuid::new_v4());
+        let previous = vec![a.clone(), b];
+        let current = vec![a];
+
+        let diff = diff_new_mentions(&previous, &current);
+        assert!(diff.is_empty(), "a removed mention is never 'new'");
+    }
+
+    /// WHY: the diff preserves first-appearance order of the NEW content —
+    /// budget truncation drops the LAST added mentions, so order is contract.
+    #[test]
+    fn diff_new_mentions_preserves_first_appearance_order() {
+        let old = UserId::from(uuid::Uuid::new_v4());
+        let first = UserId::from(uuid::Uuid::new_v4());
+        let second = UserId::from(uuid::Uuid::new_v4());
+        let previous = vec![old.clone()];
+        let current = vec![first.clone(), old, second.clone()];
+
+        let diff = diff_new_mentions(&previous, &current);
+        assert_eq!(diff, vec![first, second], "order follows the new content");
+    }
+
+    /// WHY: with an empty previous list (message had no mentions), every
+    /// validated mention in the edit is new — the edit behaves like a send.
+    #[test]
+    fn diff_new_mentions_all_new_when_previous_empty() {
+        let a = UserId::from(uuid::Uuid::new_v4());
+        let b = UserId::from(uuid::Uuid::new_v4());
+        let current = vec![a.clone(), b.clone()];
+
+        let diff = diff_new_mentions(&[], &current);
+        assert_eq!(diff, vec![a, b]);
     }
 
     /// Rate limit window must be 5 seconds. Max messages per window is plan-derived.

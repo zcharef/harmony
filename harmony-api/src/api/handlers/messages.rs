@@ -191,6 +191,12 @@ pub struct MessagePath {
 
 /// Edit a message's content. Only the author can edit.
 ///
+/// Plaintext edits re-parse `<@user_id>` markers and persist the new mention
+/// list (>10 valid markers is a 400), but edits never emit `mention.received`
+/// (Discord parity: edit-in mentions don't ping). Editing a message through a
+/// channel it does not belong to is a 404. Encrypted edits leave the mention
+/// list untouched.
+///
 /// # Errors
 /// Returns `ApiError` on validation failure, authorization failure, or repository error.
 #[utoipa::path(
@@ -226,9 +232,13 @@ pub async fn edit_message(
     // WHY: Resolve private-channel scope before mutation (see `send_message`).
     let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
 
+    // WHY pass the path channel id: the service 404s when the message does not
+    // belong to `path.channel_id` — without that binding, an author could PATCH
+    // their message through ANY channel path and the events below would fan out
+    // with an attacker-chosen channel/server scope.
     let message = state
         .message_service()
-        .edit_message(&path.message_id, &user_id, req.content)
+        .edit_message(&path.channel_id, &path.message_id, &user_id, req.content)
         .await?;
 
     let encrypted = message.message.encrypted;
@@ -246,6 +256,10 @@ pub async fn edit_message(
         receivers,
         "emitted message.updated"
     );
+
+    // §2.4: NO mention.received on edits (Discord parity — edit-in mentions
+    // don't ping). Newly-added mentions still consume budget in the service
+    // and land in the persisted list; badges converge on reconnect (§6.17).
 
     // B4: Async moderation on edits too (prevent edit-in-bypass).
     if !encrypted {
