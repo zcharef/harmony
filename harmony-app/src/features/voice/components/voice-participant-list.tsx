@@ -12,6 +12,7 @@ import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useMembers } from '@/features/members'
+import { ProfilePopover } from '@/features/profiles'
 import type { VoiceParticipantResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useRealtimeVoice } from '../hooks/use-realtime-voice'
@@ -56,6 +57,7 @@ export function VoiceParticipantList({ channelId, serverId }: VoiceParticipantLi
           )}
           avatarUrl={resolveParticipantAvatarUrl(participant, membersData?.items)}
           isSpeaking={activeSpeakers.has(participant.userId)}
+          serverId={serverId}
         />
       ))}
     </ul>
@@ -76,6 +78,8 @@ interface VoiceParticipantRowProps {
   /** WHY: Resolved from the member cache by the parent; undefined → initials fallback. */
   avatarUrl: string | undefined
   isSpeaking: boolean
+  /** WHY: Voice can span servers — `null` when no shared server context. */
+  serverId: string | null
 }
 
 const VoiceParticipantRow = memo(function VoiceParticipantRow({
@@ -83,27 +87,31 @@ const VoiceParticipantRow = memo(function VoiceParticipantRow({
   displayName,
   avatarUrl,
   isSpeaking,
+  serverId,
 }: VoiceParticipantRowProps) {
   return (
     <li
       data-test={`voice-participant-${participant.userId}`}
       className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5"
     >
-      <Avatar
-        name={displayName}
-        src={avatarUrl}
-        size="sm"
-        showFallback
-        classNames={{
-          base: cn(
-            'h-6 w-6 shrink-0 transition-shadow',
-            isSpeaking
-              ? 'duration-0 ring-2 ring-success ring-offset-1 ring-offset-default-100'
-              : 'duration-150',
-          ),
-          name: 'text-[10px]',
-        }}
-      />
+      <ProfilePopover userId={participant.userId} serverId={serverId}>
+        <Avatar
+          name={displayName}
+          src={avatarUrl}
+          size="sm"
+          showFallback
+          className="cursor-pointer"
+          classNames={{
+            base: cn(
+              'h-6 w-6 shrink-0 transition-shadow',
+              isSpeaking
+                ? 'duration-0 ring-2 ring-success ring-offset-1 ring-offset-default-100'
+                : 'duration-150',
+            ),
+            name: 'text-[10px]',
+          }}
+        />
+      </ProfilePopover>
       <span className="min-w-0 flex-1 truncate text-xs text-default-500">{displayName}</span>
       <MuteDeafIndicator participant={participant} />
     </li>

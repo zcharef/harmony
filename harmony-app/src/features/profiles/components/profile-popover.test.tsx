@@ -1,0 +1,158 @@
+import { configure, fireEvent, render, screen } from '@testing-library/react'
+import { vi } from 'vitest'
+import type { MemberListResponse, ProfileResponse } from '@/lib/api'
+// WHY side-effect import: initializes the real i18n instance so the profiles
+// namespace keys resolve to text (missing keys would otherwise log).
+import '@/lib/i18n'
+import { queryKeys } from '@/lib/query-keys'
+import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
+import { ProfilePopover } from './profile-popover'
+
+// WHY: The repo uses data-test (not data-testid).
+configure({ testIdAttribute: 'data-test' })
+
+// Control the tier-2 account fetch — the states under test are its query states.
+vi.mock('../hooks/use-profile', () => ({ useProfile: vi.fn() }))
+const { useProfile } = await import('../hooks/use-profile')
+
+const SERVER = 'server-1'
+const SUBJECT = 'user-subject'
+
+interface ProfileQueryState {
+  data?: ProfileResponse
+  isPending: boolean
+  isError: boolean
+  isFetching: boolean
+  error: unknown
+}
+
+function mockProfileQuery(state: Partial<ProfileQueryState>) {
+  vi.mocked(useProfile).mockReturnValue({
+    data: state.data,
+    isPending: state.isPending ?? false,
+    isError: state.isError ?? false,
+    isFetching: state.isFetching ?? false,
+    error: state.error ?? null,
+    refetch: vi.fn(),
+  } as never)
+}
+
+function buildProfile(overrides: Partial<ProfileResponse> = {}): ProfileResponse {
+  return {
+    id: SUBJECT,
+    username: 'subject',
+    displayName: 'Subject Name',
+    avatarUrl: null,
+    bannerUrl: null,
+    bio: null,
+    status: 'online',
+    customStatus: null,
+    createdAt: '2026-03-01T00:00:00Z',
+    updatedAt: '2026-03-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+function memberList(): MemberListResponse {
+  return {
+    items: [
+      {
+        userId: SUBJECT,
+        username: 'subject',
+        displayName: 'Subject Name',
+        avatarUrl: null,
+        nickname: null,
+        role: 'member',
+        joinedAt: '2026-03-01T00:00:00Z',
+      },
+    ],
+    nextCursor: null,
+  }
+}
+
+/** Renders the popover with an optional member-context seed, then opens it. */
+function renderAndOpen({ withContext }: { withContext: boolean }) {
+  const queryClient = createTestQueryClient()
+  if (withContext) {
+    queryClient.setQueryData(queryKeys.servers.members(SERVER), memberList())
+  }
+  render(
+    <ProfilePopover userId={SUBJECT} serverId={withContext ? SERVER : null}>
+      <button type="button" data-test="trigger">
+        open
+      </button>
+    </ProfilePopover>,
+    { wrapper: createQueryWrapper(queryClient) },
+  )
+  fireEvent.click(screen.getByTestId('trigger'))
+}
+
+describe('ProfilePopover states', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('LOADING (context present): shows the card with a bio-region spinner', async () => {
+    mockProfileQuery({ isPending: true })
+    renderAndOpen({ withContext: true })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    // Name comes from the member context tier immediately.
+    expect(screen.getByTestId('profile-card-name').textContent).toBe('Subject Name')
+    // Account tier is still loading.
+    expect(screen.getByTestId('profile-card-bio-loading')).toBeTruthy()
+  })
+
+  it('LOADING (no context): shows the full-card spinner', async () => {
+    mockProfileQuery({ isPending: true })
+    renderAndOpen({ withContext: false })
+
+    expect(await screen.findByTestId('profile-card-loading')).toBeTruthy()
+    expect(screen.queryByTestId('profile-card')).toBeNull()
+  })
+
+  it('LOADED with bio: renders the bio and banner image', async () => {
+    mockProfileQuery({
+      data: buildProfile({
+        bio: 'Building things.',
+        bannerUrl: 'https://cdn.example.com/banner.webp',
+      }),
+    })
+    renderAndOpen({ withContext: true })
+
+    expect((await screen.findByTestId('profile-bio')).textContent).toContain('Building things.')
+    expect(screen.getByTestId('profile-card-banner')).toBeTruthy()
+  })
+
+  it('EMPTY bio + banner: omits the bio, shows a flat banner band', async () => {
+    mockProfileQuery({ data: buildProfile({ bio: null, bannerUrl: null }) })
+    renderAndOpen({ withContext: true })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    expect(screen.queryByTestId('profile-bio')).toBeNull()
+    expect(screen.getByTestId('profile-card-banner-empty')).toBeTruthy()
+  })
+
+  it('ERROR (context present, non-404): shows an inline retry, keeps the context tier', async () => {
+    mockProfileQuery({ isError: true, error: { status: 500, detail: 'boom' } })
+    renderAndOpen({ withContext: true })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    expect(screen.getByTestId('profile-card-name').textContent).toBe('Subject Name')
+    expect(screen.getByTestId('profile-card-bio-error')).toBeTruthy()
+  })
+
+  it('ERROR (no context, non-404): shows the shared error state', async () => {
+    mockProfileQuery({ isError: true, error: { status: 500, detail: 'boom' } })
+    renderAndOpen({ withContext: false })
+
+    // ErrorState renders a retry button (no profile-card).
+    expect(await screen.findByRole('button', { name: /retry/i })).toBeTruthy()
+    expect(screen.queryByTestId('profile-card')).toBeNull()
+  })
+
+  it('DELETED (404): shows the minimal deleted card', async () => {
+    mockProfileQuery({ isError: true, error: { status: 404, detail: 'not found' } })
+    renderAndOpen({ withContext: false })
+
+    expect(await screen.findByTestId('profile-card-deleted')).toBeTruthy()
+  })
+})

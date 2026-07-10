@@ -39,6 +39,8 @@ export function useUpdateProfile() {
           ...(input.displayName !== undefined && { displayName: input.displayName }),
           ...(input.customStatus !== undefined && { customStatus: input.customStatus }),
           ...(input.avatarUrl !== undefined && { avatarUrl: input.avatarUrl }),
+          ...(input.bio !== undefined && { bio: input.bio }),
+          ...(input.bannerUrl !== undefined && { bannerUrl: input.bannerUrl }),
         }
       })
 

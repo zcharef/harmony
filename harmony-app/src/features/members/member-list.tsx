@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
 import { StatusIndicator, usePresenceStore } from '@/features/presence'
+import { ProfilePopover } from '@/features/profiles'
 import type { MemberResponse, UserStatus } from '@/lib/api'
 import { resolveDisplayName } from '@/lib/display-name'
 import { cn } from '@/lib/utils'
@@ -228,46 +229,60 @@ function MemberRow({
     setIsContextMenuOpen(true)
   }
 
+  // WHY the wrapper + invisible anchor: the row needs TWO overlays — a
+  // left-press ProfilePopover (the card) and a right-click MemberContextMenu
+  // (moderation). HeroUI triggers each clone their single DOM child, so they
+  // cannot share one node. The button is the popover trigger; the context menu
+  // anchors to a pointer-events-none span covering the row, opened via the
+  // wrapper's onContextMenu — the two coexist without fighting for the trigger.
   return (
-    <MemberContextMenu
-      serverId={serverId}
-      callerRole={callerRole}
-      targetUserId={member.userId}
-      targetUsername={member.username}
-      targetRole={role}
-      isSelf={isSelf}
-      isOpen={isContextMenuOpen}
-      onOpenChange={setIsContextMenuOpen}
-      onKick={() => onKick({ id: member.userId, username: member.username })}
-      onBan={() => onBan({ id: member.userId, username: member.username })}
-      onNavigateDm={onNavigateDm}
-    >
-      <button
-        type="button"
-        data-test="member-item"
-        data-user-id={member.userId}
-        className="flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-default-200"
-        onContextMenu={handleContextMenu}
+    // biome-ignore lint/a11y/noStaticElementInteractions: onContextMenu (right-click) opens the moderation menu; the primary press action lives on the inner button (the ProfilePopover trigger), which carries the interactive semantics
+    <div className="relative" onContextMenu={handleContextMenu}>
+      <ProfilePopover userId={member.userId} serverId={serverId}>
+        <button
+          type="button"
+          data-test="member-item"
+          data-user-id={member.userId}
+          className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-default-200"
+        >
+          <div className="relative">
+            <Avatar
+              name={displayName}
+              src={member.avatarUrl ?? undefined}
+              size="sm"
+              showFallback
+              classNames={{ base: 'h-8 w-8', name: 'text-xs' }}
+            />
+            {status !== null && (
+              <div data-test="member-status" className="absolute -bottom-0.5 -right-0.5">
+                <StatusIndicator status={status} size="sm" />
+              </div>
+            )}
+          </div>
+          <span
+            data-test="member-username"
+            className={cn('truncate text-sm', ROLE_NAME_CLASS[role])}
+          >
+            {displayName}
+          </span>
+          <RoleBadge role={role} />
+        </button>
+      </ProfilePopover>
+      <MemberContextMenu
+        serverId={serverId}
+        callerRole={callerRole}
+        targetUserId={member.userId}
+        targetUsername={member.username}
+        targetRole={role}
+        isSelf={isSelf}
+        isOpen={isContextMenuOpen}
+        onOpenChange={setIsContextMenuOpen}
+        onKick={() => onKick({ id: member.userId, username: member.username })}
+        onBan={() => onBan({ id: member.userId, username: member.username })}
+        onNavigateDm={onNavigateDm}
       >
-        <div className="relative">
-          <Avatar
-            name={displayName}
-            src={member.avatarUrl ?? undefined}
-            size="sm"
-            showFallback
-            classNames={{ base: 'h-8 w-8', name: 'text-xs' }}
-          />
-          {status !== null && (
-            <div data-test="member-status" className="absolute -bottom-0.5 -right-0.5">
-              <StatusIndicator status={status} size="sm" />
-            </div>
-          )}
-        </div>
-        <span data-test="member-username" className={cn('truncate text-sm', ROLE_NAME_CLASS[role])}>
-          {displayName}
-        </span>
-        <RoleBadge role={role} />
-      </button>
-    </MemberContextMenu>
+        <span aria-hidden className="pointer-events-none absolute inset-0" />
+      </MemberContextMenu>
+    </div>
   )
 }

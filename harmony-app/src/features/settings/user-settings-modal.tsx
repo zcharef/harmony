@@ -9,6 +9,7 @@ import {
   Spinner,
   Tab,
   Tabs,
+  Textarea,
 } from '@heroui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { TFunction } from 'i18next'
@@ -22,6 +23,7 @@ import {
   useCurrentProfile,
   useUpdateProfile,
   useUploadAvatar,
+  useUploadBanner,
 } from '@/features/auth'
 import { NotificationSettingsTab } from '@/features/notifications'
 import type { ProfileResponse } from '@/lib/api'
@@ -31,6 +33,7 @@ import { type UserSettingsTab, useSettingsUiStore } from './stores/settings-ui-s
 
 const DISPLAY_NAME_MAX = 32
 const CUSTOM_STATUS_MAX = 128
+const BIO_MAX = 190
 
 function profileFormSchema(t: TFunction<'settings'>) {
   return z.object({
@@ -38,6 +41,8 @@ function profileFormSchema(t: TFunction<'settings'>) {
     // username per the identity render chain). Non-blank must be 1-32 chars.
     displayName: z.string().trim().max(DISPLAY_NAME_MAX, t('displayNameMaxLength')),
     customStatus: z.string().trim().max(CUSTOM_STATUS_MAX, t('customStatusMaxLength')),
+    // WHY max-only: blank is valid — it clears the bio.
+    bio: z.string().trim().max(BIO_MAX, t('bioMaxLength')),
   })
 }
 
@@ -51,12 +56,28 @@ const AVATAR_ERROR_KEYS: Record<AvatarUploadErrorCode, string> = {
   uploadFailed: 'avatarErrorUploadFailed',
 }
 
+const BANNER_ERROR_KEYS: Record<AvatarUploadErrorCode, string> = {
+  invalidType: 'bannerErrorInvalidType',
+  tooLarge: 'bannerErrorTooLarge',
+  gifTooLarge: 'bannerErrorTooLarge',
+  processingFailed: 'bannerErrorProcessingFailed',
+  uploadFailed: 'bannerErrorUploadFailed',
+}
+
 /** Maps an avatar pipeline failure to a user-actionable inline message. */
 function resolveAvatarErrorMessage(error: unknown, t: TFunction<'settings'>): string {
   if (error instanceof AvatarUploadError) {
     return t(AVATAR_ERROR_KEYS[error.code])
   }
   return getApiErrorDetail(error, t('avatarErrorUploadFailed'))
+}
+
+/** Maps a banner pipeline failure to a user-actionable inline message. */
+function resolveBannerErrorMessage(error: unknown, t: TFunction<'settings'>): string {
+  if (error instanceof AvatarUploadError) {
+    return t(BANNER_ERROR_KEYS[error.code])
+  }
+  return getApiErrorDetail(error, t('bannerErrorUploadFailed'))
 }
 
 /**
@@ -121,6 +142,7 @@ function ProfileTab({ onClose }: { onClose: () => void }) {
   return <ProfileSettingsForm profile={profile} onClose={onClose} />
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the profile form owns five related controls (banner + avatar upload/remove, display name, custom status, bio) with their own pending/error state — splitting further would scatter tightly-coupled form logic
 function ProfileSettingsForm({
   profile,
   onClose,
@@ -134,8 +156,11 @@ function ProfileSettingsForm({
   // pending/error state — sharing the Save mutation would cross-wire spinners
   // and inline error attribution.
   const removeAvatar = useUpdateProfile()
+  const removeBanner = useUpdateProfile()
   const uploadAvatar = useUploadAvatar()
+  const uploadBanner = useUploadBanner()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const bannerInputRef = useRef<HTMLInputElement>(null)
 
   const schema = profileFormSchema(t)
   const {
@@ -149,12 +174,15 @@ function ProfileSettingsForm({
     defaultValues: {
       displayName: profile.displayName ?? '',
       customStatus: profile.customStatus ?? '',
+      bio: profile.bio ?? '',
     },
   })
 
   const displayNameLength = watch('displayName').length
   const customStatusLength = watch('customStatus').length
+  const bioLength = watch('bio').length
   const avatarUrl = profile.avatarUrl ?? null
+  const bannerUrl = profile.bannerUrl ?? null
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -164,9 +192,20 @@ function ProfileSettingsForm({
     uploadAvatar.mutate(file)
   }
 
+  function handleBannerChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (file === undefined) return
+    uploadBanner.mutate(file)
+  }
+
   function handleRemoveAvatar() {
     // WHY explicit null: the API's patch contract — null clears the field.
     removeAvatar.mutate({ avatarUrl: null })
+  }
+
+  function handleRemoveBanner() {
+    removeBanner.mutate({ bannerUrl: null })
   }
 
   function onSubmit(values: ProfileForm) {
@@ -174,6 +213,7 @@ function ProfileSettingsForm({
       {
         displayName: values.displayName === '' ? null : values.displayName,
         customStatus: values.customStatus === '' ? null : values.customStatus,
+        bio: values.bio === '' ? null : values.bio,
       },
       { onSuccess: () => onClose() },
     )
@@ -185,12 +225,74 @@ function ProfileSettingsForm({
       ? getApiErrorDetail(removeAvatar.error, t('avatarRemoveFailed'))
       : null
 
+  const bannerErrorMessage = uploadBanner.isError
+    ? resolveBannerErrorMessage(uploadBanner.error, t)
+    : removeBanner.isError
+      ? getApiErrorDetail(removeBanner.error, t('bannerRemoveFailed'))
+      : null
+
   const saveErrorMessage = saveProfile.isError
     ? getApiErrorDetail(saveProfile.error, t('profileUpdateFailed'))
     : null
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+      {/* Banner preview + controls — empty renders a flat band (matches the
+          profile card's empty banner). */}
+      <div className="flex flex-col gap-2">
+        {bannerUrl !== null ? (
+          <img
+            src={bannerUrl}
+            alt=""
+            className="aspect-[16/6] w-full rounded-lg object-cover"
+            data-test="profile-banner-preview"
+          />
+        ) : (
+          <div
+            className="aspect-[16/6] w-full rounded-lg bg-default-200"
+            data-test="profile-banner-empty"
+          />
+        )}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="flat"
+            onPress={() => bannerInputRef.current?.click()}
+            isLoading={uploadBanner.isPending}
+            data-test="profile-banner-upload-button"
+          >
+            {t('uploadBanner')}
+          </Button>
+          {bannerUrl !== null && (
+            <Button
+              size="sm"
+              variant="light"
+              color="danger"
+              onPress={handleRemoveBanner}
+              isLoading={removeBanner.isPending}
+              data-test="profile-banner-remove-button"
+            >
+              {t('removeBanner')}
+            </Button>
+          )}
+          <p className="text-xs text-default-400">{t('bannerHelp')}</p>
+        </div>
+        <input
+          ref={bannerInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          onChange={handleBannerChange}
+          aria-label={t('uploadBanner')}
+          data-test="profile-banner-file-input"
+        />
+        {bannerErrorMessage !== null && (
+          <p className="text-xs text-danger" data-test="profile-banner-error">
+            {bannerErrorMessage}
+          </p>
+        )}
+      </div>
+
       <div className="flex items-center gap-4">
         <Avatar
           src={avatarUrl ?? undefined}
@@ -271,6 +373,22 @@ function ProfileSettingsForm({
         errorMessage={errors.customStatus?.message}
         data-test="profile-custom-status-input"
         {...register('customStatus')}
+      />
+      <Textarea
+        label={t('bioLabel')}
+        placeholder={t('bioPlaceholder')}
+        description={t('bioHelp')}
+        minRows={2}
+        maxRows={4}
+        endContent={
+          <span className="text-xs text-default-400">
+            {bioLength}/{BIO_MAX}
+          </span>
+        }
+        isInvalid={errors.bio !== undefined}
+        errorMessage={errors.bio?.message}
+        data-test="profile-bio-input"
+        {...register('bio')}
       />
       {saveErrorMessage !== null && (
         <p className="text-xs text-danger" data-test="profile-settings-error">

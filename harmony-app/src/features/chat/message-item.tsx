@@ -10,6 +10,7 @@ import { ExternalLinkWarning } from '@/components/shared/external-link-warning'
 import type { DecryptResult } from '@/features/crypto'
 import { EncryptedMessageContent } from '@/features/crypto'
 import { usePreferences } from '@/features/preferences'
+import { ProfilePopover } from '@/features/profiles'
 import type { MessageResponse } from '@/lib/api'
 import { resolveDisplayName } from '@/lib/display-name'
 import { isTauri } from '@/lib/platform'
@@ -588,23 +589,32 @@ function MessageHeader({
   isPending,
   message,
   isDm,
+  serverId,
 }: {
   authorLabel: string
   isPending: boolean
   message: MessageResponse
   isDm: boolean
+  serverId: string | null
 }) {
   const { t } = useTranslation('messages')
   const { t: tCrypto } = useTranslation('crypto')
 
   return (
     <div className="flex items-baseline gap-2">
-      <span
-        data-test="message-author"
-        className="cursor-pointer font-medium text-foreground hover:underline"
-      >
-        {authorLabel}
-      </span>
+      <ProfilePopover userId={message.authorId} serverId={serverId}>
+        {/* biome-ignore lint/a11y/useSemanticElements: HeroUI PopoverTrigger makes this
+            span pressable (adds keyboard/aria at runtime); a real <button> would break
+            the inline baseline text styling of the author name */}
+        <span
+          data-test="message-author"
+          role="button"
+          tabIndex={0}
+          className="cursor-pointer font-medium text-foreground hover:underline"
+        >
+          {authorLabel}
+        </span>
+      </ProfilePopover>
       <span data-test="message-timestamp" className="text-xs text-default-500">
         {isPending ? t('sending') : formatTimestamp(message.createdAt, t)}
       </span>
@@ -741,17 +751,20 @@ export const MessageItem = memo(function MessageItem({
       {isGrouped ? (
         <div className="w-10 shrink-0" />
       ) : (
-        <Avatar
-          name={authorLabel}
-          src={message.authorAvatarUrl ?? undefined}
-          color="primary"
-          size="md"
-          showFallback
-          classNames={{
-            base: 'mt-0.5 h-10 w-10 shrink-0',
-            name: 'text-sm',
-          }}
-        />
+        <ProfilePopover userId={message.authorId} serverId={serverId}>
+          <Avatar
+            name={authorLabel}
+            src={message.authorAvatarUrl ?? undefined}
+            color="primary"
+            size="md"
+            showFallback
+            className="cursor-pointer"
+            classNames={{
+              base: 'mt-0.5 h-10 w-10 shrink-0',
+              name: 'text-sm',
+            }}
+          />
+        </ProfilePopover>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         {!isGrouped && (
@@ -760,6 +773,7 @@ export const MessageItem = memo(function MessageItem({
             isPending={isPending}
             message={message}
             isDm={isDm}
+            serverId={serverId}
           />
         )}
 

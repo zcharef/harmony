@@ -23,6 +23,13 @@ export const AVATAR_MAX_BYTES = 5 * 1024 * 1024
  */
 export const AVATAR_GIF_MAX_BYTES = 2 * 1024 * 1024
 
+/**
+ * Hard cap for any banner file (roadmap: banner <=2MB). A single flat cap (no
+ * separate gif tier) — banners are downscaled to 1024w, and a gif that large is
+ * rejected outright rather than stored animated.
+ */
+export const BANNER_MAX_BYTES = 2 * 1024 * 1024
+
 export type AvatarUploadErrorCode =
   | 'invalidType'
   | 'tooLarge'
@@ -52,6 +59,16 @@ export function validateAvatarFile(file: File): AvatarUploadErrorCode | null {
   if (ALLOWED_AVATAR_TYPES.includes(file.type) === false) return 'invalidType'
   if (file.size > AVATAR_MAX_BYTES) return 'tooLarge'
   if (file.type === 'image/gif' && file.size > AVATAR_GIF_MAX_BYTES) return 'gifTooLarge'
+  return null
+}
+
+/**
+ * Validates a banner candidate file. Same mime allowlist as avatars, single
+ * 2MB cap. Returns the error code, or `null` when the file is acceptable.
+ */
+export function validateBannerFile(file: File): AvatarUploadErrorCode | null {
+  if (ALLOWED_AVATAR_TYPES.includes(file.type) === false) return 'invalidType'
+  if (file.size > BANNER_MAX_BYTES) return 'tooLarge'
   return null
 }
 
