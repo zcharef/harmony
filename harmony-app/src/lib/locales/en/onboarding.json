@@ -13,5 +13,6 @@
   "step3Title": "Find people",
   "step3Subtitle": "Search for people you know and start a conversation.",
   "findPeopleCta": "Start a conversation",
+  "findPeopleCardBody": "Open a direct message with anyone from your servers.",
   "stepAnnounce": "Step {{current}} of {{total}}"
 }

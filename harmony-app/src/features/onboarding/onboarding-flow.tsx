@@ -216,7 +216,7 @@ export function OnboardingFlow({
                   <UserSearch className="h-6 w-6 text-primary" />
                 </div>
                 <p className="text-lg font-semibold text-foreground">{t('findPeopleCta')}</p>
-                <p className="text-sm text-default-500">{t('step3Subtitle')}</p>
+                <p className="text-sm text-default-500">{t('findPeopleCardBody')}</p>
               </CardBody>
             </Card>
           </div>
