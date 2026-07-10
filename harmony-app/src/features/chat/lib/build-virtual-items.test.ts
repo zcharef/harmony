@@ -21,6 +21,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     senderDeviceId: null,
     messageType: 'default',
     mentions: [],
+    attachments: [],
     ...overrides,
   }
 }

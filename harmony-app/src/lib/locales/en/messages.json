@@ -37,5 +37,8 @@
     "goBack": "Go Back",
     "continue": "Continue to Site"
   },
-  "unknownMention": "unknown-user"
+  "unknownMention": "unknown-user",
+  "attachmentUnavailable": "Image unavailable",
+  "downloadAttachment": "Download {{filename}}",
+  "imageAttachment": "Image attachment"
 }

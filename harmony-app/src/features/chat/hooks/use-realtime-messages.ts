@@ -49,6 +49,9 @@ function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): Messa
     // WHY: The server-resolved mentions ride the SSE payload; default to []
     // for older instances that omit the field during rollout (spec §5.3).
     mentions: payload.mentions ?? [],
+    // WHY: Attachments ride the same payload — this is what makes an
+    // attachment arriving on message.created render live, no refetch.
+    attachments: payload.attachments ?? [],
   }
 }
 

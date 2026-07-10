@@ -16,15 +16,17 @@ import { isTauri } from '@/lib/platform'
 import { maskProfanity } from '@/lib/profanity-filter'
 import { MentionPill } from './components/mention-pill'
 import { MentionText } from './components/mention-text'
+import { EmbeddedImage, MessageAttachments } from './components/message-attachments'
 import { EmojiPickerPopover } from './emoji-picker-popover'
 import { useEditBuffer } from './hooks/use-edit-buffer'
+import { isEmbeddableImageUrl } from './lib/attachment-file'
 import {
   applyMentionMap,
   markersToEditable,
-  mentionSanitizeSchema,
   mentionsToMap,
   remarkMentions,
 } from './lib/mention-tokens'
+import { messageSanitizeSchema } from './lib/message-sanitize'
 
 interface MessageItemProps {
   message: MessageResponse
@@ -135,16 +137,24 @@ function MessageContent({
   const { data: prefs } = usePreferences()
   const hideProfanity = prefs?.hideProfanity ?? true
 
-  const handleLinkClick = useCallback((e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
-    e.preventDefault()
-    // WHY: Defense-in-depth — rehype-sanitize already strips dangerous protocols,
-    // but we re-check here to guard against future config changes or plugin swaps.
+  // WHY: Defense-in-depth — rehype-sanitize already strips dangerous protocols,
+  // but we re-check here to guard against future config changes or plugin swaps.
+  // Shared by links, embedded content images and markdown images.
+  const handleGatedOpen = useCallback((href: string) => {
     const isAllowedProtocol =
       href.startsWith('https://') || href.startsWith('http://') || href.startsWith('mailto:')
     if (isAllowedProtocol) {
       setPendingUrl(href)
     }
   }, [])
+
+  const handleLinkClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+      e.preventDefault()
+      handleGatedOpen(href)
+    },
+    [handleGatedOpen],
+  )
 
   const handleLinkContinue = useCallback(() => {
     if (pendingUrl === null) return
@@ -270,7 +280,7 @@ function MessageContent({
     <div data-test="message-content" className="text-sm text-foreground/90">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMentions]}
-        rehypePlugins={[[rehypeSanitize, mentionSanitizeSchema]]}
+        rehypePlugins={[[rehypeSanitize, messageSanitizeSchema]]}
         urlTransform={normalizeUrl}
         components={{
           p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
@@ -304,17 +314,29 @@ function MessageContent({
           // CommonMark thematic break (<hr>). Defense-in-depth — backend now
           // escapes `*` as `\*`, but old messages in DB may still have unescaped `*`.
           hr: () => <span className="text-default-400">*****</span>,
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              onClick={(e) => {
-                if (href !== undefined) handleLinkClick(e, href)
-              }}
-              className="cursor-pointer text-primary underline"
-            >
-              {children}
-            </a>
-          ),
+          // WHY the image branch: a bare image/GIF URL typed into content
+          // auto-embeds inline (the T1.4/Klipy path) instead of rendering as
+          // a link. Opening stays gated by the same ExternalLinkWarning flow.
+          a: ({ href, children }) =>
+            href !== undefined && isEmbeddableImageUrl(href) ? (
+              <EmbeddedImage src={href} alt="" onOpen={handleGatedOpen} />
+            ) : (
+              <a
+                href={href}
+                onClick={(e) => {
+                  if (href !== undefined) handleLinkClick(e, href)
+                }}
+                className="cursor-pointer text-primary underline"
+              >
+                {children}
+              </a>
+            ),
+          // WHY: markdown images (`![alt](url)`) render bounded + lazy with
+          // the gated open and the onError "unavailable" fallback.
+          img: ({ src, alt }) =>
+            typeof src === 'string' && src !== '' ? (
+              <EmbeddedImage src={src} alt={alt ?? ''} onOpen={handleGatedOpen} />
+            ) : null,
         }}
       >
         {hideProfanity ? maskProfanity(message.content) : message.content}
@@ -715,6 +737,12 @@ export const MessageItem = memo(function MessageItem({
           decryptMessage={activeDecryptFn}
           getCachedPlaintext={getCachedPlaintext}
         />
+
+        {/* WHY inside the non-deleted branch: tombstoned messages never render
+            their attachment block (storage objects are retained server-side). */}
+        {isDeleted === false && (message.attachments ?? []).length > 0 && (
+          <MessageAttachments attachments={message.attachments ?? []} />
+        )}
 
         <ReactionBar
           reactions={message.reactions}

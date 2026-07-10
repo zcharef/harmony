@@ -30,6 +30,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     encrypted: false,
     messageType: 'default',
     mentions: [],
+    attachments: [],
     ...overrides,
   }
 }
@@ -577,5 +578,97 @@ describe('useRealtimeMessages', () => {
     const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
     const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
     expect(cacheData).toBeUndefined()
+  })
+})
+
+// -- Attachments (T1.3): live render pin -------------------------------------
+
+describe('useRealtimeMessages attachments', () => {
+  const SSE_ATTACHMENT = {
+    id: 'att-1',
+    url: 'https://xyz.supabase.co/storage/v1/object/public/attachments/u/pic.webp',
+    mime: 'image/webp',
+    size: 2048,
+    width: 800,
+    height: 600,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  /** HARD REQUIREMENT (reactivity): an attachment arriving on message.created
+   * lands in the cache immediately — every reader renders it live, no refetch. */
+  it('carries attachments from message.created into the cache', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    queryClient.setQueryData(messageKey, buildCacheData([buildMessage({ id: 'existing-1' })]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent(
+        'message.created',
+        buildMessageEvent({ id: 'msg-img', content: '', attachments: [SSE_ATTACHMENT] }),
+      )
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const inserted = cacheData?.pages[0]?.items[0]
+    expect(inserted?.id).toBe('msg-img')
+    expect(inserted?.attachments).toEqual([SSE_ATTACHMENT])
+    expect(logger.error).not.toHaveBeenCalled()
+  })
+
+  /** Rollout safety: an older API instance omits the field — default to []. */
+  it('defaults attachments to [] when the SSE payload omits the field', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    queryClient.setQueryData(messageKey, buildCacheData([]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('message.created', buildMessageEvent({ id: 'msg-old-instance' }))
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    expect(cacheData?.pages[0]?.items[0]?.attachments).toEqual([])
+    expect(logger.error).not.toHaveBeenCalled()
+  })
+
+  /** Edits replace the cached message wholesale — the payload's attachments
+   * must survive, or the block would vanish from readers' UIs on edit. */
+  it('keeps attachments on message.updated (payload is authoritative)', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    queryClient.setQueryData(
+      messageKey,
+      buildCacheData([buildMessage({ id: 'msg-img', attachments: [SSE_ATTACHMENT] })]),
+    )
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent(
+        'message.updated',
+        buildMessageEvent({
+          id: 'msg-img',
+          content: 'edited caption',
+          attachments: [SSE_ATTACHMENT],
+        }),
+      )
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const updated = cacheData?.pages[0]?.items[0]
+    expect(updated?.content).toBe('edited caption')
+    expect(updated?.attachments).toEqual([SSE_ATTACHMENT])
   })
 })

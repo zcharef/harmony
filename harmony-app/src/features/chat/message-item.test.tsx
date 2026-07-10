@@ -57,6 +57,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     senderDeviceId: null,
     messageType: 'default',
     mentions: [],
+    attachments: [],
     ...overrides,
   }
 }
@@ -513,5 +514,90 @@ describe('MessageItem edit-mode mention round-trip', () => {
 
     const input = screen.getByTestId<HTMLTextAreaElement>('message-edit-input')
     expect(input.value).toBe(ciphertext)
+
+describe('MessageItem attachments (T1.3 part 1)', () => {
+  const IMAGE_ATTACHMENT = {
+    id: 'att-1',
+    url: 'https://xyz.supabase.co/storage/v1/object/public/attachments/u/pic.webp',
+    mime: 'image/webp',
+    size: 2048,
+    width: 800,
+    height: 600,
+  }
+  const PDF_ATTACHMENT = {
+    id: 'att-2',
+    url: 'https://xyz.supabase.co/storage/v1/object/public/attachments/u/report.pdf',
+    mime: 'application/pdf',
+    size: 123456,
+  }
+
+  it('renders an image attachment as a bounded inline <img> with intrinsic dims', () => {
+    renderMessageItem(buildMessage({ attachments: [IMAGE_ATTACHMENT] }))
+
+    const img = screen.getByTestId('attachment-image').querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('src')).toBe(IMAGE_ATTACHMENT.url)
+    // Intrinsic dims from the stored row — zero layout shift while lazy-loading.
+    expect(img?.getAttribute('width')).toBe('800')
+    expect(img?.getAttribute('height')).toBe('600')
+    expect(img?.getAttribute('loading')).toBe('lazy')
+  })
+
+  it('renders a non-image attachment as a download chip (filename + size), never an <img>', () => {
+    renderMessageItem(buildMessage({ attachments: [PDF_ATTACHMENT] }))
+
+    const chip = screen.getByTestId('attachment-file-chip')
+    expect(chip.textContent).toContain('report.pdf')
+    expect(chip.textContent).toContain('121 KB')
+    expect(screen.queryByTestId('attachment-image')).toBeNull()
+  })
+
+  it('renders an image-only message (empty content) with its attachment', () => {
+    renderMessageItem(buildMessage({ content: '', attachments: [IMAGE_ATTACHMENT] }))
+
+    expect(screen.queryByTestId('message-attachments')).not.toBeNull()
+    expect(screen.getByTestId('attachment-image')).toBeDefined()
+  })
+
+  it('swaps a broken image for the "Image unavailable" fallback on error', () => {
+    renderMessageItem(buildMessage({ attachments: [IMAGE_ATTACHMENT] }))
+
+    const img = screen.getByTestId('attachment-image').querySelector('img')
+    if (img === null) throw new Error('attachment img not found')
+    act(() => {
+      fireEvent.error(img)
+    })
+
+    expect(screen.queryByTestId('attachment-unavailable')).not.toBeNull()
+    expect(screen.queryByTestId('attachment-image')).toBeNull()
+  })
+
+  it('never renders the attachment block on a tombstoned message', () => {
+    renderMessageItem(buildMessage({ attachments: [IMAGE_ATTACHMENT], deletedBy: 'user-42' }))
+
+    expect(screen.queryByTestId('message-attachments')).toBeNull()
+  })
+
+  it('auto-embeds a bare image URL typed in content (the Klipy render path)', () => {
+    renderMessageItem(buildMessage({ content: 'look https://media.example.com/funny.gif' }))
+
+    const embed = screen.getByTestId('attachment-image')
+    expect(embed.querySelector('img')?.getAttribute('src')).toBe(
+      'https://media.example.com/funny.gif',
+    )
+  })
+
+  it('keeps non-image URLs as plain gated links, not embeds', () => {
+    renderMessageItem(buildMessage({ content: 'see https://example.com/docs' }))
+
+    expect(screen.queryByTestId('attachment-image')).toBeNull()
+  })
+
+  it('gates opening an attachment behind the external-link warning', () => {
+    renderMessageItem(buildMessage({ attachments: [IMAGE_ATTACHMENT] }))
+
+    fireEvent.click(screen.getByTestId('attachment-image'))
+
+    expect(screen.queryByTestId('external-link-warning')).not.toBeNull()
   })
 })

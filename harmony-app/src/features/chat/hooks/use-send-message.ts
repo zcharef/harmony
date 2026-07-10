@@ -161,6 +161,9 @@ export function useSendMessage(
         // render instantly (spec §5.2); the server echo swaps in the
         // authoritative (validated, access-gated) list on success.
         mentions: input.mentions ?? [],
+        // WHY empty: the composer attachment pipeline lands in part 2; text
+        // sends carry no attachments and the server echo is authoritative.
+        attachments: [],
         parentMessageId: input.parentMessageId,
         parentMessage,
       } satisfies MessageResponse

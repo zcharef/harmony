@@ -119,6 +119,9 @@ describe('Type Safety', () => {
         // WHY: Protocol literals for URL normalization (bare-domain prepend) and
         // link safety checks (startsWith('https://')). Not env-dependent API URLs.
         join(SRC_DIR, 'features/chat/message-item.tsx'),
+        // WHY: Same protocol literals (startsWith('https://')) for the
+        // image-embed safety check. Not env-dependent API URLs.
+        join(SRC_DIR, 'features/chat/lib/attachment-file.ts'),
       ]
       const files = getAllFiles(SRC_DIR, ['.ts', '.tsx']).filter((f) => {
         if (ALLOWLIST.includes(f)) return false
