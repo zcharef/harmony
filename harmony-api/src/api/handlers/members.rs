@@ -13,6 +13,7 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::{MemberPayload, ServerPayload};
 use crate::domain::models::{ServerEvent, ServerId, UserId, VoiceAction};
+use crate::domain::services::resolve_channel_access_by_id;
 
 /// Default member page size.
 const DEFAULT_MEMBER_LIMIT: i64 = 50;
@@ -173,6 +174,24 @@ pub async fn leave_server(
     if let Some(voice_service) = state.voice_service() {
         match voice_service.leave_voice(&caller_id, None).await {
             Ok(Some(session)) => {
+                // WHY the session is already removed, so the request cannot
+                // fail cleanly. Fail OPEN on resolver error (ADR-027, F5
+                // decision #3): losing the Left event leaves a ghost
+                // participant in authorized rosters until the next fetch.
+                let channel_access = resolve_channel_access_by_id(
+                    state.channel_repository(),
+                    &session.channel_id,
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!(
+                        channel_id = %session.channel_id,
+                        user_id = %caller_id,
+                        error = %e,
+                        "Failed to resolve channel access for voice.state_update — failing open (public)"
+                    );
+                    None
+                });
                 state.event_bus().publish(ServerEvent::VoiceStateUpdate {
                     sender_id: caller_id.clone(),
                     server_id: session.server_id.clone(),
@@ -182,6 +201,7 @@ pub async fn leave_server(
                     display_name: String::new(),
                     is_muted: None,
                     is_deafened: None,
+                    channel_access,
                 });
                 tracing::debug!(
                     server_id = %session.server_id,
@@ -282,6 +302,23 @@ pub async fn kick_member(
     if let Some(voice_service) = state.voice_service() {
         match voice_service.leave_voice(&path.user_id, None).await {
             Ok(Some(session)) => {
+                // WHY fail OPEN on resolver error (ADR-027, F5 decision #3):
+                // see leave_server — losing the Left event is worse than the
+                // roster change reaching a few extra members.
+                let channel_access = resolve_channel_access_by_id(
+                    state.channel_repository(),
+                    &session.channel_id,
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!(
+                        channel_id = %session.channel_id,
+                        user_id = %path.user_id,
+                        error = %e,
+                        "Failed to resolve channel access for voice.state_update — failing open (public)"
+                    );
+                    None
+                });
                 state.event_bus().publish(ServerEvent::VoiceStateUpdate {
                     sender_id: path.user_id.clone(),
                     server_id: session.server_id.clone(),
@@ -291,6 +328,7 @@ pub async fn kick_member(
                     display_name: String::new(),
                     is_muted: None,
                     is_deafened: None,
+                    channel_access,
                 });
                 tracing::debug!(
                     server_id = %session.server_id,

@@ -12,6 +12,7 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ChannelId, ServerEvent, VoiceAction, VoiceParticipant};
+use crate::domain::services::resolve_channel_access_by_id;
 
 /// Join a voice channel. Returns a `LiveKit` token for the client.
 ///
@@ -52,6 +53,13 @@ pub async fn join_voice(
         )
     })?;
 
+    // WHY resolve BEFORE the join (F5): a private voice channel's roster
+    // (userId, displayName) must only reach its authorized roles. Resolving
+    // pre-mutation lets a lookup failure fail the request cleanly (no session
+    // created, nothing broadcast) — fail closed.
+    let channel_access =
+        resolve_channel_access_by_id(state.channel_repository(), &channel_id).await?;
+
     let voice_token = voice_service.join_voice(&user_id, &channel_id).await?;
 
     // WHY: If the user was in a different channel, notify that channel's
@@ -64,6 +72,23 @@ pub async fn join_voice(
             .as_ref()
             .unwrap_or(&voice_token.server_id);
 
+        // WHY the auto-leave already happened inside join_voice, so the
+        // request cannot fail cleanly anymore. Fail OPEN on resolver error
+        // (ADR-027, F5 decision #3): losing the Left event leaves a ghost
+        // participant in every authorized client's roster until the next
+        // fetch — worse than the roster change reaching a few extra members.
+        let prev_channel_access =
+            resolve_channel_access_by_id(state.channel_repository(), prev_channel_id)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!(
+                        channel_id = %prev_channel_id,
+                        user_id = %user_id,
+                        error = %e,
+                        "Failed to resolve channel access for voice.state_update (left previous channel) — failing open (public)"
+                    );
+                    None
+                });
         let receivers = state.event_bus().publish(ServerEvent::VoiceStateUpdate {
             sender_id: user_id.clone(),
             server_id: prev_server_id.clone(),
@@ -73,6 +98,7 @@ pub async fn join_voice(
             display_name: String::new(),
             is_muted: None,
             is_deafened: None,
+            channel_access: prev_channel_access,
         });
         tracing::debug!(
             server_id = %prev_server_id,
@@ -107,6 +133,7 @@ pub async fn join_voice(
         display_name,
         is_muted: None,
         is_deafened: None,
+        channel_access,
     });
     tracing::debug!(
         server_id = %voice_token.server_id,
@@ -151,6 +178,13 @@ pub async fn leave_voice(
         )
     })?;
 
+    // WHY resolve BEFORE the leave (F5): the leave is validated against this
+    // same channel_id, so the scope matches the session's channel. A lookup
+    // failure fails the request cleanly (session intact, nothing broadcast) —
+    // fail closed.
+    let channel_access =
+        resolve_channel_access_by_id(state.channel_repository(), &channel_id).await?;
+
     // WHY: Pass channel_id to the service so it validates the user is in the
     // specified channel before removing. Prevents leaving the wrong channel.
     let removed_session = voice_service
@@ -167,6 +201,7 @@ pub async fn leave_voice(
             display_name: String::new(),
             is_muted: None,
             is_deafened: None,
+            channel_access,
         });
         tracing::debug!(
             server_id = %session.server_id,
@@ -439,6 +474,25 @@ pub async fn update_voice_state(
         VoiceAction::Unmuted
     };
 
+    // WHY resolve AFTER the mutation: the session (and thus the channel) is
+    // only known once the service resolves session_id. Fail OPEN on resolver
+    // error (ADR-027, F5 decision #3): losing the mute/deaf event desyncs
+    // every authorized client's roster — worse than the state change reaching
+    // a few extra members for one event.
+    let channel_access = resolve_channel_access_by_id(
+        state.channel_repository(),
+        &session.channel_id,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(
+            channel_id = %session.channel_id,
+            user_id = %user_id,
+            error = %e,
+            "Failed to resolve channel access for voice.state_update — failing open (public)"
+        );
+        None
+    });
     let receivers = state.event_bus().publish(ServerEvent::VoiceStateUpdate {
         sender_id: user_id.clone(),
         server_id: session.server_id.clone(),
@@ -448,6 +502,7 @@ pub async fn update_voice_state(
         display_name: String::new(),
         is_muted: Some(body.is_muted),
         is_deafened: Some(body.is_deafened),
+        channel_access,
     });
     if receivers == 0 {
         tracing::warn!(

@@ -78,12 +78,20 @@ pub(crate) async fn resolve_channel_access(
 /// Resolve channel-access metadata when the caller holds only the channel ID.
 ///
 /// Fetches the channel, then delegates to [`resolve_channel_access`]. Returns
-/// `Ok(None)` when the channel no longer exists (treat as public / fail-open).
+/// `Ok(None)` when the channel no longer exists (treat as public / fail-open) —
+/// which is why `delete_channel`/`delete_server` must snapshot the scope
+/// BEFORE deleting the row.
 ///
 /// WHY: The moderation-delete paths (async moderation, retry sweep) emit
-/// `MessageDeleted` without the `Channel` in hand. Callers fail OPEN on error —
-/// a moderation delete reaching a few extra members is far less bad than losing
-/// the delete.
+/// `MessageDeleted` without the `Channel` in hand.
+///
+/// Error policy (ADR-027, one policy for every caller of both helpers):
+/// - POST-mutation publish sites fail OPEN — `unwrap_or_else(warn + None)` and
+///   keep publishing. Losing the event (a public channel vanishing from every
+///   sidebar, a ghost voice participant) is worse than a private one reaching
+///   a few extra members for one event; REST stays the authoritative gate.
+/// - PRE-mutation handler sites propagate with `?` — the request fails cleanly
+///   before any state change, and the client retries.
 ///
 /// # Errors
 /// Propagates repository errors from the channel fetch or role lookup.
