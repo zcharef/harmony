@@ -7,7 +7,16 @@
  */
 
 import type { Page } from '@playwright/test'
+import { syncProfile, updatePreferences } from './test-data-factory'
 import type { TestUser } from './user-factory'
+
+export interface AuthenticateOptions {
+  /**
+   * Keep `onboarding_completed = false` so the first-run OnboardingFlow shows.
+   * Onboarding specs only — every other spec wants the returning-user default.
+   */
+  firstRun?: boolean
+}
 
 /**
  * Injects a Supabase session into localStorage so the page loads as authenticated.
@@ -19,11 +28,31 @@ import type { TestUser } from './user-factory'
  *
  * `addInitScript` registers a script that Playwright injects BEFORE any page JS
  * executes, guaranteeing the session token is present when Supabase initializes.
+ *
+ * WHY returning user by default: freshly created test users have
+ * `onboarding_completed = false`, so MainLayout renders the first-run
+ * OnboardingFlow instead of the steady-state server UI. Completing it
+ * mid-test (selectServer's rail click does) swaps the entire layout tree,
+ * remounting the server rail under Playwright's stationary cursor — the
+ * server-name tooltip reopens over the channel sidebar, never closes, and
+ * intercepts channel clicks (CI deadlock: "element resolved but not
+ * visible/enabled/stable"). Marking the user as already onboarded BEFORE the
+ * first load keeps this fixture representing an established user; onboarding
+ * specs opt into the fresh state via `firstRun: true`.
  */
 export async function authenticatePage(
   page: Page,
   user: Pick<TestUser, 'token' | 'email' | 'id' | 'refreshToken'>,
+  options: AuthenticateOptions = {},
 ): Promise<void> {
+  if (options.firstRun !== true) {
+    // WHY syncProfile first: user_preferences.user_id references profiles(id),
+    // and not every spec syncs the profile before authenticating. Both calls
+    // are idempotent upserts — the app itself runs syncProfile on mount.
+    await syncProfile(user.token)
+    await updatePreferences(user.token, { onboardingCompleted: true })
+  }
+
   // WHY: Supabase client key follows pattern sb-<hostname-first-segment>-auth-token.
   // For local dev (127.0.0.1), this is "sb-127-auth-token".
   // For Cloud (abcdef.supabase.co), this is "sb-abcdef-auth-token".

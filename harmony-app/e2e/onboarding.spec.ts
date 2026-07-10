@@ -7,7 +7,6 @@ import {
   joinServer,
   syncProfile,
   updateChannel,
-  updatePreferences,
 } from './fixtures/test-data-factory'
 import { createTestUser, type TestUser } from './fixtures/user-factory'
 
@@ -45,7 +44,7 @@ test.describe('Onboarding first-run flow', () => {
     page,
   }) => {
     const user = await newFirstRunUser('onb-appear')
-    await authenticatePage(page, user)
+    await authenticatePage(page, user, { firstRun: true })
 
     await expect(page.locator('[data-test="onboarding-flow"]')).toBeVisible({ timeout: 10_000 })
     await expect(page.locator('[data-test="welcome-screen"]')).toHaveCount(0)
@@ -57,7 +56,7 @@ test.describe('Onboarding first-run flow', () => {
     page,
   }) => {
     const user = await newFirstRunUser('onb-skip')
-    await authenticatePage(page, user)
+    await authenticatePage(page, user, { firstRun: true })
 
     const flow = page.locator('[data-test="onboarding-flow"]')
     await expect(flow).toBeVisible({ timeout: 10_000 })
@@ -88,7 +87,7 @@ test.describe('Onboarding first-run flow', () => {
     page,
   }) => {
     const user = await newFirstRunUser('onb-create')
-    await authenticatePage(page, user)
+    await authenticatePage(page, user, { firstRun: true })
 
     await expect(page.locator('[data-test="onboarding-flow"]')).toBeVisible({ timeout: 10_000 })
     await page.locator('[data-test="onboarding-next"]').click()
@@ -134,7 +133,7 @@ test.describe('Onboarding first-run flow', () => {
     const member = await newFirstRunUser('onb-rail-member')
     await joinServer(member.token, server.id, invite.code)
 
-    await authenticatePage(page, member)
+    await authenticatePage(page, member, { firstRun: true })
     await expect(page.locator('[data-test="onboarding-flow"]')).toBeVisible({ timeout: 10_000 })
 
     const patchPromise = waitForCompletionPatch(page)
@@ -145,6 +144,28 @@ test.describe('Onboarding first-run flow', () => {
     await expect(
       page.locator('[data-test="channel-list"] [data-test="channel-button"]').first(),
     ).toBeVisible({ timeout: 15_000 })
+  })
+
+  // ── returning user never sees the flow ──────────────────────────
+
+  test('returning user (flag already true) does not see the flow', async ({ page }) => {
+    // WHY: regression for the fixture default — every non-onboarding spec
+    // relies on authenticatePage marking the user as returning
+    // (onboardingCompleted=true) BEFORE first load. If that default breaks,
+    // fresh fixture users land on the flow and any server-view test that
+    // clicks through the rail can deadlock on the remounted rail tooltip.
+    const user = await newFirstRunUser('onb-returning-default')
+    await authenticatePage(page, user)
+
+    // Zero custom servers + flag true = steady-state welcome screen, no flow.
+    await expect(page.locator('[data-test="welcome-screen"]')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('[data-test="onboarding-flow"]')).toHaveCount(0)
+
+    // Reload: still no flow — the flag is server-persisted.
+    await page.reload()
+    await page.locator('[data-test="main-layout"]').waitFor({ timeout: 15_000 })
+    await expect(page.locator('[data-test="welcome-screen"]')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('[data-test="onboarding-flow"]')).toHaveCount(0)
   })
 
   // ── onboarding-empty-states ─────────────────────────────────────
@@ -167,7 +188,7 @@ test.describe('Onboarding first-run flow', () => {
     const member = await newFirstRunUser('onb-empty-member')
     await joinServer(member.token, server.id, invite.code)
 
-    await authenticatePage(page, member)
+    await authenticatePage(page, member, { firstRun: true })
     await expect(page.locator('[data-test="onboarding-flow"]')).toBeVisible({ timeout: 10_000 })
 
     // Rail click completes onboarding and lands in the server (no visible channels).
@@ -199,7 +220,7 @@ test.describe('Onboarding with official server', () => {
   }) => {
     // syncProfile triggers the server-side auto-join to the official server.
     const user = await newFirstRunUser('onb-official')
-    await authenticatePage(page, user)
+    await authenticatePage(page, user, { firstRun: true })
 
     // Regression (auto-select fallback): despite being a member of the official
     // server, a first-run user must land on onboarding — never be silently
@@ -229,9 +250,7 @@ test.describe('Onboarding with official server', () => {
     page,
   }) => {
     const user = await newFirstRunUser('onb-returning')
-    // Already onboarded — set the flag via API, not by click-driving the flow.
-    await updatePreferences(user.token, { onboardingCompleted: true })
-
+    // Already onboarded — the default fixture marks the user as returning.
     await authenticatePage(page, user)
 
     // Regression (auto-select fallback = userServers[0], official excluded):
