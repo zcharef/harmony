@@ -5,9 +5,9 @@
     <img alt="Harmony" src="mediakit/logo_horizontal_dark.png" height="64">
   </picture>
   <br /><br />
-  <strong>Your chat app shouldn't sell your data.</strong>
+  <strong>Discord-class chat you can run yourself.</strong>
   <br />
-  Open-source, privacy-first group communication — Discord's UX with Signal's principles.
+  Open-source, AGPL-3.0 community chat with a Rust API, LiveKit voice, and a self-host path built around one Docker Compose command.
   <br /><br />
   <a href="https://github.com/zcharef/harmony/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zcharef/harmony/ci.yml?style=flat-square&label=CI&logo=github" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License"></a>
@@ -16,7 +16,7 @@
   <a href="https://ko-fi.com/Z8Z11JU7E7"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="ko-fi"></a>
 </p>
 
-> **Status:** Alpha, actively developed. Text chat, voice (LiveKit), DMs, presence, and moderation are live in production.
+> **Status:** Alpha, actively developed. Text chat, LiveKit voice, DMs, presence, roles, and moderation are live. Attachments, notifications, and E2EE are still in progress.
 
 <!-- TODO(launch-assets): hero screenshot + demo GIF go here — see dev/active/tickets/launch-assets.md -->
 <!-- <p align="center"><img src="mediakit/screenshot-hero.png" alt="Harmony" width="800"></p> -->
@@ -41,26 +41,19 @@ Three ways in, pick your poison:
 
 ## Why Harmony?
 
-| | Discord | Revolt | **Harmony** |
-|--|---------|--------|-------------|
-| Client | Electron (~500 MB RAM) | Solid.js PWA | **Web + Tauri desktop (~80 MB RAM)** |
-| Backend | Proprietary | 6 Rust microservices | **Single Rust binary** |
-| Database | Proprietary | MongoDB + Redis + RabbitMQ | **PostgreSQL only** |
-| Self-host | N/A | 6 services + 4 datastores | **One docker compose command** |
-| Privacy | Scans messages, sells data | Good | **No data collection, fully auditable** |
-| E2EE | No | No | **In development (DMs first)** |
+Harmony's first promise is practical ownership: a Discord-class chat surface you can inspect, run, and move to your own infrastructure.
 
 ### What makes Harmony different
 
-- **Privacy you can verify.** Fully open source under AGPL-3.0. We don't scan your messages, sell your data, or train AI on your conversations. You can read every line of code that handles your data. Self-hosted instances send us nothing — there is no telemetry to turn off.
+- **Privacy you can verify.** Harmony is fully open source under AGPL-3.0, so you can inspect the code that handles your data. Self-hosted instances run on your infrastructure and do not report usage back to Harmony.
 
 - **The Discord features you expect.** Reactions, replies, unread indicators, emoji picker, avatars, markdown, message grouping, date dividers, per-channel notification settings, presence and DND, voice channels, moderation and anti-spam. All shipped.
 
 - **E2EE in development.** The crypto foundation is built on [vodozemac](https://github.com/matrix-org/vodozemac) (NCC Group audited). It runs natively in the desktop app's Rust runtime and keys live in your OS keychain, so private keys never touch JavaScript. E2EE DMs are the next milestone. Not live yet.
 
-- **Simple to self-host.** One docker compose command runs the whole stack: the Harmony Rust binary, PostgreSQL, and Supabase's open-source auth (GoTrue). No Redis, no MongoDB, no RabbitMQ. Full features, unlimited users, your rules.
+- **Simple to self-host.** One Docker Compose command runs the current stack: Harmony's Rust API, Postgres, and Supabase's open-source auth services. No Redis, no MongoDB, no RabbitMQ.
 
-- **Your community can't be taken from you.** No arbitrary bans, no ID demands, no platform risk. Move to your own hardware any time — same codebase, same features. Discord migration tooling is on the roadmap; until then we help movers by hand ([migrate@joinharmony.app](mailto:migrate@joinharmony.app)).
+- **Keep ownership of your community.** Move to your own hardware any time: same codebase, same product surface, your infrastructure. Discord migration tooling is in development; assisted structure-only migration is available by request ([migrate@joinharmony.app](mailto:migrate@joinharmony.app)).
 
 - **Web + Desktop, same codebase.** Use Harmony in the browser with zero friction, or run the Tauri desktop app for native performance. E2EE DMs will land on desktop first.
 
