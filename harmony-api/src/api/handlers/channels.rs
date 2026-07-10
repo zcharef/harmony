@@ -100,35 +100,33 @@ pub async fn create_channel(
     // WHY resolve AFTER creation: the grant lookup needs the channel id. A
     // fresh private channel has no channel_role_access rows yet, so only
     // Owner/Admin receive channel.created — grants come later (Discord parity).
-    // WHY fail-CLOSED on resolver error: the channel is already committed, so
-    // the request cannot fail cleanly anymore, and publishing with an unknown
-    // scope could broadcast a private channel's name/topic to ungranted
-    // members. Suppress the event — authorized clients converge via REST on the
-    // next refetch/reconnect. Never silent: the warn is greppable.
-    match resolve_channel_access(state.channel_repository(), &channel).await {
-        Ok(channel_access) => {
-            let receivers = state.event_bus().publish(ServerEvent::ChannelCreated {
-                sender_id: user_id,
-                server_id: server_id.clone(),
-                channel: ChannelPayload::from(&channel),
-                channel_access,
-            });
-            tracing::debug!(
-                server_id = %server_id,
-                channel_id = %channel.id,
-                receivers,
-                "emitted channel.created"
-            );
-        }
-        Err(e) => {
+    // Fail OPEN on resolver error (ADR-027, F5 decision #3): losing the event
+    // (e.g. a PUBLIC channel silently missing from every sidebar) is worse
+    // than a private one reaching a few extra members for one event — REST
+    // stays the authoritative gate. Matches the F3 moderation-sweep precedent.
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel)
+        .await
+        .unwrap_or_else(|e| {
             tracing::warn!(
                 server_id = %server_id,
                 channel_id = %channel.id,
                 error = %e,
-                "channel access resolve failed — suppressing channel.created (fail closed)"
+                "Failed to resolve channel access for channel.created — failing open (public)"
             );
-        }
-    }
+            None
+        });
+    let receivers = state.event_bus().publish(ServerEvent::ChannelCreated {
+        sender_id: user_id,
+        server_id: server_id.clone(),
+        channel: ChannelPayload::from(&channel),
+        channel_access,
+    });
+    tracing::debug!(
+        server_id = %server_id,
+        channel_id = %channel.id,
+        receivers,
+        "emitted channel.created"
+    );
 
     Ok((StatusCode::CREATED, Json(ChannelResponse::from(channel))))
 }
@@ -199,33 +197,31 @@ pub async fn update_channel(
 
     // WHY resolve from the POST-update channel: a public→private toggle gates
     // this very event immediately; private→public resolves to None and delivers
-    // to everyone. Fail-CLOSED on resolver error, same as channel.created: the
-    // update is committed, so suppress rather than risk broadcasting private
-    // metadata with an unknown scope.
-    match resolve_channel_access(state.channel_repository(), &channel).await {
-        Ok(channel_access) => {
-            let receivers = state.event_bus().publish(ServerEvent::ChannelUpdated {
-                sender_id: user_id,
-                server_id: params.id.clone(),
-                channel: ChannelPayload::from(&channel),
-                channel_access,
-            });
-            tracing::debug!(
-                server_id = %params.id,
-                channel_id = %channel.id,
-                receivers,
-                "emitted channel.updated"
-            );
-        }
-        Err(e) => {
+    // to everyone. Fail OPEN on resolver error (ADR-027, F5 decision #3) —
+    // same reasoning as channel.created above.
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel)
+        .await
+        .unwrap_or_else(|e| {
             tracing::warn!(
                 server_id = %params.id,
                 channel_id = %channel.id,
                 error = %e,
-                "channel access resolve failed — suppressing channel.updated (fail closed)"
+                "Failed to resolve channel access for channel.updated — failing open (public)"
             );
-        }
-    }
+            None
+        });
+    let receivers = state.event_bus().publish(ServerEvent::ChannelUpdated {
+        sender_id: user_id,
+        server_id: params.id.clone(),
+        channel: ChannelPayload::from(&channel),
+        channel_access,
+    });
+    tracing::debug!(
+        server_id = %params.id,
+        channel_id = %channel.id,
+        receivers,
+        "emitted channel.updated"
+    );
 
     Ok((StatusCode::OK, Json(ChannelResponse::from(channel))))
 }

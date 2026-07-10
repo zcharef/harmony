@@ -793,33 +793,31 @@ fn spawn_voice_session_sweep(state: api::AppState) {
             let mut afk_ok = true;
 
             // Helper: emit VoiceStateUpdate(Left) for each removed session,
-            // gated on the channel's access scope (F5). Fail-CLOSED on a
-            // resolver error: broadcasting a private voice channel's roster
-            // change with an unknown scope would leak it to ungranted members —
-            // suppress that session's event and warn instead (rosters self-heal
-            // on the next participants fetch).
+            // gated on the channel's access scope (F5). Fail OPEN on a
+            // resolver error (ADR-027, F5 decision #3), matching the
+            // moderation-sweep precedent: losing the Left event leaves a
+            // ghost participant in every authorized roster until the next
+            // fetch — worse than the roster change reaching a few extra
+            // members for one event.
             async fn emit_left(state: &api::AppState, sessions: Vec<domain::models::VoiceSession>) {
                 use domain::models::{ServerEvent, VoiceAction};
                 use domain::services::resolve_channel_access_by_id;
 
                 for session in sessions {
-                    let channel_access = match resolve_channel_access_by_id(
+                    let channel_access = resolve_channel_access_by_id(
                         state.channel_repository(),
                         &session.channel_id,
                     )
                     .await
-                    {
-                        Ok(access) => access,
-                        Err(e) => {
-                            tracing::warn!(
-                                channel_id = %session.channel_id,
-                                user_id = %session.user_id,
-                                error = %e,
-                                "channel access resolve failed — suppressing voice.state_update (fail closed)"
-                            );
-                            continue;
-                        }
-                    };
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(
+                            channel_id = %session.channel_id,
+                            user_id = %session.user_id,
+                            error = %e,
+                            "Failed to resolve channel access for voice-sweep Left event — failing open (public)"
+                        );
+                        None
+                    });
                     let event = ServerEvent::VoiceStateUpdate {
                         sender_id: session.user_id.clone(),
                         server_id: session.server_id.clone(),

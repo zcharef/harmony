@@ -150,40 +150,41 @@ pub async fn ban_member(
     if let Some(voice_service) = state.voice_service() {
         match voice_service.leave_voice(&banned_user_id, None).await {
             Ok(Some(session)) => {
-                // WHY fail-CLOSED on resolver error (F5): the session is
-                // already removed; suppress rather than leak a private voice
-                // roster change with an unknown scope.
-                match resolve_channel_access_by_id(state.channel_repository(), &session.channel_id)
-                    .await
-                {
-                    Ok(channel_access) => {
-                        state.event_bus().publish(ServerEvent::VoiceStateUpdate {
-                            sender_id: banned_user_id.clone(),
-                            server_id: session.server_id.clone(),
-                            channel_id: session.channel_id.clone(),
-                            user_id: banned_user_id.clone(),
-                            action: VoiceAction::Left,
-                            display_name: String::new(),
-                            is_muted: None,
-                            is_deafened: None,
-                            channel_access,
-                        });
-                        tracing::debug!(
-                            server_id = %session.server_id,
-                            channel_id = %session.channel_id,
-                            user_id = %banned_user_id,
-                            "Banned user removed from voice channel"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            channel_id = %session.channel_id,
-                            user_id = %banned_user_id,
-                            error = %e,
-                            "channel access resolve failed — suppressing voice.state_update (fail closed)"
-                        );
-                    }
-                }
+                // WHY the session is already removed, so the request cannot
+                // fail cleanly. Fail OPEN on resolver error (ADR-027, F5
+                // decision #3): losing the Left event leaves a ghost
+                // participant in authorized rosters until the next fetch.
+                let channel_access = resolve_channel_access_by_id(
+                    state.channel_repository(),
+                    &session.channel_id,
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!(
+                        channel_id = %session.channel_id,
+                        user_id = %banned_user_id,
+                        error = %e,
+                        "Failed to resolve channel access for voice.state_update — failing open (public)"
+                    );
+                    None
+                });
+                state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+                    sender_id: banned_user_id.clone(),
+                    server_id: session.server_id.clone(),
+                    channel_id: session.channel_id.clone(),
+                    user_id: banned_user_id.clone(),
+                    action: VoiceAction::Left,
+                    display_name: String::new(),
+                    is_muted: None,
+                    is_deafened: None,
+                    channel_access,
+                });
+                tracing::debug!(
+                    server_id = %session.server_id,
+                    channel_id = %session.channel_id,
+                    user_id = %banned_user_id,
+                    "Banned user removed from voice channel"
+                );
             }
             Ok(None) => {} // User was not in voice — nothing to clean up.
             Err(e) => {
