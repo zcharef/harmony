@@ -103,6 +103,9 @@ async fn build_app_state(pool: PgPool) -> AppState {
     let key_repo = Arc::new(PgKeyRepository::new(pool.clone()));
     let reaction_repo: Arc<dyn harmony_api::domain::ports::ReactionRepository> =
         Arc::new(PgReactionRepository::new(pool.clone()));
+    let attachment_repo: Arc<dyn harmony_api::domain::ports::AttachmentRepository> = Arc::new(
+        harmony_api::infra::postgres::PgAttachmentRepository::new(pool.clone()),
+    );
     let read_state_repo = Arc::new(PgReadStateRepository::new(pool.clone()));
     let megolm_repo = Arc::new(PgMegolmSessionRepository::new(pool.clone()));
     let desktop_auth_repo = Arc::new(PgDesktopAuthRepository::new(pool.clone()));
@@ -128,6 +131,7 @@ async fn build_app_state(pool: PgPool) -> AppState {
         member_repo.clone(),
         plan_checker.clone(),
         reaction_repo.clone(),
+        attachment_repo.clone(),
         content_filter.clone(),
         spam_guard.clone(),
     ));
@@ -225,6 +229,7 @@ async fn build_app_state(pool: PgPool) -> AppState {
         None, // voice_session_repository
         None, // official_server_id
         analytics_recorder,
+        Some("https://test.supabase.co".to_string()), // attachment_url_origin
     )
 }
 

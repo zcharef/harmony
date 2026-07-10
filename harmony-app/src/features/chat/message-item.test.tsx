@@ -514,6 +514,8 @@ describe('MessageItem edit-mode mention round-trip', () => {
 
     const input = screen.getByTestId<HTMLTextAreaElement>('message-edit-input')
     expect(input.value).toBe(ciphertext)
+  })
+})
 
 describe('MessageItem attachments (T1.3 part 1)', () => {
   const IMAGE_ATTACHMENT = {
