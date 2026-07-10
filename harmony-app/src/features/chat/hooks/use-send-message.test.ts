@@ -105,6 +105,77 @@ describe('useSendMessage', () => {
     })
   })
 
+  it('never sends a mention field on the plaintext path (server re-parses authoritatively)', async () => {
+    const serverMessage = buildMessage({ id: 'msg-plain', content: 'hello' })
+    vi.mocked(sendMessage).mockResolvedValueOnce({ data: serverMessage } as never)
+
+    const queryClient = createMutationTestClient()
+    queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
+
+    const wrapper = createQueryWrapper(queryClient)
+    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+      wrapper,
+    })
+
+    await act(async () => {
+      result.current.mutate({
+        content: 'hi <@f47ac10b-58cc-4372-a567-0e02b2c3d479>',
+        mentions: [
+          {
+            userId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+            username: 'alice',
+            displayName: 'Alice',
+            nickname: null,
+          },
+        ],
+      })
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    const body = vi.mocked(sendMessage).mock.calls[0]?.[0]?.body
+    expect(body?.content).toBe('hi <@f47ac10b-58cc-4372-a567-0e02b2c3d479>')
+    expect(Object.keys(body ?? {})).not.toContain('mentionedUserIds')
+  })
+
+  it('seeds the optimistic message mentions from the composer map for instant pills', async () => {
+    let resolveMutation!: (value: unknown) => void
+    vi.mocked(sendMessage).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMutation = resolve
+        }) as never,
+    )
+
+    const queryClient = createMutationTestClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    queryClient.setQueryData(messageKey, buildCacheData([]))
+
+    const wrapper = createQueryWrapper(queryClient)
+    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+      wrapper,
+    })
+
+    const mention = {
+      userId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+      username: 'alice',
+      displayName: 'Alice',
+      nickname: null,
+    }
+    await act(async () => {
+      result.current.mutate({
+        content: 'hi <@f47ac10b-58cc-4372-a567-0e02b2c3d479>',
+        mentions: [mention],
+      })
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    expect(cacheData?.pages[0]?.items[0]?.mentions).toEqual([mention])
+
+    resolveMutation({ data: buildMessage({ id: 'msg-real' }) })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+  })
+
   it('adds an optimistic message to page 0 of the cache during onMutate', async () => {
     const existingMsg = buildMessage({ id: 'existing-1' })
     // Hold the mutation in-flight so we can inspect the optimistic state
@@ -386,6 +457,70 @@ describe('useSendMessage', () => {
         channelId: CHANNEL_ID,
         error: 'No pre-keys available',
       })
+    })
+
+    it('includes mentionedUserIds in the encrypted request body when mentions are present', async () => {
+      const encryption = buildEncryption()
+      const serverMessage = buildMessage({ id: 'msg-enc-m', encrypted: true })
+      vi.mocked(sendMessage).mockResolvedValueOnce({ data: serverMessage } as never)
+
+      const queryClient = createMutationTestClient()
+      queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
+
+      const wrapper = createQueryWrapper(queryClient)
+      const { result } = renderHook(
+        () => useSendMessage(CHANNEL_ID, USER_ID, 'testuser', encryption),
+        { wrapper },
+      )
+
+      await act(async () => {
+        result.current.mutate({
+          content: 'hi <@f47ac10b-58cc-4372-a567-0e02b2c3d479>',
+          mentions: [
+            {
+              userId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+              username: 'alice',
+              displayName: 'Alice',
+              nickname: null,
+            },
+          ],
+        })
+      })
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+      const body = vi.mocked(sendMessage).mock.calls[0]?.[0]?.body
+      expect(body?.mentionedUserIds).toEqual(['f47ac10b-58cc-4372-a567-0e02b2c3d479'])
+    })
+
+    it('OMITS the mentionedUserIds key entirely when there are no mentions (never [] or null)', async () => {
+      // WHY pinned: spec §3.1 house rule + §8 version skew — an old API instance
+      // with deny_unknown_fields would 400 every encrypted send carrying the key.
+      const encryption = buildEncryption()
+      const serverMessage = buildMessage({ id: 'msg-enc-nm', encrypted: true })
+      vi.mocked(sendMessage).mockResolvedValueOnce({ data: serverMessage } as never)
+
+      const queryClient = createMutationTestClient()
+      queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
+
+      const wrapper = createQueryWrapper(queryClient)
+      const { result } = renderHook(
+        () => useSendMessage(CHANNEL_ID, USER_ID, 'testuser', encryption),
+        { wrapper },
+      )
+
+      await act(async () => {
+        result.current.mutate({ content: 'no mentions here' })
+      })
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+      const body = vi.mocked(sendMessage).mock.calls[0]?.[0]?.body
+      expect(body).toBeDefined()
+      // Key-absence assertion — toHaveBeenCalledWith treats undefined values
+      // as equal to missing keys, which would let a `mentionedUserIds: undefined`
+      // regression slip through.
+      expect(Object.keys(body ?? {})).not.toContain('mentionedUserIds')
     })
 
     it('optimistic message always has encrypted: false even with encryption param', async () => {

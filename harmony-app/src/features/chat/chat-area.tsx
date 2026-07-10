@@ -50,10 +50,13 @@ import { cacheMessage } from '@/lib/crypto-cache'
 import { resolveDisplayName } from '@/lib/display-name'
 import { logger } from '@/lib/logger'
 import { isTauri } from '@/lib/platform'
+import { MentionAutocomplete, mentionOptionId } from './components/mention-autocomplete'
 import { EmojiPickerPopover } from './emoji-picker-popover'
 import { useAddReaction } from './hooks/use-add-reaction'
 import { useDeleteMessage } from './hooks/use-delete-message'
 import { useEditMessage } from './hooks/use-edit-message'
+import type { UseMentionAutocompleteResult } from './hooks/use-mention-autocomplete'
+import { useMentionAutocomplete } from './hooks/use-mention-autocomplete'
 import { useMessages } from './hooks/use-messages'
 import { useNotificationSettings } from './hooks/use-notification-settings'
 import { useRealtimeMessages } from './hooks/use-realtime-messages'
@@ -65,6 +68,7 @@ import { useSlowMode } from './hooks/use-slow-mode'
 import { useTypingIndicator } from './hooks/use-typing-indicator'
 import { useUpdateNotificationSettings } from './hooks/use-update-notification-settings'
 import { buildVirtualItems } from './lib/build-virtual-items'
+import { applyMentionMap } from './lib/mention-tokens'
 import { MessageItem } from './message-item'
 import { TypingIndicator } from './typing-indicator'
 
@@ -441,6 +445,8 @@ function MessageInput({
   onValueChange,
   onKeyDown,
   onSendTyping,
+  mention,
+  textareaRef,
 }: {
   isInputDisabled: boolean
   placeholder: string
@@ -448,10 +454,14 @@ function MessageInput({
   onValueChange: (value: string) => void
   onKeyDown: (e: React.KeyboardEvent) => void
   onSendTyping: () => void
+  /** WHY: state lives in ChatArea (useMentionAutocomplete) — the send transform needs its map. */
+  mention: UseMentionAutocompleteResult
+  /** WHY lifted: the autocomplete hook reads the caret from this node. */
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
 }) {
   const { t } = useTranslation('chat')
   const [isEmojiOpen, setIsEmojiOpen] = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const highlightedCandidate = mention.results[mention.highlightIndex]
 
   const handleEmojiSelect = useCallback(
     (emoji: string) => {
@@ -465,12 +475,20 @@ function MessageInput({
         onValueChange(value + emoji)
       }
     },
-    [value, onValueChange],
+    [value, onValueChange, textareaRef],
   )
 
   return (
     <div className="px-4 pb-6 pt-1">
       <div className="relative flex items-center rounded-lg bg-default-100">
+        <MentionAutocomplete
+          isOpen={mention.isOpen}
+          isLoading={mention.isLoading}
+          results={mention.results}
+          highlightIndex={mention.highlightIndex}
+          onSelect={mention.insertMention}
+          onClose={mention.close}
+        />
         {!isInputDisabled && (
           <Button
             variant="light"
@@ -497,6 +515,14 @@ function MessageInput({
             onSendTyping()
           }}
           onKeyDown={isInputDisabled ? undefined : onKeyDown}
+          aria-autocomplete="list"
+          aria-expanded={mention.isOpen}
+          aria-controls={mention.isOpen ? 'mention-listbox' : undefined}
+          aria-activedescendant={
+            mention.isOpen && highlightedCandidate !== undefined
+              ? mentionOptionId(highlightedCandidate.userId)
+              : undefined
+          }
           classNames={{
             base: 'flex-1',
             inputWrapper:
@@ -718,6 +744,8 @@ function ChatInputSection({
   onValueChange,
   onKeyDown,
   onSendTyping,
+  mention,
+  textareaRef,
 }: {
   isBlocked: boolean
   isInputDisabled: boolean
@@ -730,6 +758,8 @@ function ChatInputSection({
   onValueChange: (value: string) => void
   onKeyDown: (e: React.KeyboardEvent) => void
   onSendTyping: () => void
+  mention: UseMentionAutocompleteResult
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
 }) {
   const { t: tCrypto } = useTranslation('crypto')
 
@@ -753,6 +783,8 @@ function ChatInputSection({
         onValueChange={onValueChange}
         onKeyDown={onKeyDown}
         onSendTyping={onSendTyping}
+        mention={mention}
+        textareaRef={textareaRef}
       />
     </>
   )
@@ -1023,6 +1055,18 @@ export function ChatArea({
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null)
   const [isVerifyOpen, setIsVerifyOpen] = useState(false)
 
+  // WHY here (not MessageInput): the send transform needs the mention map, and
+  // the keyboard reducer must run BEFORE the Enter-to-send handler below.
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const mention = useMentionAutocomplete({
+    serverId,
+    isDm,
+    dmRecipient,
+    value: messageContent,
+    onValueChange: setMessageContent,
+    textareaRef: composerRef,
+  })
+
   // WHY: Safety number + trust level for DM identity verification (desktop only).
   const recipientIdForVerify = isDm && isTauri() ? (dmRecipient?.id ?? null) : null
   const { safetyNumber, isLoading: isLoadingSafetyNumber } = useSafetyNumber(recipientIdForVerify)
@@ -1078,13 +1122,23 @@ export function ChatArea({
     const parentId = replyingTo?.id
     setMessageContent('')
     setReplyingTo(null)
-    sendMessage.mutate({ content: trimmed, parentMessageId: parentId })
+    // WHY at send time: the textarea always shows human-readable `@username`;
+    // the `<@uuid>` markers exist only at rest and on the wire (spec §5.2).
+    const { content, mentionedUsers } = applyMentionMap(trimmed, mention.mentionMapRef.current)
+    sendMessage.mutate({
+      content,
+      parentMessageId: parentId,
+      ...(mentionedUsers.length > 0 ? { mentions: mentionedUsers } : {}),
+    })
     // WHY: Start cooldown optimistically right after sending. If the send fails
     // with 429, the timer is already running. Matches Discord's behavior.
     startCooldown()
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    // WHY first: while the popup is open the reducer consumes ↑↓/Enter/Tab/Esc —
+    // Enter MUST NOT send while a row is highlighted (spec §1 keyboard rules).
+    if (mention.handleKeyDown(e)) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -1208,6 +1262,8 @@ export function ChatArea({
         onValueChange={setMessageContent}
         onKeyDown={handleKeyDown}
         onSendTyping={() => sendTyping(currentUser.username)}
+        mention={mention}
+        textareaRef={composerRef}
       />
 
       {/* Verify identity modal — only rendered on desktop DMs */}

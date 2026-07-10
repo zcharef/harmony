@@ -394,3 +394,124 @@ describe('MessageItem reactions UX', () => {
     })
   })
 })
+
+// ── Edit-mode mention round-trip (wave 4, spec §5.3) ──────────────────
+
+function renderEditingMessageItem(message: MessageResponse) {
+  const onSaveEdit = vi.fn()
+  const Wrapper = createQueryWrapper(createTestQueryClient())
+  const utils = render(
+    <Wrapper>
+      <MessageItem
+        message={message}
+        currentUserId={CURRENT_USER_ID}
+        serverId={null}
+        canModerateMessages={false}
+        isEditing={true}
+        onStartEdit={vi.fn()}
+        onSaveEdit={onSaveEdit}
+        onCancelEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    </Wrapper>,
+  )
+  return { onSaveEdit, ...utils }
+}
+
+describe('MessageItem edit-mode mention round-trip', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('seeds the edit buffer with @username, never raw <@uuid>', () => {
+    renderEditingMessageItem(
+      buildMessage({
+        authorId: CURRENT_USER_ID,
+        content: `hey <@${MENTION_UUID}> hello`,
+        mentions: [buildMention()],
+      }),
+    )
+
+    const input = screen.getByTestId<HTMLTextAreaElement>('message-edit-input')
+    expect(input.value).toBe('hey @alice hello')
+  })
+
+  it('re-applies the marker on save (round-trip byte-identical)', () => {
+    const { onSaveEdit } = renderEditingMessageItem(
+      buildMessage({
+        authorId: CURRENT_USER_ID,
+        content: `hey <@${MENTION_UUID}> hello`,
+        mentions: [buildMention()],
+      }),
+    )
+
+    const input = screen.getByTestId<HTMLTextAreaElement>('message-edit-input')
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onSaveEdit).toHaveBeenCalledExactlyOnceWith(`hey <@${MENTION_UUID}> hello`)
+  })
+
+  it('preserves the mention while surrounding text is edited', () => {
+    const { onSaveEdit } = renderEditingMessageItem(
+      buildMessage({
+        authorId: CURRENT_USER_ID,
+        content: `hey <@${MENTION_UUID}>`,
+        mentions: [buildMention()],
+      }),
+    )
+
+    const input = screen.getByTestId<HTMLTextAreaElement>('message-edit-input')
+    fireEvent.change(input, { target: { value: 'edited @alice bye' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onSaveEdit).toHaveBeenCalledExactlyOnceWith(`edited <@${MENTION_UUID}> bye`)
+  })
+
+  it('round-trips markers the server never registered byte-identical (raw in buffer and save)', () => {
+    const unknownUuid = '0e02b2c3-d479-4372-a567-f47ac10b58cc'
+    const { onSaveEdit } = renderEditingMessageItem(
+      buildMessage({
+        authorId: CURRENT_USER_ID,
+        content: `raw <@${unknownUuid}> marker`,
+        mentions: [],
+      }),
+    )
+
+    const input = screen.getByTestId<HTMLTextAreaElement>('message-edit-input')
+    expect(input.value).toBe(`raw <@${unknownUuid}> marker`)
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSaveEdit).toHaveBeenCalledExactlyOnceWith(`raw <@${unknownUuid}> marker`)
+  })
+
+  it('a hand-typed name not backed by the mentions array stays plain text on save', () => {
+    const { onSaveEdit } = renderEditingMessageItem(
+      buildMessage({
+        authorId: CURRENT_USER_ID,
+        content: 'plain text',
+        mentions: [],
+      }),
+    )
+
+    const input = screen.getByTestId<HTMLTextAreaElement>('message-edit-input')
+    fireEvent.change(input, { target: { value: 'ping @stranger now' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onSaveEdit).toHaveBeenCalledExactlyOnceWith('ping @stranger now')
+  })
+
+  it('does not transform encrypted content (ciphertext untouched, no sidecar on edits in v1)', () => {
+    const ciphertext = '{"message_type":0,"ciphertext":"abc"}'
+    renderEditingMessageItem(
+      buildMessage({
+        authorId: CURRENT_USER_ID,
+        content: ciphertext,
+        encrypted: true,
+        mentions: [buildMention()],
+      }),
+    )
+
+    const input = screen.getByTestId<HTMLTextAreaElement>('message-edit-input')
+    expect(input.value).toBe(ciphertext)
+  })
+})

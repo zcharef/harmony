@@ -21,6 +21,8 @@ export const queryKeys = {
     list: () => ['servers', 'list'] as const,
     detail: (serverId: string) => ['servers', 'detail', serverId] as const,
     members: (serverId: string) => ['servers', serverId, 'members'] as const,
+    memberSearch: (serverId: string, q: string) =>
+      ['servers', serverId, 'members', 'search', q] as const,
     channels: (serverId: string) => ['servers', serverId, 'channels'] as const,
     roles: (serverId: string) => ['servers', serverId, 'roles'] as const,
     invites: (serverId: string) => ['servers', serverId, 'invites'] as const,

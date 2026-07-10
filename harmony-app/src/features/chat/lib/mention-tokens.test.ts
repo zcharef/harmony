@@ -1,13 +1,31 @@
+import type { MentionedUserResponse } from '@/lib/api'
 import { maskProfanity } from '@/lib/profanity-filter'
 import {
+  applyMentionMap,
   extractMentionIds,
   MENTION_MARKER_RE,
+  markersToEditable,
   mentionSanitizeSchema,
+  mentionsToMap,
   remarkMentions,
 } from './mention-tokens'
 
 const UUID_A = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
 const UUID_B = '0e02b2c3-d479-4372-a567-f47ac10b58cc'
+
+const ALICE: MentionedUserResponse = {
+  userId: UUID_A,
+  username: 'alice',
+  displayName: 'Alice',
+  nickname: null,
+}
+const BOB: MentionedUserResponse = {
+  userId: UUID_B,
+  username: 'bob_42',
+  displayName: null,
+  nickname: 'Bobby',
+}
+const MAP = { alice: ALICE, bob_42: BOB }
 
 // ── extractMentionIds ─────────────────────────────────────────────────
 
@@ -44,6 +62,104 @@ describe('extractMentionIds', () => {
     const content = `<@${UUID_A}>`
     expect(extractMentionIds(content)).toEqual([UUID_A])
     expect(extractMentionIds(content)).toEqual([UUID_A])
+  })
+})
+
+// ── applyMentionMap ───────────────────────────────────────────────────
+
+describe('applyMentionMap', () => {
+  it('converts @username at start-of-string', () => {
+    const result = applyMentionMap('@alice hello', MAP)
+    expect(result.content).toBe(`<@${UUID_A}> hello`)
+    expect(result.mentionedUserIds).toEqual([UUID_A])
+    expect(result.mentionedUsers).toEqual([ALICE])
+  })
+
+  it('converts @username after whitespace (space and newline)', () => {
+    const result = applyMentionMap('hey @alice\n@bob_42 hi', MAP)
+    expect(result.content).toBe(`hey <@${UUID_A}>\n<@${UUID_B}> hi`)
+    expect(result.mentionedUserIds).toEqual([UUID_A, UUID_B])
+  })
+
+  it('does NOT convert bob@alice (boundary rule — emails and handles stay text)', () => {
+    const result = applyMentionMap('mail bob@alice today', MAP)
+    expect(result.content).toBe('mail bob@alice today')
+    expect(result.mentionedUserIds).toEqual([])
+  })
+
+  it('leaves usernames not present in the map as plain text', () => {
+    const result = applyMentionMap('@stranger hello', MAP)
+    expect(result.content).toBe('@stranger hello')
+    expect(result.mentionedUserIds).toEqual([])
+  })
+
+  it('deduplicates repeated mentions of the same user', () => {
+    const result = applyMentionMap('@alice and @alice again', MAP)
+    expect(result.content).toBe(`<@${UUID_A}> and <@${UUID_A}> again`)
+    expect(result.mentionedUserIds).toEqual([UUID_A])
+    expect(result.mentionedUsers).toEqual([ALICE])
+  })
+
+  it('does not convert uppercase or invalid-charset tokens (username charset is [a-z0-9_])', () => {
+    const result = applyMentionMap('@Alice @al', { ...MAP, al: ALICE })
+    // @Alice: uppercase never matches the token grammar. @al: too short (<3).
+    expect(result.content).toBe('@Alice @al')
+    expect(result.mentionedUserIds).toEqual([])
+  })
+
+  it('handles consecutive mentions separated by single spaces', () => {
+    const result = applyMentionMap('@alice @bob_42', MAP)
+    expect(result.content).toBe(`<@${UUID_A}> <@${UUID_B}>`)
+    expect(result.mentionedUserIds).toEqual([UUID_A, UUID_B])
+  })
+})
+
+// ── markersToEditable ─────────────────────────────────────────────────
+
+describe('markersToEditable', () => {
+  it('rehydrates known markers to @username', () => {
+    expect(markersToEditable(`hey <@${UUID_A}>!`, [ALICE])).toBe('hey @alice!')
+  })
+
+  it('leaves unknown markers raw (server never registered them)', () => {
+    expect(markersToEditable(`hey <@${UUID_A}>`, [BOB])).toBe(`hey <@${UUID_A}>`)
+  })
+
+  it('returns content untouched when mentions is empty', () => {
+    const content = `hey <@${UUID_A}>`
+    expect(markersToEditable(content, [])).toBe(content)
+  })
+
+  it('round-trips markersToEditable → applyMentionMap back to the same markers', () => {
+    const original = `ping <@${UUID_A}> and <@${UUID_B}> now`
+    const editable = markersToEditable(original, [ALICE, BOB])
+    expect(editable).toBe('ping @alice and @bob_42 now')
+    const { content } = applyMentionMap(editable, mentionsToMap([ALICE, BOB]))
+    expect(content).toBe(original)
+  })
+
+  it('round-trips unknown markers byte-identical through both transforms', () => {
+    const original = `raw <@${UUID_B}> marker`
+    const editable = markersToEditable(original, [ALICE])
+    expect(editable).toBe(original)
+    const { content } = applyMentionMap(editable, mentionsToMap([ALICE]))
+    expect(content).toBe(original)
+  })
+
+  it('a mangled partial edit degrades to plain text (no marker resurrection)', () => {
+    // User deletes part of the rehydrated @username: "@alice" → "@alic".
+    const editable = 'hey @alic'
+    const { content, mentionedUserIds } = applyMentionMap(editable, mentionsToMap([ALICE]))
+    expect(content).toBe('hey @alic')
+    expect(mentionedUserIds).toEqual([])
+  })
+})
+
+// ── mentionsToMap ─────────────────────────────────────────────────────
+
+describe('mentionsToMap', () => {
+  it('keys mention objects by username', () => {
+    expect(mentionsToMap([ALICE, BOB])).toEqual({ alice: ALICE, bob_42: BOB })
   })
 })
 
