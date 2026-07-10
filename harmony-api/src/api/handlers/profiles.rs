@@ -302,16 +302,18 @@ pub async fn update_my_profile(
     // sharing a server or DM with the subject (redacted before it reaches
     // clients). Queried here because the handler, unlike the SSE stream, has no
     // live membership snapshot.
-    // WHY fail-open (not `?`): the profile is already persisted — failing the
-    // request here would leave the DB updated but the event unpublished. Empty
-    // metadata = broadcast fallback, same pattern as presence.rs (ADR-027:
-    // never silently lose the signal).
+    // WHY not `?`: the profile is already persisted — failing the request here
+    // would leave the DB updated but the event unpublished (ADR-027: never
+    // silently lose the signal). On lookup failure the event still goes out
+    // with an EMPTY scope, which the SSE layer fails CLOSED to the subject's
+    // own tabs/devices (F8) — never a broadcast of the semi-public profile to
+    // strangers. Other members catch up on their next fetch.
     let server_ids = match state.server_service().list_all_memberships(&user_id).await {
         Ok(ids) => ids,
         Err(e) => {
             tracing::warn!(
                 error = %e,
-                "profile update: membership lookup failed — broadcasting unscoped profile event"
+                "profile update: membership lookup failed — delivering profile event to self only"
             );
             Vec::new()
         }
