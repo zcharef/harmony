@@ -15,9 +15,9 @@
 import { expect, test } from '@playwright/test'
 import { authenticatePage, selectChannel, selectServer } from './fixtures/auth-fixture'
 import {
+  createChannel,
   createInvite,
   createServer,
-  getServerChannels,
   joinServer,
   sendMessage,
   sendReply,
@@ -28,15 +28,18 @@ import { createTestUser, type TestUser } from './fixtures/user-factory'
 test.describe('Unread divider + jump-to-message', () => {
   let owner: TestUser
   let reader: TestUser
+  let serverId: string
 
-  async function freshChannel(prefix: string): Promise<{ serverId: string; channelId: string }> {
-    const server = await createServer(owner.token, `${prefix}-${Date.now()}`)
-    const channels = await getServerChannels(owner.token, server.id)
-    const general = channels.items.find((c) => c.name === 'general')
-    if (general === undefined) throw new Error('Expected #general after server creation')
-    const invite = await createInvite(owner.token, server.id)
-    await joinServer(reader.token, server.id, invite.code)
-    return { serverId: server.id, channelId: general.id }
+  // WHY a fresh channel (not a fresh server) per test: the divider only renders
+  // for a reader with a null read-state on the channel, so each test needs an
+  // untouched channel. Read-state is per-channel, so a new channel in the shared
+  // server gives that isolation while keeping `owner` at ONE owned server — a
+  // new server per test would breach the free-plan cap (max_owned_servers = 3)
+  // on the 4th test and freeze the e2e deploy gate. Channels are uncapped (10k).
+  async function freshChannel(prefix: string): Promise<{ channelId: string; channelName: string }> {
+    const channelName = `${prefix}-${Date.now()}`
+    const channel = await createChannel(owner.token, serverId, channelName)
+    return { channelId: channel.id, channelName }
   }
 
   test.beforeAll(async () => {
@@ -44,24 +47,32 @@ test.describe('Unread divider + jump-to-message', () => {
     reader = await createTestUser('ud-reader')
     await syncProfile(owner.token)
     await syncProfile(reader.token)
+
+    const server = await createServer(owner.token, `ud-${Date.now()}`)
+    serverId = server.id
+    // One reused invite for the whole suite: the reader joins once and sees
+    // every channel created later. Holding a single active invite keeps the
+    // seed under the free-plan cap (max_active_invites = 5 per server).
+    const invite = await createInvite(owner.token, serverId)
+    await joinServer(reader.token, serverId, invite.code)
   })
 
   test('unread-divider-appears-on-open: the divider renders above the first unread message', async ({
     page,
   }) => {
-    const { serverId, channelId } = await freshChannel('ud-appears')
+    const { channelId, channelName } = await freshChannel('ud-appears')
     await sendMessage(owner.token, channelId, 'first unread message')
     await sendMessage(owner.token, channelId, 'second unread message')
 
     await authenticatePage(page, reader)
     await selectServer(page, serverId)
-    await selectChannel(page, 'general')
+    await selectChannel(page, channelName)
 
     await expect(page.locator('[data-test="new-messages-divider"]')).toBeVisible()
   })
 
   test('divider-frozen-while-reading: the divider survives mark-read', async ({ page }) => {
-    const { serverId, channelId } = await freshChannel('ud-frozen')
+    const { channelId, channelName } = await freshChannel('ud-frozen')
     await sendMessage(owner.token, channelId, 'unread while reading')
 
     await authenticatePage(page, reader)
@@ -75,7 +86,7 @@ test.describe('Unread divider + jump-to-message', () => {
         r.url().includes(`/v1/channels/${channelId}/read-state`) &&
         r.request().method() === 'PATCH',
     )
-    await selectChannel(page, 'general')
+    await selectChannel(page, channelName)
     await expect(page.locator('[data-test="new-messages-divider"]')).toBeVisible()
     await markRead
 
@@ -84,7 +95,7 @@ test.describe('Unread divider + jump-to-message', () => {
   })
 
   test('jump-to-latest-unread: the top pill scrolls back to the divider', async ({ page }) => {
-    const { serverId, channelId } = await freshChannel('ud-jump-unread')
+    const { channelId, channelName } = await freshChannel('ud-jump-unread')
     // Enough messages to overflow the viewport (single page, no pagination),
     // so on open the list auto-scrolls to the bottom and the divider sits above.
     for (let i = 0; i < 40; i++) {
@@ -93,7 +104,7 @@ test.describe('Unread divider + jump-to-message', () => {
 
     await authenticatePage(page, reader)
     await selectServer(page, serverId)
-    await selectChannel(page, 'general')
+    await selectChannel(page, channelName)
 
     // Divider is above the viewport → the "↑ New messages" pill is offered.
     const pill = page.locator('[data-test="jump-to-unread"]')
@@ -108,7 +119,7 @@ test.describe('Unread divider + jump-to-message', () => {
   test('jump-to-replied-message: clicking a reply quote scrolls to the parent', async ({
     page,
   }) => {
-    const { serverId, channelId } = await freshChannel('ud-jump-reply')
+    const { channelId, channelName } = await freshChannel('ud-jump-reply')
     const parent = await sendMessage(owner.token, channelId, 'the original parent message')
     // Push the parent well above the viewport, then reply to it at the bottom.
     for (let i = 0; i < 30; i++) {
@@ -118,7 +129,7 @@ test.describe('Unread divider + jump-to-message', () => {
 
     await authenticatePage(page, reader)
     await selectServer(page, serverId)
-    await selectChannel(page, 'general')
+    await selectChannel(page, channelName)
 
     // The reply quote is a button labelled from messages:jumpToRepliedMessage.
     const quote = page.getByRole('button', { name: 'Jump to replied message' })
