@@ -379,6 +379,8 @@ pub enum ServerEvent {
     /// persisted mention list passed `filter_mentionable`, no event ever targets
     /// a user who cannot see the channel — so `channel_id`/`message_id`/`sender`
     /// never leak to a user without access (no `channel_access` routing needed).
+    /// Published on send for every mention, and on edit ONLY for mentions the
+    /// edit newly added (polish #9 — pre-existing mentions never re-ping).
     MentionReceived {
         /// The message author.
         sender_id: UserId,

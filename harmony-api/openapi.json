@@ -341,7 +341,7 @@
           "Messages"
         ],
         "summary": "Edit a message's content. Only the author can edit.",
-        "description": "# Errors\nReturns `ApiError` on validation failure, authorization failure, or repository error.",
+        "description": "Plaintext edits re-parse `<@user_id>` markers and persist the new mention\nlist (>10 valid markers is a 400). Only mentions NEWLY added by the edit\nemit `mention.received` — users already mentioned before the edit are never\nre-notified. Encrypted edits leave the mention list untouched.\n\n# Errors\nReturns `ApiError` on validation failure, authorization failure, or repository error.",
         "operationId": "edit_message",
         "parameters": [
           {
@@ -3179,7 +3179,7 @@
           "Members"
         ],
         "summary": "List members of a server with cursor-based pagination.",
-        "description": "Use `before` (ISO 8601) to paginate backward. Default limit is 50, max is 100.\n\n# Errors\nReturns `ApiError` if the cursor is invalid or a repository error occurs.",
+        "description": "Use `before` (ISO 8601) to paginate backward. Default limit is 50, max is 100.\nPass `q` for autocomplete search instead (non-empty, max 32 characters,\ncannot be combined with `before`; `nextCursor` is always null for results).\n\n# Errors\nReturns `ApiError` if the cursor is invalid or a repository error occurs.",
         "operationId": "list_members",
         "parameters": [
           {
@@ -3213,7 +3213,7 @@
           {
             "name": "q",
             "in": "query",
-            "description": "Autocomplete search: substring match on `username`/`display_name`/`nickname`,\nprefix matches ranked first (max length 32 -- the username DB cap).\n`nextCursor` is always null for search results, and combining `q` with\n`before` is a 400.",
+            "description": "Autocomplete search: substring match on `username`/`display_name`/`nickname`,\nprefix matches ranked first. Must be non-empty (an empty or whitespace-only\n`q` is a 400) and at most 32 characters -- the username DB cap.\n`nextCursor` is always null for search results, and combining `q` with\n`before` is a 400.",
             "required": false,
             "schema": {
               "type": "string"
@@ -4818,7 +4818,7 @@
               "string",
               "null"
             ],
-            "description": "Autocomplete search: substring match on `username`/`display_name`/`nickname`,\nprefix matches ranked first (max length 32 -- the username DB cap).\n`nextCursor` is always null for search results, and combining `q` with\n`before` is a 400."
+            "description": "Autocomplete search: substring match on `username`/`display_name`/`nickname`,\nprefix matches ranked first. Must be non-empty (an empty or whitespace-only\n`q` is a 400) and at most 32 characters -- the username DB cap.\n`nextCursor` is always null for search results, and combining `q` with\n`before` is a 400."
           }
         }
       },

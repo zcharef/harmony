@@ -71,7 +71,8 @@ pub struct MemberListQuery {
     /// Maximum number of members to return (1-100, default 50).
     pub limit: Option<i64>,
     /// Autocomplete search: substring match on `username`/`display_name`/`nickname`,
-    /// prefix matches ranked first (max length 32 -- the username DB cap).
+    /// prefix matches ranked first. Must be non-empty (an empty or whitespace-only
+    /// `q` is a 400) and at most 32 characters -- the username DB cap.
     /// `nextCursor` is always null for search results, and combining `q` with
     /// `before` is a 400.
     pub q: Option<String>,

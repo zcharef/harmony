@@ -22,6 +22,8 @@ const MAX_MEMBER_LIMIT: i64 = 100;
 /// List members of a server with cursor-based pagination.
 ///
 /// Use `before` (ISO 8601) to paginate backward. Default limit is 50, max is 100.
+/// Pass `q` for autocomplete search instead (non-empty, max 32 characters,
+/// cannot be combined with `before`; `nextCursor` is always null for results).
 ///
 /// # Errors
 /// Returns `ApiError` if the cursor is invalid or a repository error occurs.
@@ -70,6 +72,11 @@ pub async fn list_members(
             return Err(ApiError::bad_request(
                 "Cannot combine the 'q' search with the 'before' cursor",
             ));
+        }
+        // Polish #9: an empty (or whitespace-only) `q` is a malformed request,
+        // not a search — reject it instead of substring-matching every member.
+        if q.trim().is_empty() {
+            return Err(ApiError::bad_request("Search query 'q' must not be empty"));
         }
         // WHY 32: the username DB cap — a longer query can never match.
         if q.chars().count() > 32 {
