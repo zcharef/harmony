@@ -166,6 +166,7 @@ async fn init_app_state(config: &Config) -> AppInit {
     let dm_repo = Arc::new(infra::postgres::PgDmRepository::new(pool.clone()));
     let key_repo = Arc::new(infra::postgres::PgKeyRepository::new(pool.clone()));
     let reaction_repo = Arc::new(infra::postgres::PgReactionRepository::new(pool.clone()));
+    let attachment_repo = Arc::new(infra::postgres::PgAttachmentRepository::new(pool.clone()));
     let read_state_repo = Arc::new(infra::postgres::PgReadStateRepository::new(pool.clone()));
 
     // WHY: Self-hosted deployments have no plan restrictions (AlwaysAllowedChecker).
@@ -258,6 +259,7 @@ async fn init_app_state(config: &Config) -> AppInit {
         member_repo.clone(),
         plan_limit_checker.clone(),
         reaction_repo.clone(),
+        attachment_repo,
         content_filter.clone(),
         spam_guard.clone(),
     ));
@@ -379,6 +381,39 @@ async fn init_app_state(config: &Config) -> AppInit {
 
     tracing::info!("Domain services initialized");
 
+    // WHY normalize at startup: attachment URL validation pins the origin
+    // (scheme://host[:port]) of every attachment to OUR Supabase instance.
+    // Unset/unparseable/non-http(s) → None → attachment sends are rejected
+    // (fail closed), never accepted unverified.
+    let attachment_url_origin =
+        config
+            .supabase_url
+            .as_deref()
+            .and_then(|raw| match url::Url::parse(raw) {
+                Ok(parsed) if parsed.scheme() == "https" || parsed.scheme() == "http" => {
+                    Some(parsed.origin().ascii_serialization())
+                }
+                Ok(parsed) => {
+                    tracing::error!(
+                        scheme = parsed.scheme(),
+                        "SUPABASE_URL has a non-http(s) scheme — attachments DISABLED (fail closed)"
+                    );
+                    None
+                }
+                Err(err) => {
+                    tracing::error!(
+                        error = %err,
+                        "SUPABASE_URL is not a valid URL — attachments DISABLED (fail closed)"
+                    );
+                    None
+                }
+            });
+    if attachment_url_origin.is_none() {
+        tracing::warn!(
+            "No usable SUPABASE_URL — message attachments will be rejected (fail closed)"
+        );
+    }
+
     let state = AppState::new(
         pool,
         config.supabase_jwt_secret.clone(),
@@ -419,6 +454,7 @@ async fn init_app_state(config: &Config) -> AppInit {
             )
         }),
         analytics_recorder,
+        attachment_url_origin,
     );
 
     AppInit {

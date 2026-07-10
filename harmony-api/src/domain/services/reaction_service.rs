@@ -508,6 +508,7 @@ mod tests {
             _moderation_reason: Option<String>,
             _original_content: Option<String>,
             _mentioned_user_ids: Vec<UserId>,
+            _attachments: Vec<crate::domain::models::NewAttachment>,
             _slow_mode_seconds: i32,
         ) -> Result<MessageWithAuthor, DomainError> {
             Err(DomainError::Internal("not implemented".to_string()))

@@ -92,6 +92,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     encrypted: false,
     messageType: 'default',
     mentions: [],
+    attachments: [],
     ...overrides,
   }
 }

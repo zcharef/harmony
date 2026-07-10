@@ -9,15 +9,16 @@ use super::dto::voice::{
     VoiceHeartbeatRequest, VoiceParticipantResponse, VoiceParticipantsResponse, VoiceTokenResponse,
 };
 use super::dto::{
-    AssignRoleRequest, BanListQuery, BanListResponse, BanResponse, BanUserRequest,
-    ChannelListResponse, ChannelResponse, CheckUsernameQuery, CheckUsernameResponse,
-    ClaimedKeyResponse, CreateChannelRequest, CreateDesktopAuthRequest, CreateDesktopAuthResponse,
-    CreateDmRequest, CreateInviteRequest, CreateMegolmSessionRequest, CreateServerRequest,
-    DeviceListResponse, DeviceResponse, DmLastMessageResponse, DmListItem, DmListQuery,
-    DmListResponse, DmRecipientResponse, DmResponse, EditMessageRequest, InvitePreviewResponse,
-    InviteResponse, JoinServerRequest, KeyCountResponse, MarkReadRequest, MegolmSessionResponse,
-    MemberListQuery, MemberListResponse, MemberResponse, MentionedUserResponse, MessageListQuery,
-    MessageListResponse, MessageResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
+    AssignRoleRequest, AttachmentResponse, BanListQuery, BanListResponse, BanResponse,
+    BanUserRequest, ChannelListResponse, ChannelResponse, CheckUsernameQuery,
+    CheckUsernameResponse, ClaimedKeyResponse, CreateChannelRequest, CreateDesktopAuthRequest,
+    CreateDesktopAuthResponse, CreateDmRequest, CreateInviteRequest, CreateMegolmSessionRequest,
+    CreateServerRequest, DeviceListResponse, DeviceResponse, DmLastMessageResponse, DmListItem,
+    DmListQuery, DmListResponse, DmRecipientResponse, DmResponse, EditMessageRequest,
+    InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse, MarkReadRequest,
+    MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
+    MentionedUserResponse, MessageListQuery, MessageListResponse, MessageResponse,
+    NewAttachmentRequest, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
     RedeemDesktopAuthRequest, RedeemDesktopAuthResponse, RegisterDeviceRequest, SendMessageRequest,
     ServerListResponse, ServerResponse, TransferOwnershipRequest, UpdateChannelRequest,
     UpdateProfileRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
@@ -25,8 +26,9 @@ use super::dto::{
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
 use crate::domain::models::{
-    CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode, MegolmSessionId,
-    MessageId, MessageType, OneTimeKeyId, ServerId, UserId, UserStatus, VoiceAction,
+    AttachmentId, CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode,
+    MegolmSessionId, MessageId, MessageType, OneTimeKeyId, ServerId, UserId, UserStatus,
+    VoiceAction,
 };
 use crate::domain::models::{ParentMessagePreview, ReactionSummary};
 
@@ -138,6 +140,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             ServerId,
             ChannelId,
             MessageId,
+            AttachmentId,
             CategoryId,
             InviteCode,
             DeviceKeyId,
@@ -188,6 +191,8 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             MessageListResponse,
             MessageListQuery,
             MentionedUserResponse,
+            NewAttachmentRequest,
+            AttachmentResponse,
             // Reaction DTOs
             super::handlers::reactions::AddReactionRequest,
             ReactionSummary,

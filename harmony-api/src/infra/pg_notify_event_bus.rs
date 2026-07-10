@@ -114,11 +114,86 @@ impl EventBus for PgNotifyEventBus {
     }
 }
 
+/// Serialize an envelope for `pg_notify`, degrading oversize message events.
+///
+/// WHY: `pg_notify` payloads over [`MAX_PG_NOTIFY_PAYLOAD`] would be dropped
+/// entirely — remote instances silently never see the message (clients patch
+/// caches via `setQueryData` only; there is no refetch fallback). When the
+/// full envelope exceeds the cap, the attachments are shed and the envelope
+/// re-serialized: remote readers still get the message text live, and the
+/// attachments heal on the next REST fetch / reconnect invalidation.
+///
+/// Returns `None` when the envelope cannot be delivered even degraded
+/// (serialization failure, or still over the cap after shedding) — the
+/// caller skips it; local subscribers already got the full event.
+fn bounded_payload(envelope: &mut NotifyEnvelope) -> Option<String> {
+    let payload = match serde_json::to_string(envelope) {
+        Ok(p) => p,
+        Err(err) => {
+            tracing::error!(
+                error = %err,
+                event_type = envelope.e.event_name(),
+                "failed to serialize notify envelope — skipping"
+            );
+            return None;
+        }
+    };
+
+    if payload.len() <= MAX_PG_NOTIFY_PAYLOAD {
+        return Some(payload);
+    }
+
+    let full_bytes = payload.len();
+    if envelope.e.shed_attachments() {
+        match serde_json::to_string(envelope) {
+            Ok(degraded) if degraded.len() <= MAX_PG_NOTIFY_PAYLOAD => {
+                // WHY warn, not error: graceful degradation — the event is
+                // still delivered cross-instance, minus attachments (ADR-046).
+                tracing::warn!(
+                    payload_bytes = full_bytes,
+                    degraded_bytes = degraded.len(),
+                    max_bytes = MAX_PG_NOTIFY_PAYLOAD,
+                    event_type = envelope.e.event_name(),
+                    "notify payload exceeded pg limit — shed attachments for cross-instance delivery"
+                );
+                return Some(degraded);
+            }
+            Ok(degraded) => {
+                tracing::error!(
+                    payload_bytes = degraded.len(),
+                    max_bytes = MAX_PG_NOTIFY_PAYLOAD,
+                    event_type = envelope.e.event_name(),
+                    "notify payload exceeds pg limit even after shedding attachments — skipping"
+                );
+                return None;
+            }
+            Err(err) => {
+                tracing::error!(
+                    error = %err,
+                    event_type = envelope.e.event_name(),
+                    "failed to serialize degraded notify envelope — skipping"
+                );
+                return None;
+            }
+        }
+    }
+
+    tracing::error!(
+        payload_bytes = full_bytes,
+        max_bytes = MAX_PG_NOTIFY_PAYLOAD,
+        event_type = envelope.e.event_name(),
+        "notify payload exceeds pg limit — skipping"
+    );
+    None
+}
+
 /// Background worker: drains the mpsc queue and sends events to Postgres via `pg_notify`.
 ///
 /// Exits when the mpsc sender is dropped (all `PgNotifyEventBus` clones gone).
-/// Events that fail to serialize or exceed the payload limit are logged and skipped —
-/// they were already delivered locally, so no data loss for same-instance subscribers.
+/// Oversize message events are degraded (attachments shed) before being sent;
+/// events that fail to serialize or still exceed the payload limit are logged
+/// and skipped — they were already delivered locally, so no data loss for
+/// same-instance subscribers.
 pub async fn event_notify_worker(
     pool: PgPool,
     instance_id: Uuid,
@@ -127,32 +202,14 @@ pub async fn event_notify_worker(
     tracing::info!(%instance_id, "pg notify worker started");
 
     while let Some(event) = rx.recv().await {
-        let envelope = NotifyEnvelope {
+        let mut envelope = NotifyEnvelope {
             i: instance_id,
             e: event,
         };
 
-        let payload = match serde_json::to_string(&envelope) {
-            Ok(p) => p,
-            Err(err) => {
-                tracing::error!(
-                    error = %err,
-                    event_type = envelope.e.event_name(),
-                    "failed to serialize notify envelope — skipping"
-                );
-                continue;
-            }
-        };
-
-        if payload.len() > MAX_PG_NOTIFY_PAYLOAD {
-            tracing::error!(
-                payload_bytes = payload.len(),
-                max_bytes = MAX_PG_NOTIFY_PAYLOAD,
-                event_type = envelope.e.event_name(),
-                "notify payload exceeds pg limit — skipping"
-            );
+        let Some(payload) = bounded_payload(&mut envelope) else {
             continue;
-        }
+        };
 
         if let Err(err) = sqlx::query("SELECT pg_notify($1, $2)") // allow: runtime-sql
             .bind(EVENT_CHANNEL)
@@ -283,15 +340,15 @@ pub async fn event_listen_worker(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
     use super::*;
     use crate::domain::models::{
-        ChannelId, MessageId, MessageType, ServerId, UserId,
-        server_event::{MessagePayload, ServerEvent},
+        AttachmentId, ChannelId, MessageId, MessageType, ServerId, UserId,
+        server_event::{AttachmentPayload, MessagePayload, ServerEvent},
     };
     use crate::domain::ports::EventBus;
 
@@ -307,7 +364,26 @@ mod tests {
         ChannelId::new(Uuid::new_v4())
     }
 
-    fn make_message_event() -> ServerEvent {
+    /// Realistic attachment wire entry (uuid-path Supabase public URL).
+    fn test_attachment() -> AttachmentPayload {
+        AttachmentPayload {
+            id: AttachmentId::new(Uuid::new_v4()),
+            url: format!(
+                "https://xyz.supabase.co/storage/v1/object/public/attachments/{}/{}.webp",
+                Uuid::new_v4(),
+                Uuid::new_v4()
+            ),
+            mime: "image/webp".to_string(),
+            size: 8_388_608,
+            width: Some(1920),
+            height: Some(1080),
+        }
+    }
+
+    fn make_message_event_with(
+        content: String,
+        attachments: Vec<AttachmentPayload>,
+    ) -> ServerEvent {
         let sender = test_user_id();
         let server = test_server_id();
         let channel = test_channel_id();
@@ -319,7 +395,7 @@ mod tests {
             message: MessagePayload {
                 id: MessageId::new(Uuid::new_v4()),
                 channel_id: channel,
-                content: "hello world".to_string(),
+                content,
                 author_id: sender,
                 author_username: "alice".to_string(),
                 author_display_name: None,
@@ -333,10 +409,15 @@ mod tests {
                 moderated_at: None,
                 moderation_reason: None,
                 mentions: vec![],
+                attachments,
                 created_at: Utc::now(),
             },
             channel_access: None,
         }
+    }
+
+    fn make_message_event() -> ServerEvent {
+        make_message_event_with("hello world".to_string(), vec![])
     }
 
     #[tokio::test]
@@ -433,5 +514,74 @@ mod tests {
             payload.len(),
             MAX_PG_NOTIFY_PAYLOAD
         );
+    }
+
+    /// An in-cap event passes through `bounded_payload` untouched —
+    /// attachments are never shed gratuitously.
+    #[test]
+    fn bounded_payload_keeps_attachments_when_under_cap() {
+        let mut envelope = NotifyEnvelope {
+            i: Uuid::new_v4(),
+            e: make_message_event_with("short caption".to_string(), vec![test_attachment()]),
+        };
+
+        let payload = bounded_payload(&mut envelope).unwrap();
+
+        assert!(payload.len() <= MAX_PG_NOTIFY_PAYLOAD);
+        let decoded: NotifyEnvelope = serde_json::from_str(&payload).unwrap();
+        let ServerEvent::MessageCreated { message, .. } = decoded.e else {
+            panic!("expected MessageCreated");
+        };
+        assert_eq!(message.attachments.len(), 1);
+    }
+
+    /// Regression (review finding): a max-attachments (Creator plan: 10) message
+    /// with a long caption exceeds the `pg_notify` cap. It must DEGRADE (shed
+    /// attachments, keep the text) instead of being dropped — otherwise readers
+    /// on other API instances silently never see the message (clients patch
+    /// caches via `setQueryData` only, no refetch fallback).
+    #[test]
+    fn bounded_payload_sheds_attachments_when_over_cap() {
+        let caption = "x".repeat(6000);
+        let attachments: Vec<AttachmentPayload> = (0..10).map(|_| test_attachment()).collect();
+        let mut envelope = NotifyEnvelope {
+            i: Uuid::new_v4(),
+            e: make_message_event_with(caption.clone(), attachments),
+        };
+        let full = serde_json::to_string(&envelope).unwrap();
+        assert!(
+            full.len() > MAX_PG_NOTIFY_PAYLOAD,
+            "fixture must exceed the cap to exercise degradation ({} bytes)",
+            full.len()
+        );
+
+        let payload = bounded_payload(&mut envelope).unwrap();
+
+        assert!(
+            payload.len() <= MAX_PG_NOTIFY_PAYLOAD,
+            "degraded payload {} bytes still exceeds the cap",
+            payload.len()
+        );
+        let decoded: NotifyEnvelope = serde_json::from_str(&payload).unwrap();
+        let ServerEvent::MessageCreated { message, .. } = decoded.e else {
+            panic!("expected MessageCreated");
+        };
+        assert!(message.attachments.is_empty(), "attachments must be shed");
+        assert_eq!(message.content, caption, "text must survive degradation");
+    }
+
+    /// When even the degraded envelope exceeds the cap (content alone is over
+    /// it — `MAX_MESSAGE_LENGTH` is 8000 chars, see `message_service.rs`),
+    /// `bounded_payload` returns `None`: the event is skipped for remote
+    /// instances, never sent truncated/corrupt. Pre-existing limitation for
+    /// oversize text; attachments no longer make it worse.
+    #[test]
+    fn bounded_payload_drops_event_still_over_cap_after_shedding() {
+        let mut envelope = NotifyEnvelope {
+            i: Uuid::new_v4(),
+            e: make_message_event_with("x".repeat(8000), vec![test_attachment()]),
+        };
+
+        assert!(bounded_payload(&mut envelope).is_none());
     }
 }

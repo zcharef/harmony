@@ -78,6 +78,20 @@ export const messagePayloadSchema = z.object({
       }),
     )
     .optional(),
+  // WHY optional: older API instances omit the field during rollout
+  // (attachments T1.3 — same rollout contract as `mentions`).
+  attachments: z
+    .array(
+      z.object({
+        id: z.string(),
+        url: z.string(),
+        mime: z.string(),
+        size: z.number(),
+        width: z.number().nullable().optional(),
+        height: z.number().nullable().optional(),
+      }),
+    )
+    .optional(),
   createdAt: z.string(),
 })
 

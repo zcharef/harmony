@@ -16,7 +16,7 @@ use crate::api::state::AppState;
 use crate::domain::errors::DomainError;
 use crate::domain::models::server_event::MessagePayload;
 use crate::domain::models::{
-    AnalyticsEvent, AnalyticsEventName, ChannelId, MessageId, MessageWithAuthor,
+    AnalyticsEvent, AnalyticsEventName, ChannelId, MessageId, MessageWithAuthor, NewAttachment,
     SYSTEM_MODERATOR_ID, ServerEvent, ServerId,
 };
 use crate::domain::services::content_moderation::{
@@ -68,6 +68,32 @@ pub async fn send_message(
     // this and redacts it before any client sees it.
     let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
 
+    // Parse, don't validate — each attachment reference goes through the
+    // `try_new` funnel: origin pinned to the configured Supabase origin
+    // (fails closed when unconfigured), path-prefix bucket check, sender's
+    // `{uid}/` upload-folder ownership, mime allowlist, positive size. Called
+    // directly (not via `TryFrom`) because the funnel needs the authenticated
+    // author and the configured origin — same pattern as `DeviceId::try_new`.
+    // The first invalid entry rejects the whole request with a 400
+    // (`ValidationError` → 400 via the exhaustive ADR-021 mapping).
+    let attachments: Vec<NewAttachment> = req
+        .attachments
+        .unwrap_or_default()
+        .into_iter()
+        .map(|a| {
+            NewAttachment::try_new(
+                a.url,
+                a.mime,
+                a.size,
+                a.width,
+                a.height,
+                &user_id,
+                state.attachment_url_origin(),
+            )
+            .map_err(|msg| DomainError::ValidationError(msg.to_string()))
+        })
+        .collect::<Result<_, DomainError>>()?;
+
     let message = state
         .message_service()
         .create(
@@ -78,6 +104,7 @@ pub async fn send_message(
             req.sender_device_id,
             req.parent_message_id,
             req.mentioned_user_ids,
+            attachments,
         )
         .await?;
 

@@ -185,6 +185,61 @@ impl SpamGuard {
         Ok(())
     }
 
+    /// All-or-nothing variant of [`Self::check_and_record_action`] for actions
+    /// that consume multiple budget slots at once (e.g. N attachments on one
+    /// message). Either every slot fits inside the window and ALL are
+    /// recorded, or NOTHING is recorded — a rejected message never partially
+    /// drains the caller's budget.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::RateLimited`] if recording `count` slots would
+    /// exceed `max` actions within `window`.
+    pub fn check_and_record_actions(
+        &self,
+        user_id: &UserId,
+        action: &'static str,
+        count: usize,
+        max: usize,
+        window: Duration,
+    ) -> Result<(), DomainError> {
+        if !self.enabled || count == 0 {
+            return Ok(());
+        }
+        let now = Instant::now();
+        let mut allowed = true;
+        self.action_counts
+            .entry((user_id.clone(), action))
+            .and_modify(|(entry_window, timestamps)| {
+                *entry_window = window;
+                timestamps.retain(|ts| now.duration_since(*ts) < window);
+                if timestamps.len() + count > max {
+                    allowed = false;
+                } else {
+                    for _ in 0..count {
+                        timestamps.push(now);
+                    }
+                }
+            })
+            .or_insert_with(|| {
+                if count > max {
+                    allowed = false;
+                    (window, Vec::new())
+                } else {
+                    (window, vec![now; count])
+                }
+            });
+
+        if !allowed {
+            // WHY: No number in the message on purpose — the 429 mapper scrapes
+            // the first number as Retry-After; the 5s default is accurate here.
+            return Err(DomainError::RateLimited(format!(
+                "Too many {action} actions — try again in a few seconds"
+            )));
+        }
+        Ok(())
+    }
+
     /// Check if a user is currently auto-muted in a server (A3).
     ///
     /// # Errors
@@ -1236,6 +1291,77 @@ mod tests {
                 .check_and_record_action(&u, "typing", 2, window)
                 .is_ok(),
             "budget should be restored after the window expires"
+        );
+    }
+
+    /// WHY all-or-nothing: a message with N attachments must never partially
+    /// drain the upload budget when rejected — either all N slots fit and are
+    /// recorded, or none are.
+    #[test]
+    fn multi_action_budget_is_all_or_nothing() {
+        let guard = SpamGuard::new();
+        let window = Duration::from_secs(60);
+
+        // 2 of 3 slots consumed.
+        guard
+            .check_and_record_actions(&user(1), "attachment upload", 2, 3, window)
+            .unwrap();
+
+        // Requesting 2 more (2+2 > 3) rejects AND records nothing…
+        assert!(
+            guard
+                .check_and_record_actions(&user(1), "attachment upload", 2, 3, window)
+                .is_err()
+        );
+        // …so the remaining single slot is still available.
+        assert!(
+            guard
+                .check_and_record_actions(&user(1), "attachment upload", 1, 3, window)
+                .is_ok()
+        );
+        // Budget now exhausted.
+        assert!(
+            guard
+                .check_and_record_actions(&user(1), "attachment upload", 1, 3, window)
+                .is_err()
+        );
+    }
+
+    /// A first request larger than the whole budget rejects without recording.
+    #[test]
+    fn multi_action_budget_rejects_oversized_first_request() {
+        let guard = SpamGuard::new();
+        let window = Duration::from_secs(60);
+
+        assert!(
+            guard
+                .check_and_record_actions(&user(1), "attachment upload", 5, 3, window)
+                .is_err()
+        );
+        // Nothing was recorded — 3 slots still fit.
+        assert!(
+            guard
+                .check_and_record_actions(&user(1), "attachment upload", 3, 3, window)
+                .is_ok()
+        );
+    }
+
+    /// Zero-count and disabled-guard calls are free no-ops.
+    #[test]
+    fn multi_action_budget_zero_count_and_disabled_are_noops() {
+        let guard = SpamGuard::new();
+        let window = Duration::from_secs(60);
+        assert!(
+            guard
+                .check_and_record_actions(&user(1), "attachment upload", 0, 0, window)
+                .is_ok()
+        );
+
+        let disabled = SpamGuard::with_enabled(false);
+        assert!(
+            disabled
+                .check_and_record_actions(&user(1), "attachment upload", 100, 1, window)
+                .is_ok()
         );
     }
 

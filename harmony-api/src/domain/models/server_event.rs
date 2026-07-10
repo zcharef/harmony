@@ -9,17 +9,51 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::Attachment;
 use super::Channel;
 use super::ChannelType;
 use super::MentionedUser;
 use super::MessageWithAuthor;
 use super::UserStatus;
-use super::ids::{ChannelId, MessageId, ServerId, UserId};
+use super::ids::{AttachmentId, ChannelId, MessageId, ServerId, UserId};
 use super::message::MessageType;
 use super::role::Role;
 use super::voice_session::VoiceAction;
 
 // ── Payload structs ──────────────────────────────────────────────
+
+/// Slim attachment shape for the SSE wire.
+///
+/// WHY not the full domain [`Attachment`]: `message_id` and `created_at` are
+/// wire-dead weight (the client schema never read them) and every byte counts
+/// against the 7500-byte `pg_notify` envelope cap — a max-attachments message
+/// must stay deliverable cross-instance. Dims are omitted (not `null`) when
+/// absent for the same reason.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentPayload {
+    pub id: AttachmentId,
+    pub url: String,
+    pub mime: String,
+    pub size: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<i32>,
+}
+
+impl From<Attachment> for AttachmentPayload {
+    fn from(a: Attachment) -> Self {
+        Self {
+            id: a.id,
+            url: a.url,
+            mime: a.mime,
+            size: a.size,
+            width: a.width,
+            height: a.height,
+        }
+    }
+}
 
 /// Message payload embedded in message events.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -56,12 +90,29 @@ pub struct MessagePayload {
     /// deserialize it (empty mentions) instead of dropping the event.
     #[serde(default)]
     pub mentions: Vec<MentionedUser>,
+    /// Files attached to this message (slim wire shape). Rides both
+    /// `message.created` and `message.updated` so every reader renders
+    /// attachments live, no refetch.
+    ///
+    /// WHY `default`: same rollout reasoning as `mentions` — an older instance
+    /// publishes this payload WITHOUT the field over `pg_notify`; `default`
+    /// lets a new instance deserialize it (empty attachments) instead of
+    /// dropping the event. No new `ServerEvent` variant (ticket decision D9).
+    /// An oversize envelope sheds this field before `pg_notify` (see
+    /// [`ServerEvent::shed_attachments`]) rather than dropping the event.
+    #[serde(default)]
+    pub attachments: Vec<AttachmentPayload>,
     pub created_at: DateTime<Utc>,
 }
 
 impl From<MessageWithAuthor> for MessagePayload {
     fn from(mwa: MessageWithAuthor) -> Self {
         let mentions = mwa.mentions;
+        let attachments = mwa
+            .attachments
+            .into_iter()
+            .map(AttachmentPayload::from)
+            .collect();
         let m = mwa.message;
         Self {
             id: m.id,
@@ -80,6 +131,7 @@ impl From<MessageWithAuthor> for MessagePayload {
             moderated_at: m.moderated_at,
             moderation_reason: m.moderation_reason,
             mentions,
+            attachments,
             created_at: m.created_at,
         }
     }
@@ -624,10 +676,34 @@ impl ServerEvent {
             | Self::ForceDisconnect { .. } => {}
         }
     }
+
+    /// Drop the attachments payload from a message event. Returns `true`
+    /// when something was actually shed.
+    ///
+    /// WHY: last-resort degradation for the 7500-byte `pg_notify` envelope
+    /// cap. A max-attachments + long-caption message can exceed the cap; the
+    /// notify worker sheds the attachments and re-serializes so REMOTE
+    /// instances still deliver the message (text renders live, attachments
+    /// heal on the next REST fetch/reconnect invalidation) instead of
+    /// silently losing the whole event cross-instance. Local subscribers are
+    /// unaffected — they receive the full event via the broadcast channel.
+    pub fn shed_attachments(&mut self) -> bool {
+        match self {
+            Self::MessageCreated { message, .. } | Self::MessageUpdated { message, .. } => {
+                if message.attachments.is_empty() {
+                    false
+                } else {
+                    message.attachments.clear();
+                    true
+                }
+            }
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
     use uuid::Uuid;
@@ -673,6 +749,7 @@ mod tests {
                         moderated_at: None,
                         moderation_reason: None,
                         mentions: vec![],
+                        attachments: vec![],
                         created_at: Utc::now(),
                     },
                     channel_access: None,
@@ -800,6 +877,7 @@ mod tests {
                 moderated_at: None,
                 moderation_reason: None,
                 mentions: vec![],
+                attachments: vec![],
                 created_at: Utc::now(),
             },
             channel_access: None,
@@ -1076,6 +1154,90 @@ mod tests {
                 "{} leaked routing metadata: {json}",
                 event.event_name()
             );
+        }
+    }
+
+    /// Rollout safety (mirrors `mentions`): an OLDER instance publishes a
+    /// `MessagePayload` WITHOUT the `attachments` key over `pg_notify` — a new
+    /// instance must deserialize it (empty attachments), not drop the event.
+    #[test]
+    fn message_payload_without_attachments_key_deserializes() {
+        let json = serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "channelId": Uuid::new_v4().to_string(),
+            "content": "old instance payload",
+            "authorId": Uuid::new_v4().to_string(),
+            "authorUsername": "alice",
+            "authorDisplayName": null,
+            "authorAvatarUrl": null,
+            "encrypted": false,
+            "senderDeviceId": null,
+            "editedAt": null,
+            "parentMessageId": null,
+            "messageType": "default",
+            "createdAt": Utc::now().to_rfc3339(),
+        });
+        let payload: MessagePayload = serde_json::from_value(json).unwrap();
+        assert!(payload.attachments.is_empty());
+        assert!(payload.mentions.is_empty());
+    }
+
+    /// Attachments survive the cross-instance (`pg_notify`) serde round-trip
+    /// in camelCase — this is what makes SSE-live rendering possible without
+    /// a refetch (hard requirement: reactivity). The wire shape is SLIM:
+    /// `messageId`/`createdAt` must NOT ride the envelope (dead weight against
+    /// the 7500-byte `pg_notify` cap; the client schema never read them).
+    #[test]
+    fn message_payload_attachments_round_trip() {
+        let attachment = AttachmentPayload {
+            id: crate::domain::models::AttachmentId::new(Uuid::new_v4()),
+            url: "https://x.supabase.co/storage/v1/object/public/attachments/u/f.webp".to_string(),
+            mime: "image/webp".to_string(),
+            size: 1234,
+            width: Some(800),
+            height: Some(600),
+        };
+        let event = ServerEvent::MessageCreated {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message: MessagePayload {
+                id: MessageId::new(Uuid::new_v4()),
+                channel_id: test_channel_id(),
+                content: String::new(), // image-only message
+                author_id: test_user_id(),
+                author_username: "alice".to_string(),
+                author_display_name: None,
+                author_avatar_url: None,
+                encrypted: false,
+                sender_device_id: None,
+                edited_at: None,
+                parent_message_id: None,
+                message_type: crate::domain::models::MessageType::Default,
+                system_event_key: None,
+                moderated_at: None,
+                moderation_reason: None,
+                mentions: vec![],
+                attachments: vec![attachment.clone()],
+                created_at: Utc::now(),
+            },
+            channel_access: None,
+        };
+
+        let json = serde_json::to_value(&event).unwrap();
+        let wire = &json["message"]["attachments"][0];
+        assert_eq!(wire["mime"], "image/webp");
+        assert_eq!(wire["width"], 800);
+        // Regression (review finding): the slim wire shape must not carry the
+        // redundant domain fields.
+        assert!(wire.get("messageId").is_none());
+        assert!(wire.get("createdAt").is_none());
+
+        let back: ServerEvent = serde_json::from_value(json).unwrap();
+        if let ServerEvent::MessageCreated { message, .. } = back {
+            assert_eq!(message.attachments, vec![attachment]);
+        } else {
+            panic!("expected MessageCreated");
         }
     }
 

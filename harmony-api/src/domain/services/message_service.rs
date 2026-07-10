@@ -8,10 +8,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{
-    Channel, ChannelId, MentionedUser, MessageId, MessageWithAuthor, Role, UserId,
+    Channel, ChannelId, MentionedUser, MessageId, MessageWithAuthor, NewAttachment, Role, UserId,
 };
 use crate::domain::ports::{
-    ChannelRepository, MemberRepository, MessageRepository, PlanLimitChecker, ReactionRepository,
+    AttachmentRepository, ChannelRepository, MemberRepository, MessageRepository, PlanLimitChecker,
+    ReactionRepository,
 };
 use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
@@ -42,6 +43,7 @@ pub struct MessageService {
     member_repo: Arc<dyn MemberRepository>,
     plan_checker: Arc<dyn PlanLimitChecker>,
     reaction_repo: Arc<dyn ReactionRepository>,
+    attachment_repo: Arc<dyn AttachmentRepository>,
     content_filter: Arc<ContentFilter>,
     spam_guard: Arc<SpamGuard>,
 }
@@ -62,12 +64,14 @@ fn format_duration(seconds: u64) -> &'static str {
 
 impl MessageService {
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         repo: Arc<dyn MessageRepository>,
         channel_repo: Arc<dyn ChannelRepository>,
         member_repo: Arc<dyn MemberRepository>,
         plan_checker: Arc<dyn PlanLimitChecker>,
         reaction_repo: Arc<dyn ReactionRepository>,
+        attachment_repo: Arc<dyn AttachmentRepository>,
         content_filter: Arc<ContentFilter>,
         spam_guard: Arc<SpamGuard>,
     ) -> Self {
@@ -77,6 +81,7 @@ impl MessageService {
             member_repo,
             plan_checker,
             reaction_repo,
+            attachment_repo,
             content_filter,
             spam_guard,
         }
@@ -131,6 +136,7 @@ impl MessageService {
         sender_device_id: Option<String>,
         parent_message_id: Option<MessageId>,
         mentioned_user_ids: Option<Vec<UserId>>,
+        attachments: Vec<NewAttachment>,
     ) -> Result<MessageWithAuthor, DomainError> {
         let channel = self
             .verify_channel_membership(channel_id, author_id)
@@ -155,7 +161,21 @@ impl MessageService {
             ));
         }
 
-        if content.trim().is_empty() {
+        // WHY reject attachments on encrypted messages (ticket decision D7):
+        // v1 ships plaintext attachments only. A plaintext-blob URL riding an
+        // encrypted message would leak content outside the E2EE boundary while
+        // the UI presents the message as encrypted. Encrypted-blob upload is
+        // the deferred desktop-only track.
+        if encrypted && !attachments.is_empty() {
+            return Err(DomainError::ValidationError(
+                "Attachments are not supported on encrypted messages yet".to_string(),
+            ));
+        }
+
+        // WHY attachments relax the non-empty guard (ticket decision D10):
+        // an image-only message (empty content + ≥1 attachment) is valid,
+        // Discord parity.
+        if content.trim().is_empty() && attachments.is_empty() {
             return Err(DomainError::ValidationError(
                 "Message content must not be empty".to_string(),
             ));
@@ -181,6 +201,42 @@ impl MessageService {
                 "Message content must not exceed {} characters on this plan",
                 max_chars
             )));
+        }
+
+        // §6 attachments: per-plan count + per-file size caps, then the §12
+        // upload-rate budget. Size is checked once on the LARGEST file — the
+        // per-plan cap is uniform, so one check covers every file without a
+        // DB round-trip per attachment. The 100MB bucket cap remains the hard
+        // boundary on the actual bytes (ticket decision D5).
+        if !attachments.is_empty() {
+            self.plan_checker
+                .check_attachment_count(&channel.server_id, attachments.len() as u64)
+                .await?;
+            if let Some(max_size) = attachments.iter().map(|a| a.size).max() {
+                // WHY try_from→MAX: try_new enforces size > 0, but a negative
+                // value slipping through a future construction path must FAIL
+                // the cap (u64::MAX), never wrap into a tiny number.
+                self.plan_checker
+                    .check_attachment_size(
+                        &channel.server_id,
+                        u64::try_from(max_size).unwrap_or(u64::MAX),
+                    )
+                    .await?;
+            }
+            // §12 upload rate (Free 3/min, Supporter 10/min, Creator 20/min):
+            // enforced at message-create time because uploads go direct to
+            // Storage (the API never proxies the bytes). One budget slot per
+            // attachment in a rolling 60s window.
+            let max_uploads = usize::try_from(limits.max_uploads_per_min).unwrap_or(usize::MAX);
+            // All-or-nothing: a rejected message never partially drains the
+            // budget (mirrors the pre-persist mention-budget pattern).
+            self.spam_guard.check_and_record_actions(
+                author_id,
+                "attachment upload",
+                attachments.len(),
+                max_uploads,
+                std::time::Duration::from_secs(60),
+            )?;
         }
 
         // WHY: Role needed by is_read_only, slow_mode, and flood mute admin bypass.
@@ -269,8 +325,13 @@ impl MessageService {
         // moderation, the stored content may be masked (e.g., "h***o"), so the
         // hash would differ. We must hash the same content in both check and record.
         let content_for_dedup = content.clone();
+        // WHY skip for image-only messages: empty content hashes identically,
+        // so two consecutive image-only sends would false-positive as
+        // duplicates. The attachment URLs differ per upload (uuid paths), so
+        // there is nothing meaningful to dedupe.
+        let skip_dedup = encrypted || content.trim().is_empty();
         self.spam_guard
-            .check_duplicate(author_id, channel_id, &content, encrypted)?;
+            .check_duplicate(author_id, channel_id, &content, skip_dedup)?;
 
         // §2.4 mention resolution (step 1): plaintext parses the content markers
         // (server-authoritative — the request sidecar is ignored); encrypted trusts
@@ -371,6 +432,7 @@ impl MessageService {
                 mod_reason,
                 orig_content,
                 mentioned,
+                attachments,
                 effective_slow_mode,
             )
             .await?;
@@ -433,6 +495,15 @@ impl MessageService {
         for msg in &mut messages {
             if let Some(reactions) = reactions_map.remove(&msg.message.id) {
                 msg.reactions = reactions;
+            }
+        }
+
+        // WHY: Batch-fetch attachments the same way (single query, zipped in).
+        // Messages without attachments are absent from the map — left empty.
+        let mut attachments_map = self.attachment_repo.batch_for_messages(&ids).await?;
+        for msg in &mut messages {
+            if let Some(attachments) = attachments_map.remove(&msg.message.id) {
+                msg.attachments = attachments;
             }
         }
 
@@ -668,6 +739,18 @@ impl MessageService {
             .member_repo
             .resolve_mentioned_users(&channel.server_id, &updated.message.mentioned_user_ids)
             .await?;
+
+        // WHY: Edits cannot change attachments (v1), but the MessageUpdated
+        // payload replaces the whole cached message client-side — omitting the
+        // existing attachments here would make them vanish from every reader's
+        // UI on edit.
+        let mut attachments_map = self
+            .attachment_repo
+            .batch_for_messages(std::slice::from_ref(message_id))
+            .await?;
+        if let Some(attachments) = attachments_map.remove(message_id) {
+            updated.attachments = attachments;
+        }
         Ok(updated)
     }
 
