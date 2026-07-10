@@ -5,9 +5,9 @@
     <img alt="Harmony" src="mediakit/logo_horizontal_dark.png" height="64">
   </picture>
   <br /><br />
-  <strong>Discord-class chat you can run yourself.</strong>
+  <strong>Your community, on infrastructure you control.</strong>
   <br />
-  Open-source, AGPL-3.0 community chat with a Rust API, LiveKit voice, and a self-host path built around one Docker Compose command.
+  Discord-class chat you can run yourself: open source, AGPL-3.0, Rust API, LiveKit voice, and a one-command Docker Compose self-host path.
   <br /><br />
   <a href="https://github.com/zcharef/harmony/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zcharef/harmony/ci.yml?style=flat-square&label=CI&logo=github" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License"></a>
@@ -25,35 +25,35 @@
 
 ## Try it
 
-Three ways in, pick your poison:
+Three ways in:
 
-- **Browser** — [app.joinharmony.app](https://app.joinharmony.app). No download; start from the hosted alpha in your browser.
-- **Self-host** — run the current stack on your own machine with one Docker Compose command:
+- **Browser** — try the hosted alpha at [app.joinharmony.app](https://app.joinharmony.app).
+- **Self-host** — clone the repo, fill the env file, and run the current stack yourself:
   ```bash
   git clone https://github.com/zcharef/harmony.git && cd harmony
   cp .env.example .env   # fill in the 5 required values (see docs)
   docker compose up -d --build
   ```
   Full guide (env vars, keys, TLS, upgrades): **[docs/self-hosting.md](docs/self-hosting.md)**
-- **Desktop** — native Tauri app, built from source today; packaged releases are on the roadmap. See [Development](#development).
+- **Desktop** — Tauri desktop app, built from source today. Packaged releases are on the roadmap. See [Development](#development).
 
 ---
 
 ## Why Harmony?
 
-Harmony's first promise is practical ownership: a Discord-class chat surface you can inspect, run, and move to your own infrastructure.
+Hosted chat is convenient until your community outgrows the platform's rules, limits, or roadmap. Harmony keeps the familiar server/channel/voice model, but gives you an exit: open code, your data model, your infrastructure when you want it.
 
 ### What makes Harmony different
 
-- **Privacy you can verify.** Harmony is open source under AGPL-3.0, so the code can be inspected and self-hosted. The product is designed around open code, self-hosting, and minimal data collection.
+- **Privacy you can inspect.** Harmony is open source under AGPL-3.0. You can read the code, run the stack yourself, and see what the app does instead of trusting a black box.
 
-- **The Discord features you expect.** Reactions, replies, unread indicators, emoji picker, avatars, markdown, message grouping, date dividers, per-channel notification settings, presence and DND, voice channels, moderation and anti-spam. All shipped.
+- **The chat basics already feel familiar.** Reactions, replies, unread indicators, emoji picker, avatars, markdown, message grouping, date dividers, per-channel notification settings, presence and DND, voice channels, moderation, and anti-spam are already live.
 
 - **E2EE in development.** The crypto foundation is built on [vodozemac](https://github.com/matrix-org/vodozemac) (NCC Group audited). It runs natively in the desktop app's Rust runtime and keys live in your OS keychain, so private keys never touch JavaScript. E2EE DMs are the next milestone. Not live yet.
 
-- **Simple to self-host.** One Docker Compose command runs the current stack: Harmony's Rust API, Postgres, and Supabase's open-source auth services. No Redis, no MongoDB, no RabbitMQ.
+- **Self-hosting is the product, not a weekend hack.** One Docker Compose command runs the current stack: Harmony's Rust API, Postgres, and Supabase's open-source auth services. No Redis, no MongoDB, no RabbitMQ.
 
-- **Keep more control over your community.** Self-hosting gives communities more operational control over their instance and data. Discord migration tooling is in development; assisted structure-only migration is available by request ([migrate@joinharmony.app](mailto:migrate@joinharmony.app)).
+- **Bring your community over carefully.** Discord migration tooling is in development. For now, assisted structure-only migration is available by request: we can help recreate channels while the full migration path is being built ([migrate@joinharmony.app](mailto:migrate@joinharmony.app)).
 
 - **Web + Desktop, same codebase.** Use Harmony in the browser with zero friction, or run the Tauri desktop app for native performance. E2EE DMs will land on desktop first.
 
