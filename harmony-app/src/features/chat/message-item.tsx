@@ -403,6 +403,40 @@ function ParentQuote({ parentMessage }: { parentMessage?: MessageResponse['paren
   )
 }
 
+// WHY exported: keeps ReactionBar's cognitive complexity under Biome's limit of
+// 15, isolates the "who reacted" rendering (names, overflow, fallback), and lets
+// the content be unit-tested directly (HeroUI's Tooltip portal does not open
+// reliably under jsdom synthetic events).
+export function ReactionTooltipContent({
+  reaction,
+}: {
+  reaction: NonNullable<MessageResponse['reactions']>[number]
+}) {
+  const { t } = useTranslation('chat')
+  const { emoji, count, reactors } = reaction
+
+  // Degraded / version-skew fallback: a message cached before the API regen (or
+  // an unexpected null) has no reactor detail — never render an empty tooltip.
+  if (reactors === undefined || reactors.length === 0) {
+    return <span className="text-xs">{t('reactorsCount', { count })}</span>
+  }
+
+  const names = reactors.map((r) =>
+    resolveDisplayName({ displayName: r.displayName, username: r.username }),
+  )
+  const overflow = count - reactors.length
+
+  return (
+    <div className="max-w-[16rem] px-1 py-0.5 text-xs">
+      <span className="mr-1">{emoji}</span>
+      <span>{names.join(', ')}</span>
+      {overflow > 0 && (
+        <span className="text-default-400"> {t('reactorsOthers', { count: overflow })}</span>
+      )}
+    </div>
+  )
+}
+
 // WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
 function ReactionBar({
   reactions,
@@ -423,17 +457,25 @@ function ReactionBar({
   return (
     <div className="mt-1 flex flex-wrap gap-1">
       {reactions.map((r) => (
-        <button
+        <Tooltip
           key={r.emoji}
-          type="button"
-          onClick={() =>
-            r.reactedByMe === true ? onRemoveReaction?.(r.emoji) : onAddReaction?.(r.emoji)
-          }
-          className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors${r.reactedByMe === true ? ' border-primary bg-primary/10 text-primary' : ' border-default-200 bg-default-50 hover:bg-default-100'}`}
+          content={<ReactionTooltipContent reaction={r} />}
+          placement="top"
+          delay={300}
+          closeDelay={0}
         >
-          <span>{r.emoji}</span>
-          <span>{r.count}</span>
-        </button>
+          <button
+            type="button"
+            data-test="reaction-pill"
+            onClick={() =>
+              r.reactedByMe === true ? onRemoveReaction?.(r.emoji) : onAddReaction?.(r.emoji)
+            }
+            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors${r.reactedByMe === true ? ' border-primary bg-primary/10 text-primary' : ' border-default-200 bg-default-50 hover:bg-default-100'}`}
+          >
+            <span>{r.emoji}</span>
+            <span>{r.count}</span>
+          </button>
+        </Tooltip>
       ))}
       {/* WHY: Second Discord-parity entry point — start ANOTHER reaction from the bar itself. */}
       {onAddReaction !== undefined && (

@@ -8,7 +8,7 @@ import type { MemberListResponse, MentionedUserResponse, MessageResponse } from 
 import '@/lib/i18n'
 import { queryKeys } from '@/lib/query-keys'
 import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
-import { MessageItem } from './message-item'
+import { MessageItem, ReactionTooltipContent } from './message-item'
 
 // WHY: The repo uses data-test (not data-testid) — align Testing Library queries.
 configure({ testIdAttribute: 'data-test' })
@@ -350,7 +350,7 @@ describe('MessageItem reactions UX', () => {
   describe('ReactionBar "+" pill', () => {
     it('renders the pill after existing reaction pills and opens the same picker', async () => {
       const { onAddReaction } = renderMessageItem(
-        buildMessage({ reactions: [{ emoji: '👍', count: 2, reactedByMe: false }] }),
+        buildMessage({ reactions: [{ emoji: '👍', count: 2, reactedByMe: false, reactors: [] }] }),
       )
 
       const pill = screen.getByTestId('reaction-add-button')
@@ -366,7 +366,7 @@ describe('MessageItem reactions UX', () => {
       renderMessageItem(
         buildMessage({
           deletedBy: 'user-42',
-          reactions: [{ emoji: '👍', count: 1, reactedByMe: false }],
+          reactions: [{ emoji: '👍', count: 1, reactedByMe: false, reactors: [] }],
         }),
       )
 
@@ -377,8 +377,8 @@ describe('MessageItem reactions UX', () => {
       const { onAddReaction, onRemoveReaction } = renderMessageItem(
         buildMessage({
           reactions: [
-            { emoji: '👍', count: 2, reactedByMe: true },
-            { emoji: '🎉', count: 1, reactedByMe: false },
+            { emoji: '👍', count: 2, reactedByMe: true, reactors: [] },
+            { emoji: '🎉', count: 1, reactedByMe: false, reactors: [] },
           ],
         }),
       )
@@ -393,6 +393,93 @@ describe('MessageItem reactions UX', () => {
       fireEvent.click(partyPill)
       expect(onAddReaction).toHaveBeenCalledExactlyOnceWith('🎉')
     })
+  })
+
+  // Each reaction pill is wrapped in a Tooltip trigger — the hover affordance
+  // exists and is keyboard-focusable (it is a real <button>).
+  it('wraps every reaction pill in a hoverable, focusable trigger', () => {
+    renderMessageItem(
+      buildMessage({
+        reactions: [
+          { emoji: '👍', count: 1, reactedByMe: false, reactors: [{ username: 'alice' }] },
+          { emoji: '🎉', count: 1, reactedByMe: false, reactors: [{ username: 'bob' }] },
+        ],
+      }),
+    )
+
+    const pills = screen.getAllByTestId('reaction-pill')
+    expect(pills).toHaveLength(2)
+    // Real <button>s → focusable, so HeroUI's Tooltip opens on keyboard focus.
+    for (const pill of pills) {
+      expect(pill.tagName).toBe('BUTTON')
+    }
+  })
+})
+
+// ── "who reacted" tooltip content (T1.5) ──────────────────────────────────
+//
+// WHY test the content directly: HeroUI's Tooltip renders into a portal only
+// after a real pointer/focus interaction that jsdom does not simulate
+// faithfully. The rendering logic (names, overflow, degraded fallback) lives in
+// ReactionTooltipContent, so we exercise it in isolation.
+describe('ReactionTooltipContent', () => {
+  function renderContent(reaction: NonNullable<MessageResponse['reactions']>[number]) {
+    return render(<ReactionTooltipContent reaction={reaction} />)
+  }
+
+  it('lists reactor names, preferring displayName over username', () => {
+    renderContent({
+      emoji: '👍',
+      count: 2,
+      reactedByMe: false,
+      reactors: [
+        { username: 'alice', displayName: 'Alice A' },
+        { username: 'bob', displayName: null },
+      ],
+    })
+
+    expect(screen.getByText('Alice A, bob')).toBeTruthy()
+    expect(screen.queryByText(/other/)).toBeNull()
+  })
+
+  it('appends a pluralized "+N others" when the count exceeds the reactor list', () => {
+    renderContent({
+      emoji: '🔥',
+      count: 5,
+      reactedByMe: false,
+      reactors: [
+        { username: 'alice', displayName: 'Alice' },
+        { username: 'bob', displayName: 'Bob' },
+      ],
+    })
+
+    expect(screen.getByText('Alice, Bob')).toBeTruthy()
+    // 5 total - 2 named = 3 others.
+    expect(screen.getByText('+3 others')).toBeTruthy()
+  })
+
+  it('uses the singular "+1 other" when exactly one reactor overflows', () => {
+    renderContent({
+      emoji: '🔥',
+      count: 2,
+      reactedByMe: false,
+      reactors: [{ username: 'alice', displayName: 'Alice' }],
+    })
+
+    expect(screen.getByText('+1 other')).toBeTruthy()
+  })
+
+  it('falls back to the count-only label when reactors is empty (version skew)', () => {
+    renderContent({ emoji: '🎉', count: 3, reactedByMe: false, reactors: [] })
+
+    // Never an empty tooltip — the degraded path shows the pluralized count.
+    expect(screen.getByText('3 reactions')).toBeTruthy()
+  })
+
+  it('uses the singular "reaction" label for a single degraded reactor', () => {
+    renderContent({ emoji: '🎉', count: 1, reactedByMe: false, reactors: [] })
+
+    expect(screen.getByText('1 reaction')).toBeTruthy()
   })
 })
 

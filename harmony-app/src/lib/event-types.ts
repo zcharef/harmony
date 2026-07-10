@@ -297,6 +297,9 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     emoji: z.string(),
     userId: z.string(),
     username: z.string(),
+    // WHY nullish: the reactor's display name is omitted when unset (older API
+    // instances never send it). Lets the "who reacted" list patch live.
+    displayName: z.string().nullish(),
   }),
   z.object({
     type: z.literal('reactionRemoved'),
@@ -306,6 +309,9 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     messageId: z.string(),
     emoji: z.string(),
     userId: z.string(),
+    // WHY: the "who reacted" list is keyed by username, so removal needs it to
+    // drop the matching entry.
+    username: z.string(),
   }),
 
   // Mentions (user-targeted)
