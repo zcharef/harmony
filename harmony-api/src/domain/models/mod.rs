@@ -2,6 +2,7 @@
 //!
 //! These are pure domain entities with no infrastructure dependencies.
 
+mod analytics;
 mod ban;
 mod channel;
 mod crypto;
@@ -23,6 +24,7 @@ pub mod server_event;
 mod user_preferences;
 mod voice_session;
 
+pub use analytics::{AnalyticsEvent, AnalyticsEventName};
 pub use ban::ServerBan;
 pub use channel::{Channel, ChannelType};
 pub use crypto::{ClaimedKey, DeviceKey, OneTimeKey, PreKeyBundle};

@@ -367,6 +367,10 @@ async fn init_app_state(config: &Config) -> AppInit {
         (None, None)
     };
 
+    // Analytics recorder (growth-plan §10 funnel events, fire-and-forget).
+    let analytics_recorder: Arc<dyn domain::ports::AnalyticsRecorder> =
+        Arc::new(infra::postgres::PgAnalyticsRecorder::new(pool.clone()));
+
     tracing::info!("Domain services initialized");
 
     let state = AppState::new(
@@ -408,6 +412,7 @@ async fn init_app_state(config: &Config) -> AppInit {
                     .expect("OFFICIAL_SERVER_ID must be a valid UUID"),
             )
         }),
+        analytics_recorder,
     );
 
     AppInit {

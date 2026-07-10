@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO analytics_events (name, user_id, server_id, channel_id, properties)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "871172a1d419aea9b50fd7cf16fdf766601d0f1f9a7945ce6335513353b0ef01"
+}

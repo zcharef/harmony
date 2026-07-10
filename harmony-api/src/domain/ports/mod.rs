@@ -2,6 +2,7 @@
 //!
 //! These traits define the contracts that infrastructure adapters must implement.
 
+mod analytics_recorder;
 mod ban_repository;
 mod channel_repository;
 mod content_moderator;
@@ -24,6 +25,7 @@ mod server_repository;
 mod user_preferences_repository;
 mod voice_session_repository;
 
+pub use analytics_recorder::AnalyticsRecorder;
 pub use ban_repository::BanRepository;
 pub use channel_repository::ChannelRepository;
 pub use content_moderator::{ContentModerator, ModerationResult};

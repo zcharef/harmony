@@ -16,7 +16,8 @@ use crate::api::state::AppState;
 use crate::domain::errors::DomainError;
 use crate::domain::models::server_event::MessagePayload;
 use crate::domain::models::{
-    ChannelId, MessageId, MessageWithAuthor, SYSTEM_MODERATOR_ID, ServerEvent, ServerId,
+    AnalyticsEvent, AnalyticsEventName, ChannelId, MessageId, MessageWithAuthor,
+    SYSTEM_MODERATOR_ID, ServerEvent, ServerId,
 };
 use crate::domain::services::content_moderation::{
     ModerationDecision, SCORE_THRESHOLD, evaluate_moderation,
@@ -118,6 +119,17 @@ pub async fn send_message(
     if !encrypted {
         spawn_async_moderation(&state, &message, &channel_id, &channel.server_id);
     }
+
+    // §10 activation funnel: first message ever (fire-and-forget). The DB
+    // dedups via a once-per-user unique index — replays are silent no-ops,
+    // so no "is this the first?" query on the hot path.
+    super::track(
+        &state,
+        AnalyticsEvent::new(AnalyticsEventName::FirstMessage)
+            .user(user_id)
+            .server(channel.server_id)
+            .channel(channel_id),
+    );
 
     Ok((StatusCode::CREATED, Json(MessageResponse::from(message))))
 }

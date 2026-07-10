@@ -12,6 +12,7 @@ use crate::api::extractors::{ApiJson, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::errors::DomainError;
 use crate::domain::models::server_event::{MemberPayload, ServerEvent};
+use crate::domain::models::{AnalyticsEvent, AnalyticsEventName};
 use crate::domain::services::ProfileService;
 use crate::infra::auth::AuthenticatedUser;
 
@@ -181,6 +182,16 @@ async fn auto_join_official_server(
             return;
         }
     }
+
+    // §10 activation funnel: joined-a-server milestone via the official
+    // auto-join path (fire-and-forget).
+    super::track(
+        state,
+        AnalyticsEvent::new(AnalyticsEventName::ServerJoined)
+            .user(user_id.clone())
+            .server(official_server_id.clone())
+            .properties(serde_json::json!({ "via": "official_autojoin" })),
+    );
 
     // 2. System message in default channel (best-effort).
     if let Err(e) =
