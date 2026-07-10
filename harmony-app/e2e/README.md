@@ -82,6 +82,8 @@ Tests do NOT go through the login UI (slow, flaky). Instead:
 2. `syncProfile(token)` — Calls `POST /v1/auth/me` to upsert the user's profile in the app database.
 3. `authenticatePage(page, user)` — Injects the Supabase session into `localStorage` via `addInitScript`, then navigates to `/`. The app loads as if already logged in.
 
+By default `authenticatePage` represents a RETURNING user: it syncs the profile and sets `onboardingCompleted=true` via `PATCH /v1/preferences` before the first load, so the first-run OnboardingFlow never gates the UI mid-test. Onboarding specs opt into the fresh state with `authenticatePage(page, user, { firstRun: true })`.
+
 Only `auth.spec.ts` tests the actual login form UI.
 
 ### Test data isolation
