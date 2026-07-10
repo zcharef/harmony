@@ -46,7 +46,13 @@ export function useAddReaction(channelId: string) {
                   r.emoji === emoji ? { ...r, count: r.count + 1, reactedByMe: true } : r,
                 )
               } else {
-                reactions = [...(m.reactions ?? []), { emoji, count: 1, reactedByMe: true }]
+                // WHY reactors: []: the optimistic path doesn't carry the
+                // reactor's display identity — the tooltip falls back to the
+                // count until the SSE echo / onSettled refetch fills the name.
+                reactions = [
+                  ...(m.reactions ?? []),
+                  { emoji, count: 1, reactedByMe: true, reactors: [] },
+                ]
               }
               return { ...m, reactions }
             }),

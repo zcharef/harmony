@@ -35,5 +35,9 @@
   },
   "emojiPickerLoadFailed": "Couldn’t load the emoji picker. Check your connection and try again.",
   "mentionNoResults": "No members found",
-  "mentionPopupLabel": "Mention a member"
+  "mentionPopupLabel": "Mention a member",
+  "reactorsCount": "{{count}} reaction",
+  "reactorsCount_other": "{{count}} reactions",
+  "reactorsOthers": "+{{count}} other",
+  "reactorsOthers_other": "+{{count}} others"
 }

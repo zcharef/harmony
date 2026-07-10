@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{EmojiVariety, MessageId, ReactionSummary, UserId};
+use crate::domain::models::{EmojiVariety, MessageId, ReactionSummary, Reactor, UserId};
 use crate::domain::ports::ReactionRepository;
 
 /// PostgreSQL-backed reaction repository.
@@ -111,17 +111,45 @@ impl ReactionRepository for PgReactionRepository {
 
         let ids: Vec<Uuid> = message_ids.iter().map(|id| id.0).collect();
 
+        // WHY window functions + `rn <= 10` filter (not a jsonb_agg): the reactor
+        // list is bounded to the first 10 per (message, emoji) IN Postgres, so a
+        // heavily-reacted message transfers at most 10 reactor rows per emoji —
+        // while `COUNT(*) OVER` keeps the authoritative (unbounded) total and
+        // `BOOL_OR(...) OVER` reflects the viewer even when they are the 11th+
+        // reactor. Rows come back pre-ordered so the same (message, emoji) group
+        // is contiguous and we fold it into one `ReactionSummary` in Rust —
+        // mirroring `attachment_repository::batch_for_messages` rather than
+        // pulling in the sqlx `json` feature.
         let rows = sqlx::query!(
             r#"
             SELECT
                 message_id,
                 emoji,
-                COALESCE(COUNT(*)::BIGINT, 0) as "count!",
-                BOOL_OR(user_id = $2) as "reacted_by_me!"
-            FROM message_reactions
-            WHERE message_id = ANY($1::uuid[])
-            GROUP BY message_id, emoji
-            ORDER BY message_id, MIN(created_at)
+                username,
+                display_name,
+                total_count AS "total_count!",
+                reacted_by_me AS "reacted_by_me!"
+            FROM (
+                SELECT
+                    mr.message_id,
+                    mr.emoji,
+                    p.username,
+                    p.display_name,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY mr.message_id, mr.emoji
+                        ORDER BY mr.created_at, mr.user_id
+                    ) AS rn,
+                    COUNT(*) OVER (PARTITION BY mr.message_id, mr.emoji) AS total_count,
+                    BOOL_OR(mr.user_id = $2) OVER (PARTITION BY mr.message_id, mr.emoji)
+                        AS reacted_by_me,
+                    MIN(mr.created_at) OVER (PARTITION BY mr.message_id, mr.emoji)
+                        AS group_created_at
+                FROM message_reactions mr
+                JOIN profiles p ON p.id = mr.user_id
+                WHERE mr.message_id = ANY($1::uuid[])
+            ) ranked
+            WHERE rn <= 10
+            ORDER BY message_id, group_created_at, emoji, rn
             "#,
             &ids,
             viewer_id.0,
@@ -131,14 +159,45 @@ impl ReactionRepository for PgReactionRepository {
         .map_err(super::db_err)?;
 
         let mut result: HashMap<MessageId, Vec<ReactionSummary>> = HashMap::new();
+        // WHY track the last (message, emoji): rows are ordered so each group's
+        // reactor rows are contiguous and the group's summary is always the
+        // last one pushed for that message — so we append to it directly.
+        let mut current_key: Option<(Uuid, String)> = None;
         for row in rows {
             let msg_id = MessageId::new(row.message_id);
-            let summary = ReactionSummary {
-                emoji: row.emoji,
-                count: row.count,
-                reacted_by_me: row.reacted_by_me,
+            let reactor = Reactor {
+                username: row.username,
+                display_name: row.display_name,
             };
-            result.entry(msg_id).or_default().push(summary);
+            let key = (row.message_id, row.emoji.clone());
+
+            if current_key.as_ref() == Some(&key) {
+                if let Some(last) = result.get_mut(&msg_id).and_then(|s| s.last_mut()) {
+                    last.reactors.push(reactor);
+                } else {
+                    // Unreachable given the contiguous ordering, but never drop a
+                    // reactor silently (ADR-027).
+                    tracing::warn!(
+                        message_id = %row.message_id,
+                        emoji = %row.emoji,
+                        "reactor row had no summary to append to; starting a new group"
+                    );
+                    result.entry(msg_id).or_default().push(ReactionSummary {
+                        emoji: row.emoji,
+                        count: row.total_count,
+                        reacted_by_me: row.reacted_by_me,
+                        reactors: vec![reactor],
+                    });
+                }
+            } else {
+                result.entry(msg_id).or_default().push(ReactionSummary {
+                    emoji: row.emoji,
+                    count: row.total_count,
+                    reacted_by_me: row.reacted_by_me,
+                    reactors: vec![reactor],
+                });
+                current_key = Some(key);
+            }
         }
 
         Ok(result)

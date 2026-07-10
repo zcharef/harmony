@@ -5584,18 +5584,45 @@
         "required": [
           "emoji",
           "count",
-          "reactedByMe"
+          "reactedByMe",
+          "reactors"
         ],
         "properties": {
           "count": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "TOTAL number of people who reacted with this emoji (unbounded)."
           },
           "emoji": {
             "type": "string"
           },
           "reactedByMe": {
             "type": "boolean"
+          },
+          "reactors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Reactor"
+            },
+            "description": "First up-to-10 reactors, ordered by `created_at ASC`. `count` is\nauthoritative for the total; `reactors.len()` may be smaller. When\n`count > reactors.len()` the client renders \"+N others\"."
+          }
+        }
+      },
+      "Reactor": {
+        "type": "object",
+        "description": "A single person who reacted, resolved to display data.\n\nThe client renders `display_name` when present, otherwise `username`\n(mirrors the message-author label resolution). The raw user id is never\nexposed — a reactor is identified by username on the wire (SSE removal\nmatches by username too). Bounded list — see [`ReactionSummary::reactors`].",
+        "required": [
+          "username"
+        ],
+        "properties": {
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "username": {
+            "type": "string"
           }
         }
       },

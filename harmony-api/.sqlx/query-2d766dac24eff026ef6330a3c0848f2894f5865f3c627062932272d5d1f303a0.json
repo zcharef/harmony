@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                message_id,\n                emoji,\n                username,\n                display_name,\n                total_count AS \"total_count!\",\n                reacted_by_me AS \"reacted_by_me!\"\n            FROM (\n                SELECT\n                    mr.message_id,\n                    mr.emoji,\n                    p.username,\n                    p.display_name,\n                    ROW_NUMBER() OVER (\n                        PARTITION BY mr.message_id, mr.emoji\n                        ORDER BY mr.created_at, mr.user_id\n                    ) AS rn,\n                    COUNT(*) OVER (PARTITION BY mr.message_id, mr.emoji) AS total_count,\n                    BOOL_OR(mr.user_id = $2) OVER (PARTITION BY mr.message_id, mr.emoji)\n                        AS reacted_by_me,\n                    MIN(mr.created_at) OVER (PARTITION BY mr.message_id, mr.emoji)\n                        AS group_created_at\n                FROM message_reactions mr\n                JOIN profiles p ON p.id = mr.user_id\n                WHERE mr.message_id = ANY($1::uuid[])\n            ) ranked\n            WHERE rn <= 10\n            ORDER BY message_id, group_created_at, emoji, rn\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "emoji",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "total_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "reacted_by_me!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "2d766dac24eff026ef6330a3c0848f2894f5865f3c627062932272d5d1f303a0"
+}

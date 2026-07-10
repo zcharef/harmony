@@ -420,6 +420,11 @@ pub enum ServerEvent {
         emoji: String,
         user_id: UserId,
         username: String,
+        /// Reactor's account display name, if set. Lets the client patch the
+        /// "who reacted" list live with `displayName ?? username`. Omitted when
+        /// absent so older instances that never send it deserialize cleanly.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display_name: Option<String>,
         /// Private-channel access scope (routing metadata). See `MessageCreated`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channel_access: Option<ChannelAccessScope>,
@@ -431,6 +436,9 @@ pub enum ServerEvent {
         message_id: MessageId,
         emoji: String,
         user_id: UserId,
+        /// Reactor's username — lets the client drop the matching entry from the
+        /// "who reacted" list, which is keyed by username, not id.
+        username: String,
         /// Private-channel access scope (routing metadata). See `MessageCreated`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channel_access: Option<ChannelAccessScope>,
@@ -969,6 +977,7 @@ mod tests {
             emoji: "👍".to_string(),
             user_id: test_user_id(),
             username: "alice".to_string(),
+            display_name: Some("Alice A".to_string()),
             channel_access: Some(scope.clone()),
         };
 
@@ -978,6 +987,100 @@ mod tests {
 
         let back: ServerEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(back.channel_access(), Some(&scope));
+    }
+
+    /// `reaction.added` carries `displayName` in camelCase for the "who reacted"
+    /// tooltip, and omits it entirely when the reactor has no display name.
+    #[test]
+    fn reaction_added_serializes_display_name() {
+        let with_name = ServerEvent::ReactionAdded {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message_id: MessageId::new(Uuid::new_v4()),
+            emoji: "🎉".to_string(),
+            user_id: test_user_id(),
+            username: "alice".to_string(),
+            display_name: Some("Alice A".to_string()),
+            channel_access: None,
+        };
+        let json = serde_json::to_value(&with_name).unwrap();
+        assert_eq!(json["displayName"], "Alice A");
+        assert_eq!(json["username"], "alice");
+
+        let without_name = ServerEvent::ReactionAdded {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message_id: MessageId::new(Uuid::new_v4()),
+            emoji: "🎉".to_string(),
+            user_id: test_user_id(),
+            username: "bob".to_string(),
+            display_name: None,
+            channel_access: None,
+        };
+        let json = serde_json::to_value(&without_name).unwrap();
+        assert!(json.get("displayName").is_none());
+    }
+
+    /// `reaction.removed` carries the reactor `username` so the client can drop
+    /// the matching "who reacted" entry (the list is keyed by username, not id).
+    #[test]
+    fn reaction_removed_carries_username() {
+        let event = ServerEvent::ReactionRemoved {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message_id: MessageId::new(Uuid::new_v4()),
+            emoji: "👍".to_string(),
+            user_id: test_user_id(),
+            username: "alice".to_string(),
+            channel_access: None,
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["username"], "alice");
+    }
+
+    /// Redaction still nulls `channel_access` on both reaction variants after the
+    /// display-field additions — the added `display_name`/`username` are plain
+    /// display data and are never touched by routing/redaction.
+    #[test]
+    fn redaction_nulls_channel_access_on_reaction_variants() {
+        let scope = ChannelAccessScope {
+            authorized_roles: vec![Role::Member],
+        };
+        let mut added = ServerEvent::ReactionAdded {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message_id: MessageId::new(Uuid::new_v4()),
+            emoji: "👍".to_string(),
+            user_id: test_user_id(),
+            username: "alice".to_string(),
+            display_name: Some("Alice A".to_string()),
+            channel_access: Some(scope.clone()),
+        };
+        added.redact_routing_metadata();
+        assert!(added.channel_access().is_none());
+        let json = serde_json::to_value(&added).unwrap();
+        assert_eq!(json["displayName"], "Alice A");
+        assert!(json.get("channelAccess").is_none());
+
+        let mut removed = ServerEvent::ReactionRemoved {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message_id: MessageId::new(Uuid::new_v4()),
+            emoji: "👍".to_string(),
+            user_id: test_user_id(),
+            username: "alice".to_string(),
+            channel_access: Some(scope),
+        };
+        removed.redact_routing_metadata();
+        assert!(removed.channel_access().is_none());
+        let json = serde_json::to_value(&removed).unwrap();
+        assert_eq!(json["username"], "alice");
+        assert!(json.get("channelAccess").is_none());
     }
 
     #[test]

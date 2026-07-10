@@ -88,6 +88,7 @@ pub async fn add_reaction(
         emoji: req.emoji,
         user_id: user_id.clone(),
         username: profile.username,
+        display_name: profile.display_name,
         channel_access,
     };
     let receivers = state.event_bus().publish(event);
@@ -148,6 +149,11 @@ pub async fn remove_reaction(
         .remove_reaction(&path.channel_id, &path.message_id, &user_id, &path.emoji)
         .await?;
 
+    // WHY: Fetch the profile for the username in the SSE event so clients can
+    // drop the matching entry from the "who reacted" list (keyed by username,
+    // not id). Mirrors `add_reaction`.
+    let profile = state.profile_service().get_by_id(&user_id).await?;
+
     let event = ServerEvent::ReactionRemoved {
         sender_id: user_id.clone(),
         server_id: channel.server_id,
@@ -155,6 +161,7 @@ pub async fn remove_reaction(
         message_id: path.message_id.clone(),
         emoji: path.emoji,
         user_id,
+        username: profile.username,
         channel_access,
     };
     let receivers = state.event_bus().publish(event);

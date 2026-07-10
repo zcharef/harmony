@@ -45,7 +45,7 @@ pub use message_with_author::MessageWithAuthor;
 pub use moderation::{ModerationRetry, ServerModerationSettings};
 pub use plan::{Plan, PlanLimits, ResourceKind};
 pub use profile::{Profile, UserStatus};
-pub use reaction::{EmojiVariety, ReactionSummary};
+pub use reaction::{EmojiVariety, ReactionSummary, Reactor};
 pub use read_state::ChannelReadState;
 pub use role::Role;
 pub use server::Server;

@@ -30,7 +30,7 @@ use crate::domain::models::{
     MegolmSessionId, MessageId, MessageType, OneTimeKeyId, ServerId, UserId, UserStatus,
     VoiceAction,
 };
-use crate::domain::models::{ParentMessagePreview, ReactionSummary};
+use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
 
 /// `OpenAPI` documentation for Harmony API.
 #[derive(Debug, OpenApi)]
@@ -196,6 +196,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             // Reaction DTOs
             super::handlers::reactions::AddReactionRequest,
             ReactionSummary,
+            Reactor,
             ParentMessagePreview,
             // Notification Settings DTOs
             super::dto::notification_settings::UpdateNotificationSettingsRequest,

@@ -150,6 +150,28 @@ export async function sendMessage(
 }
 
 /**
+ * POST /v1/channels/{id}/messages/{messageId}/reactions — add a reaction.
+ * WHY: seeds real reactor rows so the "who reacted" tooltip can be asserted
+ * against real data (never mock the API).
+ */
+export async function addReaction(
+  token: string,
+  channelId: string,
+  messageId: string,
+  emoji: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages/${messageId}/reactions`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ emoji }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`addReaction failed: ${res.status} ${body}`)
+  }
+}
+
+/**
  * POST /v1/channels/{id}/messages — non-throwing variant that returns the raw Response.
  * WHY: Used by tests that assert on specific HTTP status codes (e.g., 429 rate limit).
  */
