@@ -302,7 +302,7 @@ function UserControlPanel() {
     profile !== undefined
       ? resolveDisplayName({ displayName: profile.displayName, username: profile.username })
       : t('youFallback')
-  const openProfileSettings = useSettingsUiStore((s) => s.openProfileSettings)
+  const openUserSettings = useSettingsUiStore((s) => s.openUserSettings)
   const isMuted = useVoiceConnectionStore((s) => s.isMuted)
   const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
   const toggleMute = useVoiceConnectionStore((s) => s.toggleMute)
@@ -385,7 +385,7 @@ function UserControlPanel() {
             isIconOnly
             size="sm"
             className="h-8 w-8"
-            onPress={openProfileSettings}
+            onPress={() => openUserSettings()}
             data-test="user-settings-button"
           >
             <Settings className="h-4 w-4 text-default-500" />

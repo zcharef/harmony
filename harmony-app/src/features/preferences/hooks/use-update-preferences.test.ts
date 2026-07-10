@@ -33,6 +33,11 @@ function buildPreferences(
     dndEnabled: false,
     hideProfanity: true,
     onboardingCompleted: false,
+    notificationsEnabled: true,
+    notifyMessages: true,
+    notifyDms: true,
+    notifyMentions: true,
+    notificationSoundsEnabled: true,
     updatedAt: '2026-04-02T00:00:00.000Z',
     ...overrides,
   }
@@ -171,5 +176,52 @@ describe('useUpdatePreferences', () => {
 
     await waitFor(() => expect(result.current.preferences.data?.dndEnabled).toBe(false))
     expect(result.current.preferences.data?.hideProfanity).toBe(true)
+  })
+
+  it('optimistically merges a notification switch and keeps its siblings', async () => {
+    vi.mocked(updatePreferences).mockReturnValueOnce(new Promise(() => {}) as never)
+
+    const { result } = renderPreferencesHooks(buildPreferences({ notifyDms: false }))
+
+    await act(async () => {
+      result.current.update.mutate({ notifyMessages: false })
+    })
+
+    await waitFor(() => expect(result.current.preferences.data?.notifyMessages).toBe(false))
+    expect(result.current.preferences.data?.notifyDms).toBe(false)
+    expect(result.current.preferences.data?.notificationsEnabled).toBe(true)
+    expect(result.current.preferences.data?.notificationSoundsEnabled).toBe(true)
+  })
+
+  it('rolls back a failed notification-switch patch to the previous value', async () => {
+    vi.mocked(updatePreferences).mockRejectedValueOnce(new Error('boom'))
+
+    const { result } = renderPreferencesHooks(buildPreferences({ notificationSoundsEnabled: true }))
+
+    await act(async () => {
+      result.current.update.mutate({ notificationSoundsEnabled: false })
+    })
+    await waitFor(() => expect(result.current.update.isError).toBe(true))
+
+    await waitFor(() =>
+      expect(result.current.preferences.data?.notificationSoundsEnabled).toBe(true),
+    )
+  })
+
+  it('rollback without previous cache restores all-true notification defaults', async () => {
+    vi.mocked(updatePreferences).mockRejectedValueOnce(new Error('boom'))
+
+    const { result } = renderPreferencesHooks()
+
+    await act(async () => {
+      result.current.update.mutate({ notifyMentions: false })
+    })
+    await waitFor(() => expect(result.current.update.isError).toBe(true))
+
+    await waitFor(() => expect(result.current.preferences.data?.notifyMentions).toBe(true))
+    expect(result.current.preferences.data?.notificationsEnabled).toBe(true)
+    expect(result.current.preferences.data?.notifyMessages).toBe(true)
+    expect(result.current.preferences.data?.notifyDms).toBe(true)
+    expect(result.current.preferences.data?.notificationSoundsEnabled).toBe(true)
   })
 })

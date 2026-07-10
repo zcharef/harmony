@@ -41,7 +41,9 @@ export const queryKeys = {
   },
   notificationSettings: {
     all: ['notificationSettings'] as const,
-    byChannel: (channelId: string) => ['notificationSettings', 'channel', channelId] as const,
+    // WHY 'mine' (no per-channel keys): ONE bulk query holds every override —
+    // per-channel reads select from it (single source of truth, D9).
+    mine: () => ['notificationSettings', 'mine'] as const,
   },
   dms: {
     all: ['dms'] as const,

@@ -10,7 +10,6 @@ import { useAuthStore, useCurrentProfile, useRealtimeProfile } from '@/features/
 import {
   ChannelSidebar,
   useChannels,
-  useDesktopNotifications,
   useRealtimeChannels,
   useRealtimeMentions,
   useRealtimeUnread,
@@ -24,19 +23,26 @@ import {
   useMyMemberRole,
   useRealtimeMembers,
 } from '@/features/members'
+import {
+  NotificationPermissionBanner,
+  trackFocusLock,
+  useDesktopNotifications,
+  useNotificationSettingsMap,
+  useNotificationSound,
+} from '@/features/notifications'
 import { OnboardingFlow, useOnboarding } from '@/features/onboarding'
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
-import { ProfileSettingsModal, ServerSettings, useSettingsUiStore } from '@/features/settings'
+import { ServerSettings, UserSettingsModal, useSettingsUiStore } from '@/features/settings'
 import { useVoiceConnection } from '@/features/voice'
 import { useFetchSSE } from '@/hooks/use-fetch-sse'
-import { useNotificationSound } from '@/hooks/use-notification-sound'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import { type ConnectionStatus, useConnectionStatus } from '@/lib/connection-store'
 import { resolveDisplayName } from '@/lib/display-name'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
 import { NAVIGATE_EVENT, navigateDetailSchema } from '@/lib/navigation-events'
+import { readStorage, writeStorage } from '@/lib/storage'
 import { supabase } from '@/lib/supabase'
 import { AboutPage } from './about-page'
 import { ConnectionBanner } from './connection-banner'
@@ -49,29 +55,6 @@ const STORAGE_KEYS = {
   lastServerId: 'harmony:lastServerId',
   lastChannelId: (serverId: string) => `harmony:lastChannel:${serverId}`,
 } as const
-
-function readStorage(key: string): string | null {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-function writeStorage(key: string, value: string | null): void {
-  try {
-    if (value === null) {
-      localStorage.removeItem(key)
-    } else {
-      localStorage.setItem(key, value)
-    }
-  } catch (err: unknown) {
-    logger.warn('write_storage_failed', {
-      key,
-      error: err instanceof Error ? err.message : String(err),
-    })
-  }
-}
 
 function AlphaBadge() {
   const { t } = useTranslation('common')
@@ -513,13 +496,20 @@ export function MainLayout() {
   // WHY: Handles the SSE unread.sync snapshot on connect/reconnect.
   // Replaces N per-server REST calls with a single SSE initial event.
   useUnreadSync(userId)
-  // WHY: Fires native desktop notifications for incoming messages. Needs
+  // WHY: Fires native notifications (web + Tauri) for incoming messages. Needs
   // selectedChannelId to skip the active channel, userId to filter self-messages.
   useDesktopNotifications(selectedChannelId, userId)
   // WHY: Plays notification sounds (different for DMs vs server channels).
   // Suppression differs from desktop notifications: sound plays when focused
   // on a different channel, desktop notifications suppress on focus alone.
   useNotificationSound(selectedChannelId, userId)
+  // WHY: Bulk per-channel notification overrides — fetched once here so the
+  // policy respects muted levels for channels never visited this session (D9).
+  useNotificationSettingsMap()
+  // WHY: Holds the cross-tab Web Lock while this tab is focused, so no tab
+  // pops a native notification while the user is looking at ANY same-origin
+  // tab (persistent side-effect rule §4.6).
+  useEffect(() => trackFocusLock(), [])
   // WHY: Voice lifecycle (heartbeat, token refresh, mute sync, cleanup) MUST
   // survive the DM/server view toggle. ChannelSidebar unmounts in DM view,
   // which killed the heartbeat → server swept sessions after 75s → names
@@ -711,61 +701,67 @@ export function MainLayout() {
         onSelectDmView={handleSelectDmView}
       />
 
-      {/* Resizable panels for sidebar, chat, members */}
-      <Group orientation="horizontal" className="flex h-full w-full flex-1">
-        <Panel data-test="server-sidebar" defaultSize="20%" minSize="15%" maxSize="30%">
-          <FeatureErrorBoundary name={isDmView ? 'DmSidebar' : 'ChannelSidebar'}>
-            {isDmView ? (
-              <DmSidebar selectedServerId={selectedServerId} onSelectDm={handleSelectDm} />
-            ) : (
-              <ChannelSidebar
-                serverId={selectedServerId}
-                serverName={serverName}
-                selectedChannelId={selectedChannelId}
-                onSelectChannel={setSelectedChannelId}
-                joinVoice={joinVoice}
-              />
-            )}
-          </FeatureErrorBoundary>
-        </Panel>
+      {/* WHY flex-col wrapper: the one-time permission banner sits above the
+          resizable content area without disturbing the horizontal panel row. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <NotificationPermissionBanner />
 
-        <ResizeHandle />
-
-        <Panel defaultSize={isDmView ? '80%' : '60%'} minSize="30%">
-          <FeatureErrorBoundary name="ChatArea">
-            <ChatArea
-              channelId={selectedChannelId}
-              channelName={chatHeaderName}
-              serverId={selectedServerId}
-              currentUserRole={currentUserRole}
-              isDm={chatProps.isDm}
-              dmRecipient={chatProps.dmRecipient}
-              isReadOnly={chatProps.isReadOnly}
-              isChannelEncrypted={chatProps.isChannelEncrypted}
-              slowModeSeconds={chatProps.slowModeSeconds}
-            />
-          </FeatureErrorBoundary>
-        </Panel>
-
-        {/* WHY: Hide member list in DM mode — DMs have exactly 2 members, no list needed */}
-        {isDmView === false && (
-          <>
-            <ResizeHandle />
-            <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">
-              <FeatureErrorBoundary name="MemberList">
-                <MemberList
+        {/* Resizable panels for sidebar, chat, members */}
+        <Group orientation="horizontal" className="flex min-h-0 w-full flex-1">
+          <Panel data-test="server-sidebar" defaultSize="20%" minSize="15%" maxSize="30%">
+            <FeatureErrorBoundary name={isDmView ? 'DmSidebar' : 'ChannelSidebar'}>
+              {isDmView ? (
+                <DmSidebar selectedServerId={selectedServerId} onSelectDm={handleSelectDm} />
+              ) : (
+                <ChannelSidebar
                   serverId={selectedServerId}
                   serverName={serverName}
-                  onNavigateDm={handleNavigateDm}
+                  selectedChannelId={selectedChannelId}
+                  onSelectChannel={setSelectedChannelId}
+                  joinVoice={joinVoice}
                 />
-              </FeatureErrorBoundary>
-            </Panel>
-          </>
-        )}
-      </Group>
+              )}
+            </FeatureErrorBoundary>
+          </Panel>
+
+          <ResizeHandle />
+
+          <Panel defaultSize={isDmView ? '80%' : '60%'} minSize="30%">
+            <FeatureErrorBoundary name="ChatArea">
+              <ChatArea
+                channelId={selectedChannelId}
+                channelName={chatHeaderName}
+                serverId={selectedServerId}
+                currentUserRole={currentUserRole}
+                isDm={chatProps.isDm}
+                dmRecipient={chatProps.dmRecipient}
+                isReadOnly={chatProps.isReadOnly}
+                isChannelEncrypted={chatProps.isChannelEncrypted}
+                slowModeSeconds={chatProps.slowModeSeconds}
+              />
+            </FeatureErrorBoundary>
+          </Panel>
+
+          {/* WHY: Hide member list in DM mode — DMs have exactly 2 members, no list needed */}
+          {isDmView === false && (
+            <>
+              <ResizeHandle />
+              <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">
+                <FeatureErrorBoundary name="MemberList">
+                  <MemberList
+                    serverId={selectedServerId}
+                    serverName={serverName}
+                    onNavigateDm={handleNavigateDm}
+                  />
+                </FeatureErrorBoundary>
+              </Panel>
+            </>
+          )}
+        </Group>
+      </div>
       {/* WHY here: mounted in MainLayout so the modal survives DM/server view
           switches — both sidebars' gear buttons open it (CLAUDE.md 4.6). */}
-      <ProfileSettingsModal />
+      <UserSettingsModal />
       <AlphaBadge />
     </div>
   )
