@@ -142,6 +142,33 @@ impl InviteService {
             })
     }
 
+    /// Preview an invite for the PUBLIC unauthenticated invite landing page.
+    ///
+    /// Unlike `preview_invite`, dead invites (expired or exhausted) are
+    /// indistinguishable from nonexistent ones — both return `NotFound`.
+    ///
+    /// WHY: this feeds an unauthenticated, hostile-by-default surface. A dead
+    /// code must not keep leaking server name/member count forever, and
+    /// "expired" vs "never existed" must not be probeable from outside.
+    ///
+    /// # Errors
+    /// - `DomainError::ValidationError` if the code format is invalid.
+    /// - `DomainError::NotFound` if the invite does not exist, is expired,
+    ///   or has reached its maximum uses.
+    /// - Repository errors on failure.
+    pub async fn preview_public_invite(&self, code: &InviteCode) -> Result<Invite, DomainError> {
+        let invite = self.preview_invite(code).await?;
+
+        if !invite.is_valid() {
+            return Err(DomainError::NotFound {
+                resource_type: "Invite",
+                id: code.to_string(),
+            });
+        }
+
+        Ok(invite)
+    }
+
     /// Join a server via an invite code.
     ///
     /// Validates the invite, checks the user is not already a member,

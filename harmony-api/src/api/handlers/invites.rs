@@ -82,10 +82,13 @@ pub async fn create_invite(
 
 /// Preview an invite by code (no authentication required).
 ///
-/// Returns the server name and member count so a user can decide whether to join.
+/// Returns the server name/icon, member count, and inviter identity so a
+/// user can decide whether to join. Expired or exhausted invites are
+/// indistinguishable from nonexistent ones (404).
 ///
 /// # Errors
-/// Returns `ApiError` if the invite is not found or a repository error occurs.
+/// Returns `ApiError` if the invite is not found, expired, exhausted, or a
+/// repository error occurs.
 #[utoipa::path(
     get,
     path = "/v1/invites/{code}",
@@ -93,7 +96,7 @@ pub async fn create_invite(
     params(("code" = InviteCode, Path, description = "Invite code")),
     responses(
         (status = 200, description = "Invite preview", body = InvitePreviewResponse),
-        (status = 404, description = "Invite not found", body = ProblemDetails),
+        (status = 404, description = "Invite not found or no longer valid", body = ProblemDetails),
     )
 )]
 #[tracing::instrument(skip(state))]
@@ -101,7 +104,7 @@ pub async fn preview_invite(
     State(state): State<AppState>,
     ApiPath(code): ApiPath<InviteCode>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let invite = state.invite_service().preview_invite(&code).await?;
+    let invite = state.invite_service().preview_public_invite(&code).await?;
 
     let server = state.server_service().get_by_id(&invite.server_id).await?;
 
@@ -110,9 +113,38 @@ pub async fn preview_invite(
         .count_by_server(&invite.server_id)
         .await?;
 
-    let preview = InvitePreviewResponse::new(&invite, server.name, member_count);
+    // WHY: Missing inviter profile (account deleted) degrades to null fields,
+    // it must not kill the preview — the server context is the value here.
+    let inviter = state
+        .profile_service()
+        .get_by_id_optional(&invite.creator_id)
+        .await?;
+
+    // WHY: Funnel instrumentation for invite→join conversion (growth-plan §7).
+    // The analytics `funnel_events` table has not landed yet, so this degrades
+    // to a structured log per the invite-landing ticket. The raw code is a
+    // join capability — log only its hash.
+    tracing::info!(
+        event = "invite_preview_viewed",
+        invite_code_hash = %hash_invite_code(&code),
+        server_id = %invite.server_id,
+        "Invite preview viewed"
+    );
+
+    let preview = InvitePreviewResponse::new(&invite, &server, member_count, inviter.as_ref());
 
     Ok((StatusCode::OK, Json(preview)))
+}
+
+/// SHA-256 hash of an invite code, truncated to 16 hex chars.
+///
+/// WHY: enough entropy to correlate funnel events for one invite without
+/// storing the code itself (the code grants server access).
+fn hash_invite_code(code: &InviteCode) -> String {
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::digest(code.0.as_bytes());
+    hex::encode(&digest[..8])
 }
 
 /// Join a server via an invite code.
