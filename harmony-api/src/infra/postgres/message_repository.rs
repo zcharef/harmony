@@ -10,7 +10,7 @@ use crate::domain::models::{
     Attachment, AttachmentId, ChannelId, Message, MessageId, MessageType, MessageWithAuthor,
     NewAttachment, ParentMessagePreview, UserId,
 };
-use crate::domain::ports::MessageRepository;
+use crate::domain::ports::{AroundWindow, MessageRepository};
 
 /// Parse the Postgres `message_type` enum value into the domain enum.
 fn parse_message_type(value: &str) -> MessageType {
@@ -657,7 +657,7 @@ impl MessageRepository for PgMessageRepository {
         anchor_id: &MessageId,
         before_limit: i64,
         after_limit: i64,
-    ) -> Result<Option<Vec<MessageWithAuthor>>, DomainError> {
+    ) -> Result<Option<AroundWindow>, DomainError> {
         let cid = channel_id.0;
         let aid = anchor_id.0;
 
@@ -769,9 +769,25 @@ impl MessageRepository for PgMessageRepository {
                 }
                 .into_message_with_author()
             })
-            .collect();
+            .collect::<Vec<_>>();
 
-        Ok(Some(messages))
+        // WHY count strictly-older rows: the older sub-window is the only source
+        // of `created_at < anchor_at` rows (the anchor sits at `anchor_at`, the
+        // newer half strictly above). If that count hit `before_limit`, the half
+        // was capped and more history may exist below — the handler must keep the
+        // backward cursor armed. This drives `nextCursor`, NOT the total row count
+        // (a two-sided window is short whenever either half is short).
+        let older_count = messages
+            .iter()
+            .filter(|m| m.message.created_at < anchor_at)
+            .count();
+        let has_more_older =
+            before_limit > 0 && older_count == usize::try_from(before_limit).unwrap_or(usize::MAX);
+
+        Ok(Some(AroundWindow {
+            messages,
+            has_more_older,
+        }))
     }
 
     async fn update_content(

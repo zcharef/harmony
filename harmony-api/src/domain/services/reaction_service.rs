@@ -535,7 +535,7 @@ mod tests {
             _anchor_id: &MessageId,
             _before_limit: i64,
             _after_limit: i64,
-        ) -> Result<Option<Vec<MessageWithAuthor>>, DomainError> {
+        ) -> Result<Option<crate::domain::ports::AroundWindow>, DomainError> {
             Ok(None)
         }
         async fn update_content(

@@ -12,8 +12,8 @@ use crate::domain::models::{
     UserId,
 };
 use crate::domain::ports::{
-    AttachmentRepository, ChannelRepository, MemberRepository, MessageRepository, PlanLimitChecker,
-    ReactionRepository,
+    AroundWindow, AttachmentRepository, ChannelRepository, MemberRepository, MessageRepository,
+    PlanLimitChecker, ReactionRepository,
 };
 use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
@@ -508,7 +508,7 @@ impl MessageService {
         user_id: &UserId,
         message_id: &MessageId,
         limit: i64,
-    ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+    ) -> Result<AroundWindow, DomainError> {
         let channel = self.verify_channel_membership(channel_id, user_id).await?;
 
         // WHY floor(limit/2) older + anchor + rest newer: keeps the target
@@ -516,7 +516,7 @@ impl MessageService {
         let before_limit = limit / 2;
         let after_limit = (limit - 1 - before_limit).max(0);
 
-        let messages = self
+        let window = self
             .repo
             .list_around(channel_id, message_id, before_limit, after_limit)
             .await?
@@ -525,8 +525,14 @@ impl MessageService {
                 id: message_id.to_string(),
             })?;
 
-        self.enrich_page(&channel.server_id, user_id, messages)
-            .await
+        // Enrichment preserves order, so the `has_more_older` flag stays valid.
+        let messages = self
+            .enrich_page(&channel.server_id, user_id, window.messages)
+            .await?;
+        Ok(AroundWindow {
+            messages,
+            has_more_older: window.has_more_older,
+        })
     }
 
     /// Enrich a raw message page with reactions, attachments, and resolved

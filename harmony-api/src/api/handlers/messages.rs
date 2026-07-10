@@ -202,11 +202,27 @@ pub async fn list_messages(
         ));
     }
 
-    let messages = if let Some(anchor_id) = query.around {
-        state
+    let (messages, next_cursor) = if let Some(anchor_id) = query.around {
+        let window = state
             .message_service()
             .list_around(&channel_id, &user_id, &anchor_id, limit)
-            .await?
+            .await?;
+
+        // WHY not `rows.len() == limit` for the around window: it is two-sided,
+        // so the total is short whenever EITHER half is short. When the newer
+        // half is short (anchor near the present) but the older half was capped,
+        // older history still exists below the window — a count-based cursor
+        // would wrongly null out and break backward (`before`) paging. Drive it
+        // from the older-side fill flag instead (§3.2).
+        let next_cursor = if window.has_more_older {
+            window
+                .messages
+                .last()
+                .map(|m| m.message.created_at.to_rfc3339())
+        } else {
+            None
+        };
+        (window.messages, next_cursor)
     } else {
         let cursor = query
             .before
@@ -217,19 +233,19 @@ pub async fn list_messages(
             .transpose()
             .map_err(ApiError::bad_request)?;
 
-        state
+        let messages = state
             .message_service()
             .list_for_channel(&channel_id, &user_id, cursor, limit)
-            .await?
-    };
+            .await?;
 
-    // WHY: If we received exactly `limit` rows, there may be more older history —
-    // provide the oldest row's timestamp as the `before` cursor. Same rule for
-    // the around window so scrolling further up keeps working (§3.2).
-    let next_cursor = if i64::try_from(messages.len()).unwrap_or(0) == limit {
-        messages.last().map(|m| m.message.created_at.to_rfc3339())
-    } else {
-        None
+        // WHY: If we received exactly `limit` rows, there may be more older
+        // history — provide the oldest row's timestamp as the `before` cursor.
+        let next_cursor = if i64::try_from(messages.len()).unwrap_or(0) == limit {
+            messages.last().map(|m| m.message.created_at.to_rfc3339())
+        } else {
+            None
+        };
+        (messages, next_cursor)
     };
 
     Ok((

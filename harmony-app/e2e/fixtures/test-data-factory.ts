@@ -150,6 +150,28 @@ export async function sendMessage(
 }
 
 /**
+ * POST /v1/channels/{id}/messages with a `parentMessageId` — seed a reply so the
+ * clickable reply quote (jump-to-message) can be exercised end-to-end.
+ */
+export async function sendReply(
+  token: string,
+  channelId: string,
+  content: string,
+  parentMessageId: string,
+): Promise<{ id: string; content: string; createdAt: string }> {
+  const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ content, parentMessageId }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`sendReply failed: ${res.status} ${body}`)
+  }
+  return (await res.json()) as { id: string; content: string; createdAt: string }
+}
+
+/**
  * POST /v1/channels/{id}/messages/{messageId}/reactions — add a reaction.
  * WHY: seeds real reactor rows so the "who reacted" tooltip can be asserted
  * against real data (never mock the API).

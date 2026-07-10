@@ -233,10 +233,16 @@ async fn list_around_centers_window_and_includes_deleted_anchor() {
         .await
         .unwrap()
         .expect("anchor exists");
-    assert_eq!(window.len(), 20, "10 older + anchor + 9 newer");
+    assert_eq!(window.messages.len(), 20, "10 older + anchor + 9 newer");
+    // 20 older messages exist (ids[0..20]) but the older half is capped at 10,
+    // so more history remains below the window → backward cursor stays armed.
+    assert!(
+        window.has_more_older,
+        "older half capped at before_limit ⇒ has_more_older"
+    );
 
     // DESC ordered.
-    for pair in window.windows(2) {
+    for pair in window.messages.windows(2) {
         assert!(
             pair[0].message.created_at >= pair[1].message.created_at,
             "list_around must be created_at DESC"
@@ -244,8 +250,41 @@ async fn list_around_centers_window_and_includes_deleted_anchor() {
     }
     // Anchor present and centered.
     assert!(
-        window.iter().any(|m| m.message.id == anchor),
+        window.messages.iter().any(|m| m.message.id == anchor),
         "anchor must be in the window"
+    );
+
+    // Regression for the `nextCursor` bug: an anchor NEAR THE PRESENT has a short
+    // newer half (few messages after it) while the older half is still capped, so
+    // the total row count is < limit. `has_more_older` must remain true regardless
+    // so scrolling further up keeps working — driving the cursor off the row count
+    // would wrongly null it here.
+    let near_present = MessageId::new(ids[38]);
+    let near_window = msg_repo
+        .list_around(&cid, &near_present, 10, 9)
+        .await
+        .unwrap()
+        .expect("anchor exists");
+    assert!(
+        near_window.messages.len() < 20,
+        "newer half is short near the present ⇒ fewer than `limit` rows"
+    );
+    assert!(
+        near_window.has_more_older,
+        "older half still capped ⇒ has_more_older even though the window is short"
+    );
+
+    // Anchor NEAR THE BEGINNING: only 2 older messages exist (ids[0..2]) so the
+    // older half is NOT capped → no more history below → cursor must be dropped.
+    let near_start = MessageId::new(ids[2]);
+    let start_window = msg_repo
+        .list_around(&cid, &near_start, 10, 9)
+        .await
+        .unwrap()
+        .expect("anchor exists");
+    assert!(
+        !start_window.has_more_older,
+        "older half not filled to before_limit ⇒ no more older history"
     );
 
     // Unknown / wrong-channel anchor → None.
@@ -263,7 +302,7 @@ async fn list_around_centers_window_and_includes_deleted_anchor() {
         .unwrap()
         .expect("deleted anchor still resolves");
     assert!(
-        with_deleted.iter().any(|m| m.message.id == anchor),
+        with_deleted.messages.iter().any(|m| m.message.id == anchor),
         "soft-deleted anchor must be included so the jump lands on the tombstone"
     );
 
