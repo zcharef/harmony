@@ -19,6 +19,12 @@ import { buildInviteOgTags, injectIntoHead, isValidInviteCode, parseInviteOgPrev
 
 interface Env {
   HARMONY_API_URL?: string
+  /**
+   * Shared secret matching the API's TRUSTED_PROXY_SECRET. When set, the
+   * original client IP is forwarded so the API's unauth rate limiter keys
+   * on the real caller instead of this function's Cloudflare egress IP.
+   */
+  HARMONY_PROXY_SECRET?: string
   ASSETS: { fetch: (request: Request) => Promise<Response> }
 }
 
@@ -60,7 +66,7 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
       return cached
     }
 
-    const preview = await fetchInvitePreview(apiUrl, code)
+    const preview = await fetchInvitePreview(apiUrl, code, request, env.HARMONY_PROXY_SECRET)
     if (preview === null) {
       // Dead/unknown invite or API degraded — plain shell, no OG claims.
       return serveSpaShell()
@@ -109,14 +115,29 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
 async function fetchInvitePreview(
   apiUrl: string,
   code: string,
+  request: Request,
+  proxySecret: string | undefined,
 ): Promise<ReturnType<typeof parseInviteOgPreview>> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), PREVIEW_TIMEOUT_MS)
 
+  // WHY forward the original client IP: this server-side fetch reaches the
+  // API from Cloudflare egress, laundering the real caller — every crawler
+  // and visitor would share one rate-limit bucket. The API trusts the
+  // forwarded header only when the shared secret matches (see the API's
+  // api::client_ip module). Both headers or neither — a bare IP header
+  // without the secret is ignored by the API anyway.
+  const clientIp = request.headers.get('cf-connecting-ip')
+  const headers: Record<string, string> = { accept: 'application/json' }
+  if (proxySecret !== undefined && proxySecret.length > 0 && clientIp !== null) {
+    headers['x-harmony-proxy-secret'] = proxySecret
+    headers['x-harmony-client-ip'] = clientIp
+  }
+
   try {
     const response = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/invites/${code}`, {
       signal: controller.signal,
-      headers: { accept: 'application/json' },
+      headers,
     })
     if (!response.ok) {
       return null

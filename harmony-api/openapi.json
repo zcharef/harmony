@@ -1614,6 +1614,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Invite preview rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }

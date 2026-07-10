@@ -87,6 +87,13 @@ pub struct Config {
     /// UUID of the official Harmony server. When set, new users are
     /// auto-joined and SSE events are emitted. Unset = no auto-join.
     pub official_server_id: Option<String>,
+
+    /// Shared secret authenticating trusted server-side proxies (the invite
+    /// OG Cloudflare Pages Function). A request presenting this value in
+    /// `x-harmony-proxy-secret` may set `x-harmony-client-ip` to the original
+    /// client IP, so unauth rate limits key on the real caller instead of the
+    /// proxy egress IP. Unset = the forwarded header is never trusted.
+    pub trusted_proxy_secret: Option<SecretString>,
 }
 
 fn default_port() -> u16 {
@@ -197,6 +204,10 @@ impl std::fmt::Debug for Config {
             .field("livekit_token_ttl_secs", &self.livekit_token_ttl_secs)
             .field("livekit_enabled", &self.livekit_enabled())
             .field("official_server_id", &self.official_server_id)
+            .field(
+                "trusted_proxy_secret",
+                &self.trusted_proxy_secret.as_ref().map(|_| "[REDACTED]"),
+            )
             .finish()
     }
 }

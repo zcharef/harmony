@@ -106,6 +106,10 @@ pub struct AppState {
     /// URLs must live on. Derived from `SUPABASE_URL` at startup. `None` =
     /// unconfigured → attachment validation FAILS CLOSED (rejects all).
     attachment_url_origin: Option<String>,
+    /// Shared secret authenticating trusted proxies that forward the original
+    /// client IP for unauth rate limiting (see `api::client_ip`). None =
+    /// forwarded IPs are never trusted.
+    trusted_proxy_secret: Option<secrecy::SecretString>,
 }
 
 // WHY: Manual Debug because `dyn MemberRepository` needs explicit impl through Arc.
@@ -154,6 +158,10 @@ impl std::fmt::Debug for AppState {
             .field("official_server_id", &self.official_server_id)
             .field("analytics_recorder", &self.analytics_recorder)
             .field("attachment_url_origin", &self.attachment_url_origin)
+            .field(
+                "trusted_proxy_secret",
+                &self.trusted_proxy_secret.as_ref().map(|_| "[REDACTED]"),
+            )
             .finish()
     }
 }
@@ -198,6 +206,7 @@ impl AppState {
         official_server_id: Option<ServerId>,
         analytics_recorder: Arc<dyn AnalyticsRecorder>,
         attachment_url_origin: Option<String>,
+        trusted_proxy_secret: Option<secrecy::SecretString>,
     ) -> Self {
         Self {
             pool,
@@ -236,6 +245,7 @@ impl AppState {
             official_server_id,
             analytics_recorder,
             attachment_url_origin,
+            trusted_proxy_secret,
         }
     }
 
@@ -445,6 +455,13 @@ impl AppState {
     #[must_use]
     pub fn analytics_recorder(&self) -> &Arc<dyn AnalyticsRecorder> {
         &self.analytics_recorder
+    }
+
+    /// Access the trusted proxy shared secret. None = forwarded client IPs
+    /// are never trusted (see `api::client_ip`).
+    #[must_use]
+    pub fn trusted_proxy_secret(&self) -> Option<&secrecy::SecretString> {
+        self.trusted_proxy_secret.as_ref()
     }
 
     /// Access the Postgres connection pool.
