@@ -24,6 +24,9 @@ test.describe('Reactions — who reacted', () => {
   let bob: TestUser
   let server: { id: string; name: string }
   let channelId: string
+  // A single unlimited-use invite (maxUses: null) reused by every joiner —
+  // holding one active invite keeps the seed under the free-plan cap of 5.
+  let invite: { code: string }
 
   test.beforeAll(async () => {
     // The prefix becomes each user's display_name — asserted in the tooltip.
@@ -42,7 +45,7 @@ test.describe('Reactions — who reacted', () => {
     }
     channelId = gen.id
 
-    const invite = await createInvite(owner.token, server.id)
+    invite = await createInvite(owner.token, server.id)
     await joinServer(alice.token, server.id, invite.code)
     await joinServer(bob.token, server.id, invite.code)
   })
@@ -94,12 +97,13 @@ test.describe('Reactions — who reacted', () => {
     const msg = await sendMessage(owner.token, channelId, 'overflow target')
 
     // 12 distinct reactors → the server caps the list at 10 and the tooltip
-    // renders "+2 others".
+    // renders "+2 others". All joiners reuse the one shared invite so the seed
+    // never exceeds the free-plan cap of 5 active invites.
     const reactors: TestUser[] = []
     for (let i = 0; i < 12; i++) {
       const u = await createTestUser(`who-many-${i}`)
       await syncProfile(u.token)
-      await joinServer(u.token, server.id, (await createInvite(owner.token, server.id)).code)
+      await joinServer(u.token, server.id, invite.code)
       await addReaction(u.token, channelId, msg.id, '🔥')
       reactors.push(u)
     }
