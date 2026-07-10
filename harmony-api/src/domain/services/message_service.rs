@@ -252,8 +252,11 @@ impl MessageService {
 
         // WHY: Per-plan rate limit — Free: 5/5s, Supporter: 10/5s, Creator: 20/5s.
         // Uses server's plan (already fetched above for char limit).
-        #[allow(clippy::cast_possible_wrap)] // WHY: max is 20, fits in i64
-        let rate_max = limits.max_messages_per_5s as i64;
+        // WHY try_from + saturate: self-hosted limits use u64::MAX ("unlimited");
+        // a raw `as i64` cast wraps it to -1, making `recent_count >= -1` always
+        // true — every self-hosted message send 429'd (found by
+        // analytics_emission_test, which runs with AlwaysAllowedChecker).
+        let rate_max = i64::try_from(limits.max_messages_per_5s).unwrap_or(i64::MAX);
         if recent_count >= rate_max {
             return Err(DomainError::RateLimited(
                 "Too many messages — try again in a few seconds".to_string(),
