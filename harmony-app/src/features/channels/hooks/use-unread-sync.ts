@@ -6,6 +6,8 @@ import { useUnreadStore } from '../stores/unread-store'
 
 const unreadSyncSchema = z.object({
   channels: z.record(z.string(), z.number()),
+  // WHY optional: older API instances omit the mentions map during rollout.
+  mentions: z.record(z.string(), z.number()).optional(),
 })
 
 /**
@@ -31,7 +33,7 @@ export function useUnreadSync(userId: string | null): void {
         return
       }
 
-      sync(parsed.data.channels)
+      sync(parsed.data.channels, parsed.data.mentions ?? {})
     },
     [userId, sync],
   )

@@ -64,6 +64,12 @@ function ChannelButton({
 }) {
   const { t } = useTranslation('channels')
   const unreadCount = useUnreadStore((s) => s.counts[channel.id] ?? 0)
+  const mentionCount = useUnreadStore((s) => s.mentionCounts[channel.id] ?? 0)
+  // WHY the number stays unreadCount (spec §1): swapping it for mentionCount
+  // would read as the count going DOWN. Mentions add a distinct treatment
+  // instead: `@` prefix + bold.
+  const hasMentions = mentionCount > 0
+  const unreadLabel = unreadCount > 99 ? '99+' : `${unreadCount}`
 
   return (
     <div data-test="channel-item" className="group flex items-center">
@@ -90,8 +96,22 @@ function ChannelButton({
         {channel.isPrivate && <Lock className="h-3 w-3 shrink-0 text-default-400" />}
         {channel.isReadOnly && <Megaphone className="h-3 w-3 shrink-0 text-default-400" />}
         {unreadCount > 0 && (
-          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-xs text-danger-foreground">
-            {unreadCount > 99 ? '99+' : unreadCount}
+          <span
+            data-test="channel-unread-pill"
+            data-test-has-mentions={hasMentions ? 'true' : undefined}
+            className={cn(
+              'ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-xs text-danger-foreground',
+              hasMentions && 'font-bold',
+            )}
+          >
+            {/* WHY sr-only twin: spans don't support aria-label (a11y lint);
+                screen readers get both counts, sighted users the @-pill. */}
+            <span aria-hidden="true">{hasMentions ? `@ ${unreadLabel}` : unreadLabel}</span>
+            {hasMentions && (
+              <span className="sr-only">
+                {t('unreadWithMentions', { unread: unreadCount, mentions: mentionCount })}
+              </span>
+            )}
           </span>
         )}
       </Button>

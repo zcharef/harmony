@@ -7,7 +7,7 @@
   "removedByModerator": "[Message removed by moderator]",
   "todayAt": "Today at {{time}}",
   "dateAt": "{{date}} at {{time}}",
-  "escapeToCancel": "escape to <cancel>cancel</cancel> \u2022 enter to <save>save</save>",
+  "escapeToCancel": "escape to <cancel>cancel</cancel> • enter to <save>save</save>",
   "system": {
     "memberJoin": "{{username}} joined the server",
     "memberLeave": "{{username}} left the server",
@@ -36,5 +36,6 @@
     "destination": "You're going to:",
     "goBack": "Go Back",
     "continue": "Continue to Site"
-  }
+  },
+  "unknownMention": "unknown-user"
 }

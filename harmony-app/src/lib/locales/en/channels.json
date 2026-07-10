@@ -34,5 +34,6 @@
   "topicPlaceholder": "What's this channel about?",
   "topicMaxLength": "Topic must be 1024 characters or less",
   "home": "Harmony",
-  "selectServerHint": "Pick a server from the sidebar to see its channels."
+  "selectServerHint": "Pick a server from the sidebar to see its channels.",
+  "unreadWithMentions": "{{unread}} unread, {{mentions}} mentions"
 }

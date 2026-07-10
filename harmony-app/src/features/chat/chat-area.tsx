@@ -71,6 +71,8 @@ import { TypingIndicator } from './typing-indicator'
 interface ChatAreaProps {
   channelId: string | null
   channelName: string | null
+  /** WHY: Server context for the mention pill's members-cache fallback (spec §5.3). */
+  serverId?: string | null
   currentUserRole: MemberRole
   /** WHY: When true, renders a DM-style header (avatar + name) instead of # channel-name */
   isDm?: boolean
@@ -955,6 +957,7 @@ function useChatInputState(
 export function ChatArea({
   channelId,
   channelName,
+  serverId = null,
   currentUserRole,
   isDm = false,
   dmRecipient = null,
@@ -1158,6 +1161,7 @@ export function ChatArea({
                   <MessageItem
                     message={item.msg}
                     currentUserId={currentUser.id}
+                    serverId={serverId}
                     canModerateMessages={
                       ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.moderator
                     }

@@ -9,7 +9,7 @@
 
 import { Chip, Spinner } from '@heroui/react'
 import { Lock } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MessageResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
@@ -22,6 +22,12 @@ interface EncryptedMessageContentProps {
   decryptMessage: (message: MessageResponse, senderIdentityKey?: string) => Promise<DecryptResult>
   /** WHY: Fast synchronous lookup for already-decrypted messages. */
   getCachedPlaintext: (messageId: string) => string | undefined
+  /**
+   * WHY injected (not imported from chat): mention pills parse decrypted
+   * plaintext, but that renderer lives in the chat feature — importing it here
+   * would create a circular feature dependency (chat already imports crypto).
+   */
+  renderPlaintext?: (plaintext: string) => ReactNode
 }
 
 type DecryptionStatus = 'pending' | 'decrypted' | 'error' | 'web_fallback'
@@ -30,6 +36,7 @@ export function EncryptedMessageContent({
   message,
   decryptMessage,
   getCachedPlaintext,
+  renderPlaintext,
 }: EncryptedMessageContentProps) {
   const { t } = useTranslation('crypto')
 
@@ -103,7 +110,11 @@ export function EncryptedMessageContent({
 
   return (
     <>
-      <span className="text-sm text-foreground/90">{plaintext}</span>
+      {renderPlaintext !== undefined ? (
+        renderPlaintext(plaintext ?? '')
+      ) : (
+        <span className="text-sm text-foreground/90">{plaintext}</span>
+      )}
       {identityKeyChanged && (
         <Chip color="warning" size="sm" variant="flat" className="ml-1">
           {t('identityKeyChanged')}

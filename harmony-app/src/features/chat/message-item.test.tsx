@@ -1,9 +1,13 @@
+import type { QueryClient } from '@tanstack/react-query'
 import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act } from 'react'
 import { vi } from 'vitest'
-import type { MessageResponse } from '@/lib/api'
+import type { MemberListResponse, MentionedUserResponse, MessageResponse } from '@/lib/api'
 // WHY: Side-effect import initializes the real i18n instance so aria-labels
 // resolve to actual translations (missing keys would log via mocked logger).
 import '@/lib/i18n'
+import { queryKeys } from '@/lib/query-keys'
+import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 import { MessageItem } from './message-item'
 
 // WHY: The repo uses data-test (not data-testid) — align Testing Library queries.
@@ -57,25 +61,35 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
   }
 }
 
-function renderMessageItem(message: MessageResponse) {
+function renderMessageItem(
+  message: MessageResponse,
+  options: { serverId?: string | null; queryClient?: QueryClient } = {},
+) {
   const onAddReaction = vi.fn()
   const onRemoveReaction = vi.fn()
+  const queryClient = options.queryClient ?? createTestQueryClient()
+  // WHY wrapper: MentionPill subscribes to the members cache via useQuery,
+  // which requires a QueryClientProvider even when the cache is empty.
+  const Wrapper = createQueryWrapper(queryClient)
   const utils = render(
-    <MessageItem
-      message={message}
-      currentUserId={CURRENT_USER_ID}
-      canModerateMessages={false}
-      isEditing={false}
-      onStartEdit={vi.fn()}
-      onSaveEdit={vi.fn()}
-      onCancelEdit={vi.fn()}
-      onDelete={vi.fn()}
-      onAddReaction={onAddReaction}
-      onRemoveReaction={onRemoveReaction}
-      onReply={vi.fn()}
-    />,
+    <Wrapper>
+      <MessageItem
+        message={message}
+        currentUserId={CURRENT_USER_ID}
+        serverId={options.serverId ?? null}
+        canModerateMessages={false}
+        isEditing={false}
+        onStartEdit={vi.fn()}
+        onSaveEdit={vi.fn()}
+        onCancelEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAddReaction={onAddReaction}
+        onRemoveReaction={onRemoveReaction}
+        onReply={vi.fn()}
+      />
+    </Wrapper>,
   )
-  return { onAddReaction, onRemoveReaction, ...utils }
+  return { onAddReaction, onRemoveReaction, queryClient, ...utils }
 }
 
 describe('MessageItem identity rendering', () => {
@@ -117,6 +131,159 @@ describe('MessageItem identity rendering', () => {
     // proves the initials fallback is active.
     expect(container.querySelector('img')).toBeNull()
     expect(screen.getByTestId('message-author').textContent).toBe('test-user')
+  })
+})
+
+// ── Mentions (wave 3) ─────────────────────────────────────────────────
+
+const MENTION_UUID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+const SERVER_ID = 'server-1'
+
+function buildMention(overrides: Partial<MentionedUserResponse> = {}): MentionedUserResponse {
+  return {
+    userId: MENTION_UUID,
+    username: 'alice',
+    displayName: 'Alice Doe',
+    nickname: null,
+    ...overrides,
+  }
+}
+
+function buildMemberList(): MemberListResponse {
+  return {
+    items: [
+      {
+        userId: MENTION_UUID,
+        username: 'alice',
+        displayName: 'Cache Alice',
+        nickname: null,
+        role: 'member',
+        joinedAt: '2026-01-01T00:00:00Z',
+      },
+    ],
+    nextCursor: null,
+  }
+}
+
+describe('MessageItem mention rendering', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders a marker as a resolved pill from message.mentions (survives rehype-sanitize)', () => {
+    renderMessageItem(
+      buildMessage({
+        content: `hey <@${MENTION_UUID}> hello`,
+        mentions: [buildMention()],
+      }),
+    )
+
+    const pill = screen.getByTestId('mention-pill')
+    expect(pill.textContent).toBe('@Alice Doe')
+    expect(pill.getAttribute('data-mention-user-id')).toBe(MENTION_UUID)
+    // WHY: The pill renders through the full markdown pipeline — its survival
+    // proves the sanitizer schema allowlists data-mention-id.
+    expect(screen.getByTestId('message-content').textContent).toBe('hey @Alice Doe hello')
+  })
+
+  it('prefers the nickname tier over displayName and username', () => {
+    renderMessageItem(
+      buildMessage({
+        content: `<@${MENTION_UUID}>`,
+        mentions: [buildMention({ nickname: 'Ali' })],
+      }),
+    )
+
+    expect(screen.getByTestId('mention-pill').textContent).toBe('@Ali')
+  })
+
+  it('mentions array beats the members cache (resolution order)', () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(queryKeys.servers.members(SERVER_ID), buildMemberList())
+
+    renderMessageItem(buildMessage({ content: `<@${MENTION_UUID}>`, mentions: [buildMention()] }), {
+      serverId: SERVER_ID,
+      queryClient,
+    })
+
+    expect(screen.getByTestId('mention-pill').textContent).toBe('@Alice Doe')
+  })
+
+  it('falls back to the members cache when the mentions array misses the id', () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(queryKeys.servers.members(SERVER_ID), buildMemberList())
+
+    renderMessageItem(buildMessage({ content: `<@${MENTION_UUID}>`, mentions: [] }), {
+      serverId: SERVER_ID,
+      queryClient,
+    })
+
+    expect(screen.getByTestId('mention-pill').textContent).toBe('@Cache Alice')
+  })
+
+  it('renders a muted @unknown-user pill when no source resolves the id', () => {
+    renderMessageItem(buildMessage({ content: `<@${MENTION_UUID}>`, mentions: [] }))
+
+    const pill = screen.getByTestId('mention-pill')
+    expect(pill.textContent).toBe('@unknown-user')
+    expect(pill.getAttribute('data-test-unknown')).toBe('true')
+  })
+
+  it('re-resolves the pill live when the members cache fills later (no refresh)', async () => {
+    const queryClient = createTestQueryClient()
+    renderMessageItem(buildMessage({ content: `<@${MENTION_UUID}>`, mentions: [] }), {
+      serverId: SERVER_ID,
+      queryClient,
+    })
+    expect(screen.getByTestId('mention-pill').textContent).toBe('@unknown-user')
+
+    act(() => {
+      queryClient.setQueryData(queryKeys.servers.members(SERVER_ID), buildMemberList())
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mention-pill').textContent).toBe('@Cache Alice')
+    })
+  })
+
+  it('leaves invalid markers as plain text (no pill, no crash)', () => {
+    renderMessageItem(buildMessage({ content: '<@everyone> and <@not-a-uuid>', mentions: [] }))
+
+    expect(screen.queryByTestId('mention-pill')).toBeNull()
+    expect(screen.getByTestId('message-content').textContent).toContain('<@everyone>')
+  })
+
+  it('tints the row when the server-validated mentions include me', () => {
+    renderMessageItem(
+      buildMessage({
+        content: `<@${CURRENT_USER_ID}>`,
+        mentions: [buildMention({ userId: CURRENT_USER_ID, username: 'me' })],
+      }),
+    )
+
+    const row = screen.getByTestId('message-item')
+    expect(row.getAttribute('data-test-mentions-me')).toBe('true')
+    expect(row.className).toContain('bg-warning/10')
+    expect(row.className).toContain('border-warning')
+  })
+
+  it('does NOT tint the row for mentions of someone else', () => {
+    renderMessageItem(buildMessage({ content: `<@${MENTION_UUID}>`, mentions: [buildMention()] }))
+
+    const row = screen.getByTestId('message-item')
+    expect(row.getAttribute('data-test-mentions-me')).toBeNull()
+    expect(row.className).not.toContain('bg-warning/10')
+  })
+
+  it('derives the tint from the mentions field even when no marker renders (E2EE ghost ping)', () => {
+    renderMessageItem(
+      buildMessage({
+        content: 'no marker in the visible text',
+        mentions: [buildMention({ userId: CURRENT_USER_ID, username: 'me' })],
+      }),
+    )
+
+    expect(screen.getByTestId('message-item').getAttribute('data-test-mentions-me')).toBe('true')
   })
 })
 

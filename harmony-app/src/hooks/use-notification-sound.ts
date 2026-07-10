@@ -1,8 +1,9 @@
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef } from 'react'
 import { z } from 'zod'
+import { isDmServer } from '@/features/channels'
 import { usePreferences } from '@/features/preferences'
-import type { DmListItem, NotificationSettingsResponse } from '@/lib/api'
+import type { NotificationSettingsResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 import { useServerEvent } from './use-server-event'
@@ -59,18 +60,6 @@ function shouldSuppressSound(
   cooldownMap.set(channelId, now)
 
   return false
-}
-
-/**
- * WHY: DM servers are NOT in the servers list cache (queryKeys.servers.list()).
- * They live in the DMs cache (queryKeys.dms.list()) where each DmListItem has
- * a serverId. Matching against this cache is the only reliable way to detect
- * whether an incoming message belongs to a DM conversation.
- */
-function isDmServer(serverId: string, queryClient: QueryClient): boolean {
-  const dms = queryClient.getQueryData<DmListItem[]>(queryKeys.dms.list())
-  if (dms === undefined) return false
-  return dms.some((dm) => dm.serverId === serverId)
 }
 
 const NOTIFICATION_VOLUME = 0.6
