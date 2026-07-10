@@ -1,0 +1,10 @@
+{
+  "invitedYou": "{{name}} invited you",
+  "acceptInvite": "Accept invite",
+  "signInToAccept": "You'll sign in or create an account to accept.",
+  "invalidTitle": "This invite is invalid or has expired",
+  "invalidSubtitle": "Ask the person who invited you for a new invite link.",
+  "continueToApp": "Continue to Harmony",
+  "loadFailed": "Couldn't load this invite. Check your connection and try again.",
+  "joinFailed": "Couldn't join this server. Please try again."
+}

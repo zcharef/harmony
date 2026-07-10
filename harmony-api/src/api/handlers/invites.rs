@@ -1,8 +1,14 @@
 //! Invite handlers.
 
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+};
 use chrono::{Duration, Utc};
 
+use crate::api::client_ip::resolve_client_key;
 use crate::api::dto::invites::{
     CreateInviteRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest,
 };
@@ -13,6 +19,15 @@ use crate::domain::models::server_event::MemberPayload;
 use crate::domain::models::{
     AnalyticsEvent, AnalyticsEventName, InviteCode, ServerEvent, ServerId,
 };
+
+/// Maximum invite previews per client IP within [`INVITE_PREVIEW_RATE_WINDOW`].
+/// WHY 20/min: a human landing on an invite triggers ONE preview (crawlers are
+/// absorbed by the Pages Function's 60s cache) — generous for legitimate use,
+/// hostile to code enumeration on this unauth surface (ticket decision #1).
+const INVITE_PREVIEW_RATE_MAX: usize = 20;
+
+/// Window for the per-client invite preview rate limit.
+const INVITE_PREVIEW_RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Create a new invite for a server.
 ///
@@ -82,10 +97,13 @@ pub async fn create_invite(
 
 /// Preview an invite by code (no authentication required).
 ///
-/// Returns the server name and member count so a user can decide whether to join.
+/// Returns the server name/icon, member count, and inviter identity so a
+/// user can decide whether to join. Expired or exhausted invites are
+/// indistinguishable from nonexistent ones (404).
 ///
 /// # Errors
-/// Returns `ApiError` if the invite is not found or a repository error occurs.
+/// Returns `ApiError` if the invite is not found, expired, exhausted, or a
+/// repository error occurs.
 #[utoipa::path(
     get,
     path = "/v1/invites/{code}",
@@ -93,15 +111,32 @@ pub async fn create_invite(
     params(("code" = InviteCode, Path, description = "Invite code")),
     responses(
         (status = 200, description = "Invite preview", body = InvitePreviewResponse),
-        (status = 404, description = "Invite not found", body = ProblemDetails),
+        (status = 404, description = "Invite not found or no longer valid", body = ProblemDetails),
+        (status = 429, description = "Invite preview rate limit exceeded", body = ProblemDetails),
     )
 )]
-#[tracing::instrument(skip(state))]
+// WHY skip(code): the raw invite code is a join capability — it must never
+// land in span fields. The handler logs only its hash (hash_invite_code).
+#[tracing::instrument(skip(state, headers, code))]
 pub async fn preview_invite(
     State(state): State<AppState>,
+    headers: HeaderMap,
     ApiPath(code): ApiPath<InviteCode>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let invite = state.invite_service().preview_invite(&code).await?;
+    // WHY per-IP and BEFORE any lookup: this is the unauth hostile surface
+    // (ticket decision #1) — enumeration attempts must burn the attacker's
+    // budget, not our DB. The Pages Function forwards the original client IP
+    // (secret-gated) because its server-side fetch would otherwise collapse
+    // all crawlers into the Cloudflare egress bucket (see api::client_ip).
+    let client_key = resolve_client_key(&headers, state.trusted_proxy_secret());
+    state.spam_guard().check_and_record_unauth_action(
+        &client_key,
+        "invite preview",
+        INVITE_PREVIEW_RATE_MAX,
+        INVITE_PREVIEW_RATE_WINDOW,
+    )?;
+
+    let invite = state.invite_service().preview_public_invite(&code).await?;
 
     let server = state.server_service().get_by_id(&invite.server_id).await?;
 
@@ -110,9 +145,38 @@ pub async fn preview_invite(
         .count_by_server(&invite.server_id)
         .await?;
 
-    let preview = InvitePreviewResponse::new(&invite, server.name, member_count);
+    // WHY: Missing inviter profile (account deleted) degrades to null fields,
+    // it must not kill the preview — the server context is the value here.
+    let inviter = state
+        .profile_service()
+        .get_by_id_optional(&invite.creator_id)
+        .await?;
+
+    // WHY: Funnel instrumentation for invite→join conversion (growth-plan §7).
+    // The analytics `funnel_events` table has not landed yet, so this degrades
+    // to a structured log per the invite-landing ticket. The raw code is a
+    // join capability — log only its hash.
+    tracing::info!(
+        event = "invite_preview_viewed",
+        invite_code_hash = %hash_invite_code(&code),
+        server_id = %invite.server_id,
+        "Invite preview viewed"
+    );
+
+    let preview = InvitePreviewResponse::new(&invite, &server, member_count, inviter.as_ref());
 
     Ok((StatusCode::OK, Json(preview)))
+}
+
+/// SHA-256 hash of an invite code, truncated to 16 hex chars.
+///
+/// WHY: enough entropy to correlate funnel events for one invite without
+/// storing the code itself (the code grants server access).
+fn hash_invite_code(code: &InviteCode) -> String {
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::digest(code.0.as_bytes());
+    hex::encode(&digest[..8])
 }
 
 /// Join a server via an invite code.

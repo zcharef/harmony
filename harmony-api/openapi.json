@@ -1581,7 +1581,7 @@
           "Invites"
         ],
         "summary": "Preview an invite by code (no authentication required).",
-        "description": "Returns the server name and member count so a user can decide whether to join.\n\n# Errors\nReturns `ApiError` if the invite is not found or a repository error occurs.",
+        "description": "Returns the server name/icon, member count, and inviter identity so a\nuser can decide whether to join. Expired or exhausted invites are\nindistinguishable from nonexistent ones (404).\n\n# Errors\nReturns `ApiError` if the invite is not found, expired, exhausted, or a\nrepository error occurs.",
         "operationId": "preview_invite",
         "parameters": [
           {
@@ -1606,7 +1606,17 @@
             }
           },
           "404": {
-            "description": "Invite not found",
+            "description": "Invite not found or no longer valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Invite preview rate limit exceeded",
             "content": {
               "application/json": {
                 "schema": {
@@ -4747,7 +4757,7 @@
       },
       "InvitePreviewResponse": {
         "type": "object",
-        "description": "Public invite preview (no auth required).\n\nContains just enough information for a user to decide whether to join.",
+        "description": "Public invite preview (no auth required).\n\nContains just enough information for a user to decide whether to join.\nREDACTION CONTRACT: this is an UNAUTHENTICATED surface — never add member\nlists, channel names, or any field beyond the ones below. The exact key\nset is pinned by `preview_serializes_exactly_the_allowed_fields`.",
         "required": [
           "code",
           "serverId",
@@ -4758,9 +4768,30 @@
           "code": {
             "$ref": "#/components/schemas/InviteCode"
           },
+          "inviterAvatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Avatar URL of the invite creator, `null` when absent."
+          },
+          "inviterDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of the invite creator (\"Maya invited you\").\nFalls back to the username; `null` when the profile no longer exists."
+          },
           "memberCount": {
             "type": "integer",
             "format": "int64"
+          },
+          "serverIconUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Server icon URL, `null` when the server has no icon."
           },
           "serverId": {
             "$ref": "#/components/schemas/ServerId"

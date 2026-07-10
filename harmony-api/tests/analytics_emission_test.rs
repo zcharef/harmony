@@ -280,6 +280,7 @@ async fn build_app_state(pool: PgPool, analytics_recorder: Arc<dyn AnalyticsReco
         None, // official_server_id
         analytics_recorder,
         Some("https://test.supabase.co".to_string()), // attachment_url_origin
+        None,
     )
 }
 

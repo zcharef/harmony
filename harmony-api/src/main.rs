@@ -455,6 +455,7 @@ async fn init_app_state(config: &Config) -> AppInit {
         }),
         analytics_recorder,
         attachment_url_origin,
+        config.trusted_proxy_secret.clone(),
     );
 
     AppInit {

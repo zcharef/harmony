@@ -69,6 +69,10 @@ pub struct SpamGuard {
     /// WHY: The window is stored alongside the timestamps because each action
     /// has its own window; the sweep needs it to know when an entry is stale.
     action_counts: DashMap<(UserId, &'static str), (Duration, Vec<Instant>)>,
+    /// Unauthenticated action limiter — timestamps of recent actions per
+    /// (client key, action). The key is a caller-resolved client IP (see
+    /// `api::client_ip`) because unauth surfaces have no `UserId` to key on.
+    unauth_action_counts: DashMap<(String, &'static str), (Duration, Vec<Instant>)>,
     /// Mention budget — timestamps of recently granted mentions per (user, channel).
     /// Bounds ghost-ping abuse in E2EE channels (spec §6.8).
     mention_budget: DashMap<(UserId, ChannelId), Vec<Instant>>,
@@ -95,6 +99,7 @@ impl SpamGuard {
             flood_counts: DashMap::new(),
             muted_until: DashMap::new(),
             action_counts: DashMap::new(),
+            unauth_action_counts: DashMap::new(),
             mention_budget: DashMap::new(),
         }
     }
@@ -235,6 +240,56 @@ impl SpamGuard {
             // the first number as Retry-After; the 5s default is accurate here.
             return Err(DomainError::RateLimited(format!(
                 "Too many {action} actions — try again in a few seconds"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Windowed rate limiter for UNAUTHENTICATED endpoints (invite preview).
+    ///
+    /// Same semantics as [`Self::check_and_record_action`], but keyed by a
+    /// caller-resolved client key (an IP, or the shared `"unattributed"`
+    /// bucket when no attribution exists) instead of a `UserId` — unauth
+    /// surfaces have no authenticated identity to key on (invite-landing
+    /// ticket: "same limiter family as auth endpoints").
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::RateLimited`] if this client already performed
+    /// `max` actions of this kind within `window`.
+    pub fn check_and_record_unauth_action(
+        &self,
+        client_key: &str,
+        action: &'static str,
+        max: usize,
+        window: Duration,
+    ) -> Result<(), DomainError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        let now = Instant::now();
+        let mut allowed = true;
+        self.unauth_action_counts
+            .entry((client_key.to_string(), action))
+            .and_modify(|(entry_window, timestamps)| {
+                // WHY: Refresh the stored window in case a call site's window
+                // constant changed — the sweep prunes based on this value.
+                *entry_window = window;
+                // Lazy eviction: drop timestamps older than the window
+                timestamps.retain(|ts| now.duration_since(*ts) < window);
+                if timestamps.len() >= max {
+                    allowed = false;
+                } else {
+                    timestamps.push(now);
+                }
+            })
+            .or_insert_with(|| (window, vec![now]));
+
+        if !allowed {
+            // WHY: No number in the message on purpose — the 429 mapper scrapes
+            // the first number as Retry-After; the 5s default is accurate here.
+            return Err(DomainError::RateLimited(format!(
+                "Too many {action} requests — try again in a few seconds"
             )));
         }
         Ok(())
@@ -413,6 +468,15 @@ impl SpamGuard {
         });
         let actions_removed = action_before.saturating_sub(self.action_counts.len());
 
+        // Sweep stale unauth action counters (entries with all timestamps
+        // expired), each pruned against its own recorded window.
+        let unauth_before = self.unauth_action_counts.len();
+        self.unauth_action_counts.retain(|_, (window, timestamps)| {
+            timestamps.retain(|ts| now.duration_since(*ts) < *window);
+            !timestamps.is_empty()
+        });
+        let unauth_actions_removed = unauth_before.saturating_sub(self.unauth_action_counts.len());
+
         // Sweep stale mention-budget entries (all timestamps outside the window).
         let mention_before = self.mention_budget.len();
         self.mention_budget.retain(|_, timestamps| {
@@ -425,6 +489,7 @@ impl SpamGuard {
             || hashes_removed > 0
             || floods_removed > 0
             || actions_removed > 0
+            || unauth_actions_removed > 0
             || mentions_removed > 0
         {
             tracing::debug!(
@@ -432,6 +497,7 @@ impl SpamGuard {
                 hashes_removed,
                 floods_removed,
                 actions_removed,
+                unauth_actions_removed,
                 mentions_removed,
                 "Swept expired SpamGuard entries"
             );
@@ -1422,6 +1488,92 @@ mod tests {
 
         guard.sweep_expired();
         assert_eq!(guard.action_counts.len(), 1);
+    }
+
+    // ── Unauth action limiter ──────────────────────────────────────
+
+    #[test]
+    fn unauth_limiter_rejects_over_limit_and_isolates_clients() {
+        let guard = SpamGuard::new();
+        let window = Duration::from_secs(60);
+
+        for _ in 0..3 {
+            guard
+                .check_and_record_unauth_action("203.0.113.7", "invite_preview", 3, window)
+                .unwrap();
+        }
+
+        let err = guard
+            .check_and_record_unauth_action("203.0.113.7", "invite_preview", 3, window)
+            .unwrap_err();
+        assert!(matches!(err, DomainError::RateLimited(_)), "got {err:?}");
+
+        // A different client key keeps an independent budget.
+        assert!(
+            guard
+                .check_and_record_unauth_action("203.0.113.8", "invite_preview", 3, window)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn unauth_limiter_window_expiry_restores_budget() {
+        let guard = SpamGuard::new();
+        let window = Duration::from_millis(20);
+
+        for _ in 0..2 {
+            guard
+                .check_and_record_unauth_action("203.0.113.7", "invite_preview", 2, window)
+                .unwrap();
+        }
+        assert!(
+            guard
+                .check_and_record_unauth_action("203.0.113.7", "invite_preview", 2, window)
+                .is_err()
+        );
+
+        // WHY: sleep guarantees AT LEAST the duration — after 30ms every
+        // recorded timestamp is outside the 20ms window, deterministically.
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(
+            guard
+                .check_and_record_unauth_action("203.0.113.7", "invite_preview", 2, window)
+                .is_ok(),
+            "budget should be restored after the window expires"
+        );
+    }
+
+    #[test]
+    fn unauth_limiter_disabled_guard_is_noop() {
+        let guard = SpamGuard::with_enabled(false);
+        for _ in 0..50 {
+            assert!(
+                guard
+                    .check_and_record_unauth_action(
+                        "203.0.113.7",
+                        "invite_preview",
+                        1,
+                        Duration::from_secs(60)
+                    )
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    fn sweep_removes_stale_unauth_action_entries() {
+        let guard = SpamGuard::new();
+
+        guard.unauth_action_counts.insert(
+            ("203.0.113.7".to_string(), "invite_preview"),
+            (
+                Duration::from_secs(10),
+                vec![Instant::now() - Duration::from_secs(60)],
+            ),
+        );
+
+        guard.sweep_expired();
+        assert!(guard.unauth_action_counts.is_empty());
     }
 
     // ── A4: ASCII art detection ────────────────────────────────────

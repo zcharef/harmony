@@ -8,6 +8,7 @@ import { useAuthStore } from '@/features/auth/stores/auth-store'
 import { checkUsername } from '@/lib/api'
 import { env } from '@/lib/env'
 import { EXTERNAL_LINKS } from '@/lib/external-links'
+import { getInviteCodeFromPath } from '@/lib/invite-path'
 import { logger } from '@/lib/logger'
 import { isTauri, openExternalUrl } from '@/lib/platform'
 import { supabase } from '@/lib/supabase'
@@ -70,6 +71,20 @@ function UsernameField({
       maxLength={32}
     />
   )
+}
+
+/**
+ * Where the email-confirmation link should land the user.
+ *
+ * WHY guarded: only invite paths are worth preserving through the email
+ * round-trip. Echoing arbitrary pathnames would send auth-page paths (or a
+ * future non-allowlisted route) to Supabase, which rejects unlisted redirect
+ * URLs and falls back unpredictably. Everything else goes to "/".
+ */
+function emailConfirmRedirectUrl(): string {
+  const path = window.location.pathname
+  const safePath = getInviteCodeFromPath(path) !== null ? path : '/'
+  return `${window.location.origin}${safePath}`
 }
 
 // WHY: Matches supabase config.toml — minimum_password_length = 8, password_requirements = "letters_digits".
@@ -398,7 +413,9 @@ export function LoginPage() {
           email,
           options: {
             shouldCreateUser: false,
-            emailRedirectTo: `${window.location.origin}/`,
+            // WHY: preserves the in-flight invite flow through the email
+            // round-trip; any other path falls back to "/".
+            emailRedirectTo: emailConfirmRedirectUrl(),
           },
         })
         .catch((err: unknown) => {
@@ -461,6 +478,11 @@ export function LoginPage() {
               options: {
                 captchaToken,
                 data: signupMetadata,
+                // WHY: the email-confirmation link must land the user back on
+                // the invite where signup started so the flow can resume.
+                // NOTE: the target must be allowlisted in Supabase Auth
+                // Redirect URLs (add https://app.joinharmony.app/invite/*).
+                emailRedirectTo: emailConfirmRedirectUrl(),
               },
             })
 

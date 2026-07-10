@@ -29,4 +29,8 @@ export const ROUTES = {
     login: () => '/login' as const,
     register: () => '/register' as const,
   },
+
+  invite: {
+    detail: (code: string) => `/invite/${code}` as const,
+  },
 } as const
