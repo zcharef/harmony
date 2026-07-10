@@ -104,7 +104,8 @@ function ChannelButton({
               hasMentions && 'font-bold',
             )}
           >
-            {/* WHY sr-only twin: spans don't support aria-label (a11y lint);
+            {/* WHY sr-only twin: ARIA prohibits naming on generic-role spans
+                (lint/a11y/useAriaPropsSupportedByRole), so no aria-label here —
                 screen readers get both counts, sighted users the @-pill. */}
             <span aria-hidden="true">{hasMentions ? `@ ${unreadLabel}` : unreadLabel}</span>
             {hasMentions && (
