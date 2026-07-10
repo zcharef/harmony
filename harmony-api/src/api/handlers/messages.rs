@@ -192,9 +192,10 @@ pub struct MessagePath {
 /// Edit a message's content. Only the author can edit.
 ///
 /// Plaintext edits re-parse `<@user_id>` markers and persist the new mention
-/// list (>10 valid markers is a 400). Only mentions NEWLY added by the edit
-/// emit `mention.received` — users already mentioned before the edit are never
-/// re-notified. Encrypted edits leave the mention list untouched.
+/// list (>10 valid markers is a 400), but edits never emit `mention.received`
+/// (Discord parity: edit-in mentions don't ping). Editing a message through a
+/// channel it does not belong to is a 404. Encrypted edits leave the mention
+/// list untouched.
 ///
 /// # Errors
 /// Returns `ApiError` on validation failure, authorization failure, or repository error.
@@ -231,11 +232,14 @@ pub async fn edit_message(
     // WHY: Resolve private-channel scope before mutation (see `send_message`).
     let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
 
-    let outcome = state
+    // WHY pass the path channel id: the service 404s when the message does not
+    // belong to `path.channel_id` — without that binding, an author could PATCH
+    // their message through ANY channel path and the events below would fan out
+    // with an attacker-chosen channel/server scope.
+    let message = state
         .message_service()
-        .edit_message(&path.message_id, &user_id, req.content)
+        .edit_message(&path.channel_id, &path.message_id, &user_id, req.content)
         .await?;
-    let message = outcome.message;
 
     let encrypted = message.message.encrypted;
     let event = ServerEvent::MessageUpdated {
@@ -253,27 +257,9 @@ pub async fn edit_message(
         "emitted message.updated"
     );
 
-    // Polish #9: one targeted MentionReceived per mention NEWLY ADDED by this
-    // edit — pre-existing mentions were notified on send and must not re-ping.
-    // Same guarantees as the send path: the list passed filter_mentionable, and
-    // the author is stripped, so no event targets an inaccessible user or self.
-    for target_user_id in &outcome.newly_mentioned {
-        state.event_bus().publish(ServerEvent::MentionReceived {
-            sender_id: user_id.clone(),
-            target_user_id: target_user_id.clone(),
-            server_id: channel.server_id.clone(),
-            channel_id: path.channel_id.clone(),
-            message_id: message.message.id.clone(),
-        });
-    }
-    if !outcome.newly_mentioned.is_empty() {
-        tracing::debug!(
-            channel_id = %path.channel_id,
-            message_id = %path.message_id,
-            count = outcome.newly_mentioned.len(),
-            "emitted mention.received for mentions newly added by edit"
-        );
-    }
+    // §2.4: NO mention.received on edits (Discord parity — edit-in mentions
+    // don't ping). Newly-added mentions still consume budget in the service
+    // and land in the persisted list; badges converge on reconnect (§6.17).
 
     // B4: Async moderation on edits too (prevent edit-in-bypass).
     if !encrypted {

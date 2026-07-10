@@ -1,15 +1,18 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Mentions polish (#9) integration tests — real DB + real HTTP (tower oneshot).
 //!
-//! Pins the two behavior corrections of the mentions-polish ticket:
+//! Pins the behavior corrections of the mentions-polish ticket:
 //! 1. EDIT-BUDGET SKIP: editing a message re-parses mentions, but only mentions
-//!    NEWLY ADDED by the edit consume the mention budget and emit a targeted
-//!    `mention.received` — pre-existing mentions never re-charge or re-ping.
-//!    The reactivity invariant is asserted on the event bus: a genuinely new
-//!    mention on edit DOES fire `mention.received` (for the new user only).
+//!    NEWLY ADDED by the edit consume the mention budget — pre-existing
+//!    mentions never re-charge. Per spec §2.4 (Discord parity) edits NEVER
+//!    emit `mention.received` — not even for newly-added mentions; both cases
+//!    are asserted on the event bus.
 //! 2. EMPTY `?q=` REJECT: the members list endpoint rejects an empty or
 //!    whitespace-only `q` with 400, while the existing rules (max 32 chars,
 //!    `q` + `before` → 400) still hold.
+//! 3. PATH-SCOPE BINDING: editing a message through a channel path it does not
+//!    belong to is a 404 and publishes ZERO events — the SSE scope can never
+//!    be attacker-chosen via the URL.
 //!
 //! WHY #[ignore]: requires a running Postgres with the Harmony schema (mirrors
 //! the voice endpoint and mentions integration tests). Run locally with:
@@ -479,12 +482,12 @@ async fn edit_with_unchanged_mentions_charges_no_budget_and_notifies_nobody() {
     cleanup_fixture(&pool, &fixture).await;
 }
 
-/// Editing a message to ADD a mention must emit `mention.received` for the
-/// newly-added user ONLY (reactivity invariant), and charge budget for that
-/// one mention only.
+/// Editing a message to ADD a mention persists it and charges budget for
+/// that one mention only — but emits NO `mention.received` (spec §2.4,
+/// Discord parity: edit-in mentions don't ping).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires local Supabase Postgres"]
-async fn edit_adding_new_mention_notifies_only_the_new_user() {
+async fn edit_adding_new_mention_charges_budget_but_notifies_nobody() {
     let pool = test_pool().await;
     let fixture = seed_fixture(&pool).await;
     let state = build_app_state(pool.clone()).await;
@@ -528,35 +531,24 @@ async fn edit_adding_new_mention_notifies_only_the_new_user() {
         "newly-added mention persisted after edit"
     );
 
-    // ...but only the NEW user is notified (reactivity invariant: the
-    // mention.received SSE event fires for genuinely new mentions on edit).
+    // ...but NOBODY is notified — spec §2.4 (Discord parity): edits never
+    // emit mention.received, not even for mentions the edit newly added.
+    // The new mention badges only via the computed unread.sync counts on
+    // reconnect (§6.17 known wart).
     let events = drain_events(&mut rx);
-    let mention_targets: Vec<Uuid> = events
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, ServerEvent::MessageUpdated { .. })),
+        "edit must still emit message.updated"
+    );
+    let mention_events: Vec<_> = events
         .iter()
-        .filter_map(|e| match e {
-            ServerEvent::MentionReceived {
-                sender_id,
-                target_user_id,
-                channel_id,
-                message_id: event_message_id,
-                ..
-            } => {
-                assert_eq!(sender_id.0, fixture.author, "sender is the editor");
-                assert_eq!(channel_id.0, fixture.channel, "channel matches");
-                assert_eq!(
-                    event_message_id.to_string(),
-                    message_id,
-                    "message id matches the edited message"
-                );
-                Some(target_user_id.0)
-            }
-            _ => None,
-        })
+        .filter(|e| matches!(e, ServerEvent::MentionReceived { .. }))
         .collect();
-    assert_eq!(
-        mention_targets,
-        vec![fixture.new_target],
-        "exactly ONE mention.received, targeting the newly-added user only"
+    assert!(
+        mention_events.is_empty(),
+        "edits NEVER emit mention.received (spec §2.4), got {mention_events:?}"
     );
 
     // Budget: the seed charged nothing; the edit charged exactly 1 (the NEW
@@ -566,6 +558,74 @@ async fn edit_adding_new_mention_notifies_only_the_new_user() {
         MENTION_BUDGET_MAX - 1,
         "edit must charge budget only for the newly-added mention"
     );
+
+    cleanup_fixture(&pool, &fixture).await;
+}
+
+/// Editing a message through a channel path it does NOT belong to must 404
+/// and publish ZERO events — otherwise the author could stamp SSE events
+/// (message.updated) with an arbitrary channel/server scope of their choosing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires local Supabase Postgres"]
+async fn edit_via_mismatched_channel_path_is_404_and_publishes_nothing() {
+    let pool = test_pool().await;
+    let fixture = seed_fixture(&pool).await;
+    let state = build_app_state(pool.clone()).await;
+    let app = test_router(state.clone());
+
+    let message_id = seed_message(&pool, &fixture, "no mentions here", &[])
+        .await
+        .to_string();
+
+    // A second channel in the same server — the message does NOT belong to it.
+    let other_channel = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channels (id, server_id, name, channel_type, position) VALUES ($1, $2, 'other', 'text'::channel_type, 1)",
+    )
+    .bind(other_channel)
+    .bind(fixture.server)
+    .execute(&pool)
+    .await
+    .expect("seed other channel");
+
+    let mut rx = state.event_bus().subscribe();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!(
+                    "/v1/channels/{other_channel}/messages/{message_id}"
+                ))
+                .header(header::AUTHORIZATION, format!("Bearer {}", fixture.jwt))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "content": "hijacked scope" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "a mismatched channel path must be a 404, not a scope override"
+    );
+
+    let events = drain_events(&mut rx);
+    assert!(
+        events.is_empty(),
+        "a rejected edit must publish ZERO events, got {events:?}"
+    );
+
+    // The message content is untouched.
+    let content: String = sqlx::query_scalar("SELECT content FROM messages WHERE id = $1")
+        .bind(Uuid::parse_str(&message_id).unwrap())
+        .fetch_one(&pool)
+        .await
+        .expect("message still exists");
+    assert_eq!(content, "no mentions here", "rejected edit must not mutate");
 
     cleanup_fixture(&pool, &fixture).await;
 }

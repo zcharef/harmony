@@ -17,30 +17,14 @@ use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
 use crate::domain::services::spam_guard::{self, SpamGuard};
 
-/// Outcome of a message edit: the updated message plus the mention targets
-/// this edit newly added.
-///
-/// WHY a struct and not just `MessageWithAuthor`: the handler must emit
-/// `mention.received` for NEWLY-ADDED mentions only (polish #9) — pre-existing
-/// mentions never re-notify and never re-consume the mention budget. The diff
-/// is computed here (against the pre-edit persisted list), so the handler gets
-/// the exact target list to publish.
-#[derive(Debug)]
-pub struct MessageEditOutcome {
-    /// The updated message with resolved mention display data.
-    pub message: MessageWithAuthor,
-    /// Users mentioned by the new content who were NOT in the pre-edit mention
-    /// list. Already validated (mentionable + budget-granted) — publish one
-    /// `mention.received` per entry.
-    pub newly_mentioned: Vec<UserId>,
-}
-
 /// Mention targets present in `current` but absent from `previous`,
 /// first-appearance order preserved.
 ///
-/// WHY: edits must not re-charge the mention budget or re-ping users who were
+/// WHY: edits must not re-charge the mention budget for users who were
 /// already mentioned before the edit (polish #9) — only this diff consumes
-/// budget and emits `mention.received`.
+/// budget. NO `mention.received` is ever emitted for edits (§2.4, Discord
+/// parity: edit-in mentions don't ping) — this diff exists purely for
+/// budget accounting.
 fn diff_new_mentions(previous: &[UserId], current: &[UserId]) -> Vec<UserId> {
     let previous: HashSet<&UserId> = previous.iter().collect();
     current
@@ -480,20 +464,22 @@ impl MessageService {
 
     /// Edit a message's content. Only the author can edit.
     ///
-    /// Plaintext edits re-parse mentions; users newly added by the edit are
-    /// returned in [`MessageEditOutcome::newly_mentioned`] so the handler can
-    /// emit `mention.received` for them (and ONLY them — polish #9).
+    /// Plaintext edits re-parse mentions and persist the new list; only
+    /// mentions NEWLY added by the edit consume budget (polish #9). No
+    /// `mention.received` is emitted for edits (§2.4, Discord parity).
     ///
     /// # Errors
     /// Returns `DomainError::ValidationError` if content is empty,
-    /// `DomainError::NotFound` if the message doesn't exist or is deleted,
+    /// `DomainError::NotFound` if the message doesn't exist, is deleted, or
+    /// does not belong to `channel_id` (path-scope binding),
     /// `DomainError::Forbidden` if the caller is not the author.
     pub async fn edit_message(
         &self,
+        channel_id: &ChannelId,
         message_id: &MessageId,
         user_id: &UserId,
         content: String,
-    ) -> Result<MessageEditOutcome, DomainError> {
+    ) -> Result<MessageWithAuthor, DomainError> {
         if content.trim().is_empty() {
             return Err(DomainError::ValidationError(
                 "Message content must not be empty".to_string(),
@@ -516,6 +502,19 @@ impl MessageService {
                     resource_type: "Message",
                     id: message_id.to_string(),
                 })?;
+
+        // WHY: bind the URL path to the message — without this, an author could
+        // PATCH their message through ANY existing channel id and the handler
+        // would stamp SSE events (message.updated) with the attacker-chosen
+        // channel/server scope. 404 (not 400) so a mismatched path leaks
+        // nothing about the message's real location. Mirrors the cross-channel
+        // parent check in `create`.
+        if message.channel_id != *channel_id {
+            return Err(DomainError::NotFound {
+                resource_type: "Message",
+                id: message_id.to_string(),
+            });
+        }
 
         if message.author_id != *user_id {
             return Err(DomainError::Forbidden(
@@ -562,62 +561,61 @@ impl MessageService {
         }
 
         // §2.4 edits: re-parse mentions (plaintext) so rendering and future
-        // read-state queries stay correct. Runs BEFORE the masking block below
-        // (parse-before-mask). Polish #9: only mentions NEWLY ADDED by this edit
-        // (absent from the pre-edit persisted list) consume the mention budget,
-        // and only they get `mention.received` (emitted by the handler from
-        // `newly_mentioned`) — pre-existing mentions were charged and notified
-        // when first sent, so an edit must not re-charge or re-ping them.
-        // Behavior change (step 2): a plaintext edit producing >10 valid markers
-        // returns 400. Encrypted edits pass None (the column is left untouched
-        // via COALESCE in the repo) and never add mentions.
-        let (mentioned_user_ids, newly_mentioned): (Option<Vec<UserId>>, Vec<UserId>) =
-            if message.encrypted {
-                (None, Vec::new())
-            } else {
-                let raw = spam_guard::extract_mentions(&content);
-                if raw.len() > spam_guard::MAX_MENTIONS {
-                    return Err(DomainError::ValidationError(format!(
-                        "Too many mentions (max {})",
-                        spam_guard::MAX_MENTIONS
-                    )));
-                }
-                let mut seen = HashSet::new();
-                let candidate_ids: Vec<UserId> = raw
-                    .into_iter()
-                    .filter(|id| *id != message.author_id && seen.insert(id.clone()))
-                    .collect();
-                let mentionable: HashSet<UserId> = self
-                    .member_repo
-                    .filter_mentionable(&channel, &candidate_ids)
-                    .await?
-                    .into_iter()
-                    .collect();
-                let mut mentioned: Vec<UserId> = candidate_ids
-                    .into_iter()
-                    .filter(|id| mentionable.contains(id))
-                    .collect();
-                let mut new_ids = diff_new_mentions(&message.mentioned_user_ids, &mentioned);
-                let granted = self.spam_guard.consume_mention_budget(
-                    &message.author_id,
-                    &message.channel_id,
-                    new_ids.len(),
+        // read-state queries stay correct. Discord parity — the handler emits
+        // only MessageUpdated, NO mention.received / live badge deltas for
+        // edits. Runs BEFORE the masking block below (parse-before-mask).
+        // Polish #9: only mentions NEWLY ADDED by this edit (absent from the
+        // pre-edit persisted list) consume the mention budget — pre-existing
+        // mentions were charged when first sent, so an edit must not re-charge
+        // them. Behavior change (step 2): a plaintext edit producing >10 valid
+        // markers returns 400. Encrypted edits pass None (the column is left
+        // untouched via COALESCE in the repo) and never add mentions.
+        let mentioned_user_ids: Option<Vec<UserId>> = if message.encrypted {
+            None
+        } else {
+            let raw = spam_guard::extract_mentions(&content);
+            if raw.len() > spam_guard::MAX_MENTIONS {
+                return Err(DomainError::ValidationError(format!(
+                    "Too many mentions (max {})",
+                    spam_guard::MAX_MENTIONS
+                )));
+            }
+            let mut seen = HashSet::new();
+            let candidate_ids: Vec<UserId> = raw
+                .into_iter()
+                .filter(|id| *id != message.author_id && seen.insert(id.clone()))
+                .collect();
+            let mentionable: HashSet<UserId> = self
+                .member_repo
+                .filter_mentionable(&channel, &candidate_ids)
+                .await?
+                .into_iter()
+                .collect();
+            let mut mentioned: Vec<UserId> = candidate_ids
+                .into_iter()
+                .filter(|id| mentionable.contains(id))
+                .collect();
+            let mut new_ids = diff_new_mentions(&message.mentioned_user_ids, &mentioned);
+            let granted = self.spam_guard.consume_mention_budget(
+                &message.author_id,
+                &message.channel_id,
+                new_ids.len(),
+            );
+            if granted < new_ids.len() {
+                tracing::warn!(
+                    sender_id = %message.author_id,
+                    channel_id = %message.channel_id,
+                    requested = new_ids.len(),
+                    granted,
+                    "mention budget exceeded on edit — excess new mentions dropped"
                 );
-                if granted < new_ids.len() {
-                    tracing::warn!(
-                        sender_id = %message.author_id,
-                        channel_id = %message.channel_id,
-                        requested = new_ids.len(),
-                        granted,
-                        "mention budget exceeded on edit — excess new mentions dropped"
-                    );
-                    // Keep every pre-existing mention plus the first `granted`
-                    // new ones (first-appearance order) — drop only the excess.
-                    let dropped: HashSet<UserId> = new_ids.split_off(granted).into_iter().collect();
-                    mentioned.retain(|id| !dropped.contains(id));
-                }
-                (Some(mentioned), new_ids)
-            };
+                // Keep every pre-existing mention plus the first `granted`
+                // new ones (first-appearance order) — drop only the excess.
+                let dropped: HashSet<UserId> = new_ids.split_off(granted).into_iter().collect();
+                mentioned.retain(|id| !dropped.contains(id));
+            }
+            Some(mentioned)
+        };
 
         // WHY: Re-check content moderation on edits — a user could send a clean
         // message then edit it to add banned words. Skip for encrypted messages.
@@ -667,10 +665,7 @@ impl MessageService {
             .member_repo
             .resolve_mentioned_users(&channel.server_id, &updated.message.mentioned_user_ids)
             .await?;
-        Ok(MessageEditOutcome {
-            message: updated,
-            newly_mentioned,
-        })
+        Ok(updated)
     }
 
     /// Soft-delete a message. The author or moderator+ can delete (ADR-038).
@@ -770,8 +765,8 @@ mod tests {
     // ── diff_new_mentions (polish #9: edit budget/notify diff) ────
 
     /// WHY: an edit that keeps the same mentions must produce an EMPTY diff —
-    /// this is what guarantees no budget re-charge and no re-notification for
-    /// users already mentioned before the edit.
+    /// this is what guarantees no budget re-charge for users already
+    /// mentioned before the edit.
     #[test]
     fn diff_new_mentions_same_mentions_yields_empty() {
         let a = UserId::from(uuid::Uuid::new_v4());
@@ -786,8 +781,8 @@ mod tests {
         );
     }
 
-    /// WHY: only the users ADDED by the edit may consume budget and get
-    /// `mention.received` — pre-existing ones are excluded from the diff.
+    /// WHY: only the users ADDED by the edit may consume budget —
+    /// pre-existing ones are excluded from the diff.
     #[test]
     fn diff_new_mentions_returns_only_added_users() {
         let existing = UserId::from(uuid::Uuid::new_v4());

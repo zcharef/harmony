@@ -36,7 +36,7 @@ pub use content_moderation::{
 pub use dm_service::DmService;
 pub use invite_service::InviteService;
 pub use key_service::KeyService;
-pub use message_service::{MessageEditOutcome, MessageService};
+pub use message_service::MessageService;
 pub use moderation_service::ModerationService;
 pub use notification_settings_service::NotificationSettingsService;
 pub use profile_service::ProfileService;

@@ -341,7 +341,7 @@
           "Messages"
         ],
         "summary": "Edit a message's content. Only the author can edit.",
-        "description": "Plaintext edits re-parse `<@user_id>` markers and persist the new mention\nlist (>10 valid markers is a 400). Only mentions NEWLY added by the edit\nemit `mention.received` — users already mentioned before the edit are never\nre-notified. Encrypted edits leave the mention list untouched.\n\n# Errors\nReturns `ApiError` on validation failure, authorization failure, or repository error.",
+        "description": "Plaintext edits re-parse `<@user_id>` markers and persist the new mention\nlist (>10 valid markers is a 400), but edits never emit `mention.received`\n(Discord parity: edit-in mentions don't ping). Editing a message through a\nchannel it does not belong to is a 404. Encrypted edits leave the mention\nlist untouched.\n\n# Errors\nReturns `ApiError` on validation failure, authorization failure, or repository error.",
         "operationId": "edit_message",
         "parameters": [
           {
