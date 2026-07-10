@@ -15,9 +15,10 @@ use super::dto::{
     CreateDesktopAuthRequest, CreateDesktopAuthResponse, CreateDmRequest, CreateInviteRequest,
     CreateMegolmSessionRequest, CreateServerRequest, DeviceListResponse, DeviceResponse,
     DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse, DmRecipientResponse,
-    DmResponse, EditMessageRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest,
-    KeyCountResponse, MarkReadRequest, MegolmSessionResponse, MemberListQuery, MemberListResponse,
-    MemberResponse, MentionedUserResponse, MessageListQuery, MessageListResponse, MessageResponse,
+    DmResponse, EditMessageRequest, GifItem, GifListResponse, GifSearchQuery, GifTrendingQuery,
+    InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse, MarkReadRequest,
+    MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
+    MentionedUserResponse, MessageListQuery, MessageListResponse, MessageResponse,
     NewAttachmentRequest, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
     RedeemDesktopAuthRequest, RedeemDesktopAuthResponse, RegisterDeviceRequest, SendMessageRequest,
     ServerListResponse, ServerResponse, SetChannelRoleAccessRequest, TransferOwnershipRequest,
@@ -97,6 +98,9 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         // Reactions
         handlers::reactions::add_reaction,
         handlers::reactions::remove_reaction,
+        // GIFs (Klipy proxy)
+        handlers::gifs::search_gifs,
+        handlers::gifs::trending_gifs,
         // Read States
         handlers::read_states::mark_channel_read,
         // Notification Settings
@@ -215,6 +219,11 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             ReactionSummary,
             Reactor,
             ParentMessagePreview,
+            // GIF DTOs (Klipy proxy)
+            GifItem,
+            GifListResponse,
+            GifSearchQuery,
+            GifTrendingQuery,
             // Notification Settings DTOs
             super::dto::notification_settings::UpdateNotificationSettingsRequest,
             super::dto::notification_settings::NotificationSettingsResponse,
@@ -274,6 +283,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         (name = "Moderation", description = "Server moderation (bans, kicks)"),
         (name = "Messages", description = "Messaging within channels"),
         (name = "Reactions", description = "Message reactions"),
+        (name = "Gifs", description = "GIF picker (Klipy proxy)"),
         (name = "ReadStates", description = "Channel read state tracking"),
         (name = "NotificationSettings", description = "Per-channel notification preferences"),
         (name = "DirectMessages", description = "Direct message conversations"),

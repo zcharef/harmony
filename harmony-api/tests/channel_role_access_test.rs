@@ -348,6 +348,7 @@ async fn build_handler_app_state(pool: PgPool) -> AppState {
         spam_guard,
         None, // content_moderator
         None, // safe_browsing
+        None, // klipy
         message_repo,
         server_repo,
         moderation_retry_repo,

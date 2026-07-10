@@ -391,6 +391,11 @@ fn no_offset_in_sql() {
 /// WHY: Pagination fields like `page`, `page_number`, `offset` indicate
 /// OFFSET-based pagination, which is O(n). DTOs should use cursor-based
 /// pagination fields (`cursor`, `after`, `before`) instead.
+///
+/// EXEMPTION — `gifs.rs`: the Klipy GIF endpoints are a pass-through proxy over
+/// an external, inherently page-based upstream API (Klipy has no cursor). The
+/// `page` param mirrors Klipy's pagination; ADR-036 governs OUR Postgres reads,
+/// not a third-party's contract, so the proxy DTOs are exempt.
 #[test]
 fn no_page_params_in_dtos() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -399,6 +404,7 @@ fn no_page_params_in_dtos() {
     let rust_files: Vec<PathBuf> = collect_rust_files(&dto_dir)
         .into_iter()
         .filter(|f| f.file_name().is_some_and(|name| name != "mod.rs"))
+        .filter(|f| f.file_name().is_some_and(|name| name != "gifs.rs"))
         .collect();
 
     if rust_files.is_empty() {

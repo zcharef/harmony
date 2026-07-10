@@ -272,6 +272,7 @@ async fn build_app_state(pool: PgPool, analytics_recorder: Arc<dyn AnalyticsReco
         spam_guard,
         None, // content_moderator
         None, // safe_browsing
+        None, // klipy
         message_repo,
         server_repo,
         moderation_retry_repo,

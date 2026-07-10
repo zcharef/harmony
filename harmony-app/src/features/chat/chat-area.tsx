@@ -11,6 +11,7 @@ import {
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual'
 import {
   Bell,
+  Film,
   Hash,
   MessageCircle,
   MessageSquare,
@@ -55,10 +56,12 @@ import { isTauri } from '@/lib/platform'
 import { AttachmentTray } from './components/attachment-tray'
 import { MentionAutocomplete, mentionOptionId } from './components/mention-autocomplete'
 import { EmojiPickerPopover } from './emoji-picker-popover'
+import { GifPickerPopover } from './gif-picker-popover'
 import { useAddReaction } from './hooks/use-add-reaction'
 import { type ComposerAttachments, useComposerAttachments } from './hooks/use-composer-attachments'
 import { useDeleteMessage } from './hooks/use-delete-message'
 import { useEditMessage } from './hooks/use-edit-message'
+import { useGifCapability } from './hooks/use-gif-capability'
 import type { UseMentionAutocompleteResult } from './hooks/use-mention-autocomplete'
 import { useMentionAutocomplete } from './hooks/use-mention-autocomplete'
 import { useMessages } from './hooks/use-messages'
@@ -469,6 +472,7 @@ function MessageInput({
   onValueChange,
   onKeyDown,
   onSendTyping,
+  onGifSelect,
   mention,
   textareaRef,
   attachments,
@@ -480,6 +484,8 @@ function MessageInput({
   onValueChange: (value: string) => void
   onKeyDown: (e: React.KeyboardEvent) => void
   onSendTyping: () => void
+  /** WHY: a picked GIF sends immediately as its own message (Discord behavior). */
+  onGifSelect: (gifUrl: string) => void
   /** WHY: state lives in ChatArea (useMentionAutocomplete) — the send transform needs its map. */
   mention: UseMentionAutocompleteResult
   /** WHY lifted: the autocomplete hook reads the caret from this node. */
@@ -493,6 +499,10 @@ function MessageInput({
   const [isEmojiOpen, setIsEmojiOpen] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [isGifOpen, setIsGifOpen] = useState(false)
+  // WHY: hide the GIF button when the deployment has no Klipy key (proxy 503),
+  // so self-hosters never see a dead button.
+  const isGifEnabled = useGifCapability()
   const highlightedCandidate = mention.results[mention.highlightIndex]
   const inlineError = useAttachmentInlineError(attachments)
 
@@ -676,6 +686,18 @@ function MessageInput({
             <Button variant="light" isIconOnly size="sm" aria-label={t('stickers')}>
               <Sticker className="h-5 w-5 text-default-500" />
             </Button>
+            {isGifEnabled && (
+              <GifPickerPopover
+                isOpen={isGifOpen}
+                onOpenChange={setIsGifOpen}
+                onGifSelect={onGifSelect}
+                placement="top-end"
+              >
+                <Button variant="light" isIconOnly size="sm" aria-label={t('gif.button')}>
+                  <Film className="h-5 w-5 text-default-500" />
+                </Button>
+              </GifPickerPopover>
+            )}
             <EmojiPickerPopover
               isOpen={isEmojiOpen}
               onOpenChange={setIsEmojiOpen}
@@ -885,6 +907,7 @@ function ChatInputSection({
   onValueChange,
   onKeyDown,
   onSendTyping,
+  onGifSelect,
   mention,
   textareaRef,
   attachments,
@@ -901,6 +924,7 @@ function ChatInputSection({
   onValueChange: (value: string) => void
   onKeyDown: (e: React.KeyboardEvent) => void
   onSendTyping: () => void
+  onGifSelect: (gifUrl: string) => void
   mention: UseMentionAutocompleteResult
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
   attachments: ComposerAttachments
@@ -928,6 +952,7 @@ function ChatInputSection({
         onValueChange={onValueChange}
         onKeyDown={onKeyDown}
         onSendTyping={onSendTyping}
+        onGifSelect={onGifSelect}
         mention={mention}
         textareaRef={textareaRef}
         attachments={attachments}
@@ -1340,6 +1365,18 @@ export function ChatArea({
     startCooldown()
   }
 
+  // WHY separate from handleSend: a picked GIF is its own message sent
+  // immediately (Discord behavior) — the bare hosted URL is the content, so it
+  // auto-embeds via the inline-image render path. It rides the same
+  // `sendMessage` mutation, so E2EE channels encrypt it like any message.
+  function handleSendGif(gifUrl: string) {
+    if (channelId === null || isInCooldown) return
+    const parentId = replyingTo?.id
+    setReplyingTo(null)
+    sendMessage.mutate({ content: gifUrl, parentMessageId: parentId })
+    startCooldown()
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     // WHY first: while the popup is open the reducer consumes ↑↓/Enter/Tab/Esc —
     // Enter MUST NOT send while a row is highlighted (spec §1 keyboard rules).
@@ -1467,6 +1504,7 @@ export function ChatArea({
         onValueChange={setMessageContent}
         onKeyDown={handleKeyDown}
         onSendTyping={() => sendTyping(currentUser.username)}
+        onGifSelect={handleSendGif}
         mention={mention}
         textareaRef={composerRef}
         attachments={attachments}

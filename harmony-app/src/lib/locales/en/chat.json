@@ -50,5 +50,15 @@
   "reactorsCount": "{{count}} reaction",
   "reactorsCount_other": "{{count}} reactions",
   "reactorsOthers": "+{{count}} other",
-  "reactorsOthers_other": "+{{count}} others"
+  "reactorsOthers_other": "+{{count}} others",
+  "gif": {
+    "button": "Open GIF picker",
+    "searchPlaceholder": "Search GIFs",
+    "noResults": "No GIFs for “{{query}}”",
+    "trendingEmpty": "No trending GIFs right now",
+    "loadFailed": "Couldn’t load GIFs. Check your connection and try again.",
+    "retry": "Try again",
+    "rateLimited": "Too many searches — slow down a moment.",
+    "poweredBy": "Powered by KLIPY"
+  }
 }

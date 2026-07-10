@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 pub mod auth;
+pub mod klipy;
 pub mod livekit;
 pub mod openai_moderator;
 pub mod pg_notify_event_bus;

@@ -201,6 +201,9 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             "/v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}",
             delete(handlers::reactions::remove_reaction),
         )
+        // GIFs (Klipy proxy)
+        .route("/v1/gifs/search", get(handlers::gifs::search_gifs))
+        .route("/v1/gifs/trending", get(handlers::gifs::trending_gifs))
         // Notification Settings
         .route(
             "/v1/channels/{id}/notification-settings",

@@ -4,6 +4,7 @@ pub mod bans;
 pub mod channels;
 pub mod desktop_auth;
 pub mod dms;
+pub mod gifs;
 pub mod invites;
 pub mod keys;
 pub mod members;
@@ -33,6 +34,7 @@ pub use dms::{
     CreateDmRequest, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,
     DmRecipientResponse, DmResponse,
 };
+pub use gifs::{GifItem, GifListResponse, GifSearchQuery, GifTrendingQuery};
 pub use invites::{CreateInviteRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest};
 pub use keys::{
     ClaimedKeyResponse, DeviceListResponse, DeviceResponse, KeyCountQuery, KeyCountResponse,

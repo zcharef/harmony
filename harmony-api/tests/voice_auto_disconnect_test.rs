@@ -475,6 +475,7 @@ async fn build_app_state_with_voice(pool: PgPool) -> AppState {
         spam_guard,
         None, // content_moderator
         None, // safe_browsing
+        None, // klipy
         message_repo,
         server_repo,
         moderation_retry_repo,

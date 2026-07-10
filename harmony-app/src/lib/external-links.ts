@@ -9,4 +9,6 @@
 export const EXTERNAL_LINKS = {
   WEB_APP: 'https://app.joinharmony.app',
   GITHUB_RELEASES: 'https://github.com/zcharef/harmony/releases',
+  // Klipy attribution target — the "Powered by KLIPY" label links here (ToS).
+  KLIPY: 'https://klipy.com',
 } as const
