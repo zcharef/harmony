@@ -47,7 +47,10 @@ import { useChannels } from './hooks/use-channels'
 import { useDeleteChannel } from './hooks/use-delete-channel'
 import { useUnreadStore } from './stores/unread-store'
 
-function ChannelButton({
+// WHY export: unit-tested directly (channel-sidebar.test.tsx) — rendering the
+// whole ChannelSidebar would require mocking five unrelated feature barrels.
+// Intentionally NOT in the feature barrel: not part of the public API.
+export function ChannelButton({
   channel,
   isActive,
   canManageChannels,
@@ -106,13 +109,15 @@ function ChannelButton({
           >
             {/* WHY sr-only twin: ARIA prohibits naming on generic-role spans
                 (lint/a11y/useAriaPropsSupportedByRole), so no aria-label here —
-                screen readers get both counts, sighted users the @-pill. */}
+                screen readers get a full sentence, sighted users the compact
+                pill. The twin renders in BOTH branches: hiding the visible
+                count without it would silence the pill entirely. */}
             <span aria-hidden="true">{hasMentions ? `@ ${unreadLabel}` : unreadLabel}</span>
-            {hasMentions && (
-              <span className="sr-only">
-                {t('unreadWithMentions', { unread: unreadCount, mentions: mentionCount })}
-              </span>
-            )}
+            <span className="sr-only">
+              {hasMentions
+                ? t('unreadWithMentions', { unread: unreadCount, mentions: mentionCount })
+                : t('unreadOnly', { unread: unreadCount })}
+            </span>
           </span>
         )}
       </Button>

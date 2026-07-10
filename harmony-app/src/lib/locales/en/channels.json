@@ -35,5 +35,6 @@
   "topicMaxLength": "Topic must be 1024 characters or less",
   "home": "Harmony",
   "selectServerHint": "Pick a server from the sidebar to see its channels.",
-  "unreadWithMentions": "{{unread}} unread, {{mentions}} mentions"
+  "unreadWithMentions": "{{unread}} unread, {{mentions}} mentions",
+  "unreadOnly": "{{unread}} unread"
 }
