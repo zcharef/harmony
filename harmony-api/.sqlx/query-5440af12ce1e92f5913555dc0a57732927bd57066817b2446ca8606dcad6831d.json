@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                members_joined_week1   AS \"members_joined_week1!\",\n                non_owner_active_week1 AS \"non_owner_active_week1!\",\n                messages_week1         AS \"messages_week1!\",\n                distinct_senders_week1 AS \"distinct_senders_week1!\",\n                active_days_week1      AS \"active_days_week1!\",\n                is_alive               AS \"is_alive?\"\n            FROM analytics.metrics_server_alive\n            WHERE server_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "members_joined_week1!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "non_owner_active_week1!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "messages_week1!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "distinct_senders_week1!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "active_days_week1!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_alive?",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5440af12ce1e92f5913555dc0a57732927bd57066817b2446ca8606dcad6831d"
+}

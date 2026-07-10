@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                user_id       AS \"user_id!\",\n                username      AS \"username!\",\n                display_name,\n                avatar_url,\n                nickname,\n                joined_at     AS \"joined_at!\",\n                has_sent_message AS \"has_sent_message!\"\n            FROM analytics.server_member_cohort\n            WHERE server_id = $1\n              AND is_active = false\n              AND ($2::timestamptz IS NULL OR joined_at < $2)\n            ORDER BY joined_at DESC, user_id DESC\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "username!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "nickname",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "joined_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "has_sent_message!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e9eaf745e66ccebeff9da21e8fe69f2dd29808986a44241b92d1be135219cc70"
+}

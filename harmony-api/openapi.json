@@ -3572,6 +3572,171 @@
         ]
       }
     },
+    "/v1/servers/{id}/migration/cohort": {
+      "get": {
+        "tags": [
+          "Migration"
+        ],
+        "summary": "The not-yet-active member cohort for a server — members who joined but have\nnot performed a genuine action yet (the intervention targets). Cursor\npagination on `joined_at`, newest joiners first. Owner-only.",
+        "description": "# Errors\n`400` on an invalid cursor, `403` if the caller is not the server owner,\n`404` if the server does not exist, `5xx` on repository failure.",
+        "operationId": "list_not_yet_active_cohort",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "ISO 8601 `joined_at` cursor; returns members who joined before it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 25, max 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Not-yet-active member cohort",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberCohortResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the server owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers/{id}/migration/progress": {
+      "get": {
+        "tags": [
+          "Migration"
+        ],
+        "summary": "Owner-facing migration progress for a server.",
+        "description": "Returns the §5 \"alive server\" snapshot (the honest, alt-account-resistant\nsignal), all-time member follow-through counts, and the single recommended\nnext action. Owner-only.\n\n# Errors\n`403` if the caller is not the server owner, `404` if the server does not\nexist, `5xx` on repository failure.",
+        "operationId": "get_migration_progress",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Migration progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationProgressResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the server owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/servers/{id}/moderation": {
       "get": {
         "tags": [
@@ -4028,6 +4193,82 @@
         },
         "additionalProperties": false
       },
+      "AliveSnapshotResponse": {
+        "type": "object",
+        "description": "The §5 week-1 alive snapshot. `isAlive` is `true` once every criterion\nholds, `false` once the week-1 window closes unmet, `null` while it is\nstill open (the §10 null/unknown rule — never a fake zero).",
+        "required": [
+          "membersJoinedWeek1",
+          "nonOwnerActiveWeek1",
+          "messagesWeek1",
+          "distinctSendersWeek1",
+          "activeDaysWeek1",
+          "thresholds"
+        ],
+        "properties": {
+          "activeDaysWeek1": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "distinctSendersWeek1": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "isAlive": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "membersJoinedWeek1": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "messagesWeek1": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "nonOwnerActiveWeek1": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/AliveThresholds"
+          }
+        }
+      },
+      "AliveThresholds": {
+        "type": "object",
+        "description": "The §5 week-1 \"alive server\" thresholds, echoed so the client can render\nprogress bars without hardcoding them (`SSoT` stays in the analytics view).",
+        "required": [
+          "membersJoined",
+          "nonOwnerActive",
+          "messages",
+          "distinctSenders",
+          "activeDays"
+        ],
+        "properties": {
+          "activeDays": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "distinctSenders": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "membersJoined": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "messages": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "nonOwnerActive": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "AssignRoleRequest": {
         "type": "object",
         "description": "Request body for assigning a role to a server member.",
@@ -4343,6 +4584,27 @@
           },
           "publicKey": {
             "type": "string"
+          }
+        }
+      },
+      "CohortQuery": {
+        "type": "object",
+        "description": "Query parameters for the not-yet-active cohort list.",
+        "properties": {
+          "before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 `joined_at` cursor; returns members who joined before it."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Page size (default 25, max 100)."
           }
         }
       },
@@ -4720,6 +4982,34 @@
         },
         "additionalProperties": false
       },
+      "FollowThroughResponse": {
+        "type": "object",
+        "description": "All-time member-follow-through counts.",
+        "required": [
+          "membersJoined",
+          "membersActive",
+          "membersSentMessage",
+          "notYetActive"
+        ],
+        "properties": {
+          "membersActive": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "membersJoined": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "membersSentMessage": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "notYetActive": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "HealthResponse": {
         "type": "object",
         "description": "Deep health check response with component status.",
@@ -4954,6 +5244,32 @@
           },
           "sessionId": {
             "type": "string"
+          }
+        }
+      },
+      "MemberCohortResponse": {
+        "type": "object",
+        "description": "Cursor-paginated not-yet-active cohort (ADR-036 envelope).",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotYetActiveMemberResponse"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -5286,6 +5602,30 @@
           "system"
         ]
       },
+      "MigrationProgressResponse": {
+        "type": "object",
+        "description": "Owner-facing migration-progress payload for one server.",
+        "required": [
+          "serverId",
+          "alive",
+          "followThrough",
+          "recommendedAction"
+        ],
+        "properties": {
+          "alive": {
+            "$ref": "#/components/schemas/AliveSnapshotResponse"
+          },
+          "followThrough": {
+            "$ref": "#/components/schemas/FollowThroughResponse"
+          },
+          "recommendedAction": {
+            "$ref": "#/components/schemas/RecommendedActionResponse"
+          },
+          "serverId": {
+            "type": "string"
+          }
+        }
+      },
       "ModerationSettingsResponse": {
         "type": "object",
         "description": "Response for server moderation settings.",
@@ -5365,6 +5705,48 @@
           }
         },
         "additionalProperties": false
+      },
+      "NotYetActiveMemberResponse": {
+        "type": "object",
+        "description": "One not-yet-active member (an intervention target).",
+        "required": [
+          "userId",
+          "username",
+          "joinedAt",
+          "hasSentMessage"
+        ],
+        "properties": {
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hasSentMessage": {
+            "type": "boolean"
+          },
+          "joinedAt": {
+            "type": "string"
+          },
+          "nickname": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userId": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
       },
       "NotificationLevel": {
         "type": "string",
@@ -5625,6 +6007,16 @@
             "type": "string"
           }
         }
+      },
+      "RecommendedActionResponse": {
+        "type": "string",
+        "description": "The single owner-actionable next step (client renders localized copy).",
+        "enum": [
+          "invite_members",
+          "seed_conversation",
+          "nudge_inactive",
+          "share_progress"
+        ]
       },
       "RedeemDesktopAuthRequest": {
         "type": "object",

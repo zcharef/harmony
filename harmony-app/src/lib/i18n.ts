@@ -10,6 +10,7 @@ import dms from '@/lib/locales/en/dms.json'
 import invite from '@/lib/locales/en/invite.json'
 import members from '@/lib/locales/en/members.json'
 import messages from '@/lib/locales/en/messages.json'
+import migration from '@/lib/locales/en/migration.json'
 import onboarding from '@/lib/locales/en/onboarding.json'
 import servers from '@/lib/locales/en/servers.json'
 import settings from '@/lib/locales/en/settings.json'
@@ -32,6 +33,7 @@ const resources = {
     onboarding,
     servers,
     members,
+    migration,
     settings,
     voice,
   },
@@ -53,6 +55,7 @@ i18n.use(initReactI18next).init({
     'onboarding',
     'servers',
     'members',
+    'migration',
     'settings',
     'voice',
   ],

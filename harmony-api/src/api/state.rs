@@ -13,11 +13,12 @@ use crate::domain::ports::{
     ModerationRetryRepository, PlanLimitChecker, ServerRepository, VoiceSessionRepository,
 };
 use crate::domain::services::{
-    ChannelService, DmService, InviteService, KeyService, MessageService, ModerationService,
-    NotificationSettingsService, ProfileService, ReactionService, ReadStateService, ServerService,
-    SpamGuard, UserPreferencesService, VoiceService,
+    ChannelService, DmService, InviteService, KeyService, MessageService, MigrationService,
+    ModerationService, NotificationSettingsService, ProfileService, ReactionService,
+    ReadStateService, ServerService, SpamGuard, UserPreferencesService, VoiceService,
 };
 use crate::infra::PgPresenceTracker;
+use crate::infra::postgres::PgMigrationDashboardRepository;
 use crate::infra::safe_browsing::SafeBrowsingClient;
 
 /// Maximum concurrent async moderation tasks (`OpenAI` + Safe Browsing).
@@ -63,6 +64,8 @@ pub struct AppState {
     notification_settings_service: Arc<NotificationSettingsService>,
     /// User preferences domain service (DND mode, user-controlled settings).
     user_preferences_service: Arc<UserPreferencesService>,
+    /// Member-migration command-center service (owner dashboard, §14.1).
+    migration_service: Arc<MigrationService>,
     /// Member repository (accessed directly for simple queries; invite logic lives in `InviteService`).
     member_repository: Arc<dyn MemberRepository>,
     /// Channel repository (accessed directly by handlers that call the shared
@@ -133,6 +136,7 @@ impl std::fmt::Debug for AppState {
                 &self.notification_settings_service,
             )
             .field("user_preferences_service", &self.user_preferences_service)
+            .field("migration_service", &self.migration_service)
             .field("member_repository", &self.member_repository)
             .field("channel_repository", &self.channel_repository)
             .field("ban_repository", &self.ban_repository)
@@ -208,6 +212,15 @@ impl AppState {
         attachment_url_origin: Option<String>,
         trusted_proxy_secret: Option<secrecy::SecretString>,
     ) -> Self {
+        // WHY constructed here (not a positional param): the owner-migration
+        // dashboard needs only the server repository (ownership check) and a
+        // read-only analytics reader over the same pool — wiring it internally
+        // keeps the already-large constructor signature stable.
+        let migration_service = Arc::new(MigrationService::new(
+            server_repository_for_moderation.clone(),
+            Arc::new(PgMigrationDashboardRepository::new(pool.clone())),
+        ));
+
         Self {
             pool,
             jwt_secret,
@@ -225,6 +238,7 @@ impl AppState {
             read_state_service,
             notification_settings_service,
             user_preferences_service,
+            migration_service,
             member_repository,
             channel_repository,
             ban_repository,
@@ -326,6 +340,12 @@ impl AppState {
     #[must_use]
     pub fn user_preferences_service(&self) -> &UserPreferencesService {
         &self.user_preferences_service
+    }
+
+    /// Access the member-migration command-center service (owner dashboard).
+    #[must_use]
+    pub fn migration_service(&self) -> &MigrationService {
+        &self.migration_service
     }
 
     /// Access the member repository directly (simple queries; invite logic in `InviteService`).

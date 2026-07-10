@@ -140,6 +140,15 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             "/v1/servers/{id}/transfer-ownership",
             post(handlers::members::transfer_ownership),
         )
+        // Member-migration command center (owner-only dashboard, §14.1)
+        .route(
+            "/v1/servers/{id}/migration/progress",
+            get(handlers::migration::get_migration_progress),
+        )
+        .route(
+            "/v1/servers/{id}/migration/cohort",
+            get(handlers::migration::list_not_yet_active_cohort),
+        )
         // Bans (moderation)
         .route(
             "/v1/servers/{id}/bans",
