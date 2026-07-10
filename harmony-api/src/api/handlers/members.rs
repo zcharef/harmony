@@ -426,6 +426,7 @@ pub async fn assign_role(
             avatar_url: member.avatar_url.clone(),
             nickname: member.nickname.clone(),
             role: member.role,
+            is_founding: member.is_founding,
             joined_at: member.joined_at,
         },
     });
@@ -495,6 +496,7 @@ pub async fn transfer_ownership(
                     avatar_url: old_owner.avatar_url,
                     nickname: old_owner.nickname,
                     role: old_owner.role,
+                    is_founding: old_owner.is_founding,
                     joined_at: old_owner.joined_at,
                 },
             });
@@ -531,6 +533,7 @@ pub async fn transfer_ownership(
                     avatar_url: new_owner.avatar_url,
                     nickname: new_owner.nickname,
                     role: new_owner.role,
+                    is_founding: new_owner.is_founding,
                     joined_at: new_owner.joined_at,
                 },
             });

@@ -133,6 +133,43 @@ describe('MessageItem identity rendering', () => {
     expect(container.querySelector('img')).toBeNull()
     expect(screen.getByTestId('message-author').textContent).toBe('test-user')
   })
+
+  // WHY: founding status rides the member cache (ticket §4), read by author id.
+  function seedFoundingAuthor(isFounding: boolean) {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData<MemberListResponse>(queryKeys.servers.members('server-1'), {
+      items: [
+        {
+          userId: 'user-42',
+          username: 'test-user',
+          nickname: null,
+          role: 'member',
+          isFounding,
+          joinedAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+      nextCursor: null,
+    })
+    return queryClient
+  }
+
+  it('renders the founding badge next to a founding author', () => {
+    renderMessageItem(buildMessage({ authorId: 'user-42' }), {
+      serverId: 'server-1',
+      queryClient: seedFoundingAuthor(true),
+    })
+
+    expect(screen.getByTestId('founding-badge')).toBeTruthy()
+  })
+
+  it('omits the founding badge for a non-founding author', () => {
+    renderMessageItem(buildMessage({ authorId: 'user-42' }), {
+      serverId: 'server-1',
+      queryClient: seedFoundingAuthor(false),
+    })
+
+    expect(screen.queryByTestId('founding-badge')).toBeNull()
+  })
 })
 
 // ── Mentions (wave 3) ─────────────────────────────────────────────────
@@ -159,6 +196,7 @@ function buildMemberList(): MemberListResponse {
         displayName: 'Cache Alice',
         nickname: null,
         role: 'member',
+        isFounding: false,
         joinedAt: '2026-01-01T00:00:00Z',
       },
     ],

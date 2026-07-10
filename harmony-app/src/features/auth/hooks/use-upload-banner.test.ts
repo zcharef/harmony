@@ -61,6 +61,7 @@ function buildProfile(overrides: Partial<ProfileResponse> = {}): ProfileResponse
     bannerUrl: null,
     status: 'online',
     customStatus: null,
+    isFounding: false,
     createdAt: '2026-03-16T00:00:00.000Z',
     updatedAt: '2026-03-16T00:00:00.000Z',
     ...overrides,

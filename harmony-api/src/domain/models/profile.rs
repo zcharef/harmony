@@ -34,6 +34,9 @@ pub struct Profile {
     pub bio: Option<String>,
     /// Banner image URL (public Storage URL, reuses the avatars bucket).
     pub banner_url: Option<String>,
+    /// Whether this user holds the `founding` badge (one of the first accounts).
+    /// Derived from `user_badges` at read time; never mutated on the profile row.
+    pub is_founding: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -25,6 +25,7 @@ function buildMember(overrides: Partial<MemberResponse> = {}): MemberResponse {
     avatarUrl: null,
     nickname: null,
     role: 'member',
+    isFounding: false,
     joinedAt: '2026-04-05T00:00:00.000Z',
     ...overrides,
   }

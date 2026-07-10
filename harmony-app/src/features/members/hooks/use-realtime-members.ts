@@ -20,6 +20,9 @@ const memberPayloadSchema = z.object({
   avatarUrl: z.string().nullable().optional(),
   nickname: z.string().nullable().optional(),
   role: z.string(),
+  // WHY optional + default false: a pre-deploy API omits it; this keeps the
+  // founding badge correct on a live join / role change without a refetch.
+  isFounding: z.boolean().optional(),
   joinedAt: z.string(),
 })
 
@@ -42,6 +45,7 @@ function toMemberResponse(payload: z.infer<typeof memberPayloadSchema>): MemberR
     avatarUrl: payload.avatarUrl,
     nickname: payload.nickname,
     role: payload.role,
+    isFounding: payload.isFounding ?? false,
     joinedAt: payload.joinedAt,
   }
 }

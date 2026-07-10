@@ -145,6 +145,7 @@ mod tests {
             custom_status: None,
             bio: None,
             banner_url: None,
+            is_founding: false,
             created_at: now,
             updated_at: now,
         }

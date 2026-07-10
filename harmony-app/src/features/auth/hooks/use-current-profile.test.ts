@@ -24,6 +24,7 @@ const mockProfile: ProfileResponse = {
   avatarUrl: null,
   customStatus: null,
   status: 'online',
+  isFounding: false,
   createdAt: '2026-03-16T00:00:00.000Z',
   updatedAt: '2026-03-16T00:00:00.000Z',
 }

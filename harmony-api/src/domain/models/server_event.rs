@@ -146,6 +146,10 @@ pub struct MemberPayload {
     pub avatar_url: Option<String>,
     pub nickname: Option<String>,
     pub role: Role,
+    /// Whether this member holds the `founding` badge. Carried on the event so
+    /// a live cache update (join / role change) keeps the badge correct without
+    /// a refetch — a role change must not drop a founding member's badge.
+    pub is_founding: bool,
     pub joined_at: DateTime<Utc>,
 }
 

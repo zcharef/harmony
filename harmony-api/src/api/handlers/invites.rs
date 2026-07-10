@@ -271,6 +271,7 @@ pub async fn join_server(
                     avatar_url: member.avatar_url,
                     nickname: member.nickname,
                     role: member.role,
+                    is_founding: member.is_founding,
                     joined_at: member.joined_at,
                 },
             };

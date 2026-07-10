@@ -41,6 +41,7 @@ struct MemberRow {
     avatar_url: Option<String>,
     nickname: Option<String>,
     role: String,
+    is_founding: bool,
     joined_at: DateTime<Utc>,
 }
 
@@ -54,6 +55,7 @@ impl MemberRow {
             avatar_url: self.avatar_url,
             nickname: self.nickname,
             role: parse_role(&self.role)?,
+            is_founding: self.is_founding,
             joined_at: self.joined_at,
         })
     }
@@ -74,6 +76,10 @@ impl MemberRepository for PgMemberRepository {
                 p.avatar_url,
                 sm.nickname,
                 sm.role as "role!",
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = sm.user_id AND ub.badge = 'founding'
+                ) AS "is_founding!",
                 sm.joined_at
             FROM server_members sm
             INNER JOIN profiles p ON p.id = sm.user_id
@@ -96,6 +102,7 @@ impl MemberRepository for PgMemberRepository {
                     avatar_url: r.avatar_url,
                     nickname: r.nickname,
                     role: r.role,
+                    is_founding: r.is_founding,
                     joined_at: r.joined_at,
                 }
                 .into_member()
@@ -122,6 +129,10 @@ impl MemberRepository for PgMemberRepository {
                 p.avatar_url,
                 sm.nickname,
                 sm.role as "role!",
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = sm.user_id AND ub.badge = 'founding'
+                ) AS "is_founding!",
                 sm.joined_at
             FROM server_members sm
             INNER JOIN profiles p ON p.id = sm.user_id
@@ -148,6 +159,7 @@ impl MemberRepository for PgMemberRepository {
                     avatar_url: r.avatar_url,
                     nickname: r.nickname,
                     role: r.role,
+                    is_founding: r.is_founding,
                     joined_at: r.joined_at,
                 }
                 .into_member()
@@ -173,6 +185,10 @@ impl MemberRepository for PgMemberRepository {
                 p.avatar_url,
                 sm.nickname,
                 sm.role as "role!",
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = sm.user_id AND ub.badge = 'founding'
+                ) AS "is_founding!",
                 sm.joined_at
             FROM server_members sm
             INNER JOIN profiles p ON p.id = sm.user_id
@@ -194,6 +210,7 @@ impl MemberRepository for PgMemberRepository {
                 avatar_url: r.avatar_url,
                 nickname: r.nickname,
                 role: r.role,
+                is_founding: r.is_founding,
                 joined_at: r.joined_at,
             }
             .into_member()
@@ -603,6 +620,10 @@ impl MemberRepository for PgMemberRepository {
                 p.avatar_url,
                 sm.nickname,
                 sm.role as "role!",
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = sm.user_id AND ub.badge = 'founding'
+                ) AS "is_founding!",
                 sm.joined_at
             FROM server_members sm
             INNER JOIN profiles p ON p.id = sm.user_id
@@ -634,6 +655,7 @@ impl MemberRepository for PgMemberRepository {
                     avatar_url: r.avatar_url,
                     nickname: r.nickname,
                     role: r.role,
+                    is_founding: r.is_founding,
                     joined_at: r.joined_at,
                 }
                 .into_member()

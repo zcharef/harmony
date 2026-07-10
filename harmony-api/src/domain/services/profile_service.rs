@@ -2,10 +2,52 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use crate::domain::errors::DomainError;
 use crate::domain::models::{Profile, UserId};
 use crate::domain::ports::ProfileRepository;
 use crate::domain::services::content_filter::ContentFilter;
+
+/// The `founding` badge key stored in `user_badges`. Kept in sync with the
+/// backfill literal in `20260713100000_create_user_badges.sql`.
+pub const FOUNDING_BADGE: &str = "founding";
+
+/// How many accounts receive the founding badge (ticket §2 default: 500).
+/// `SSoT` for the live signup path; the migration backfill mirrors this literal.
+pub const FOUNDING_MAX_ACCOUNTS: i64 = 500;
+
+/// End of the founding grant window (launch-day + 30d, ticket §2).
+///
+/// `None` until Zayd sets the launch day (growth-plan §11): pre-launch there is
+/// no date cutoff, so only the count bound (`FOUNDING_MAX_ACCOUNTS`) governs.
+/// Wire this to `Some(launch + 30 days)` once the date is decided — the grant
+/// then stops at whichever bound (count OR date) is reached first.
+pub const FOUNDING_WINDOW_END: Option<DateTime<Utc>> = None;
+
+/// Whether an account qualifies for the founding badge.
+///
+/// The grant stops at the FIRST of two bounds (ticket §2): the first
+/// `max_accounts` accounts by signup order, OR accounts created on/before
+/// `window_end`. `account_index` is the 1-based position in signup order (the
+/// count of badges already granted, plus one). A qualifying account satisfies
+/// BOTH bounds — it signed up before either limit was hit. When `window_end`
+/// is `None` there is no active date cutoff and only the count bound applies.
+#[must_use]
+pub fn qualifies_as_founding(
+    account_index: i64,
+    created_at: DateTime<Utc>,
+    max_accounts: i64,
+    window_end: Option<DateTime<Utc>>,
+) -> bool {
+    if account_index > max_accounts {
+        return false;
+    }
+    match window_end {
+        Some(end) => created_at <= end,
+        None => true,
+    }
+}
 
 /// WHY: Prevent confusion with system roles and @mention keywords.
 /// Lives in the domain layer because username policy is business logic,
@@ -264,6 +306,40 @@ impl ProfileService {
             })
     }
 
+    /// Grant the founding-member badge to `user_id` if the cohort is still open.
+    ///
+    /// Idempotent: the badge grant is `ON CONFLICT DO NOTHING`, so re-running on
+    /// every login never double-grants. The cohort is open while fewer than
+    /// `FOUNDING_MAX_ACCOUNTS` accounts hold the badge and (once wired) the
+    /// launch window has not closed — see [`qualifies_as_founding`]. The count
+    /// of current holders is the signup-order cursor.
+    ///
+    /// # Errors
+    /// Returns a repository error if the count or grant query fails. Callers on
+    /// the login hot-path treat this as best-effort (log, never block signup).
+    pub async fn grant_founding_if_eligible(
+        &self,
+        user_id: &UserId,
+        created_at: DateTime<Utc>,
+    ) -> Result<(), DomainError> {
+        let granted = self.repo.count_badge_holders(FOUNDING_BADGE).await?;
+        let account_index = granted + 1;
+        if qualifies_as_founding(
+            account_index,
+            created_at,
+            FOUNDING_MAX_ACCOUNTS,
+            FOUNDING_WINDOW_END,
+        ) {
+            self.repo.grant_badge(user_id, FOUNDING_BADGE).await?;
+            tracing::info!(
+                user_id = %user_id,
+                account_index,
+                "granted founding-member badge"
+            );
+        }
+        Ok(())
+    }
+
     /// Update profile fields for the authenticated user.
     ///
     /// Each field is double-optional: outer `None` = not provided (unchanged),
@@ -433,6 +509,87 @@ mod tests {
     use super::*;
     use uuid::Uuid;
 
+    // ── founding-badge cohort gate (ticket §2 boundaries) ───────
+
+    #[test]
+    fn founding_nth_account_in_next_out() {
+        let created = Utc::now();
+        // First account is always in (count bound only).
+        assert!(qualifies_as_founding(
+            1,
+            created,
+            FOUNDING_MAX_ACCOUNTS,
+            None
+        ));
+        // The cap-th account (Nth in) still qualifies.
+        assert!(qualifies_as_founding(
+            FOUNDING_MAX_ACCOUNTS,
+            created,
+            FOUNDING_MAX_ACCOUNTS,
+            None
+        ));
+        // One past the cap (N+1 out) is rejected.
+        assert!(!qualifies_as_founding(
+            FOUNDING_MAX_ACCOUNTS + 1,
+            created,
+            FOUNDING_MAX_ACCOUNTS,
+            None
+        ));
+    }
+
+    #[test]
+    fn founding_window_cutoff_edge_is_inclusive() {
+        // Arbitrary fixed instant as the window end.
+        let end = DateTime::from_timestamp(1_800_000_000, 0).unwrap();
+        // Exactly on the boundary → in.
+        assert!(qualifies_as_founding(
+            1,
+            end,
+            FOUNDING_MAX_ACCOUNTS,
+            Some(end)
+        ));
+        // Just before → in.
+        assert!(qualifies_as_founding(
+            1,
+            end - chrono::Duration::seconds(1),
+            FOUNDING_MAX_ACCOUNTS,
+            Some(end)
+        ));
+        // Just after → out, even as account #1.
+        assert!(!qualifies_as_founding(
+            1,
+            end + chrono::Duration::seconds(1),
+            FOUNDING_MAX_ACCOUNTS,
+            Some(end)
+        ));
+    }
+
+    #[tokio::test]
+    async fn grant_founding_issues_below_cap_and_stops_at_cap() {
+        use std::sync::atomic::Ordering::SeqCst;
+
+        // 499 already granted → the 500th account receives the badge.
+        let repo = Arc::new(FakeProfileRepo::default());
+        repo.founding_holders.store(499, SeqCst);
+        let svc = ProfileService::new(repo.clone(), Arc::new(ContentFilter::noop()));
+        svc.grant_founding_if_eligible(&UserId::new(Uuid::from_u128(1)), Utc::now())
+            .await
+            .unwrap();
+        assert_eq!(repo.grant_calls.load(SeqCst), 1);
+
+        // Cohort full (cap already granted) → the next account is not granted.
+        let repo_full = Arc::new(FakeProfileRepo::default());
+        repo_full
+            .founding_holders
+            .store(FOUNDING_MAX_ACCOUNTS, SeqCst);
+        let svc_full = ProfileService::new(repo_full.clone(), Arc::new(ContentFilter::noop()));
+        svc_full
+            .grant_founding_if_eligible(&UserId::new(Uuid::from_u128(2)), Utc::now())
+            .await
+            .unwrap();
+        assert_eq!(repo_full.grant_calls.load(SeqCst), 0);
+    }
+
     // ── NotFound error construction ─────────────────────────────
 
     #[test]
@@ -558,6 +715,10 @@ mod tests {
     #[derive(Debug, Default)]
     struct FakeProfileRepo {
         update_username_calls: std::sync::atomic::AtomicUsize,
+        /// What `count_badge_holders` returns (seed the founding-grant gate).
+        founding_holders: std::sync::atomic::AtomicI64,
+        /// How many times `grant_badge` was invoked (founding-grant assertions).
+        grant_calls: std::sync::atomic::AtomicUsize,
     }
 
     fn dummy_profile(user_id: &UserId) -> Profile {
@@ -571,6 +732,7 @@ mod tests {
             custom_status: None,
             bio: None,
             banner_url: None,
+            is_founding: false,
             created_at: now,
             updated_at: now,
         }
@@ -628,6 +790,16 @@ mod tests {
         }
         async fn get_profiles_by_ids(&self, _ids: &[UserId]) -> Result<Vec<Profile>, DomainError> {
             Ok(vec![])
+        }
+        async fn count_badge_holders(&self, _badge: &str) -> Result<i64, DomainError> {
+            Ok(self
+                .founding_holders
+                .load(std::sync::atomic::Ordering::SeqCst))
+        }
+        async fn grant_badge(&self, _user_id: &UserId, _badge: &str) -> Result<(), DomainError> {
+            self.grant_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
         }
     }
 

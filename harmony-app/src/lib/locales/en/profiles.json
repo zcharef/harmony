@@ -9,5 +9,7 @@
   "loadFailedFull": "Couldn't load this profile",
   "retry": "Retry",
   "bannerAlt": "Profile banner",
-  "openCard": "Open {{name}}'s profile"
+  "openCard": "Open {{name}}'s profile",
+  "foundingTooltip": "Founding member — here since the beginning",
+  "foundingLabel": "Founding member"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                sm.user_id,\n                sm.server_id,\n                p.username,\n                p.display_name,\n                p.avatar_url,\n                sm.nickname,\n                sm.role as \"role!\",\n                sm.joined_at\n            FROM server_members sm\n            INNER JOIN profiles p ON p.id = sm.user_id\n            WHERE sm.server_id = $1\n              AND ($2::timestamptz IS NULL OR sm.joined_at < $2)\n            ORDER BY sm.joined_at DESC\n            LIMIT $3\n            ",
+  "query": "\n            SELECT\n                sm.user_id,\n                sm.server_id,\n                p.username,\n                p.display_name,\n                p.avatar_url,\n                sm.nickname,\n                sm.role as \"role!\",\n                EXISTS(\n                    SELECT 1 FROM user_badges ub\n                    WHERE ub.user_id = sm.user_id AND ub.badge = 'founding'\n                ) AS \"is_founding!\",\n                sm.joined_at\n            FROM server_members sm\n            INNER JOIN profiles p ON p.id = sm.user_id\n            WHERE sm.server_id = $1\n              AND ($2::timestamptz IS NULL OR sm.joined_at < $2)\n            ORDER BY sm.joined_at DESC\n            LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -40,6 +40,11 @@
       },
       {
         "ordinal": 7,
+        "name": "is_founding!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
         "name": "joined_at",
         "type_info": "Timestamptz"
       }
@@ -59,8 +64,9 @@
       true,
       true,
       false,
+      null,
       false
     ]
   },
-  "hash": "48b824b8a355596607c00b3bd8fb96971c6c6dde6bdb62a4f554e2f4d2c6f25a"
+  "hash": "e6128bd2b8eac7a5b4b3f74134e70b2f9ca0f8621eb1d5553f4aaff3960b4a99"
 }

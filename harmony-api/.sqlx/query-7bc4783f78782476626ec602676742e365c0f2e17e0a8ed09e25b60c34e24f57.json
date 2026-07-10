@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO profiles (id, username, status, display_name)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (id) DO UPDATE\n                SET id = profiles.id\n            RETURNING\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                bio,\n                banner_url,\n                created_at,\n                updated_at\n            ",
+  "query": "\n            UPDATE profiles\n            SET\n                username = $2,\n                updated_at = now()\n            WHERE id = $1\n            RETURNING\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                bio,\n                banner_url,\n                EXISTS(\n                    SELECT 1 FROM user_badges ub\n                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'\n                ) AS \"is_founding!\",\n                created_at,\n                updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -45,11 +45,16 @@
       },
       {
         "ordinal": 8,
+        "name": "is_founding!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -57,8 +62,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
-        "Text",
         "Text"
       ]
     },
@@ -71,9 +74,10 @@
       true,
       true,
       true,
+      null,
       false,
       false
     ]
   },
-  "hash": "8f8d070422469db610529a773c63a318206c4a6cd7eb32ac80113180acf24068"
+  "hash": "7bc4783f78782476626ec602676742e365c0f2e17e0a8ed09e25b60c34e24f57"
 }
