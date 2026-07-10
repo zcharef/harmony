@@ -139,6 +139,72 @@ describe('useSendMessage', () => {
     expect(Object.keys(body ?? {})).not.toContain('mentionedUserIds')
   })
 
+  it('includes attachments in the request body and seeds the optimistic message for instant render', async () => {
+    let resolveMutation!: (value: unknown) => void
+    vi.mocked(sendMessage).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMutation = resolve
+        }) as never,
+    )
+
+    const queryClient = createMutationTestClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    queryClient.setQueryData(messageKey, buildCacheData([]))
+
+    const wrapper = createQueryWrapper(queryClient)
+    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+      wrapper,
+    })
+
+    const attachment = {
+      url: 'https://cdn/storage/v1/object/public/attachments/user-1/pic.webp',
+      mime: 'image/webp',
+      size: 4096,
+      width: 800,
+      height: 600,
+    }
+    await act(async () => {
+      result.current.mutate({ content: '', attachments: [attachment] })
+    })
+
+    // Body carries the attachment (image-only message allowed, D10).
+    const body = vi.mocked(sendMessage).mock.calls[0]?.[0]?.body
+    expect(body?.attachments).toEqual([attachment])
+
+    // Optimistic message renders the sender's own image instantly (REACTIVITY).
+    const optimistic =
+      queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)?.pages[0]?.items[0]
+    expect(optimistic?.attachments).toHaveLength(1)
+    expect(optimistic?.attachments[0]?.url).toBe(attachment.url)
+    expect(optimistic?.attachments[0]?.width).toBe(800)
+    expect(optimistic?.attachments[0]?.id).toContain('temp-')
+
+    resolveMutation({ data: buildMessage({ id: 'msg-real' }) })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+  })
+
+  it('OMITS the attachments key entirely when there are none (never [] or null)', async () => {
+    const serverMessage = buildMessage({ id: 'msg-plain', content: 'hello' })
+    vi.mocked(sendMessage).mockResolvedValueOnce({ data: serverMessage } as never)
+
+    const queryClient = createMutationTestClient()
+    queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
+
+    const wrapper = createQueryWrapper(queryClient)
+    const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+      wrapper,
+    })
+
+    await act(async () => {
+      result.current.mutate({ content: 'hello' })
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    const body = vi.mocked(sendMessage).mock.calls[0]?.[0]?.body
+    expect(Object.keys(body ?? {})).not.toContain('attachments')
+  })
+
   it('seeds the optimistic message mentions from the composer map for instant pills', async () => {
     let resolveMutation!: (value: unknown) => void
     vi.mocked(sendMessage).mockImplementationOnce(

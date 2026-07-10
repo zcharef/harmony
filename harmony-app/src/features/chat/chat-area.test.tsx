@@ -211,10 +211,12 @@ describe('ChatArea mention wiring', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(sendMutate).toHaveBeenCalledTimes(1)
+    // WHY assert the first arg (not the whole call): handleSend now passes a
+    // second callbacks object (onSuccess clears the attachment tray).
     // WHY toMatchObject on mentions: the map stores the candidate object as-is
     // (a structural superset of MentionCandidate) — pin the fields the
     // optimistic message and the encrypted sidecar actually consume.
-    expect(sendMutate).toHaveBeenCalledWith({
+    expect(sendMutate.mock.calls[0]?.[0]).toEqual({
       content: `<@${MENTION_UUID}> hello`,
       parentMessageId: undefined,
       mentions: [expect.objectContaining({ userId: MENTION_UUID, username: 'alice' })],
