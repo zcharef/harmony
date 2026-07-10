@@ -150,4 +150,20 @@ describe('MigrationCenter', () => {
       expect(screen.getByText('Everyone who joined has taken part. Nothing to chase.')).toBeTruthy()
     })
   })
+
+  it('surfaces a cohort failure instead of the reassuring empty copy when the fetch errors', async () => {
+    // WHY (regression): a failed cohort fetch leaves items empty. Collapsing it
+    // into the 'empty' state would tell the owner "nothing to chase" while the
+    // intervention list silently failed to load (ADR-045 silent-failure).
+    getMigrationProgressMock.mockResolvedValue({ data: progressPayload })
+    listNotYetActiveCohortMock.mockRejectedValue({ status: 500, title: 'Server Error' })
+
+    renderCenter()
+
+    await waitFor(() => {
+      expect(screen.getByText('Could not load who still needs a nudge.')).toBeTruthy()
+    })
+    // The reassuring empty copy must NOT appear on a failed fetch.
+    expect(screen.queryByText('Everyone who joined has taken part. Nothing to chase.')).toBeNull()
+  })
 })

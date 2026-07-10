@@ -38,6 +38,7 @@
 
   "cohortTitle": "Members who joined but haven't participated",
   "cohortEmpty": "Everyone who joined has taken part. Nothing to chase.",
+  "cohortFailed": "Could not load who still needs a nudge.",
   "cohortCount": "{{count}} waiting",
   "joinedAt": "Joined {{date}}",
   "loadMore": "Show more",

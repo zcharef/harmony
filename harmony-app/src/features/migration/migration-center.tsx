@@ -70,6 +70,9 @@ export function MigrationCenter({ serverId }: MigrationCenterProps) {
         items={cohort.data?.items ?? []}
         total={cohort.data?.total ?? 0}
         isPending={cohort.isPending}
+        isError={cohort.isError}
+        onRetry={() => cohort.refetch()}
+        isRetrying={cohort.isRefetching}
       />
 
       <p className="text-xs text-default-400">{t('honestyNote')}</p>
@@ -210,19 +213,45 @@ function FollowThroughRow({ followThrough }: { followThrough: FollowThroughRespo
   )
 }
 
+type CohortStatus = 'loading' | 'error' | 'empty' | 'populated'
+
+// WHY a status discriminant with early returns (not a nested ternary or a
+// negation-combined boolean): the arch wall forbids complex boolean state
+// (CLAUDE.md 4.11 / ADR-045). isError is checked before empty so a failed
+// fetch never collapses into 'empty' — otherwise the reassuring "nothing to
+// chase" copy would paper over silent data loss (ADR-045).
+function getCohortStatus({
+  isPending,
+  isError,
+  items,
+}: {
+  isPending: boolean
+  isError: boolean
+  items: NotYetActiveMemberResponse[]
+}): CohortStatus {
+  if (isPending) return 'loading'
+  if (isError) return 'error'
+  if (items.length === 0) return 'empty'
+  return 'populated'
+}
+
 function CohortSection({
   items,
   total,
   isPending,
+  isError,
+  onRetry,
+  isRetrying,
 }: {
   items: NotYetActiveMemberResponse[]
   total: number
   isPending: boolean
+  isError: boolean
+  onRetry: () => void
+  isRetrying: boolean
 }) {
   const { t } = useTranslation('migration')
-  // WHY a status discriminant (not chained !isPending && …): the arch wall
-  // forbids negation-combined boolean state (CLAUDE.md 4.11 / ADR-045).
-  const status = isPending ? 'loading' : items.length === 0 ? 'empty' : 'populated'
+  const status = getCohortStatus({ isPending, isError, items })
 
   return (
     <section data-test="migration-cohort" className="rounded-large border border-divider p-4">
@@ -237,6 +266,15 @@ function CohortSection({
         <div className="flex justify-center py-6">
           <Spinner size="sm" />
         </div>
+      )}
+
+      {status === 'error' && (
+        <ErrorState
+          icon={<Users className="h-8 w-8" />}
+          message={t('cohortFailed')}
+          onRetry={onRetry}
+          isRetrying={isRetrying}
+        />
       )}
 
       {status === 'empty' && (
