@@ -398,7 +398,9 @@ export function LoginPage() {
           email,
           options: {
             shouldCreateUser: false,
-            emailRedirectTo: `${window.location.origin}/`,
+            // WHY pathname: preserves the in-flight flow (e.g. /invite/:code)
+            // through the email round-trip; on normal pages this is "/".
+            emailRedirectTo: `${window.location.origin}${window.location.pathname}`,
           },
         })
         .catch((err: unknown) => {
@@ -461,6 +463,12 @@ export function LoginPage() {
               options: {
                 captchaToken,
                 data: signupMetadata,
+                // WHY: the email-confirmation link must land the user back on
+                // the page where signup started (e.g. /invite/:code) so the
+                // invite flow can resume. On normal pages this is "/".
+                // NOTE: the target must be allowlisted in Supabase Auth
+                // Redirect URLs (add https://app.joinharmony.app/invite/*).
+                emailRedirectTo: `${window.location.origin}${window.location.pathname}`,
               },
             })
 

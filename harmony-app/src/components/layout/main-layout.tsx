@@ -407,9 +407,19 @@ function OnboardingView({
   )
 }
 
-export function MainLayout() {
+interface MainLayoutProps {
+  /**
+   * Server to preselect on mount (e.g. just joined via the invite landing).
+   * WHY a prop (not localStorage): the invite flow finishes BEFORE MainLayout
+   * mounts, and the auto-select effect only fills a null selection — an
+   * initial value deterministically wins over the last-used fallback.
+   */
+  initialServerId?: string | null
+}
+
+export function MainLayout({ initialServerId = null }: MainLayoutProps) {
   const [view, setView] = useState<ViewMode>('servers')
-  const [selectedServerId, setSelectedServerId] = useState<string | null>(null)
+  const [selectedServerId, setSelectedServerId] = useState<string | null>(initialServerId)
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null)
 
   // WHY: Derive server/channel names from query cache to display in headers.

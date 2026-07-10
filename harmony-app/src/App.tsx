@@ -1,5 +1,6 @@
 import { HeroUIProvider, Spinner, ToastProvider } from '@heroui/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useState } from 'react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { FeatureErrorBoundary } from '@/components/shared/error-boundary'
 import { UpdateNotification } from '@/components/shared/update-notification'
@@ -12,10 +13,12 @@ import {
   VerifyEmailScreen,
 } from '@/features/auth'
 import { CryptoProvider } from '@/features/crypto'
+import { getInviteCodeFromPath, InviteLandingPage } from '@/features/invite'
 import { useAppUpdater } from '@/hooks/use-app-updater'
 import { useDockBadge } from '@/hooks/use-dock-badge'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { useFaviconBadge } from '@/hooks/use-favicon-badge'
+import { ROUTES } from '@/lib/routes'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -50,12 +53,34 @@ function AppContent() {
   const isLoggedIn = !isLoading && session !== null
   const update = useAppUpdater(isLoggedIn)
 
+  // WHY: /invite/:code is the only "route" rendered outside the main shell
+  // (the app has no client-side router — ADR-033 constants + location checks).
+  // `inviteResult` flips once the flow finishes so the shell can mount with
+  // the joined server preselected.
+  const inviteCode = getInviteCodeFromPath(window.location.pathname)
+  const [inviteResult, setInviteResult] = useState<{ serverId: string | null } | null>(null)
+  const isInviteFlow = inviteCode !== null && inviteResult === null
+
+  function handleInviteDone(serverId: string | null) {
+    // WHY replaceState: leave /invite/:code without a reload and without
+    // polluting history — Back must not re-trigger the join flow.
+    window.history.replaceState(null, '', ROUTES.home())
+    setInviteResult({ serverId })
+  }
+
   if (isLoading) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <Spinner size="lg" color="primary" />
       </div>
     )
+  }
+
+  // WHY before the LoginPage gate: the invitee must see server context
+  // BEFORE being asked to sign up (invite-landing ticket). The page itself
+  // escalates to LoginPage on "Accept invite".
+  if (isInviteFlow && session === null) {
+    return <InviteLandingPage code={inviteCode} onDone={handleInviteDone} />
   }
 
   if (session === null) {
@@ -87,13 +112,19 @@ function AppContent() {
     return <DesktopAuthRedirect />
   }
 
+  // WHY after email-confirm/password-recovery gates: an authed invitee must
+  // still satisfy account safety gates before joining a server.
+  if (isInviteFlow) {
+    return <InviteLandingPage code={inviteCode} onDone={handleInviteDone} />
+  }
+
   // WHY: Inline narrowing so TypeScript knows updateInfo is non-null inside the JSX.
   const readyUpdate = update.status === 'ready' && !update.dismissed ? update.updateInfo : null
 
   return (
     <>
       <UnreadBadges />
-      <MainLayout />
+      <MainLayout initialServerId={inviteResult?.serverId ?? null} />
       {readyUpdate !== null && (
         <UpdateNotification
           version={readyUpdate.version}
