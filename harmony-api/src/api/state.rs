@@ -102,6 +102,10 @@ pub struct AppState {
     official_server_id: Option<ServerId>,
     /// Append-only analytics event recorder (growth-plan §10 funnel).
     analytics_recorder: Arc<dyn AnalyticsRecorder>,
+    /// Normalized Supabase origin (`scheme://host[:port]`) that attachment
+    /// URLs must live on. Derived from `SUPABASE_URL` at startup. `None` =
+    /// unconfigured → attachment validation FAILS CLOSED (rejects all).
+    attachment_url_origin: Option<String>,
 }
 
 // WHY: Manual Debug because `dyn MemberRepository` needs explicit impl through Arc.
@@ -149,6 +153,7 @@ impl std::fmt::Debug for AppState {
             )
             .field("official_server_id", &self.official_server_id)
             .field("analytics_recorder", &self.analytics_recorder)
+            .field("attachment_url_origin", &self.attachment_url_origin)
             .finish()
     }
 }
@@ -192,6 +197,7 @@ impl AppState {
         voice_session_repository: Option<Arc<dyn VoiceSessionRepository>>,
         official_server_id: Option<ServerId>,
         analytics_recorder: Arc<dyn AnalyticsRecorder>,
+        attachment_url_origin: Option<String>,
     ) -> Self {
         Self {
             pool,
@@ -229,7 +235,15 @@ impl AppState {
             voice_session_repository,
             official_server_id,
             analytics_recorder,
+            attachment_url_origin,
         }
+    }
+
+    /// Normalized Supabase origin attachment URLs are pinned to.
+    /// `None` = unconfigured — `NewAttachment::try_new` then fails closed.
+    #[must_use]
+    pub fn attachment_url_origin(&self) -> Option<&str> {
+        self.attachment_url_origin.as_deref()
     }
 
     /// Access the profile domain service.

@@ -22,6 +22,9 @@ tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "time
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# URL parsing (attachment origin/path validation — WHATWG parser, no ad-hoc string checks)
+url = "2"
+
 # OpenAPI (Code-First) - Rust structs are SSoT
 utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
 utoipa-swagger-ui = { version = "9", features = ["axum", "vendored"] }

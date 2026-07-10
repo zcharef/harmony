@@ -4,10 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use crate::domain::errors::DomainError;
 use crate::domain::models::{
     Attachment, AttachmentId, ChannelId, MentionedUser, MessageId, MessageType, MessageWithAuthor,
-    NewAttachment, ParentMessagePreview, ReactionSummary, UserId,
+    ParentMessagePreview, ReactionSummary, UserId,
 };
 
 /// Request body for sending a new message.
@@ -66,14 +65,12 @@ pub struct NewAttachmentRequest {
     pub height: Option<i32>,
 }
 
-impl TryFrom<NewAttachmentRequest> for NewAttachment {
-    type Error = DomainError;
-
-    fn try_from(req: NewAttachmentRequest) -> Result<Self, Self::Error> {
-        NewAttachment::try_new(req.url, req.mime, req.size, req.width, req.height)
-            .map_err(|msg| DomainError::ValidationError(msg.to_string()))
-    }
-}
+// NOTE (deliberate ADR-023 deviation): there is no `TryFrom<NewAttachmentRequest>
+// for NewAttachment`. The validation needs request context a `TryFrom` cannot
+// carry — the authenticated author id and the configured Supabase origin — so
+// the handler calls `NewAttachment::try_new` directly (same pattern as
+// `DeviceId::try_new` in `handlers/keys.rs`). Validation tests live next to
+// the funnel in `domain/models/message.rs`.
 
 /// Request body for editing a message.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -343,91 +340,11 @@ mod tests {
     }
 
     // ── Attachments (T1.3) ───────────────────────────────────────────
+    // URL/mime/size validation tests live next to the funnel
+    // (`NewAttachment::try_new`) in `domain/models/message.rs`.
 
     const VALID_ATTACHMENT_URL: &str =
         "https://xyz.supabase.co/storage/v1/object/public/attachments/user-uuid/file-uuid.webp";
-
-    fn attachment_request(url: &str, mime: &str, size: i64) -> NewAttachmentRequest {
-        NewAttachmentRequest {
-            url: url.to_string(),
-            mime: mime.to_string(),
-            size,
-            width: Some(800),
-            height: Some(600),
-        }
-    }
-
-    /// The `TryFrom` funnel accepts a well-formed attachments-bucket URL.
-    #[test]
-    fn attachment_try_from_accepts_bucket_url() {
-        let result =
-            NewAttachment::try_from(attachment_request(VALID_ATTACHMENT_URL, "image/webp", 1024));
-        let attachment = result.unwrap();
-        assert_eq!(attachment.url, VALID_ATTACHMENT_URL);
-        assert_eq!(attachment.width, Some(800));
-    }
-
-    /// WHY: a client must not be able to persist an arbitrary external URL as
-    /// an "attachment" — only attachments-bucket public URLs pass.
-    #[test]
-    fn attachment_try_from_rejects_external_url() {
-        let result = NewAttachment::try_from(attachment_request(
-            "https://evil.example.com/image.png",
-            "image/png",
-            1024,
-        ));
-        assert!(matches!(result, Err(DomainError::ValidationError(_))));
-    }
-
-    /// WHY: the avatars bucket is NOT the attachments bucket — its URLs are
-    /// rejected so avatar objects can't masquerade as message attachments.
-    #[test]
-    fn attachment_try_from_rejects_other_bucket_url() {
-        let result = NewAttachment::try_from(attachment_request(
-            "https://xyz.supabase.co/storage/v1/object/public/avatars/uid/file.webp",
-            "image/webp",
-            1024,
-        ));
-        assert!(matches!(result, Err(DomainError::ValidationError(_))));
-    }
-
-    /// Non-http(s) schemes never pass, even with the marker embedded.
-    #[test]
-    fn attachment_try_from_rejects_non_http_scheme() {
-        let result = NewAttachment::try_from(attachment_request(
-            "javascript:alert(1)///storage/v1/object/public/attachments/x",
-            "image/png",
-            1024,
-        ));
-        assert!(matches!(result, Err(DomainError::ValidationError(_))));
-    }
-
-    /// Mime must be on the bucket allowlist.
-    #[test]
-    fn attachment_try_from_rejects_unlisted_mime() {
-        let result = NewAttachment::try_from(attachment_request(
-            VALID_ATTACHMENT_URL,
-            "application/x-msdownload",
-            1024,
-        ));
-        assert!(matches!(result, Err(DomainError::ValidationError(_))));
-    }
-
-    /// Size must be strictly positive.
-    #[test]
-    fn attachment_try_from_rejects_non_positive_size() {
-        for size in [0, -1] {
-            let result = NewAttachment::try_from(attachment_request(
-                VALID_ATTACHMENT_URL,
-                "image/png",
-                size,
-            ));
-            assert!(
-                matches!(result, Err(DomainError::ValidationError(_))),
-                "size {size} must be rejected"
-            );
-        }
-    }
 
     /// `attachments` rides the response in camelCase; absent dims are omitted.
     #[test]

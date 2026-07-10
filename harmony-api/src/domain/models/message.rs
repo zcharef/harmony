@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use url::Url;
 use utoipa::ToSchema;
 
 use super::ids::{AttachmentId, ChannelId, MessageId, UserId};
@@ -99,13 +100,14 @@ pub const ALLOWED_ATTACHMENT_MIME: &[&str] = &[
     "audio/wav",
 ];
 
-/// Public URL marker for objects in the `attachments` storage bucket.
+/// Public URL *path prefix* for objects in the `attachments` storage bucket.
 ///
-/// WHY a marker (not a full-origin prefix): the domain layer has no access to
-/// the Supabase URL config (hexagonal purity), and the client mirror
-/// (`parseAttachmentStoragePath`) matches the same substring. The check stops
-/// arbitrary external URLs from being persisted as "attachments"; the bucket
-/// RLS + uuid paths are the actual security boundary (ticket decision D6).
+/// `NewAttachment::try_new` requires the parsed URL PATH to start with this
+/// prefix (never a substring match — a substring is trivially satisfiable in
+/// a query string or mid-path on an attacker host) AND the URL origin to
+/// equal the configured Supabase origin. The client mirror
+/// (`parseAttachmentStoragePath`) matches the same string when parsing its
+/// own uploaded URLs (non-security use).
 pub const ATTACHMENT_PUBLIC_PATH_MARKER: &str = "/storage/v1/object/public/attachments/";
 
 /// A file attached to a message (persisted row).
@@ -142,18 +144,55 @@ pub struct NewAttachment {
 impl NewAttachment {
     /// Validated construction for an attachment reference.
     ///
+    /// The URL must be a public `attachments`-bucket object on OUR Supabase
+    /// instance, uploaded by the message author:
+    /// - `allowed_origin` is the configured Supabase origin
+    ///   (`scheme://host[:port]`, threaded in from config by the caller —
+    ///   the domain layer holds no config). `None` FAILS CLOSED: without a
+    ///   pinned origin any host could serve the bucket path, so attachments
+    ///   are rejected outright rather than accepted unverified.
+    /// - The parsed PATH must start with [`ATTACHMENT_PUBLIC_PATH_MARKER`] —
+    ///   a substring match would pass the marker in a query string or
+    ///   mid-path on a foreign host.
+    /// - The first path segment after the marker must be the author's user
+    ///   id: the bucket's INSERT RLS only lets a user write under their own
+    ///   `{auth.uid()}/…` prefix, so a legit upload always satisfies this
+    ///   and a foreign object (another user's upload) never does.
+    ///
     /// # Errors
-    /// Returns a static message when the URL is not an `attachments`-bucket
-    /// public URL, the mime is not allowlisted, or the size is not positive.
+    /// Returns a static message when any of the URL checks above fail, the
+    /// mime is not allowlisted, or the size is not positive.
     pub fn try_new(
         url: String,
         mime: String,
         size: i64,
         width: Option<i32>,
         height: Option<i32>,
+        author_id: &UserId,
+        allowed_origin: Option<&str>,
     ) -> Result<Self, &'static str> {
-        let is_https = url.starts_with("https://") || url.starts_with("http://");
-        if !is_https || !url.contains(ATTACHMENT_PUBLIC_PATH_MARKER) {
+        let Some(allowed_origin) = allowed_origin else {
+            return Err("Attachments are unavailable: storage origin is not configured");
+        };
+        let parsed = Url::parse(&url).map_err(|_| "Invalid attachment URL")?;
+        // WHY an explicit scheme allowlist even though the origin is compared
+        // below: opaque origins (data:, file:, javascript:) all serialize to
+        // "null" — two "null"s would compare equal if the configured origin
+        // were ever degenerate. http(s) origins are never opaque.
+        if parsed.scheme() != "https" && parsed.scheme() != "http" {
+            return Err("Invalid attachment URL");
+        }
+        if parsed.origin().ascii_serialization() != allowed_origin {
+            return Err("Invalid attachment URL");
+        }
+        let Some(object_path) = parsed.path().strip_prefix(ATTACHMENT_PUBLIC_PATH_MARKER) else {
+            return Err("Invalid attachment URL");
+        };
+        let mut segments = object_path.split('/');
+        if segments.next().unwrap_or("") != author_id.to_string() {
+            return Err("Attachment URL must reference the sender's upload folder");
+        }
+        if !segments.any(|segment| !segment.is_empty()) {
             return Err("Invalid attachment URL");
         }
         if !ALLOWED_ATTACHMENT_MIME.contains(&mime.as_str()) {
@@ -188,4 +227,178 @@ pub struct ParentMessagePreview {
     /// `author_username` and `content_preview` are empty when deleted
     /// to avoid leaking content or identity.
     pub deleted: bool,
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::*;
+
+    /// The origin every valid fixture URL lives on.
+    const ORIGIN: &str = "https://xyz.supabase.co";
+
+    fn author() -> UserId {
+        UserId::new(Uuid::new_v4())
+    }
+
+    fn bucket_url(author_id: &UserId) -> String {
+        format!("{ORIGIN}{ATTACHMENT_PUBLIC_PATH_MARKER}{author_id}/file-uuid.webp")
+    }
+
+    fn try_new(
+        url: &str,
+        mime: &str,
+        size: i64,
+        author_id: &UserId,
+    ) -> Result<NewAttachment, &'static str> {
+        NewAttachment::try_new(
+            url.to_string(),
+            mime.to_string(),
+            size,
+            Some(800),
+            Some(600),
+            author_id,
+            Some(ORIGIN),
+        )
+    }
+
+    #[test]
+    fn try_new_accepts_own_bucket_url_on_configured_origin() {
+        let author_id = author();
+        let url = bucket_url(&author_id);
+        let attachment = try_new(&url, "image/webp", 1024, &author_id).unwrap();
+        assert_eq!(attachment.url, url);
+        assert_eq!(attachment.width, Some(800));
+    }
+
+    /// Regression (review finding): the bucket path marker on a FOREIGN host
+    /// must not pass — the old substring check accepted this.
+    #[test]
+    fn try_new_rejects_marker_in_path_on_foreign_host() {
+        let author_id = author();
+        let url =
+            format!("https://evil.example.com{ATTACHMENT_PUBLIC_PATH_MARKER}{author_id}/x.png");
+        assert_eq!(
+            try_new(&url, "image/png", 1024, &author_id),
+            Err("Invalid attachment URL")
+        );
+    }
+
+    /// Regression (review finding): the marker in the QUERY STRING must not
+    /// pass — the old substring check accepted this too.
+    #[test]
+    fn try_new_rejects_marker_in_query_string() {
+        let author_id = author();
+        for host in ["https://evil.com", ORIGIN] {
+            let url = format!("{host}/mal.bin?{ATTACHMENT_PUBLIC_PATH_MARKER}");
+            assert!(
+                try_new(&url, "image/png", 1024, &author_id).is_err(),
+                "query-string marker must be rejected on {host}"
+            );
+        }
+    }
+
+    /// The marker mid-path (not a path PREFIX) never passes, even on our origin.
+    #[test]
+    fn try_new_rejects_marker_mid_path() {
+        let author_id = author();
+        let url = format!("{ORIGIN}/prefix{ATTACHMENT_PUBLIC_PATH_MARKER}{author_id}/x.png");
+        assert_eq!(
+            try_new(&url, "image/png", 1024, &author_id),
+            Err("Invalid attachment URL")
+        );
+    }
+
+    /// Another bucket (avatars) on our origin is not the attachments bucket.
+    #[test]
+    fn try_new_rejects_other_bucket_url() {
+        let author_id = author();
+        let url = format!("{ORIGIN}/storage/v1/object/public/avatars/{author_id}/file.webp");
+        assert!(try_new(&url, "image/webp", 1024, &author_id).is_err());
+    }
+
+    /// Non-http(s) schemes never pass, even with the marker embedded.
+    #[test]
+    fn try_new_rejects_non_http_scheme() {
+        let author_id = author();
+        let url = format!("javascript:alert(1)//{ATTACHMENT_PUBLIC_PATH_MARKER}x");
+        assert!(try_new(&url, "image/png", 1024, &author_id).is_err());
+    }
+
+    /// A URL under ANOTHER user's `{uid}/` prefix is rejected: the bucket
+    /// INSERT RLS binds uploads to the uploader's folder, so the author of
+    /// the message must own the referenced object.
+    #[test]
+    fn try_new_rejects_other_users_upload_folder() {
+        let author_id = author();
+        let other = author();
+        let url = bucket_url(&other);
+        assert_eq!(
+            try_new(&url, "image/webp", 1024, &author_id),
+            Err("Attachment URL must reference the sender's upload folder")
+        );
+    }
+
+    /// The bucket prefix alone (no object segment) is not a valid object URL.
+    #[test]
+    fn try_new_rejects_missing_object_segment() {
+        let author_id = author();
+        for url in [
+            format!("{ORIGIN}{ATTACHMENT_PUBLIC_PATH_MARKER}{author_id}"),
+            format!("{ORIGIN}{ATTACHMENT_PUBLIC_PATH_MARKER}{author_id}/"),
+        ] {
+            assert!(
+                try_new(&url, "image/webp", 1024, &author_id).is_err(),
+                "{url} must be rejected"
+            );
+        }
+    }
+
+    /// FAIL CLOSED: without a configured storage origin, no URL is verifiable,
+    /// so every attachment is rejected (never accepted unverified).
+    #[test]
+    fn try_new_fails_closed_without_configured_origin() {
+        let author_id = author();
+        let url = bucket_url(&author_id);
+        let result = NewAttachment::try_new(
+            url,
+            "image/webp".to_string(),
+            1024,
+            None,
+            None,
+            &author_id,
+            None,
+        );
+        assert_eq!(
+            result,
+            Err("Attachments are unavailable: storage origin is not configured")
+        );
+    }
+
+    /// Mime must be on the bucket allowlist.
+    #[test]
+    fn try_new_rejects_unlisted_mime() {
+        let author_id = author();
+        let url = bucket_url(&author_id);
+        assert_eq!(
+            try_new(&url, "application/x-msdownload", 1024, &author_id),
+            Err("Unsupported attachment type")
+        );
+    }
+
+    /// Size must be strictly positive.
+    #[test]
+    fn try_new_rejects_non_positive_size() {
+        let author_id = author();
+        let url = bucket_url(&author_id);
+        for size in [0, -1] {
+            assert_eq!(
+                try_new(&url, "image/png", size, &author_id),
+                Err("Attachment size must be positive"),
+                "size {size} must be rejected"
+            );
+        }
+    }
 }

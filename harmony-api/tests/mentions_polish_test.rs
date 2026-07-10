@@ -236,6 +236,7 @@ async fn build_app_state(pool: PgPool) -> AppState {
         None, // voice_session_repository
         None, // official_server_id
         analytics_recorder,
+        Some("https://test.supabase.co".to_string()), // attachment_url_origin
     )
 }
 

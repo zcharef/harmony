@@ -26,7 +26,9 @@ use harmony_api::infra::postgres::{
     PgPlanLimitChecker, PgReactionRepository,
 };
 
-const ATTACHMENT_URL: &str = "https://test.supabase.co/storage/v1/object/public/attachments/00000000-0000-0000-0000-000000000000/file.webp";
+/// Origin every fixture URL lives on — passed to `try_new` as the pinned
+/// storage origin (mirrors `SUPABASE_URL` in a deployed environment).
+const ATTACHMENT_ORIGIN: &str = "https://test.supabase.co";
 
 // ── DB pool (mirrors mentions_test) ──────────────────────────────────────
 
@@ -119,13 +121,27 @@ async fn cleanup(pool: &PgPool, servers: &[Uuid], users: &[Uuid]) {
         .await;
 }
 
-fn attachment(url: &str, mime: &str, size: i64, dims: Option<(i32, i32)>) -> NewAttachment {
+/// Builds a valid public-bucket URL under the OWNER's upload folder — the
+/// validation funnel requires the `{uid}/` prefix to match the author.
+fn attachment_url(owner: Uuid, file: &str) -> String {
+    format!("{ATTACHMENT_ORIGIN}/storage/v1/object/public/attachments/{owner}/{file}")
+}
+
+fn attachment(
+    owner: Uuid,
+    file: &str,
+    mime: &str,
+    size: i64,
+    dims: Option<(i32, i32)>,
+) -> NewAttachment {
     NewAttachment::try_new(
-        url.to_string(),
+        attachment_url(owner, file),
         mime.to_string(),
         size,
         dims.map(|(w, _)| w),
         dims.map(|(_, h)| h),
+        &UserId::new(owner),
+        Some(ATTACHMENT_ORIGIN),
     )
     .expect("valid attachment fixture")
 }
@@ -158,9 +174,8 @@ async fn send_persists_attachments_atomically_and_in_order() {
     let server = seed_server(&pool, owner).await;
     let channel = seed_channel(&pool, server, false).await;
 
-    let first = attachment(ATTACHMENT_URL, "image/webp", 1024, Some((800, 600)));
-    let second_url = ATTACHMENT_URL.replace("file.webp", "doc.pdf");
-    let second = attachment(&second_url, "application/pdf", 2048, None);
+    let first = attachment(owner, "file.webp", "image/webp", 1024, Some((800, 600)));
+    let second = attachment(owner, "doc.pdf", "application/pdf", 2048, None);
 
     let sent = repo
         .send_to_channel(
@@ -226,7 +241,8 @@ async fn batch_for_messages_maps_attachments_to_the_right_message() {
     for (i, with_attachment) in [(0, true), (1, false), (2, true)] {
         let attachments = if with_attachment {
             vec![attachment(
-                &ATTACHMENT_URL.replace("file.webp", &format!("f{i}.webp")),
+                owner,
+                &format!("f{i}.webp"),
                 "image/webp",
                 512,
                 Some((10, 10)),
@@ -294,8 +310,8 @@ async fn free_plan_rejects_second_attachment_and_oversized_file() {
             None,
             None,
             vec![
-                attachment(ATTACHMENT_URL, "image/webp", 1024, Some((1, 1))),
-                attachment(ATTACHMENT_URL, "image/webp", 1024, Some((1, 1))),
+                attachment(owner, "file.webp", "image/webp", 1024, Some((1, 1))),
+                attachment(owner, "file.webp", "image/webp", 1024, Some((1, 1))),
             ],
         )
         .await;
@@ -315,7 +331,8 @@ async fn free_plan_rejects_second_attachment_and_oversized_file() {
             None,
             None,
             vec![attachment(
-                ATTACHMENT_URL,
+                owner,
+                "file.webp",
                 "image/webp",
                 8_388_609,
                 Some((1, 1)),
@@ -337,7 +354,13 @@ async fn free_plan_rejects_second_attachment_and_oversized_file() {
             None,
             None,
             None,
-            vec![attachment(ATTACHMENT_URL, "image/webp", 1024, Some((1, 1)))],
+            vec![attachment(
+                owner,
+                "file.webp",
+                "image/webp",
+                1024,
+                Some((1, 1)),
+            )],
         )
         .await
         .expect("one small attachment allowed on Free");
@@ -368,7 +391,13 @@ async fn image_only_message_is_valid_and_empty_both_is_rejected() {
             None,
             None,
             None,
-            vec![attachment(ATTACHMENT_URL, "image/webp", 1024, Some((4, 4)))],
+            vec![attachment(
+                owner,
+                "file.webp",
+                "image/webp",
+                1024,
+                Some((4, 4)),
+            )],
         )
         .await
         .expect("image-only message accepted");
@@ -412,7 +441,13 @@ async fn encrypted_message_with_attachments_is_rejected() {
             Some("DEVICE1".to_string()),
             None,
             None,
-            vec![attachment(ATTACHMENT_URL, "image/webp", 1024, Some((1, 1)))],
+            vec![attachment(
+                owner,
+                "file.webp",
+                "image/webp",
+                1024,
+                Some((1, 1)),
+            )],
         )
         .await;
     assert!(
@@ -447,7 +482,13 @@ async fn soft_delete_retains_rows_and_hard_delete_cascades() {
             None,
             None,
             vec![],
-            vec![attachment(ATTACHMENT_URL, "image/webp", 512, Some((2, 2)))],
+            vec![attachment(
+                owner,
+                "file.webp",
+                "image/webp",
+                512,
+                Some((2, 2)),
+            )],
             0,
         )
         .await
@@ -529,7 +570,13 @@ async fn message_attachments_rls_is_enabled_with_select_policy() {
             None,
             None,
             vec![],
-            vec![attachment(ATTACHMENT_URL, "image/webp", 256, Some((1, 1)))],
+            vec![attachment(
+                owner,
+                "file.webp",
+                "image/webp",
+                256,
+                Some((1, 1)),
+            )],
             0,
         )
         .await

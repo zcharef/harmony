@@ -1375,6 +1375,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "unicode-normalization",
+ "url",
  "utoipa",
  "utoipa-swagger-ui",
  "uuid",

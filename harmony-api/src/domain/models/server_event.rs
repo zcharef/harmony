@@ -15,12 +15,45 @@ use super::ChannelType;
 use super::MentionedUser;
 use super::MessageWithAuthor;
 use super::UserStatus;
-use super::ids::{ChannelId, MessageId, ServerId, UserId};
+use super::ids::{AttachmentId, ChannelId, MessageId, ServerId, UserId};
 use super::message::MessageType;
 use super::role::Role;
 use super::voice_session::VoiceAction;
 
 // ── Payload structs ──────────────────────────────────────────────
+
+/// Slim attachment shape for the SSE wire.
+///
+/// WHY not the full domain [`Attachment`]: `message_id` and `created_at` are
+/// wire-dead weight (the client schema never read them) and every byte counts
+/// against the 7500-byte `pg_notify` envelope cap — a max-attachments message
+/// must stay deliverable cross-instance. Dims are omitted (not `null`) when
+/// absent for the same reason.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentPayload {
+    pub id: AttachmentId,
+    pub url: String,
+    pub mime: String,
+    pub size: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<i32>,
+}
+
+impl From<Attachment> for AttachmentPayload {
+    fn from(a: Attachment) -> Self {
+        Self {
+            id: a.id,
+            url: a.url,
+            mime: a.mime,
+            size: a.size,
+            width: a.width,
+            height: a.height,
+        }
+    }
+}
 
 /// Message payload embedded in message events.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -57,22 +90,29 @@ pub struct MessagePayload {
     /// deserialize it (empty mentions) instead of dropping the event.
     #[serde(default)]
     pub mentions: Vec<MentionedUser>,
-    /// Files attached to this message. Rides both `message.created` and
-    /// `message.updated` so every reader renders attachments live, no refetch.
+    /// Files attached to this message (slim wire shape). Rides both
+    /// `message.created` and `message.updated` so every reader renders
+    /// attachments live, no refetch.
     ///
     /// WHY `default`: same rollout reasoning as `mentions` — an older instance
     /// publishes this payload WITHOUT the field over `pg_notify`; `default`
     /// lets a new instance deserialize it (empty attachments) instead of
     /// dropping the event. No new `ServerEvent` variant (ticket decision D9).
+    /// An oversize envelope sheds this field before `pg_notify` (see
+    /// [`ServerEvent::shed_attachments`]) rather than dropping the event.
     #[serde(default)]
-    pub attachments: Vec<Attachment>,
+    pub attachments: Vec<AttachmentPayload>,
     pub created_at: DateTime<Utc>,
 }
 
 impl From<MessageWithAuthor> for MessagePayload {
     fn from(mwa: MessageWithAuthor) -> Self {
         let mentions = mwa.mentions;
-        let attachments = mwa.attachments;
+        let attachments = mwa
+            .attachments
+            .into_iter()
+            .map(AttachmentPayload::from)
+            .collect();
         let m = mwa.message;
         Self {
             id: m.id,
@@ -636,6 +676,30 @@ impl ServerEvent {
             | Self::ForceDisconnect { .. } => {}
         }
     }
+
+    /// Drop the attachments payload from a message event. Returns `true`
+    /// when something was actually shed.
+    ///
+    /// WHY: last-resort degradation for the 7500-byte `pg_notify` envelope
+    /// cap. A max-attachments + long-caption message can exceed the cap; the
+    /// notify worker sheds the attachments and re-serializes so REMOTE
+    /// instances still deliver the message (text renders live, attachments
+    /// heal on the next REST fetch/reconnect invalidation) instead of
+    /// silently losing the whole event cross-instance. Local subscribers are
+    /// unaffected — they receive the full event via the broadcast channel.
+    pub fn shed_attachments(&mut self) -> bool {
+        match self {
+            Self::MessageCreated { message, .. } | Self::MessageUpdated { message, .. } => {
+                if message.attachments.is_empty() {
+                    false
+                } else {
+                    message.attachments.clear();
+                    true
+                }
+            }
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1120,18 +1184,18 @@ mod tests {
 
     /// Attachments survive the cross-instance (`pg_notify`) serde round-trip
     /// in camelCase — this is what makes SSE-live rendering possible without
-    /// a refetch (hard requirement: reactivity).
+    /// a refetch (hard requirement: reactivity). The wire shape is SLIM:
+    /// `messageId`/`createdAt` must NOT ride the envelope (dead weight against
+    /// the 7500-byte `pg_notify` cap; the client schema never read them).
     #[test]
     fn message_payload_attachments_round_trip() {
-        let attachment = Attachment {
+        let attachment = AttachmentPayload {
             id: crate::domain::models::AttachmentId::new(Uuid::new_v4()),
-            message_id: MessageId::new(Uuid::new_v4()),
             url: "https://x.supabase.co/storage/v1/object/public/attachments/u/f.webp".to_string(),
             mime: "image/webp".to_string(),
             size: 1234,
             width: Some(800),
             height: Some(600),
-            created_at: Utc::now(),
         };
         let event = ServerEvent::MessageCreated {
             sender_id: test_user_id(),
@@ -1164,6 +1228,10 @@ mod tests {
         let wire = &json["message"]["attachments"][0];
         assert_eq!(wire["mime"], "image/webp");
         assert_eq!(wire["width"], 800);
+        // Regression (review finding): the slim wire shape must not carry the
+        // redundant domain fields.
+        assert!(wire.get("messageId").is_none());
+        assert!(wire.get("createdAt").is_none());
 
         let back: ServerEvent = serde_json::from_value(json).unwrap();
         if let ServerEvent::MessageCreated { message, .. } = back {
