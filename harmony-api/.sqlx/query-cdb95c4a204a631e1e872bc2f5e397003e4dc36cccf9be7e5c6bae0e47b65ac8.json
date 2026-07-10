@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT channel_id, level\n            FROM channel_notification_settings\n            WHERE user_id = $1\n            ORDER BY updated_at DESC\n            LIMIT 1000\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "level",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "cdb95c4a204a631e1e872bc2f5e397003e4dc36cccf9be7e5c6bae0e47b65ac8"
+}

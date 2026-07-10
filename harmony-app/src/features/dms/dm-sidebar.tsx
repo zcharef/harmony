@@ -152,7 +152,7 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
   const { t } = useTranslation('dms')
   const { t: tVoice } = useTranslation('voice')
   const { t: tSettings } = useTranslation('settings')
-  const openProfileSettings = useSettingsUiStore((s) => s.openProfileSettings)
+  const openUserSettings = useSettingsUiStore((s) => s.openUserSettings)
   const { data: dms, isPending, isError, refetch, isRefetching } = useDms()
   const closeDmMutation = useCloseDm()
   const [isSearchOpen, setIsSearchOpen] = useState(false)
@@ -323,7 +323,7 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
               isIconOnly
               size="sm"
               className="h-8 w-8"
-              onPress={openProfileSettings}
+              onPress={() => openUserSettings()}
               data-test="user-settings-button"
             >
               <Settings className="h-4 w-4 text-default-500" />

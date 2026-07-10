@@ -97,4 +97,34 @@ impl NotificationSettingsRepository for PgNotificationSettingsRepository {
 
         Ok(())
     }
+
+    async fn list_for_user(
+        &self,
+        user_id: &UserId,
+    ) -> Result<Vec<(ChannelId, NotificationLevel)>, DomainError> {
+        let uid = user_id.0;
+
+        // WHY ORDER BY updated_at DESC LIMIT 1000: rows exist only for explicit
+        // overrides, so the cap is a safety valve — if it is ever hit, the rows
+        // dropped are the stalest overrides, not arbitrary ones. The handler
+        // logs when the cap is reached (no silent data drops).
+        let rows = sqlx::query!(
+            r#"
+            SELECT channel_id, level
+            FROM channel_notification_settings
+            WHERE user_id = $1
+            ORDER BY updated_at DESC
+            LIMIT 1000
+            "#,
+            uid,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| (ChannelId(r.channel_id), parse_level(&r.level)))
+            .collect())
+    }
 }

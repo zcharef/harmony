@@ -31,4 +31,14 @@ pub trait NotificationSettingsRepository: Send + Sync + std::fmt::Debug {
         user_id: &UserId,
         level: NotificationLevel,
     ) -> Result<(), DomainError>;
+
+    /// List ALL channel overrides for a user (bounded, newest-updated first).
+    ///
+    /// WHY newest-first + cap: rows exist only for explicit user overrides, but
+    /// they are unbounded in theory — if the cap is ever hit, the silently
+    /// dropped rows must be the STALEST overrides, not arbitrary ones.
+    async fn list_for_user(
+        &self,
+        user_id: &UserId,
+    ) -> Result<Vec<(ChannelId, NotificationLevel)>, DomainError>;
 }

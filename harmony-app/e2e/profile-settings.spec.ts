@@ -7,7 +7,7 @@
  *
  * Real data-test attributes from:
  * - channel-sidebar.tsx (user-settings-button)
- * - profile-settings-modal.tsx (profile-settings-modal,
+ * - user-settings-modal.tsx (user-settings-modal,
  *   profile-display-name-input, profile-settings-save-button,
  *   profile-settings-cancel-button)
  */
@@ -33,7 +33,7 @@ test.describe('Profile Settings — display name', () => {
     await selectServer(page, server.id)
 
     await page.locator('[data-test="user-settings-button"]').click()
-    const modal = page.locator('[data-test="profile-settings-modal"]')
+    const modal = page.locator('[data-test="user-settings-modal"]')
     await modal.waitFor({ timeout: 10_000 })
 
     const displayNameInput = modal.locator('[data-test="profile-display-name-input"]')
@@ -51,7 +51,7 @@ test.describe('Profile Settings — display name', () => {
 
     await page.locator('[data-test="user-settings-button"]').click()
     await expect(
-      page.locator('[data-test="profile-settings-modal"] [data-test="profile-display-name-input"]'),
+      page.locator('[data-test="user-settings-modal"] [data-test="profile-display-name-input"]'),
     ).toHaveValue('Display Name E2E', { timeout: 10_000 })
   })
 
@@ -60,7 +60,7 @@ test.describe('Profile Settings — display name', () => {
     await selectServer(page, server.id)
 
     await page.locator('[data-test="user-settings-button"]').click()
-    const modal = page.locator('[data-test="profile-settings-modal"]')
+    const modal = page.locator('[data-test="user-settings-modal"]')
     await modal.waitFor({ timeout: 10_000 })
 
     await modal.locator('[data-test="profile-display-name-input"]').fill('Never Saved')
@@ -70,7 +70,7 @@ test.describe('Profile Settings — display name', () => {
     // Reopen: the discarded edit must not be there.
     await page.locator('[data-test="user-settings-button"]').click()
     await expect(
-      page.locator('[data-test="profile-settings-modal"] [data-test="profile-display-name-input"]'),
+      page.locator('[data-test="user-settings-modal"] [data-test="profile-display-name-input"]'),
     ).not.toHaveValue('Never Saved', { timeout: 10_000 })
   })
 })

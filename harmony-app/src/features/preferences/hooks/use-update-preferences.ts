@@ -35,20 +35,31 @@ export function useUpdatePreferences() {
         dndEnabled: patch.dndEnabled ?? old?.dndEnabled ?? false,
         hideProfanity: patch.hideProfanity ?? old?.hideProfanity ?? true,
         onboardingCompleted: patch.onboardingCompleted ?? old?.onboardingCompleted ?? false,
+        notificationsEnabled: patch.notificationsEnabled ?? old?.notificationsEnabled ?? true,
+        notifyMessages: patch.notifyMessages ?? old?.notifyMessages ?? true,
+        notifyDms: patch.notifyDms ?? old?.notifyDms ?? true,
+        notifyMentions: patch.notifyMentions ?? old?.notifyMentions ?? true,
+        notificationSoundsEnabled:
+          patch.notificationSoundsEnabled ?? old?.notificationSoundsEnabled ?? true,
         updatedAt: new Date().toISOString(),
       }))
 
       return { previousData }
     },
     onError: (error, _patch, context) => {
-      // WHY: Rollback defaults to dndEnabled: false, hideProfanity: true when no previous cache entry
-      // (first-ever toggle, no GET has resolved yet).
+      // WHY: Rollback defaults to the server-default object when no previous
+      // cache entry exists (first-ever toggle, no GET has resolved yet).
       queryClient.setQueryData<UserPreferencesResponse>(
         queryKeys.preferences.me(),
         context?.previousData ?? {
           dndEnabled: false,
           hideProfanity: true,
           onboardingCompleted: false,
+          notificationsEnabled: true,
+          notifyMessages: true,
+          notifyDms: true,
+          notifyMentions: true,
+          notificationSoundsEnabled: true,
           updatedAt: new Date().toISOString(),
         },
       )

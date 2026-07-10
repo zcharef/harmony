@@ -56,3 +56,31 @@ impl NotificationSettingsResponse {
         Self { channel_id, level }
     }
 }
+
+/// Response for the bulk notification-settings list (ADR-036 envelope).
+///
+/// WHY `next_cursor` is always `None`: rows exist only for explicit user
+/// overrides and the query is capped server-side (stalest dropped, logged).
+/// The envelope keeps the shape forward-compatible without cursor plumbing.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListNotificationSettingsResponse {
+    pub items: Vec<NotificationSettingsResponse>,
+    pub total: i64,
+    pub next_cursor: Option<String>,
+}
+
+impl From<Vec<(ChannelId, DomainNotificationLevel)>> for ListNotificationSettingsResponse {
+    fn from(overrides: Vec<(ChannelId, DomainNotificationLevel)>) -> Self {
+        let items: Vec<NotificationSettingsResponse> = overrides
+            .into_iter()
+            .map(|(channel_id, level)| NotificationSettingsResponse::new(channel_id, level.into()))
+            .collect();
+        let total = i64::try_from(items.len()).unwrap_or(i64::MAX);
+        Self {
+            items,
+            total,
+            next_cursor: None,
+        }
+    }
+}

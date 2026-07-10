@@ -86,5 +86,25 @@
   "avatarErrorTooLarge": "Avatar must be 5MB or less.",
   "avatarErrorGifTooLarge": "Animated GIF avatars must be 2MB or less.",
   "avatarErrorProcessingFailed": "Could not process this image. Try a different file.",
-  "avatarErrorUploadFailed": "Avatar upload failed. Try again."
+  "avatarErrorUploadFailed": "Avatar upload failed. Try again.",
+
+  "userSettingsTitle": "User Settings",
+  "tabProfile": "Profile",
+  "tabNotifications": "Notifications",
+  "notifDesktopLabel": "Desktop notifications",
+  "notifDesktopHelp": "Get a native notification when a message arrives while Harmony is in the background.",
+  "notifPermissionEnable": "Enable",
+  "notifPermissionBlocked": "Blocked by your browser",
+  "notifPermissionDenied": "Notifications are blocked by your browser. Allow them for this site in your browser settings, then reload.",
+  "notifPermissionUnsupported": "Desktop notifications are not supported in this browser.",
+  "notifServerMessages": "Server messages",
+  "notifDirectMessages": "Direct messages",
+  "notifMentions": "Mentions",
+  "notifSoundsLabel": "Notification sounds",
+  "notifDndActive": "Do Not Disturb is on — all notifications are muted.",
+  "notifBannerText": "Enable desktop notifications to know when someone messages you.",
+  "notifBannerEnable": "Enable",
+  "notifBannerDismiss": "Not now",
+  "notifLoadError": "Could not load notification settings.",
+  "notifRetry": "Retry"
 }

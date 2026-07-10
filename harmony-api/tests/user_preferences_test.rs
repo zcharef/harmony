@@ -104,6 +104,11 @@ async fn completing_onboarding_persists() {
                 dnd_enabled: None,
                 hide_profanity: None,
                 onboarding_completed: Some(true),
+                notifications_enabled: None,
+                notify_messages: None,
+                notify_dms: None,
+                notify_mentions: None,
+                notification_sounds_enabled: None,
             },
         )
         .await
@@ -130,6 +135,11 @@ async fn unrelated_patch_preserves_onboarding_completed() {
             dnd_enabled: None,
             hide_profanity: None,
             onboarding_completed: Some(true),
+            notifications_enabled: None,
+            notify_messages: None,
+            notify_dms: None,
+            notify_mentions: None,
+            notification_sounds_enabled: None,
         },
     )
     .await
@@ -142,6 +152,11 @@ async fn unrelated_patch_preserves_onboarding_completed() {
                 dnd_enabled: Some(true),
                 hide_profanity: None,
                 onboarding_completed: None,
+                notifications_enabled: None,
+                notify_messages: None,
+                notify_dms: None,
+                notify_mentions: None,
+                notification_sounds_enabled: None,
             },
         )
         .await

@@ -42,6 +42,11 @@ function buildPreferences(
     dndEnabled: false,
     hideProfanity: true,
     onboardingCompleted: false,
+    notificationsEnabled: true,
+    notifyMessages: true,
+    notifyDms: true,
+    notifyMentions: true,
+    notificationSoundsEnabled: true,
     updatedAt: '2026-04-02T00:00:00.000Z',
     ...overrides,
   }

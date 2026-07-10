@@ -60,6 +60,11 @@ pub async fn update_preferences(
         dnd_enabled: req.dnd_enabled,
         hide_profanity: req.hide_profanity,
         onboarding_completed: req.onboarding_completed,
+        notifications_enabled: req.notifications_enabled,
+        notify_messages: req.notify_messages,
+        notify_dms: req.notify_dms,
+        notify_mentions: req.notify_mentions,
+        notification_sounds_enabled: req.notification_sounds_enabled,
     };
 
     state

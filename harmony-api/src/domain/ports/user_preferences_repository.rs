@@ -11,6 +11,11 @@ pub struct UpdatePreferences {
     pub dnd_enabled: Option<bool>,
     pub hide_profanity: Option<bool>,
     pub onboarding_completed: Option<bool>,
+    pub notifications_enabled: Option<bool>,
+    pub notify_messages: Option<bool>,
+    pub notify_dms: Option<bool>,
+    pub notify_mentions: Option<bool>,
+    pub notification_sounds_enabled: Option<bool>,
 }
 
 /// Intent-based repository for user preferences.

@@ -43,6 +43,7 @@ import {
   VerifyIdentityModal,
 } from '@/features/crypto'
 import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
+import { useChannelNotificationLevel } from '@/features/notifications'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import type { DmRecipientResponse, MessageResponse } from '@/lib/api'
 import { encrypt } from '@/lib/crypto'
@@ -58,7 +59,6 @@ import { useEditMessage } from './hooks/use-edit-message'
 import type { UseMentionAutocompleteResult } from './hooks/use-mention-autocomplete'
 import { useMentionAutocomplete } from './hooks/use-mention-autocomplete'
 import { useMessages } from './hooks/use-messages'
-import { useNotificationSettings } from './hooks/use-notification-settings'
 import { useRealtimeMessages } from './hooks/use-realtime-messages'
 import { useRealtimeReactions } from './hooks/use-realtime-reactions'
 import { useRemoveReaction } from './hooks/use-remove-reaction'
@@ -366,8 +366,12 @@ function ChatToolbar({
   onOpenVerify: () => void
 }) {
   const { t } = useTranslation('chat')
-  const { data: notifSettings } = useNotificationSettings(channelId)
+  const notifLevel = useChannelNotificationLevel(channelId)
   const updateNotif = useUpdateNotificationSettings(channelId ?? '')
+  // WHY no 'mentions' for DMs (D14): every DM message is mention-equivalent —
+  // Discord DMs only offer mute. Stale 'mentions' rows on DM channels behave
+  // as 'all' by policy construction.
+  const levelOptions = isDm ? (['all', 'none'] as const) : (['all', 'mentions', 'none'] as const)
 
   return (
     <div
@@ -397,10 +401,10 @@ function ChatToolbar({
           </PopoverTrigger>
           <PopoverContent>
             <div className="flex flex-col gap-1 p-2">
-              {(['all', 'mentions', 'none'] as const).map((level) => (
+              {levelOptions.map((level) => (
                 <Button
                   key={level}
-                  variant={notifSettings?.level === level ? 'flat' : 'light'}
+                  variant={notifLevel === level ? 'flat' : 'light'}
                   size="sm"
                   onPress={() => updateNotif.mutate(level)}
                 >

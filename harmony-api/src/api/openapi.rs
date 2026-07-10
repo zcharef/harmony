@@ -94,6 +94,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         // Notification Settings
         handlers::notification_settings::get_notification_settings,
         handlers::notification_settings::update_notification_settings,
+        handlers::notification_settings::list_notification_settings,
         // Typing indicators
         handlers::typing::send_typing,
         // Direct Messages
@@ -194,6 +195,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             // Notification Settings DTOs
             super::dto::notification_settings::UpdateNotificationSettingsRequest,
             super::dto::notification_settings::NotificationSettingsResponse,
+            super::dto::notification_settings::ListNotificationSettingsResponse,
             super::dto::notification_settings::NotificationLevel,
             // Moderation Settings DTOs
             super::dto::moderation_settings::ModerationSettingsResponse,
