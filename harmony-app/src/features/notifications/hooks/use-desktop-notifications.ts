@@ -166,13 +166,31 @@ export function useDesktopNotifications(
       })
 
       const hasFocus = document.hasFocus()
-      // WHY resolved here: the policy is pure/sync — the async cross-tab check
-      // is short-circuited when this tab already has focus.
-      const anyTabFocused = hasFocus ? true : await isAnyTabFocused()
 
+      // Gate 9 check-and-RESERVE — MUST be synchronous, before any await: the
+      // SSE handler dispatches a same-channel burst synchronously, and a set
+      // deferred past an await lets every continuation read the pre-burst map
+      // and pass the cooldown (N Tauri popups instead of 1 — no OS tag
+      // coalescing there). Reserved slots are rolled back below when a later
+      // gate suppresses, so a suppressed event never burns the window.
       const now = Date.now()
       const lastNotified = cooldownMap.current.get(channelId)
       const cooldownHit = lastNotified !== undefined && now - lastNotified < COOLDOWN_MS
+      if (!cooldownHit) {
+        cooldownMap.current.set(channelId, now)
+      }
+      const rollbackCooldownReservation = () => {
+        if (cooldownHit) return
+        if (lastNotified === undefined) {
+          cooldownMap.current.delete(channelId)
+        } else {
+          cooldownMap.current.set(channelId, lastNotified)
+        }
+      }
+
+      // WHY resolved here: the policy is pure/sync — the async cross-tab check
+      // is short-circuited when this tab already has focus.
+      const anyTabFocused = hasFocus ? true : await isAnyTabFocused()
 
       const suppressed = shouldSuppress({
         kind: 'desktop',
@@ -186,12 +204,16 @@ export function useDesktopNotifications(
         anyTabFocused,
         cooldownHit,
       })
-      if (suppressed) return
+      if (suppressed) {
+        rollbackCooldownReservation()
+        return
+      }
 
       const granted = await hasNotificationPermission(tauriPermissionRef, unavailableLoggedRef)
-      if (!granted) return
-
-      cooldownMap.current.set(channelId, now)
+      if (!granted) {
+        rollbackCooldownReservation()
+        return
+      }
 
       await sendPlatformNotification({
         // WHY display name first: identity render chain (display name falls

@@ -420,6 +420,44 @@ describe('useDesktopNotifications (web)', () => {
 
     await waitFor(() => expect(constructed).toHaveLength(1))
   })
+
+  // REGRESSION: the cooldown check-and-set was split across two awaits, so a
+  // synchronous same-channel burst (SSE dispatches without yielding) read the
+  // map before any event wrote it — every event passed gate 9 and a blurred
+  // Tauri client popped N native notifications instead of 1.
+  it('coalesces a synchronous same-channel burst into ONE notification', async () => {
+    renderNotificationHook()
+
+    act(() => {
+      for (let i = 0; i < 10; i++) {
+        fireMessageCreated(buildNotifEvent())
+      }
+    })
+    await flushNotificationPipeline()
+
+    await waitFor(() => expect(constructed).toHaveLength(1))
+  })
+
+  it('a suppressed event does not burn the cooldown (reservation rollback)', async () => {
+    renderNotificationHook()
+
+    // Focused window → gate 6 suppresses; the reservation must be rolled back.
+    hasFocusSpy.mockReturnValue(true)
+    act(() => {
+      fireMessageCreated(buildNotifEvent())
+    })
+    await flushNotificationPipeline()
+    expect(constructed).toHaveLength(0)
+
+    // Window blurs; the next message must notify despite the 5s window.
+    hasFocusSpy.mockReturnValue(false)
+    act(() => {
+      fireMessageCreated(buildNotifEvent())
+    })
+    await flushNotificationPipeline()
+
+    await waitFor(() => expect(constructed).toHaveLength(1))
+  })
 })
 
 describe('useDesktopNotifications (Tauri)', () => {
