@@ -27,7 +27,7 @@ impl UserPreferencesRepository for PgUserPreferencesRepository {
 
         let row = sqlx::query!(
             r#"
-            SELECT user_id, dnd_enabled, hide_profanity, created_at, updated_at
+            SELECT user_id, dnd_enabled, hide_profanity, onboarding_completed, created_at, updated_at
             FROM user_preferences
             WHERE user_id = $1
             "#,
@@ -41,6 +41,7 @@ impl UserPreferencesRepository for PgUserPreferencesRepository {
             user_id: UserId(r.user_id),
             dnd_enabled: r.dnd_enabled,
             hide_profanity: r.hide_profanity,
+            onboarding_completed: r.onboarding_completed,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }))
@@ -55,17 +56,19 @@ impl UserPreferencesRepository for PgUserPreferencesRepository {
 
         let row = sqlx::query!(
             r#"
-            INSERT INTO user_preferences (user_id, dnd_enabled, hide_profanity, updated_at)
-            VALUES ($1, COALESCE($2, false), COALESCE($3, true), now())
+            INSERT INTO user_preferences (user_id, dnd_enabled, hide_profanity, onboarding_completed, updated_at)
+            VALUES ($1, COALESCE($2, false), COALESCE($3, true), COALESCE($4, false), now())
             ON CONFLICT (user_id) DO UPDATE SET
                 dnd_enabled = COALESCE($2, user_preferences.dnd_enabled),
                 hide_profanity = COALESCE($3, user_preferences.hide_profanity),
+                onboarding_completed = COALESCE($4, user_preferences.onboarding_completed),
                 updated_at = now()
-            RETURNING user_id, dnd_enabled, hide_profanity, created_at, updated_at
+            RETURNING user_id, dnd_enabled, hide_profanity, onboarding_completed, created_at, updated_at
             "#,
             uid,
             patch.dnd_enabled,
             patch.hide_profanity,
+            patch.onboarding_completed,
         )
         .fetch_one(&self.pool)
         .await
@@ -75,6 +78,7 @@ impl UserPreferencesRepository for PgUserPreferencesRepository {
             user_id: UserId(row.user_id),
             dnd_enabled: row.dnd_enabled,
             hide_profanity: row.hide_profanity,
+            onboarding_completed: row.onboarding_completed,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
