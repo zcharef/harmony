@@ -1,0 +1,46 @@
+{
+  "title": "Migration center",
+  "subtitle": "Track who followed you over and who still needs a nudge.",
+
+  "loading": "Loading migration progress",
+  "failedToLoad": "Could not load migration progress",
+
+  "aliveTitle": "Is your server alive yet?",
+  "statusAlive": "Alive",
+  "statusNotAlive": "Not alive yet",
+  "statusPending": "Too early to tell",
+  "statusAliveHelp": "Enough of your members are talking for the room to feel real.",
+  "statusNotAliveHelp": "The first week closed without enough activity. Keep inviting and start conversations.",
+  "statusPendingHelp": "Still inside the first week. These numbers firm up once the week is up.",
+
+  "criterionMembersJoined": "Members joined",
+  "criterionActiveMembers": "Members talking",
+  "criterionMessages": "Messages",
+  "criterionDistinctSenders": "Different senders",
+  "criterionActiveDays": "Active days",
+  "criterionProgress": "{{current}} of {{target}}",
+
+  "followThroughTitle": "Follow-through",
+  "statJoined": "Joined",
+  "statActive": "Participating",
+  "statSentMessage": "Sent a message",
+  "statNotYetActive": "Not active yet",
+
+  "actionTitle": "Next step",
+  "action_invite_members_title": "Invite your top members",
+  "action_invite_members_body": "Nobody has joined yet. Message the ten people who make your community what it is and send them the invite personally.",
+  "action_seed_conversation_title": "Start the first conversations",
+  "action_seed_conversation_body": "People joined but the room is quiet. Post a prompt, ask a question, or run a small event so there is something to walk into.",
+  "action_nudge_inactive_title": "Nudge the members who went quiet",
+  "action_nudge_inactive_body": "Some members joined but never said anything. A short personal message brings most of them back.",
+  "action_share_progress_title": "Share the momentum",
+  "action_share_progress_body": "Your server is alive. Post a progress update where your community still gathers so the rest follow.",
+
+  "cohortTitle": "Members who joined but haven't participated",
+  "cohortEmpty": "Everyone who joined has taken part. Nothing to chase.",
+  "cohortCount": "{{count}} waiting",
+  "joinedAt": "Joined {{date}}",
+  "loadMore": "Show more",
+
+  "honestyNote": "Migration brings your channel structure across. Roles, members, and message history you move by hand for now."
+}

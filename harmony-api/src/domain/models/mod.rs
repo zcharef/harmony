@@ -13,6 +13,7 @@ mod megolm_session;
 mod member;
 mod message;
 mod message_with_author;
+mod migration;
 mod moderation;
 mod plan;
 mod profile;
@@ -42,6 +43,11 @@ pub use message::{
     MessageType, NewAttachment, ParentMessagePreview,
 };
 pub use message_with_author::MessageWithAuthor;
+pub use migration::{
+    ALIVE_MIN_ACTIVE_DAYS, ALIVE_MIN_DISTINCT_SENDERS, ALIVE_MIN_MEMBERS_JOINED,
+    ALIVE_MIN_MESSAGES, ALIVE_MIN_NON_OWNER_ACTIVE, MemberCohortPage, MemberFollowThrough,
+    MigrationProgress, NotYetActiveMember, RecommendedAction, ServerAliveSnapshot,
+};
 pub use moderation::{ModerationRetry, ServerModerationSettings};
 pub use plan::{Plan, PlanLimits, ResourceKind};
 pub use profile::{Profile, UserStatus};

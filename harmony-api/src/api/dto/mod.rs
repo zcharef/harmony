@@ -8,6 +8,7 @@ pub mod invites;
 pub mod keys;
 pub mod members;
 pub mod messages;
+pub mod migration;
 pub mod moderation_settings;
 pub mod notification_settings;
 pub mod pagination;

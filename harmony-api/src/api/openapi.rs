@@ -76,6 +76,9 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
         handlers::members::kick_member,
         handlers::members::assign_role,
         handlers::members::transfer_ownership,
+        // Member Migration (owner dashboard)
+        handlers::migration::get_migration_progress,
+        handlers::migration::list_not_yet_active_cohort,
         // Bans (Moderation)
         handlers::bans::list_bans,
         handlers::bans::ban_member,
@@ -179,6 +182,15 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary};
             MemberListQuery,
             AssignRoleRequest,
             TransferOwnershipRequest,
+            // Member Migration DTOs
+            super::dto::migration::MigrationProgressResponse,
+            super::dto::migration::AliveSnapshotResponse,
+            super::dto::migration::AliveThresholds,
+            super::dto::migration::FollowThroughResponse,
+            super::dto::migration::RecommendedActionResponse,
+            super::dto::migration::MemberCohortResponse,
+            super::dto::migration::NotYetActiveMemberResponse,
+            super::dto::migration::CohortQuery,
             // Ban DTOs
             BanUserRequest,
             BanResponse,
