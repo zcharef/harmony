@@ -307,7 +307,13 @@ async fn init_app_state(config: &Config) -> AppInit {
         infra::postgres::PgNotificationSettingsRepository::new(pool.clone()),
     );
     let notification_settings_service = Arc::new(
-        domain::services::NotificationSettingsService::new(notification_settings_repo),
+        // WHY channel/member repos: the PATCH path enforces channel access
+        // (server membership + private-channel grant) before writing.
+        domain::services::NotificationSettingsService::new(
+            notification_settings_repo,
+            channel_repo.clone(),
+            member_repo.clone(),
+        ),
     );
     let user_preferences_repo = Arc::new(infra::postgres::PgUserPreferencesRepository::new(
         pool.clone(),

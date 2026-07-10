@@ -189,6 +189,10 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             get(handlers::notification_settings::get_notification_settings)
                 .patch(handlers::notification_settings::update_notification_settings),
         )
+        .route(
+            "/v1/notification-settings",
+            get(handlers::notification_settings::list_notification_settings),
+        )
         // Voice channels
         .route(
             "/v1/channels/{id}/voice/join",

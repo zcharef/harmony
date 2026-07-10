@@ -13,6 +13,11 @@ pub struct UserPreferencesResponse {
     pub dnd_enabled: bool,
     pub hide_profanity: bool,
     pub onboarding_completed: bool,
+    pub notifications_enabled: bool,
+    pub notify_messages: bool,
+    pub notify_dms: bool,
+    pub notify_mentions: bool,
+    pub notification_sounds_enabled: bool,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -22,6 +27,11 @@ impl From<UserPreferences> for UserPreferencesResponse {
             dnd_enabled: prefs.dnd_enabled,
             hide_profanity: prefs.hide_profanity,
             onboarding_completed: prefs.onboarding_completed,
+            notifications_enabled: prefs.notifications_enabled,
+            notify_messages: prefs.notify_messages,
+            notify_dms: prefs.notify_dms,
+            notify_mentions: prefs.notify_mentions,
+            notification_sounds_enabled: prefs.notification_sounds_enabled,
             updated_at: prefs.updated_at,
         }
     }
@@ -37,6 +47,16 @@ pub struct UpdateUserPreferencesRequest {
     pub hide_profanity: Option<bool>,
     #[serde(default)]
     pub onboarding_completed: Option<bool>,
+    #[serde(default)]
+    pub notifications_enabled: Option<bool>,
+    #[serde(default)]
+    pub notify_messages: Option<bool>,
+    #[serde(default)]
+    pub notify_dms: Option<bool>,
+    #[serde(default)]
+    pub notify_mentions: Option<bool>,
+    #[serde(default)]
+    pub notification_sounds_enabled: Option<bool>,
 }
 
 #[cfg(test)]
@@ -55,6 +75,11 @@ mod tests {
             dnd_enabled: false,
             hide_profanity: true,
             onboarding_completed,
+            notifications_enabled: true,
+            notify_messages: true,
+            notify_dms: true,
+            notify_mentions: true,
+            notification_sounds_enabled: true,
             created_at: now,
             updated_at: now,
         }

@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO user_preferences (\n                user_id, dnd_enabled, hide_profanity, onboarding_completed,\n                notifications_enabled, notify_messages, notify_dms, notify_mentions,\n                notification_sounds_enabled, updated_at\n            )\n            VALUES (\n                $1, COALESCE($2, false), COALESCE($3, true), COALESCE($4, false),\n                COALESCE($5, true), COALESCE($6, true), COALESCE($7, true),\n                COALESCE($8, true), COALESCE($9, true), now()\n            )\n            ON CONFLICT (user_id) DO UPDATE SET\n                dnd_enabled = COALESCE($2, user_preferences.dnd_enabled),\n                hide_profanity = COALESCE($3, user_preferences.hide_profanity),\n                onboarding_completed = COALESCE($4, user_preferences.onboarding_completed),\n                notifications_enabled = COALESCE($5, user_preferences.notifications_enabled),\n                notify_messages = COALESCE($6, user_preferences.notify_messages),\n                notify_dms = COALESCE($7, user_preferences.notify_dms),\n                notify_mentions = COALESCE($8, user_preferences.notify_mentions),\n                notification_sounds_enabled = COALESCE($9, user_preferences.notification_sounds_enabled),\n                updated_at = now()\n            RETURNING user_id, dnd_enabled, hide_profanity, onboarding_completed,\n                      notifications_enabled, notify_messages, notify_dms, notify_mentions,\n                      notification_sounds_enabled, created_at, updated_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "dnd_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "hide_profanity",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "onboarding_completed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "notifications_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "notify_messages",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "notify_dms",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "notify_mentions",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "notification_sounds_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "55e9243937fac653626d12e955b706f32128d3df1e9efe2dd33974b7d6978e33"
+}

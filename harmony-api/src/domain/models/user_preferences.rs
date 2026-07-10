@@ -1,6 +1,7 @@
 //! User preferences domain model.
 //!
-//! Represents per-user settings (DND mode, future expandable preferences).
+//! Represents per-user settings (DND mode, notification switches, future
+//! expandable preferences).
 
 use chrono::{DateTime, Utc};
 
@@ -13,6 +14,11 @@ pub struct UserPreferences {
     pub dnd_enabled: bool,
     pub hide_profanity: bool,
     pub onboarding_completed: bool,
+    pub notifications_enabled: bool,
+    pub notify_messages: bool,
+    pub notify_dms: bool,
+    pub notify_mentions: bool,
+    pub notification_sounds_enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -27,6 +33,13 @@ impl UserPreferences {
             dnd_enabled: false,
             hide_profanity: true,
             onboarding_completed: false,
+            // WHY all true: matches today's effective behavior (notifications
+            // always attempted) so the feature rollout is behavior-neutral.
+            notifications_enabled: true,
+            notify_messages: true,
+            notify_dms: true,
+            notify_mentions: true,
+            notification_sounds_enabled: true,
             created_at: now,
             updated_at: now,
         }

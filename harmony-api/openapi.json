@@ -884,7 +884,7 @@
           "NotificationSettings"
         ],
         "summary": "Update notification settings for a channel.",
-        "description": "# Errors\nReturns `ApiError` on validation failure or repository error.",
+        "description": "# Errors\nReturns `ApiError` on validation failure, missing channel, missing\nchannel access, or repository error.",
         "operationId": "update_notification_settings",
         "parameters": [
           {
@@ -923,6 +923,26 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a server member or no private-channel access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1898,6 +1918,43 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/notification-settings": {
+      "get": {
+        "tags": [
+          "NotificationSettings"
+        ],
+        "summary": "List ALL channel notification overrides for the authenticated user.",
+        "description": "WHY bulk: per-channel reads only cover visited channels — respecting a\nmuted level for never-visited channels requires knowing all overrides\nup front.\n\n# Errors\nReturns `ApiError` on repository error.",
+        "operationId": "list_notification_settings",
+        "responses": {
+          "200": {
+            "description": "All channel notification overrides for the user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListNotificationSettingsResponse"
                 }
               }
             }
@@ -4735,6 +4792,32 @@
           }
         }
       },
+      "ListNotificationSettingsResponse": {
+        "type": "object",
+        "description": "Response for the bulk notification-settings list (ADR-036 envelope).\n\nWHY `next_cursor` is always `None`: rows exist only for explicit user\noverrides and the query is capped server-side (stalest dropped, logged).\nThe envelope keeps the shape forward-compatible without cursor plumbing.",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationSettingsResponse"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "LivenessResponse": {
         "type": "object",
         "description": "Liveness probe response.",
@@ -5782,6 +5865,36 @@
               "null"
             ]
           },
+          "notificationSoundsEnabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "notificationsEnabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "notifyDms": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "notifyMentions": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "notifyMessages": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "onboardingCompleted": {
             "type": [
               "boolean",
@@ -5850,6 +5963,11 @@
           "dndEnabled",
           "hideProfanity",
           "onboardingCompleted",
+          "notificationsEnabled",
+          "notifyMessages",
+          "notifyDms",
+          "notifyMentions",
+          "notificationSoundsEnabled",
           "updatedAt"
         ],
         "properties": {
@@ -5857,6 +5975,21 @@
             "type": "boolean"
           },
           "hideProfanity": {
+            "type": "boolean"
+          },
+          "notificationSoundsEnabled": {
+            "type": "boolean"
+          },
+          "notificationsEnabled": {
+            "type": "boolean"
+          },
+          "notifyDms": {
+            "type": "boolean"
+          },
+          "notifyMentions": {
+            "type": "boolean"
+          },
+          "notifyMessages": {
             "type": "boolean"
           },
           "onboardingCompleted": {
