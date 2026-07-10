@@ -27,6 +27,6 @@
     "verbatimModuleSyntax": true,
     "noImplicitOverride": true
   },
-  "include": ["src"],
+  "include": ["src", "functions"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

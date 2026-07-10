@@ -14,7 +14,9 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // WHY functions/**: Cloudflare Pages Functions (OG injection) live outside
+    // src/ but their pure logic is unit-tested with the same runner.
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'functions/**/*.test.ts'],
     exclude: ['node_modules', 'dist', 'src-tauri'],
   },
   resolve: {
