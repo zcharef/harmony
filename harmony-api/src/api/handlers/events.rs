@@ -106,6 +106,30 @@ fn presence_visible_to(
         .any(|sid| receiver_servers.contains_key(sid))
 }
 
+/// Decides whether a `ProfileUpdated` for `subject` is visible to `receiver`.
+///
+/// Same shared-server/DM overlap rule as `presence_visible_to`, with ONE
+/// deliberate difference (F8): an EMPTY `subject_servers` fails CLOSED to the
+/// subject only. For profile updates, empty means either a membership-lookup
+/// failure at publish time (the publisher warns and scopes to self) or a user
+/// with zero memberships — in both cases nobody but the subject's own
+/// tabs/devices should receive the semi-public profile snapshot. Presence keeps
+/// its fail-open broadcast for rolling-deploy back-compat; `ProfileUpdated`
+/// never shipped without `server_ids`, so no such compat path exists here.
+fn profile_visible_to(
+    subject: &UserId,
+    subject_servers: &[ServerId],
+    receiver: &UserId,
+    receiver_servers: &HashMap<ServerId, Role>,
+) -> bool {
+    if receiver == subject {
+        return true;
+    }
+    subject_servers
+        .iter()
+        .any(|sid| receiver_servers.contains_key(sid))
+}
+
 /// Decides whether a channel-scoped event is visible to a receiver, given the
 /// channel's access scope and the receiver's role in that server.
 ///
@@ -417,15 +441,17 @@ pub async fn sse_events(
         // target_user_id nor server_id, so it would otherwise reach EVERY
         // connected user — leaking a display-name/avatar change (and its
         // timing) to strangers. It carries the subject's memberships as routing
-        // metadata; reuse the IDENTICAL `presence_visible_to` gate so a profile
-        // change reaches only users sharing a server/DM (or the subject's own
-        // tabs). The metadata is redacted below before serialization.
+        // metadata; `profile_visible_to` delivers only to users sharing a
+        // server/DM (or the subject's own tabs) and — unlike presence — fails
+        // CLOSED to self on an empty scope (F8: a membership-lookup failure
+        // must not broadcast the profile to everyone). The metadata is
+        // redacted below before serialization.
         if let ServerEvent::ProfileUpdated {
             user_id: subject,
             server_ids: subject_servers,
             ..
         } = &event
-            && !presence_visible_to(subject, subject_servers, &user_id, &current_server_ids)
+            && !profile_visible_to(subject, subject_servers, &user_id, &current_server_ids)
         {
             return None;
         }
@@ -643,6 +669,60 @@ mod tests {
             &uid(10),
             &[],
             &uid(20),
+            &receiver_servers
+        ));
+    }
+
+    // ── profile_visible_to: ProfileUpdated fan-out gate (F8) ───────────
+
+    /// Success path (reactivity invariant): a profile update MUST keep reaching
+    /// legitimate shared-server members — live rehydrate depends on it.
+    #[test]
+    fn profile_visible_with_shared_server_or_dm() {
+        let receiver_servers = member_map(&[sid(1), sid(2)]);
+        // sid(2) is shared — DMs are servers too, so this covers DM partners.
+        assert!(profile_visible_to(
+            &uid(10),
+            &[sid(2), sid(9)],
+            &uid(20),
+            &receiver_servers
+        ));
+    }
+
+    #[test]
+    fn profile_hidden_from_users_with_no_shared_server() {
+        let receiver_servers = member_map(&[sid(1), sid(2)]);
+        assert!(!profile_visible_to(
+            &uid(10),
+            &[sid(3), sid(4)],
+            &uid(20),
+            &receiver_servers
+        ));
+    }
+
+    /// F8 regression: a membership-lookup DB error at publish time yields an
+    /// EMPTY scope. It used to fail OPEN (broadcast to every connected user);
+    /// it must now fail CLOSED — strangers receive nothing.
+    #[test]
+    fn profile_with_empty_scope_hidden_from_others() {
+        let receiver_servers = member_map(&[sid(1)]);
+        assert!(!profile_visible_to(
+            &uid(10),
+            &[],
+            &uid(20),
+            &receiver_servers
+        ));
+    }
+
+    /// F8: on the same empty-scope (lookup-error) event, the subject's own
+    /// tabs/devices still receive it — fail closed TO SELF, not dropped.
+    #[test]
+    fn profile_with_empty_scope_still_visible_to_self() {
+        let receiver_servers: HashMap<ServerId, Role> = HashMap::new();
+        assert!(profile_visible_to(
+            &uid(10),
+            &[],
+            &uid(10),
             &receiver_servers
         ));
     }

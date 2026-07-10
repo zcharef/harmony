@@ -307,10 +307,12 @@ pub enum ServerEvent {
         custom_status: Option<String>,
         /// Routing metadata: the subject's server memberships (incl. DM
         /// servers), used by the SSE layer to deliver profile updates only to
-        /// users sharing a server or DM. Same contract as
-        /// `PresenceChanged.server_ids`: survives the cross-instance
-        /// `pg_notify` round-trip, then REDACTED (emptied) before client
-        /// serialize — an empty vec is omitted entirely.
+        /// users sharing a server or DM. Like `PresenceChanged.server_ids` it
+        /// survives the cross-instance `pg_notify` round-trip, then is
+        /// REDACTED (emptied) before client serialize — but unlike presence,
+        /// an EMPTY scope fails CLOSED to the subject only (F8): a
+        /// membership-lookup failure at publish time must not broadcast the
+        /// profile snapshot to every connected user.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         server_ids: Vec<ServerId>,
     },

@@ -46,4 +46,15 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
         display_name: Option<Option<String>>,
         custom_status: Option<Option<String>>,
     ) -> Result<Profile, DomainError>;
+
+    /// Overwrite a user's username with a server-chosen safe value.
+    ///
+    /// Used only to remediate a username that bypassed the content filter via
+    /// the signup trigger. Unlike `update`, this targets the immutable-by-user
+    /// `username` column, so it is a distinct, narrowly-scoped method.
+    async fn update_username(
+        &self,
+        user_id: &UserId,
+        username: &str,
+    ) -> Result<Profile, DomainError>;
 }

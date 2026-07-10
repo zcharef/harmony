@@ -57,6 +57,21 @@ pub async fn sync_profile(
     // DB upsert is a no-op for existing profiles, skip the entire validation
     // chain and return the existing profile directly.
     if let Some(existing) = state.profile_service().get_by_id_optional(&user_id).await? {
+        // WHY (F7): The signup trigger honors user_metadata.username but cannot
+        // run the content filter, so a direct /auth/v1/signup bypasses it. Only
+        // a username chosen at THIS signup (metadata == stored) is re-validated
+        // and regenerated — grandfathered names are untouched. Runs BEFORE
+        // auto-join so MemberJoined broadcasts the corrected username.
+        let metadata_username: Option<&str> = auth_user
+            .user_metadata
+            .as_ref()
+            .and_then(|m: &serde_json::Value| m.get("username"))
+            .and_then(serde_json::Value::as_str);
+        let existing = state
+            .profile_service()
+            .remediate_bypassed_username(existing, metadata_username)
+            .await?;
+
         // WHY: The DB trigger handle_new_user() creates the profile before
         // sync_profile runs, so new users always land here. Check membership
         // and auto-join if needed — the membership check avoids duplicate
@@ -287,16 +302,18 @@ pub async fn update_my_profile(
     // sharing a server or DM with the subject (redacted before it reaches
     // clients). Queried here because the handler, unlike the SSE stream, has no
     // live membership snapshot.
-    // WHY fail-open (not `?`): the profile is already persisted — failing the
-    // request here would leave the DB updated but the event unpublished. Empty
-    // metadata = broadcast fallback, same pattern as presence.rs (ADR-027:
-    // never silently lose the signal).
+    // WHY not `?`: the profile is already persisted — failing the request here
+    // would leave the DB updated but the event unpublished (ADR-027: never
+    // silently lose the signal). On lookup failure the event still goes out
+    // with an EMPTY scope, which the SSE layer fails CLOSED to the subject's
+    // own tabs/devices (F8) — never a broadcast of the semi-public profile to
+    // strangers. Other members catch up on their next fetch.
     let server_ids = match state.server_service().list_all_memberships(&user_id).await {
         Ok(ids) => ids,
         Err(e) => {
             tracing::warn!(
                 error = %e,
-                "profile update: membership lookup failed — broadcasting unscoped profile event"
+                "profile update: membership lookup failed — delivering profile event to self only"
             );
             Vec::new()
         }
