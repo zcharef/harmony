@@ -17,6 +17,8 @@
   "deleteChannelFailed": "Failed to delete channel",
   "selectServerToViewChannels": "Select a server to view channels",
   "noChannelsYet": "No channels yet",
+  "noChannelsYetHint": "This server is a blank canvas — channels are where conversations happen.",
+  "createChannelCta": "Create a channel",
   "statusOnline": "Online",
   "statusIdle": "Idle",
   "statusDnd": "Do Not Disturb",

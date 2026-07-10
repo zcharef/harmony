@@ -501,6 +501,26 @@ export async function getMessages(
   }
 }
 
+/**
+ * PATCH /v1/preferences — update user preferences (e.g. onboardingCompleted).
+ * WHY: Onboarding E2E tests need users in the "already onboarded" state
+ * without click-driving the flow in every scenario.
+ */
+export async function updatePreferences(
+  token: string,
+  patch: { onboardingCompleted?: boolean; dndEnabled?: boolean; hideProfanity?: boolean },
+): Promise<void> {
+  const res = await fetch(`${API_URL}/v1/preferences`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`updatePreferences failed: ${res.status} ${body}`)
+  }
+}
+
 /** DELETE /v1/dms/{server_id} — close (leave) a DM conversation. */
 export async function closeDm(token: string, serverId: string): Promise<void> {
   const res = await fetch(`${API_URL}/v1/dms/${serverId}`, {

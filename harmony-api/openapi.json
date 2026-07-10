@@ -5781,6 +5781,12 @@
               "boolean",
               "null"
             ]
+          },
+          "onboardingCompleted": {
+            "type": [
+              "boolean",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -5843,6 +5849,7 @@
         "required": [
           "dndEnabled",
           "hideProfanity",
+          "onboardingCompleted",
           "updatedAt"
         ],
         "properties": {
@@ -5850,6 +5857,9 @@
             "type": "boolean"
           },
           "hideProfanity": {
+            "type": "boolean"
+          },
+          "onboardingCompleted": {
             "type": "boolean"
           },
           "updatedAt": {

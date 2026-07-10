@@ -6,7 +6,7 @@ import { Group, Panel, Separator } from 'react-resizable-panels'
 
 import { FeatureErrorBoundary } from '@/components/shared/error-boundary'
 import { ErrorState } from '@/components/shared/error-state'
-import { useAuthStore, useRealtimeProfile } from '@/features/auth'
+import { useAuthStore, useCurrentProfile, useRealtimeProfile } from '@/features/auth'
 import {
   ChannelSidebar,
   useChannels,
@@ -24,6 +24,7 @@ import {
   useMyMemberRole,
   useRealtimeMembers,
 } from '@/features/members'
+import { OnboardingFlow, useOnboarding } from '@/features/onboarding'
 import { usePresence } from '@/features/presence'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ProfileSettingsModal, ServerSettings, useSettingsUiStore } from '@/features/settings'
@@ -137,23 +138,28 @@ function useServerAutoSelect(
   view: ViewMode,
   selectedServerId: string | null,
   regularServers: { id: string }[],
+  userServers: { id: string }[],
   servers: { id: string }[] | undefined,
   setSelectedServerId: (id: string | null) => void,
   setSelectedChannelId: (id: string | null) => void,
 ) {
   // WHY: Auto-select a server on initial load. Tries the last-used server
-  // from localStorage first, falls back to first server if not found/deleted.
+  // from localStorage first (any non-DM server, official included — "return
+  // to last position"), then falls back to the first CUSTOM server only.
+  // The official server is deliberately excluded from the fallback: an
+  // official-only user who never visited it must land on WelcomeScreen /
+  // onboarding, not silently inside the official server.
   useEffect(() => {
     if (view !== 'servers' || selectedServerId !== null || regularServers.length === 0) return
 
     const savedId = readStorage(STORAGE_KEYS.lastServerId)
     const target =
       (savedId !== null ? regularServers.find((s) => s.id === savedId) : undefined) ??
-      regularServers[0]
+      userServers[0]
     if (target !== undefined) {
       setSelectedServerId(target.id)
     }
-  }, [view, selectedServerId, regularServers, setSelectedServerId])
+  }, [view, selectedServerId, regularServers, userServers, setSelectedServerId])
 
   // WHY: If the selected server was removed (e.g., user was kicked/banned),
   // reset selection so the UI doesn't show stale data.
@@ -354,6 +360,70 @@ function WelcomeView({
   )
 }
 
+// WHY membership check, not just env (ticket §6.9): banned users are skipped
+// by auto-join — for them the official server must be treated as absent.
+// Extracted to keep MainLayout below Biome's cognitive complexity limit of 15.
+function resolveOfficialServerId(regularServers: { id: string }[]): string | null {
+  const officialId = env.VITE_OFFICIAL_SERVER_ID
+  if (officialId === undefined) return null
+  return regularServers.some((s) => s.id === officialId) ? officialId : null
+}
+
+// WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
+// Mirrors WelcomeView: ServerList rail + ConnectionBanner stay mounted around
+// the one-time OnboardingFlow (Discord parity — the rail is always visible).
+function OnboardingView({
+  onSelectServer,
+  onSelectDmView,
+  officialServerId,
+  onSelectAndComplete,
+  onDmStarted,
+  onComplete,
+  selectedServerId,
+  view,
+}: {
+  onSelectServer: (serverId: string) => void
+  onSelectDmView: () => void
+  officialServerId: string | null
+  onSelectAndComplete: (serverId: string) => void
+  onDmStarted: (serverId: string, channelId: string) => void
+  onComplete: () => void
+  selectedServerId: string | null
+  view: ViewMode
+}) {
+  const sseStatus = useConnectionStatus()
+  // WHY here (not in MainLayout): only the onboarding greeting needs the
+  // profile — keeps the query out of the always-mounted layout path.
+  const { data: profile } = useCurrentProfile()
+  const displayName = profile !== undefined ? resolveDisplayName(profile) : ''
+
+  return (
+    <div
+      data-test="main-layout"
+      data-test-sse-status={sseStatus}
+      className="flex h-screen w-screen overflow-hidden"
+    >
+      <ConnectionBanner />
+      <ServerList
+        selectedServerId={selectedServerId}
+        view={view}
+        onSelectServer={onSelectServer}
+        onSelectDmView={onSelectDmView}
+      />
+      <OnboardingFlow
+        displayName={displayName}
+        officialServerId={officialServerId}
+        onExploreOfficial={onSelectAndComplete}
+        onServerCreated={onSelectAndComplete}
+        onServerJoined={onSelectAndComplete}
+        onDmStarted={onDmStarted}
+        onComplete={onComplete}
+      />
+      <AlphaBadge />
+    </div>
+  )
+}
+
 export function MainLayout() {
   const [view, setView] = useState<ViewMode>('servers')
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null)
@@ -367,6 +437,13 @@ export function MainLayout() {
   // WHY: Filter DM servers so we can check if user has real servers.
   // Same filter applied inside ServerList (server-list.tsx:106).
   const regularServers = useMemo(() => servers?.filter((s) => !s.isDm) ?? [], [servers])
+
+  // WHY: Exclude the official Harmony server from the "has servers" check so
+  // new users who were auto-joined still get onboarding / the welcome screen.
+  const userServers = useMemo(
+    () => regularServers.filter((s) => s.id !== env.VITE_OFFICIAL_SERVER_ID),
+    [regularServers],
+  )
 
   // WHY: Presence subscribes to ALL servers so the user appears online to
   // friends everywhere, not just on the currently viewed server.
@@ -491,10 +568,29 @@ export function MainLayout() {
     setSelectedChannelId(channelId)
   }, [])
 
+  // WHY: Onboarding terminal paths — every one writes the completion flag
+  // exactly once, then navigates (fire-and-forget optimistic, ticket §6.2).
+  const { showOnboarding, completeOnboarding } = useOnboarding()
+  const handleOnboardingSelect = useCallback(
+    (serverId: string) => {
+      completeOnboarding()
+      handleSelectServer(serverId)
+    },
+    [completeOnboarding, handleSelectServer],
+  )
+  const handleOnboardingDmStarted = useCallback(
+    (serverId: string, channelId: string) => {
+      completeOnboarding()
+      handleNavigateDm(serverId, channelId)
+    },
+    [completeOnboarding, handleNavigateDm],
+  )
+
   useServerAutoSelect(
     view,
     selectedServerId,
     regularServers,
+    userServers,
     servers,
     setSelectedServerId,
     setSelectedChannelId,
@@ -508,13 +604,21 @@ export function MainLayout() {
   const showAboutPage = useAboutUiStore((s) => s.showAboutPage)
   const showServerSettings = useSettingsUiStore((s) => s.showServerSettings)
 
-  // WHY: Exclude the official Harmony server from the "has servers" check so
-  // new users who were auto-joined still see the onboarding welcome screen.
-  const userServers = useMemo(
-    () => regularServers.filter((s) => s.id !== env.VITE_OFFICIAL_SERVER_ID),
-    [regularServers],
-  )
-  const showWelcome = servers !== undefined && userServers.length === 0 && !isDmView
+  const officialServerId = resolveOfficialServerId(regularServers)
+
+  // WHY !showOnboarding: a first-run user with only the auto-joined official
+  // server (userServers.length === 0) must get onboarding, not the bare
+  // welcome empty state. WelcomeScreen is the steady-state for returning users.
+  // WHY selectedServerId === null: an explicit navigation (rail click, the
+  // onboarding "Explore" CTA, last-position restore) must win over the empty
+  // state — otherwise an official-only user could never view the official
+  // server at all (the pre-existing §1.1 invisibility bug).
+  const showWelcome =
+    servers !== undefined &&
+    userServers.length === 0 &&
+    !isDmView &&
+    !showOnboarding &&
+    selectedServerId === null
   const showServersError = isServersError && servers === undefined && !isDmView
 
   // WHY: Pre-compute props to move ternary/logical complexity out of MainLayout,
@@ -535,6 +639,32 @@ export function MainLayout() {
   /** WHY: Server settings replaces the entire main content area (like Discord). */
   if (showServerSettings && selectedServerId !== null) {
     return <ServerSettingsView serverId={selectedServerId} connectionStatus={connectionStatus} />
+  }
+
+  /** WHY: One-time first-run flow takes precedence over the welcome empty state
+   *  (ticket §5.3). Gated on server-persisted onboardingCompleted === false;
+   *  never shown while preferences is cold or errored (no flash, no trap).
+   *  Skip in DM view — the DmSidebar must stay reachable.
+   *  WHY onSelectServer={handleOnboardingSelect}: an explicit rail click must
+   *  win over the flow (same rule as the showWelcome guard). It completes
+   *  onboarding + navigates, exactly like the explore CTA — otherwise the
+   *  click only highlights the rail item while the content stays trapped on
+   *  the flow (a user action with no visible effect). Background auto-select
+   *  (localStorage restore) does NOT go through this callback, so it cannot
+   *  silently complete onboarding. */
+  if (showOnboarding && !isDmView) {
+    return (
+      <OnboardingView
+        onSelectServer={handleOnboardingSelect}
+        onSelectDmView={handleSelectDmView}
+        officialServerId={officialServerId}
+        onSelectAndComplete={handleOnboardingSelect}
+        onDmStarted={handleOnboardingDmStarted}
+        onComplete={completeOnboarding}
+        selectedServerId={selectedServerId}
+        view={view}
+      />
+    )
   }
 
   /** WHY: Early return avoids a JSX ternary that would increase nesting complexity

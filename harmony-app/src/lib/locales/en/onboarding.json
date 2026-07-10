@@ -1,0 +1,18 @@
+{
+  "welcomeTitle": "Welcome to Harmony",
+  "welcomeGreeting": "Hey {{name}}, glad you're here.",
+  "welcomeBody": "You've already joined the Harmony community server — it's the best place to say hi and get your first reply.",
+  "welcomeBodyNoOfficial": "Harmony is where your communities live — servers, channels, voice, and direct messages.",
+  "exploreOfficialCta": "Explore the community server",
+  "next": "Next",
+  "back": "Back",
+  "skip": "Skip for now",
+  "done": "Done",
+  "step2Title": "Set up your first server",
+  "step2Subtitle": "Create a place for your people, or join one with an invite link.",
+  "step3Title": "Find people",
+  "step3Subtitle": "Search for people you know and start a conversation.",
+  "findPeopleCta": "Start a conversation",
+  "findPeopleCardBody": "Open a direct message with anyone from your servers.",
+  "stepAnnounce": "Step {{current}} of {{total}}"
+}

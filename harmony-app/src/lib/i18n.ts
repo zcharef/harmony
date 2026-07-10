@@ -9,6 +9,7 @@ import crypto from '@/lib/locales/en/crypto.json'
 import dms from '@/lib/locales/en/dms.json'
 import members from '@/lib/locales/en/members.json'
 import messages from '@/lib/locales/en/messages.json'
+import onboarding from '@/lib/locales/en/onboarding.json'
 import servers from '@/lib/locales/en/servers.json'
 import settings from '@/lib/locales/en/settings.json'
 import voice from '@/lib/locales/en/voice.json'
@@ -26,6 +27,7 @@ const resources = {
     dms,
     messages,
     channels,
+    onboarding,
     servers,
     members,
     settings,
@@ -45,6 +47,7 @@ i18n.use(initReactI18next).init({
     'dms',
     'messages',
     'channels',
+    'onboarding',
     'servers',
     'members',
     'settings',

@@ -10,6 +10,7 @@ use crate::domain::models::{UserId, UserPreferences};
 pub struct UpdatePreferences {
     pub dnd_enabled: Option<bool>,
     pub hide_profanity: Option<bool>,
+    pub onboarding_completed: Option<bool>,
 }
 
 /// Intent-based repository for user preferences.

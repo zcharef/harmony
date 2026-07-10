@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT user_id, dnd_enabled, hide_profanity, created_at, updated_at\n            FROM user_preferences\n            WHERE user_id = $1\n            ",
+  "query": "\n            SELECT user_id, dnd_enabled, hide_profanity, onboarding_completed, created_at, updated_at\n            FROM user_preferences\n            WHERE user_id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -20,11 +20,16 @@
       },
       {
         "ordinal": 3,
+        "name": "onboarding_completed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -39,8 +44,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "d0bbd27072157ae7ae0e090ef03eaca6dc08eb6b03b22743fc2a3f5f3c26c277"
+  "hash": "b64e0e7c2288796682c49167888f45672178e69bac2c46600c5d9c9ce615f6a0"
 }

@@ -59,6 +59,7 @@ pub async fn update_preferences(
     let patch = UpdatePreferences {
         dnd_enabled: req.dnd_enabled,
         hide_profanity: req.hide_profanity,
+        onboarding_completed: req.onboarding_completed,
     };
 
     state

@@ -1,10 +1,10 @@
-import { configure, render, screen } from '@testing-library/react'
+import { configure, fireEvent, render, screen } from '@testing-library/react'
 import { vi } from 'vitest'
 import type { ChannelResponse } from '@/lib/api'
 // WHY: Side-effect import initializes the real i18n instance so the sr-only
 // strings resolve to actual translations (missing keys would log via mocked logger).
 import '@/lib/i18n'
-import { ChannelButton } from './channel-sidebar'
+import { ChannelButton, ChannelEmptyState } from './channel-sidebar'
 import { useUnreadStore } from './stores/unread-store'
 
 // WHY: The repo uses data-test (not data-testid) — align Testing Library queries.
@@ -76,5 +76,25 @@ describe('ChannelButton unread pill accessibility', () => {
     renderChannelButton()
 
     expect(screen.queryByTestId('channel-unread-pill')).toBeNull()
+  })
+})
+
+describe('ChannelEmptyState', () => {
+  // WHY: The empty state's create CTA reuses the sidebar's existing role gate
+  // (canAccessSettings) — members must get guidance without a dead-end button.
+  it('shows the create CTA only when the user may manage channels', () => {
+    const onCreateChannel = vi.fn()
+    render(<ChannelEmptyState canManageChannels={true} onCreateChannel={onCreateChannel} />)
+
+    expect(screen.getByTestId('channel-empty-state')).toBeDefined()
+    fireEvent.click(screen.getByTestId('channel-empty-create-cta'))
+    expect(onCreateChannel).toHaveBeenCalledOnce()
+  })
+
+  it('renders guidance without a CTA for members who cannot manage channels', () => {
+    render(<ChannelEmptyState canManageChannels={false} onCreateChannel={vi.fn()} />)
+
+    expect(screen.getByTestId('channel-empty-state')).toBeDefined()
+    expect(screen.queryByTestId('channel-empty-create-cta')).toBeNull()
   })
 })

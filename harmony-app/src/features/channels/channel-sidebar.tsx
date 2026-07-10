@@ -50,6 +50,43 @@ import { useUnreadStore } from './stores/unread-store'
 // WHY export: unit-tested directly (channel-sidebar.test.tsx) — rendering the
 // whole ChannelSidebar would require mocking five unrelated feature barrels.
 // Intentionally NOT in the feature barrel: not part of the public API.
+// The create CTA is gated on the SAME role check as the header's create-channel
+// affordance (canAccessSettings) — no new permission logic invented.
+export function ChannelEmptyState({
+  canManageChannels,
+  onCreateChannel,
+}: {
+  canManageChannels: boolean
+  onCreateChannel: () => void
+}) {
+  const { t } = useTranslation('channels')
+  return (
+    <div
+      data-test="channel-empty-state"
+      className="flex flex-col items-center gap-2 px-4 py-8 text-center"
+    >
+      <Hash className="h-8 w-8 text-default-300" />
+      <p className="text-sm text-default-500">{t('noChannelsYet')}</p>
+      <p className="text-xs text-default-400">{t('noChannelsYetHint')}</p>
+      {canManageChannels && (
+        <Button
+          data-test="channel-empty-create-cta"
+          size="sm"
+          color="primary"
+          variant="flat"
+          className="mt-2"
+          onPress={onCreateChannel}
+        >
+          {t('createChannelCta')}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+// WHY export: unit-tested directly (channel-sidebar.test.tsx) — rendering the
+// whole ChannelSidebar would require mocking five unrelated feature barrels.
+// Intentionally NOT in the feature barrel: not part of the public API.
 export function ChannelButton({
   channel,
   isActive,
@@ -433,7 +470,10 @@ export function ChannelSidebar({
           )}
 
           {channels !== undefined && channels.length === 0 && (
-            <p className="px-2 text-xs text-default-500">{t('noChannelsYet')}</p>
+            <ChannelEmptyState
+              canManageChannels={canAccessSettings}
+              onCreateChannel={() => setIsCreateChannelOpen(true)}
+            />
           )}
 
           {channels !== undefined && channels.length > 0 && (
