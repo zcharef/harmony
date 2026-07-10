@@ -5,9 +5,9 @@
     <img alt="Harmony" src="mediakit/logo_horizontal_dark.png" height="64">
   </picture>
   <br /><br />
-  <strong>Your community, on infrastructure you control.</strong>
+  <strong>Your community, without the ID-check treadmill.</strong>
   <br />
-  Discord-class chat you can run yourself: open source, AGPL-3.0, Rust API, LiveKit voice, and a one-command Docker Compose self-host path.
+  Discord-class chat you can run yourself: no phone number, no ID scan, open source, AGPL-3.0, Rust API, LiveKit voice, and one-command self-hosting.
   <br /><br />
   <a href="https://github.com/zcharef/harmony/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zcharef/harmony/ci.yml?style=flat-square&label=CI&logo=github" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License"></a>
@@ -27,7 +27,7 @@
 
 Three ways in:
 
-- **Browser** — try the hosted alpha at [app.joinharmony.app](https://app.joinharmony.app).
+- **Browser** — try the hosted alpha at [app.joinharmony.app](https://app.joinharmony.app). No phone number. No ID scan.
 - **Self-host** — clone the repo, fill the env file, and run the current stack yourself:
   ```bash
   git clone https://github.com/zcharef/harmony.git && cd harmony
@@ -41,7 +41,9 @@ Three ways in:
 
 ## Why Harmony?
 
-Hosted chat is convenient until your community outgrows the platform's rules, limits, or roadmap. Harmony keeps the familiar server/channel/voice model, but gives you an exit: open code, your data model, your infrastructure when you want it.
+Discord now documents age checks through selfie scans and government ID flows, with a wider rollout planned for 2026. If your community lives there, identity policy is now platform risk. Harmony keeps the familiar server/channel/voice model, but gives you an exit: open code, your data model, your infrastructure when you want it.
+
+Sources: [Discord age assurance](https://support.discord.com/hc/en-us/articles/30326565624343-How-to-Complete-Age-Assurance-on-Discord), [UK age assurance rollout](https://support.discord.com/hc/en-us/articles/33362401287959-Age-Assurance-for-UK-Users).
 
 ### What makes Harmony different
 
