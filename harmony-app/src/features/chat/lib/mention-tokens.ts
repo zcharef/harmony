@@ -7,13 +7,14 @@
  */
 
 import { defaultSchema } from 'rehype-sanitize'
+import type { MentionedUserResponse } from '@/lib/api'
 
 /**
  * The §1 marker grammar. Capture group 1 = the UUID.
  *
  * WHY no exec/test on this shared instance: it carries the `g` flag, and
- * exec/test mutate `lastIndex`. Consumers use split/matchAll only (both
- * operate on an internal clone, leaving this instance stateless).
+ * exec/test mutate `lastIndex`. Consumers use split/matchAll/replace only
+ * (all three reset `lastIndex`, leaving this instance stateless).
  */
 export const MENTION_MARKER_RE =
   /<@([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})>/g
@@ -28,6 +29,81 @@ export function extractMentionIds(content: string): string[] {
     }
   }
   return ids
+}
+
+/**
+ * `@username` token grammar for the composer/edit transform (spec §5.1).
+ * Charset + length are DB-constrained (`^[a-z0-9_]{3,32}$`,
+ * 20260316013625_create_profiles.sql). Capture group 1 = the boundary
+ * (start-of-string or whitespace), group 2 = the username.
+ *
+ * WHY the boundary group: `@` only counts at start-of-string or after
+ * whitespace — the same rule as autocomplete trigger detection — so
+ * `bob@alice` (emails, handles) never converts.
+ */
+const MENTION_TOKEN_RE = /(^|\s)@([a-z0-9_]{3,32})/g
+
+/**
+ * Replace `@username` tokens present in `map` with `<@uuid>` markers.
+ *
+ * Tokens whose username is not in the map (hand-typed, never inserted via the
+ * popup) stay plain text — the map is the ONLY source of userId resolution
+ * (locked decision: resolution by user_id, spec §9).
+ *
+ * WHY `mentionedUsers` in the result: the optimistic message needs the full
+ * member objects (spec §5.2) so the sender's own pills render instantly;
+ * returning them here avoids a second lookup pass at the call site.
+ *
+ * WHY generic: the composer map stores MentionCandidate (a superset carrying
+ * avatarUrl); the generic preserves the caller's exact value type instead of
+ * silently widening — no `as` casts at call sites (ADR-035).
+ *
+ * WHY Map (not Record): usernames are user-controlled keys, and the DB charset
+ * `^[a-z0-9_]{3,32}$` permits 'constructor' and '__proto__'. A plain-object
+ * lookup walks the prototype chain — `({})['constructor']` is a Function, so
+ * '@constructor' in plain text would convert to '<@undefined>' even with an
+ * empty map. Map.get has no prototype chain, and Map.set cannot mutate a
+ * prototype the way `obj['__proto__'] = x` does.
+ */
+export function applyMentionMap<T extends MentionedUserResponse>(
+  text: string,
+  map: ReadonlyMap<string, T>,
+): { content: string; mentionedUserIds: string[]; mentionedUsers: T[] } {
+  const mentionedUserIds: string[] = []
+  const mentionedUsers: T[] = []
+  const content = text.replace(
+    MENTION_TOKEN_RE,
+    (token, boundary: string, username: string): string => {
+      const entry = map.get(username)
+      if (entry === undefined) return token
+      if (mentionedUserIds.includes(entry.userId) === false) {
+        mentionedUserIds.push(entry.userId)
+        mentionedUsers.push(entry)
+      }
+      return `${boundary}<@${entry.userId}>`
+    },
+  )
+  return { content, mentionedUserIds, mentionedUsers }
+}
+
+/**
+ * Inverse transform for the edit buffer (spec §5.3): `<@uuid>` → `@username`
+ * for every uuid present in `mentions`. Markers the server never registered
+ * (unknown uuid) are left raw and round-trip byte-identical.
+ */
+export function markersToEditable(content: string, mentions: MentionedUserResponse[]): string {
+  if (mentions.length === 0) return content
+  return content.replace(MENTION_MARKER_RE, (marker, userId: string): string => {
+    const mention = mentions.find((m) => m.userId === userId)
+    return mention === undefined ? marker : `@${mention.username}`
+  })
+}
+
+/** Build the `username → user` map `applyMentionMap` expects from a message's `mentions`. */
+export function mentionsToMap(
+  mentions: MentionedUserResponse[],
+): Map<string, MentionedUserResponse> {
+  return new Map(mentions.map((mention) => [mention.username, mention]))
 }
 
 /**

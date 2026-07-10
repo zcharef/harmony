@@ -18,7 +18,13 @@ import { MentionPill } from './components/mention-pill'
 import { MentionText } from './components/mention-text'
 import { EmojiPickerPopover } from './emoji-picker-popover'
 import { useEditBuffer } from './hooks/use-edit-buffer'
-import { mentionSanitizeSchema, remarkMentions } from './lib/mention-tokens'
+import {
+  applyMentionMap,
+  markersToEditable,
+  mentionSanitizeSchema,
+  mentionsToMap,
+  remarkMentions,
+} from './lib/mention-tokens'
 
 interface MessageItemProps {
   message: MessageResponse
@@ -561,6 +567,37 @@ function MessageHeader({
 }
 
 /**
+ * Mention-aware edit buffer (spec §5.3): the buffer shows `@username`, never
+ * raw `<@uuid>`; saving re-applies markers from a map built from the message's
+ * own mentions, so hand-typed names stay plain text. Encrypted content is
+ * ciphertext — never transformed (no sidecar on edits in v1).
+ */
+function useMentionAwareEditBuffer(
+  message: MessageResponse,
+  isEditing: boolean,
+  onSaveEdit: (content: string) => void,
+) {
+  const isCiphertext = message.encrypted === true
+  const editSeed = isCiphertext
+    ? message.content
+    : markersToEditable(message.content, message.mentions)
+  const { editContent, setEditContent } = useEditBuffer(editSeed, isEditing)
+
+  const handleSaveEdit = useCallback(
+    (content: string) => {
+      if (isCiphertext) {
+        onSaveEdit(content)
+        return
+      }
+      onSaveEdit(applyMentionMap(content, mentionsToMap(message.mentions)).content)
+    },
+    [isCiphertext, message.mentions, onSaveEdit],
+  )
+
+  return { editContent, setEditContent, handleSaveEdit }
+}
+
+/**
  * WHY React.memo: The virtualizer re-renders all visible items when the
  * messages array reference changes (on every new message via realtime or
  * pagination). Memoizing skips re-render for messages whose props haven't
@@ -591,7 +628,11 @@ export const MessageItem = memo(function MessageItem({
   // The buffer is seeded when editing OPENS (not at mount) so a message edited
   // via SSE/AutoMod in between never leaks stale content into the editor
   // (ADR-045) — see use-edit-buffer.ts, including the AutoMod `\*` unescape.
-  const { editContent, setEditContent } = useEditBuffer(message.content, isEditing)
+  const { editContent, setEditContent, handleSaveEdit } = useMentionAwareEditBuffer(
+    message,
+    isEditing,
+    onSaveEdit,
+  )
 
   // WHY: System messages have a completely different layout — early return.
   if (message.messageType === 'system') {
@@ -669,7 +710,7 @@ export const MessageItem = memo(function MessageItem({
           isEditing={isEditing}
           editContent={editContent}
           setEditContent={setEditContent}
-          onSaveEdit={onSaveEdit}
+          onSaveEdit={handleSaveEdit}
           onCancelEdit={onCancelEdit}
           decryptMessage={activeDecryptFn}
           getCachedPlaintext={getCachedPlaintext}

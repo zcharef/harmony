@@ -1,7 +1,13 @@
 import type { InfiniteData } from '@tanstack/react-query'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
-import type { DmListItem, MessageListResponse, MessageResponse, ProfileResponse } from '@/lib/api'
+import type {
+  DmListItem,
+  MentionedUserResponse,
+  MessageListResponse,
+  MessageResponse,
+  ProfileResponse,
+} from '@/lib/api'
 import { sendMessage } from '@/lib/api'
 import { getApiErrorDetail, isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
@@ -11,6 +17,18 @@ import { buildParentPreview } from './build-parent-preview'
 
 /** WHY: Shared prefix so useMarkReadOnFocus can skip optimistic messages. */
 export const OPTIMISTIC_ID_PREFIX = 'temp-'
+
+export interface SendMessageInput {
+  /** Content AFTER the mention transform — `<@uuid>` markers already applied. */
+  content: string
+  parentMessageId?: string
+  /**
+   * Mentioned users resolved by the composer's map (spec §5.2). Drives the
+   * optimistic message's pills for both paths; only the ENCRYPTED request
+   * carries the ids (plaintext is re-parsed server-side, authoritatively).
+   */
+  mentions?: MentionedUserResponse[]
+}
 
 export interface SendMessageEncryption {
   /** WHY: Async function that encrypts plaintext and returns the ciphertext envelope + deviceId. */
@@ -43,7 +61,7 @@ export function useSendMessage(
   const messageQueryKey = queryKeys.messages.byChannel(channelId)
 
   return useMutation({
-    mutationFn: async (input: { content: string; parentMessageId?: string }) => {
+    mutationFn: async (input: SendMessageInput) => {
       // WHY encrypted context is fail-closed: When `encryption` is present the user
       // believes this DM is end-to-end encrypted. If encryptFn fails (recipient has
       // no pre-key bundle → 404, Olm/ratchet error, Tauri invoke failure) we MUST NOT
@@ -67,6 +85,11 @@ export function useSendMessage(
           )
         }
 
+        // WHY only here: the server cannot parse ciphertext, so the encrypted
+        // path carries the plaintext sidecar (parsed client-side PRE-encryption).
+        // The key is OMITTED entirely when empty — never [] or null (spec §3.1;
+        // minimizes the deny_unknown_fields version-skew surface, §8).
+        const mentionedUserIds = (input.mentions ?? []).map((m) => m.userId)
         const { data } = await sendMessage({
           path: { id: channelId },
           body: {
@@ -74,6 +97,7 @@ export function useSendMessage(
             encrypted: true,
             senderDeviceId: encrypted.senderDeviceId,
             parentMessageId: input.parentMessageId,
+            ...(mentionedUserIds.length > 0 ? { mentionedUserIds } : {}),
           },
           throwOnError: true,
         })
@@ -84,7 +108,8 @@ export function useSendMessage(
       }
 
       // WHY plaintext here is intentional: no encryption context means a channel
-      // message or a web DM (plaintext by design). This path is unchanged.
+      // message or a web DM (plaintext by design). No mention field either —
+      // the server parses `<@uuid>` markers itself, authoritatively (spec §3.1).
       const { data } = await sendMessage({
         path: { id: channelId },
         body: { content: input.content, parentMessageId: input.parentMessageId },
@@ -93,7 +118,7 @@ export function useSendMessage(
       return data
     },
 
-    onMutate: async (input: { content: string; parentMessageId?: string }) => {
+    onMutate: async (input: SendMessageInput) => {
       // WHY cancel: Prevent in-flight refetches from overwriting our optimistic entry
       await queryClient.cancelQueries({ queryKey: messageQueryKey })
 
@@ -132,9 +157,10 @@ export function useSendMessage(
         encrypted: false,
         messageType: 'default',
         reactions: [],
-        // WHY: The optimistic entry has no resolved mentions yet; the server
-        // echo populates them. Empty keeps the type satisfied (spec §5.2).
-        mentions: [],
+        // WHY: Seed from the composer's mention map so the sender's own pills
+        // render instantly (spec §5.2); the server echo swaps in the
+        // authoritative (validated, access-gated) list on success.
+        mentions: input.mentions ?? [],
         parentMessageId: input.parentMessageId,
         parentMessage,
       } satisfies MessageResponse

@@ -32,5 +32,7 @@
     "mentions": "@Mentions Only",
     "none": "Nothing"
   },
-  "emojiPickerLoadFailed": "Couldn’t load the emoji picker. Check your connection and try again."
+  "emojiPickerLoadFailed": "Couldn’t load the emoji picker. Check your connection and try again.",
+  "mentionNoResults": "No members found",
+  "mentionPopupLabel": "Mention a member"
 }
