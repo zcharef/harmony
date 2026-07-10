@@ -1210,6 +1210,17 @@ export function ChatArea({
   // `activeEncryption` is defined exactly when the send path encrypts.
   const attachmentsEnabled = activeEncryption === undefined
 
+  // WHY reset on channel switch: ChatArea mounts once (no key={channelId} in
+  // main-layout), so pending attachments outlive the channel they were staged
+  // in. Without this they'd post to the wrong channel, or — switching into an
+  // encrypted channel where the tray is gated off — sit invisible yet still be
+  // forwarded to a send the API rejects, soft-locking the composer. clear()
+  // also revokes the preview objectURLs.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clear is stable; intentionally re-run only on channel switch
+  useEffect(() => {
+    attachments.clear()
+  }, [channelId])
+
   // WHY here (not MessageInput): the send transform needs the mention map, and
   // the keyboard reducer must run BEFORE the Enter-to-send handler below.
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
@@ -1274,7 +1285,10 @@ export function ChatArea({
   async function handleSend() {
     if (channelId === null || isInCooldown) return
     const trimmed = messageContent.trim()
-    const hasAttachments = attachments.isEmpty === false
+    // WHY gate on attachmentsEnabled: in an encrypted channel the tray is hidden
+    // (D7) — never forward stray pending attachments the API would reject (400),
+    // even in the transient window before the channel-switch reset clears them.
+    const hasAttachments = attachmentsEnabled && attachments.isEmpty === false
     // WHY allow empty content when files are attached: image-only messages are
     // valid (Decision D10). Otherwise an empty send is a no-op.
     if (trimmed.length === 0 && hasAttachments === false) return
