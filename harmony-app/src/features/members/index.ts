@@ -1,6 +1,5 @@
 export { useChangeRole } from './hooks/use-change-role'
 export { useForceDisconnect } from './hooks/use-force-disconnect'
-export { useIsFounding } from './hooks/use-is-founding'
 export { useLeaveServer } from './hooks/use-leave-server'
 export { useMembers } from './hooks/use-members'
 export { useMyMemberRole } from './hooks/use-my-member-role'
