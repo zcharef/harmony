@@ -85,4 +85,19 @@ pub trait ChannelRepository: Send + Sync + std::fmt::Debug {
     /// the `pg_notify` payload cap.
     async fn list_authorized_roles(&self, channel_id: &ChannelId)
     -> Result<Vec<Role>, DomainError>;
+
+    /// Replace a channel's `channel_role_access` grant set with exactly `roles`.
+    ///
+    /// Full replacement (idempotent, race-safe last-writer-wins): rows for roles
+    /// not in `roles` are deleted, rows in `roles` are inserted if absent. `roles`
+    /// MUST already be validated to contain only grantable roles
+    /// (`moderator`/`member`) — the caller enforces that; this method persists
+    /// verbatim. An empty slice revokes every grant (admins/owner keep implicit
+    /// access). The delete + inserts run in one transaction so no reader ever
+    /// observes a partial grant set.
+    async fn replace_role_access(
+        &self,
+        channel_id: &ChannelId,
+        roles: &[Role],
+    ) -> Result<(), DomainError>;
 }

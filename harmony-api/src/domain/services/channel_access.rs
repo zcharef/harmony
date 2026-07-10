@@ -273,6 +273,14 @@ mod tests {
             Ok(self.authorized_roles.clone())
         }
 
+        async fn replace_role_access(
+            &self,
+            _channel_id: &ChannelId,
+            _roles: &[Role],
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+
         // -- unused by ensure_channel_access --
         async fn list_for_server(
             &self,

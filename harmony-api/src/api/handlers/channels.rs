@@ -4,8 +4,9 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::Deserialize;
 
 use crate::api::dto::{
-    ChannelListResponse, ChannelResponse, CreateChannelRequest, CreateMegolmSessionRequest,
-    MegolmSessionResponse, UpdateChannelRequest,
+    ChannelListResponse, ChannelResponse, ChannelRoleAccessResponse, CreateChannelRequest,
+    CreateMegolmSessionRequest, MegolmSessionResponse, SetChannelRoleAccessRequest,
+    UpdateChannelRequest,
 };
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
@@ -326,6 +327,164 @@ pub async fn delete_channel(
     );
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// List the role-access grant set of a private channel. Requires admin+ role.
+///
+/// Only admins manage channel access, so this is admin-gated: a plain member
+/// never needs to enumerate grants (they either see the channel or they don't).
+///
+/// # Errors
+/// Returns `ApiError` on authorization failure or if the channel is not found /
+/// does not belong to the path server.
+#[utoipa::path(
+    get,
+    path = "/v1/servers/{id}/channels/{channel_id}/role-access",
+    tag = "Channels",
+    security(("bearer_auth" = [])),
+    params(
+        ("id" = ServerId, Path, description = "Server ID"),
+        ("channel_id" = ChannelId, Path, description = "Channel ID"),
+    ),
+    responses(
+        (status = 200, description = "Channel role-access grant set", body = ChannelRoleAccessResponse),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Insufficient role", body = ProblemDetails),
+        (status = 404, description = "Channel not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn get_channel_role_access(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(params): ApiPath<ChannelPath>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .moderation_service()
+        .require_role(&params.id, &user_id, Role::Admin)
+        .await?;
+
+    // WHY load + verify: a channel_id from another server must 404, not leak the
+    // target channel's grants (path-integrity, same posture as the reaction
+    // message-channel binding).
+    let channel = load_channel_in_server(&state, &params).await?;
+
+    let roles = state
+        .channel_repository()
+        .list_authorized_roles(&channel.id)
+        .await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ChannelRoleAccessResponse::from((channel.id, roles))),
+    ))
+}
+
+/// Replace the role-access grant set of a private channel. Requires admin+ role.
+///
+/// Idempotent, replace-the-set semantics (last-writer-wins, race-safe): the body
+/// is the DESIRED set of grantable roles. Only `moderator`/`member` are accepted.
+///
+/// # Errors
+/// Returns `ApiError` on authorization failure, an ungrantable role in the body,
+/// or if the channel is not found / does not belong to the path server.
+#[utoipa::path(
+    put,
+    path = "/v1/servers/{id}/channels/{channel_id}/role-access",
+    tag = "Channels",
+    security(("bearer_auth" = [])),
+    params(
+        ("id" = ServerId, Path, description = "Server ID"),
+        ("channel_id" = ChannelId, Path, description = "Channel ID"),
+    ),
+    request_body = SetChannelRoleAccessRequest,
+    responses(
+        (status = 200, description = "Grant set replaced", body = ChannelRoleAccessResponse),
+        (status = 400, description = "admin/owner cannot be granted", body = ProblemDetails),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Insufficient role", body = ProblemDetails),
+        (status = 404, description = "Channel not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state, req))]
+pub async fn set_channel_role_access(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(params): ApiPath<ChannelPath>,
+    ApiJson(req): ApiJson<SetChannelRoleAccessRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .moderation_service()
+        .require_role(&params.id, &user_id, Role::Admin)
+        .await?;
+
+    let channel = load_channel_in_server(&state, &params).await?;
+
+    // WHY reject admin/owner: they hold IMPLICIT access to every private channel.
+    // Persisting them would break the read path's invariant that the grant table
+    // only ever stores moderator/member (F-note in the migration; the read path
+    // merely `warn`s on drift — the write path must PREVENT it).
+    for role in &req.roles {
+        if !role.is_channel_grantable() {
+            return Err(ApiError::bad_request(
+                "admin and owner have implicit access and cannot be granted",
+            ));
+        }
+    }
+
+    state
+        .channel_repository()
+        .replace_role_access(&channel.id, &req.roles)
+        .await?;
+
+    // WHY re-read: the response + SSE payload must reflect the canonical stored
+    // set (deduped, parsed), not the raw request — and it proves the write landed.
+    let granted_roles = state
+        .channel_repository()
+        .list_authorized_roles(&channel.id)
+        .await?;
+
+    // WHY server-scoped fan-out (not gated by channel_access): every member must
+    // re-evaluate visibility, including the member whose role was just GRANTED —
+    // gating by the current grant set would starve them (A4 decision).
+    let receivers = state
+        .event_bus()
+        .publish(ServerEvent::ChannelAccessUpdated {
+            sender_id: user_id,
+            server_id: params.id.clone(),
+            channel_id: channel.id.clone(),
+            authorized_roles: granted_roles.clone(),
+        });
+    tracing::debug!(
+        server_id = %params.id,
+        channel_id = %channel.id,
+        receivers,
+        "emitted channel.access_updated"
+    );
+
+    Ok((
+        StatusCode::OK,
+        Json(ChannelRoleAccessResponse::from((channel.id, granted_roles))),
+    ))
+}
+
+/// Load a channel and assert it belongs to the path server.
+///
+/// WHY: both role-access handlers take `{id}/channels/{channel_id}` — a
+/// `channel_id` from a different server must 404 (not act on / leak another
+/// server's channel), even though the caller is an admin of the path server.
+async fn load_channel_in_server(
+    state: &AppState,
+    params: &ChannelPath,
+) -> Result<crate::domain::models::Channel, ApiError> {
+    let channel = state
+        .channel_service()
+        .get_by_id(&params.channel_id)
+        .await?;
+    if channel.server_id != params.id {
+        return Err(ApiError::not_found("Channel not found"));
+    }
+    Ok(channel)
 }
 
 /// Register a Megolm session for an encrypted channel. Requires channel membership.

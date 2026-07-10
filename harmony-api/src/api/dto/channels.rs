@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 
 use super::serde_helpers::double_option;
 use crate::domain::models::{
-    CategoryId, Channel, ChannelId, ChannelType, MegolmSession, MegolmSessionId, ServerId,
+    CategoryId, Channel, ChannelId, ChannelType, MegolmSession, MegolmSessionId, Role, ServerId,
 };
 
 /// Channel response returned to API consumers.
@@ -109,6 +109,36 @@ pub struct UpdateChannelRequest {
     /// Minimum seconds between messages per user. 0 = disable slow mode. Admin+ only.
     #[serde(default)]
     pub slow_mode_seconds: Option<i32>,
+}
+
+/// Desired set of roles granted access to a private channel. Full replacement —
+/// the server deletes grant rows not present and inserts rows not yet stored.
+///
+/// Only `moderator` and `member` are accepted; `admin`/`owner` hold IMPLICIT
+/// access to every private channel and are rejected (the read path assumes the
+/// grant table only ever stores grantable roles). An empty `roles` means
+/// admins/owner only.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetChannelRoleAccessRequest {
+    /// Grantable roles (subset of {`moderator`, `member`}). Empty = admins/owner only.
+    pub roles: Vec<Role>,
+}
+
+/// The role-access grant set of a private channel (the raw `channel_role_access`
+/// rows). `Owner`/`Admin` are never present — they hold implicit access.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelRoleAccessResponse {
+    pub channel_id: ChannelId,
+    /// Roles with an explicit grant. Never contains `admin`/`owner`.
+    pub roles: Vec<Role>,
+}
+
+impl From<(ChannelId, Vec<Role>)> for ChannelRoleAccessResponse {
+    fn from((channel_id, roles): (ChannelId, Vec<Role>)) -> Self {
+        Self { channel_id, roles }
+    }
 }
 
 /// Request body for registering a Megolm session on a channel.

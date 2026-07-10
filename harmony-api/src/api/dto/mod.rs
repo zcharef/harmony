@@ -21,8 +21,9 @@ pub mod voice;
 
 pub use bans::{BanListQuery, BanListResponse, BanResponse, BanUserRequest};
 pub use channels::{
-    ChannelListResponse, ChannelResponse, CreateChannelRequest, CreateMegolmSessionRequest,
-    MegolmSessionResponse, UpdateChannelRequest,
+    ChannelListResponse, ChannelResponse, ChannelRoleAccessResponse, CreateChannelRequest,
+    CreateMegolmSessionRequest, MegolmSessionResponse, SetChannelRoleAccessRequest,
+    UpdateChannelRequest,
 };
 pub use desktop_auth::{
     CreateDesktopAuthRequest, CreateDesktopAuthResponse, RedeemDesktopAuthRequest,

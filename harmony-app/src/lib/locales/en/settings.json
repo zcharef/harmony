@@ -48,6 +48,11 @@
 
   "privateChannelLabel": "Private Channel",
   "privateChannelHelp": "Only selected roles can see this channel.",
+  "channelAccessTitle": "Role access",
+  "channelAccessEmptyHelp": "Only admins and the owner can see this channel until you grant roles.",
+  "channelAccessLoadError": "Couldn't load channel access. Tap to retry.",
+  "channelAccessSaveError": "Couldn't update channel access.",
+  "channelAccessGrantAria": "Grant {{role}} access to this channel",
   "readOnlyChannelLabel": "Announcement Channel (Read-Only)",
   "readOnlyChannelHelp": "Only admins and above can send messages.",
   "announcementPlaceholder": "This is an announcement channel",

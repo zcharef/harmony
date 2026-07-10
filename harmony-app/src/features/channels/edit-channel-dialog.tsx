@@ -15,6 +15,7 @@ import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import type { ChannelResponse } from '@/lib/api'
+import { ChannelRoleAccessSection } from './channel-role-access-section'
 import { useUpdateChannel } from './hooks/use-update-channel'
 
 function editChannelSchema(t: TFunction<'channels'>) {
@@ -115,6 +116,10 @@ export function EditChannelDialog({ channel, serverId, isOpen, onClose }: EditCh
                 <p className="text-xs text-default-400">{tSettings('privateChannelHelp')}</p>
               </div>
             </Switch>
+            {/* WHY gated on isPrivate: grants are meaningless on a public channel
+                (the read path ignores them). Mounting only when private also keeps
+                the role-access query disabled for public channels. */}
+            {isPrivate && <ChannelRoleAccessSection serverId={serverId} channelId={channel.id} />}
             {channel.channelType !== 'voice' && (
               <Switch
                 isSelected={isReadOnly}
