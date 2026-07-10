@@ -1,6 +1,6 @@
 # Harmony Metrics Dictionary
 
-> **Version: 1.0.0** (2026-07-10) · Owner: Tempo (growth CTO) · Spec: `dev/strategy/growth-plan.md` §10
+> **Version: 1.1.0** (2026-07-10) · Owner: Tempo (growth CTO) · Spec: `dev/strategy/growth-plan.md` §10
 >
 > Contract (§10, "data quality is a first-class contract"): every figure is
 > traceable to a query, every query to a **versioned metric definition** in
@@ -84,7 +84,7 @@ a 2-active server and an excluded server contribute zero.
 
 ### 2. Alive server (tightened §5)
 
-**View:** `analytics.metrics_server_alive` · **Version 1.0.0**
+**View:** `analytics.metrics_server_alive` · **Version 1.1.0**
 
 §5 (tightened per Tempo — *"the old ≥5 members ≥50 messages is gamed by one
 owner + four alts"*), all within week 1 after server creation:
@@ -92,7 +92,13 @@ owner + four alts"*), all within week 1 after server creation:
 1. ≥5 members joined (`server_members.joined_at` in window — members who
    later left are not re-counted; known v1 limitation, `server_joined`
    events close the gap going forward);
-2. ≥3 non-owner members active (meaningful action in that server);
+2. ≥3 non-owner members active — **"active" here = `message_sent` ·
+   `voice_joined` · `reaction_added` in that server.** `server_joined` /
+   `invite_redeemed` deliberately do NOT count for this criterion: the API
+   emits both for every invite join, so counting them would make joining
+   itself satisfy the bar and collapse it into criterion 1 — the exact
+   alt-account gaming this metric exists to resist. (Joins remain
+   meaningful actions everywhere else: retention, K-factor actives.)
 3. ≥50 messages from ≥3 distinct senders;
 4. message activity on ≥2 separate days.
 
@@ -100,7 +106,9 @@ owner + four alts"*), all within week 1 after server creation:
 closes unmet · `NULL` while the window is open (null rule).
 
 Fixture proof: §B4–B6 — the genuine server is alive; the alt-farm (owner +
-4 silent alts + 50 owner-only messages) is not; the excluded server is absent.
+4 silent alts + 50 owner-only messages, production-shaped: the alts carry
+the `server_joined`/`invite_redeemed` events the API emits on every join)
+is not, and its non-owner-active count is 0; the excluded server is absent.
 
 ### 3. Activation: signup → first message
 
@@ -118,17 +126,23 @@ is exactly the anti-gaming rule).
 
 ### 4. Event-based D1/D7/D30 retention
 
-**View:** `analytics.metrics_retention` · **Version 1.0.0**
+**View:** `analytics.metrics_retention` · **Version 1.1.0**
 
 §10: *"Retention is event-based + server-contextual, not 'returned by signup
 week'."* Retained at day N = ≥1 meaningful action during
 `[signup + N days, signup + N+1 days)` (classic exact-day retention).
-Per signup-week cohort: `cohort_size`, `dN_retained`, `dN_rate`. Each rate's
-denominator counts only users whose day-N window has fully elapsed; `NULL`
-when no member is measurable yet.
+Per signup-week cohort: `cohort_size`, `dN_retained`, `dN_rate`. Each rate
+counts only users whose day-N window has fully elapsed — **numerator and
+denominator alike**: a user who already acted inside a still-open window is
+not yet measurable and inflates neither side (otherwise an in-progress
+cohort week could report a rate above 1.0). `dN_retained` stays the raw
+retained count (immature included); `NULL` rate when no member is
+measurable yet.
 
-Fixture proof: §B1–B2 — the delete-and-leave user vanishes from the cohort;
-the connect-only lurker is not retained; the voice-only user is retained at D7.
+Fixture proof: §B1–B2, §B13 — the delete-and-leave user vanishes from the
+cohort; the connect-only lurker is not retained; the voice-only user is
+retained at D7; the mixed-maturity cohort (one measurable non-retained user
++ one immature already-active user) reports 0.0000, not 1.0.
 
 ### 5. K-factor inputs (referral)
 
@@ -167,6 +181,16 @@ Cloudflare Web Analytics, not this DB).
 
 ## Changelog
 
+- **1.1.0** (2026-07-10) — review fixes, pre-release (1.0.0 never shipped, so
+  no backfill/re-baseline: views recompute from base data on deploy).
+  - Alive-server → 1.1.0: criterion 2 ("≥3 non-owner members active") now
+    counts only `message_sent`/`voice_joined`/`reaction_added`. Previously
+    `server_joined`/`invite_redeemed` counted, so every invite join satisfied
+    the bar and it collapsed into criterion 1.
+  - Retention → 1.1.0: `dN_rate` numerators now apply the same maturity
+    filter as the denominators. Previously an immature already-active user
+    was counted retained but not measurable, letting in-progress cohort
+    weeks report rates above 1.0.
 - **1.0.0** (2026-07-10) — initial dictionary: WCU, alive-server (tightened),
   activation, D1/D7/D30 event-based retention, K-factor inputs; anti-gaming
   exclusion mechanism (`analytics.exclusions` + structural rules).

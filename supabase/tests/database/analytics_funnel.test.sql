@@ -14,7 +14,7 @@
 -- =============================================================
 BEGIN;
 
-SELECT plan(38);
+SELECT plan(42);
 
 -- ═══════════════════════════════════════════════════════════════
 -- AUTH HELPERS (same pattern as rls_policies.test.sql)
@@ -152,8 +152,12 @@ RESET ROLE;
 --   R3  EXCLUDED user posting in S1 (staff/dogfood analog)
 --   R5  delete-and-leave user: active day 1, then deletes account
 --   U5, U6 active members of S1 (profiles created "now" — different cohort)
---   O2  owner of S2 (alt farm: 4 alt members, all 50 messages his own)
+--   O2  owner of S2 (alt farm: 4 alt members joined via invite — with the
+--       server_joined/invite_redeemed events the API ALWAYS emits on join —
+--       all 50 messages his own)
 --   U7  posts in S3 (an EXCLUDED server)
+--   M1, M2 mixed-maturity retention cohort (M1 mature non-retained,
+--       M2 immature but already active inside its open d1 window)
 -- ═══════════════════════════════════════════════════════════════
 
 INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, is_sso_user, is_anonymous, confirmation_token, recovery_token, email_change_token_new, email_change)
@@ -171,7 +175,9 @@ VALUES
     ('77b10000-0000-4000-a000-000000000011', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'funnel.a2@harmony.test', crypt('pw', gen_salt('bf')), now(), '{}', '{"username":"funnel_a2"}', now(), now(), false, false, '', '', '', ''),
     ('77b10000-0000-4000-a000-000000000012', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'funnel.a3@harmony.test', crypt('pw', gen_salt('bf')), now(), '{}', '{"username":"funnel_a3"}', now(), now(), false, false, '', '', '', ''),
     ('77b10000-0000-4000-a000-000000000013', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'funnel.a4@harmony.test', crypt('pw', gen_salt('bf')), now(), '{}', '{"username":"funnel_a4"}', now(), now(), false, false, '', '', '', ''),
-    ('77b10000-0000-4000-a000-000000000014', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'funnel.u7@harmony.test', crypt('pw', gen_salt('bf')), now(), '{}', '{"username":"funnel_u7"}', now(), now(), false, false, '', '', '', '');
+    ('77b10000-0000-4000-a000-000000000014', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'funnel.u7@harmony.test', crypt('pw', gen_salt('bf')), now(), '{}', '{"username":"funnel_u7"}', now(), now(), false, false, '', '', '', ''),
+    ('77b10000-0000-4000-a000-000000000015', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'funnel.m1@harmony.test', crypt('pw', gen_salt('bf')), now(), '{}', '{"username":"funnel_m1"}', now(), now(), false, false, '', '', '', ''),
+    ('77b10000-0000-4000-a000-000000000016', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'funnel.m2@harmony.test', crypt('pw', gen_salt('bf')), now(), '{}', '{"username":"funnel_m2"}', now(), now(), false, false, '', '', '', '');
 
 -- Signup cohort of Monday 2020-06-01: R1, R2, R4 (+R5 until deletion).
 UPDATE public.profiles SET created_at = '2020-06-01T00:00:00Z'
@@ -221,6 +227,27 @@ VALUES
     ('77510000-0000-4000-a000-000000000002', '77b10000-0000-4000-a000-000000000011', '2020-06-01T01:00:00Z'),
     ('77510000-0000-4000-a000-000000000002', '77b10000-0000-4000-a000-000000000012', '2020-06-01T01:00:00Z'),
     ('77510000-0000-4000-a000-000000000002', '77b10000-0000-4000-a000-000000000013', '2020-06-01T01:00:00Z');
+
+-- S2 join events, PRODUCTION-SHAPED: the API emits invite_redeemed +
+-- server_joined for EVERY invite join (invites.rs join_server), and O2
+-- created the invite his alts redeemed. Without these rows the alt farm
+-- would be a fixture the real event stream never produces — and the
+-- non-owner-active bar would pass vacuously instead of being proven.
+INSERT INTO public.analytics_events (name, user_id, server_id, properties, occurred_at)
+VALUES ('invite_created', '77b10000-0000-4000-a000-000000000009',
+        '77510000-0000-4000-a000-000000000002', '{"code":"altfarm1"}', '2020-06-01T00:30:00Z');
+INSERT INTO public.analytics_events (name, user_id, server_id, properties, occurred_at)
+SELECT e.name, a.alt_id, '77510000-0000-4000-a000-000000000002', e.props::jsonb, '2020-06-01T01:00:00Z'
+FROM (VALUES
+    ('77b10000-0000-4000-a000-000000000010'::uuid),
+    ('77b10000-0000-4000-a000-000000000011'::uuid),
+    ('77b10000-0000-4000-a000-000000000012'::uuid),
+    ('77b10000-0000-4000-a000-000000000013'::uuid)
+) AS a(alt_id)
+CROSS JOIN (VALUES
+    ('invite_redeemed', '{"code":"altfarm1"}'),
+    ('server_joined',   '{"via":"invite"}')
+) AS e(name, props);
 
 -- S1 messages, week 1, spread over 2 days, 4 distinct eligible senders:
 -- R1×20 (day 1 — also his D1-retention action), U5×20, U6×6, O1×5 = 51.
@@ -356,7 +383,9 @@ SELECT is(
     'S1 has exactly 3 non-owner active members in week 1'
 );
 
--- B5: the alt-account farm is NOT alive (Tempo's fixture).
+-- B5: the alt-account farm is NOT alive (Tempo's fixture) — proven against
+-- production-shaped data: the alts DID emit the server_joined/invite_redeemed
+-- events the API always emits on join, and still count as inactive.
 SELECT is(
     (SELECT is_alive FROM analytics.metrics_server_alive
       WHERE server_id = '77510000-0000-4000-a000-000000000002'),
@@ -368,6 +397,12 @@ SELECT is(
       WHERE server_id = '77510000-0000-4000-a000-000000000002'),
     1,
     'alt farm has a single distinct sender'
+);
+SELECT is(
+    (SELECT non_owner_active_week1::int FROM analytics.metrics_server_alive
+      WHERE server_id = '77510000-0000-4000-a000-000000000002'),
+    0,
+    'joining alone (server_joined/invite_redeemed events) does NOT make an alt "active" for the non-owner-active bar'
 );
 
 -- B6: excluded server is absent from the alive view entirely.
@@ -402,15 +437,17 @@ SELECT is(
     'median time-to-first-message is ~29 hours (signup Mon 00:00, first msg Tue 05:01)'
 );
 
--- B8: K-factor inputs — 2 invites created, 1 redeemed, 5 weekly actives
--- (O1, R1, U5, U6 in S1 + O2 in S2: the K denominator counts every active
--- member in eligible servers; the >=3-actives bar belongs to WCU only).
+-- B8: K-factor inputs — 3 invites created (2 in S1 + O2's alt-farm one),
+-- 5 redeemed (R1 + the 4 alts), 9 weekly actives (O1, R1, U5, U6 in S1 +
+-- O2 and his 4 alts in S2 — joins ARE meaningful actions for this
+-- denominator; the >=3-actives bar belongs to WCU only). A multi-use
+-- invite makes conversion > 1 by design (weekly inputs, not per-invite).
 SELECT results_eq(
     $$SELECT invites_created::int, invites_redeemed::int, active_members::int,
              invite_join_conversion, invites_per_active_member, k_factor
         FROM analytics.metrics_invite_funnel WHERE week_start = '2020-06-01'$$,
-    $$VALUES (2, 1, 5, 0.5000::numeric, 0.4000::numeric, 0.2000::numeric)$$,
-    'invite funnel: created=2, redeemed=1, actives=5, conversion=0.5, invites/active=0.4, K=0.2'
+    $$VALUES (3, 5, 9, 1.6667::numeric, 0.3333::numeric, 0.5556::numeric)$$,
+    'invite funnel: created=3, redeemed=5, actives=9, conversion=5/3, invites/active=1/3, K=5/9'
 );
 
 -- B9: immature cohorts report NULL rates (§10 explicit null/unknown rule).
@@ -459,6 +496,63 @@ SELECT is(
       WHERE user_id = '00000000-0000-0000-0000-000000000001'),
     0,
     'system moderator sentinel is not an eligible user'
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- B13: MIXED-MATURITY COHORT — the in-progress-week inflation bug.
+-- M1 signed up exactly 2 days ago: d1 window elapsed, no action → the
+-- one measurable, non-retained user. M2 signed up 1 second later: d1
+-- window [signup+1d, signup+2d) is OPEN (now < signup+2d) yet M2 already
+-- reacted inside it. The unfixed view counted M2 in the numerator but
+-- not the denominator → d1_rate = 1/1 = 1.0 (and >1.0 with more M2s).
+-- Correct: immature users inflate NEITHER side → 0/1 = 0.0000.
+-- now() is transaction-frozen in pgTAP, so the maturity boundaries are
+-- exact; the 1-second offset keeps both users in the same cohort week
+-- except in a ~1s/week boundary edge.
+-- LAST test on purpose: the isolation step below excludes every other
+-- profile in that cohort week (the week of now-2d exists in real local
+-- DBs and, on Wed–Sun runs, contains this file's own now()-dated users).
+-- ═══════════════════════════════════════════════════════════════
+
+UPDATE public.profiles SET created_at = now() - INTERVAL '2 days'
+WHERE id = '77b10000-0000-4000-a000-000000000015';  -- M1: measurable
+UPDATE public.profiles SET created_at = now() - INTERVAL '2 days' + INTERVAL '1 second'
+WHERE id = '77b10000-0000-4000-a000-000000000016';  -- M2: immature
+
+-- M2's meaningful action, inside its still-open d1 window
+-- [now-1d+1s, now+1s): now() qualifies.
+INSERT INTO public.analytics_events (name, user_id, server_id, channel_id, occurred_at)
+VALUES ('reaction_added', '77b10000-0000-4000-a000-000000000016',
+        '77510000-0000-4000-a000-000000000001', '77c10000-0000-4000-a000-000000000001',
+        now());
+
+-- Isolation: keep only M1 + M2 in their cohort week.
+INSERT INTO analytics.exclusions (scope, target_id, reason)
+SELECT 'user', p.id, 'test isolation: mixed-maturity cohort'
+FROM public.profiles p
+WHERE date_trunc('week', p.created_at AT TIME ZONE 'UTC')::date
+      = date_trunc('week', (now() - INTERVAL '2 days') AT TIME ZONE 'UTC')::date
+  AND p.id NOT IN ('77b10000-0000-4000-a000-000000000015',
+                   '77b10000-0000-4000-a000-000000000016')
+ON CONFLICT DO NOTHING;
+
+SELECT is(
+    (SELECT cohort_size::int FROM analytics.metrics_retention
+      WHERE cohort_week = date_trunc('week', (now() - INTERVAL '2 days') AT TIME ZONE 'UTC')::date),
+    2,
+    'mixed-maturity cohort contains exactly M1 and M2'
+);
+SELECT is(
+    (SELECT d1_retained::int FROM analytics.metrics_retention
+      WHERE cohort_week = date_trunc('week', (now() - INTERVAL '2 days') AT TIME ZONE 'UTC')::date),
+    1,
+    'raw retained count still sees the immature-but-active user'
+);
+SELECT is(
+    (SELECT d1_rate FROM analytics.metrics_retention
+      WHERE cohort_week = date_trunc('week', (now() - INTERVAL '2 days') AT TIME ZONE 'UTC')::date),
+    0.0000,
+    'd1 rate is 0.0000 — the immature already-active user inflates neither numerator nor denominator (was 1.0)'
 );
 
 SELECT * FROM finish();

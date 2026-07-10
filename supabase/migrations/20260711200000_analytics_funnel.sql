@@ -252,6 +252,13 @@ week1_active_members AS (
     JOIN analytics.eligible_servers es ON es.server_id = ma.server_id
     WHERE ma.occurred_at >= es.created_at
       AND ma.occurred_at < es.created_at + INTERVAL '7 days'
+      -- Anti-gaming: joining is NOT "active" for THIS criterion. The API
+      -- emits server_joined + invite_redeemed for EVERY invite join, so
+      -- counting them would collapse the ≥3-non-owner-active bar into the
+      -- ≥5-joined one — exactly the alt-account gaming §5 targets. Joins
+      -- remain meaningful actions for retention (§10); only this bar
+      -- demands genuine activity.
+      AND ma.action IN ('message_sent', 'voice_joined', 'reaction_added')
     GROUP BY ma.server_id, ma.user_id
 ),
 stats AS (
@@ -340,7 +347,10 @@ GROUP BY c.cohort_week;
 -- Retained at day N = performed a meaningful action (see
 -- analytics.meaningful_actions — connects and lurking excluded) during
 -- [signup + N days, signup + N+1 days). Rates count only users whose
--- day-N window has fully elapsed; NULL when no user is measurable yet.
+-- day-N window has fully elapsed — in BOTH the numerator and the
+-- denominator: an immature user who already acted inside a still-open
+-- window must not inflate the rate (it could exceed 1.0 otherwise).
+-- NULL when no user is measurable yet.
 CREATE OR REPLACE VIEW analytics.metrics_retention AS
 WITH cohort AS (
     SELECT
@@ -378,13 +388,13 @@ SELECT
     cohort_week,
     COUNT(*) AS cohort_size,
     COUNT(*) FILTER (WHERE retained_d1) AS d1_retained,
-    ROUND(COUNT(*) FILTER (WHERE retained_d1)::numeric
+    ROUND(COUNT(*) FILTER (WHERE retained_d1 AND now() >= signed_up_at + INTERVAL '2 days')::numeric
         / NULLIF(COUNT(*) FILTER (WHERE now() >= signed_up_at + INTERVAL '2 days'), 0), 4) AS d1_rate,
     COUNT(*) FILTER (WHERE retained_d7) AS d7_retained,
-    ROUND(COUNT(*) FILTER (WHERE retained_d7)::numeric
+    ROUND(COUNT(*) FILTER (WHERE retained_d7 AND now() >= signed_up_at + INTERVAL '8 days')::numeric
         / NULLIF(COUNT(*) FILTER (WHERE now() >= signed_up_at + INTERVAL '8 days'), 0), 4) AS d7_rate,
     COUNT(*) FILTER (WHERE retained_d30) AS d30_retained,
-    ROUND(COUNT(*) FILTER (WHERE retained_d30)::numeric
+    ROUND(COUNT(*) FILTER (WHERE retained_d30 AND now() >= signed_up_at + INTERVAL '31 days')::numeric
         / NULLIF(COUNT(*) FILTER (WHERE now() >= signed_up_at + INTERVAL '31 days'), 0), 4) AS d30_rate
 FROM flags
 GROUP BY cohort_week;
