@@ -27,15 +27,15 @@
 
 Three ways in, pick your poison:
 
-- **Browser** — [app.joinharmony.app](https://app.joinharmony.app). No download, no phone number, no ID verification. Chatting in under a minute.
-- **Self-host** — the full stack on your own machine with one command. Unlimited users, every feature, no strings:
+- **Browser** — [app.joinharmony.app](https://app.joinharmony.app). No download; start from the hosted alpha in your browser.
+- **Self-host** — run the current stack on your own machine with one Docker Compose command:
   ```bash
   git clone https://github.com/zcharef/harmony.git && cd harmony
   cp .env.example .env   # fill in the 5 required values (see docs)
   docker compose up -d --build
   ```
   Full guide (env vars, keys, TLS, upgrades): **[docs/self-hosting.md](docs/self-hosting.md)**
-- **Desktop** — native Tauri app (~80 MB RAM vs Electron's ~500 MB), built from source today; packaged releases are on the roadmap. See [Development](#development).
+- **Desktop** — native Tauri app, built from source today; packaged releases are on the roadmap. See [Development](#development).
 
 ---
 
@@ -45,7 +45,7 @@ Harmony's first promise is practical ownership: a Discord-class chat surface you
 
 ### What makes Harmony different
 
-- **Privacy you can verify.** Harmony is fully open source under AGPL-3.0, so you can inspect the code that handles your data. Self-hosted instances run on your infrastructure and do not report usage back to Harmony.
+- **Privacy you can verify.** Harmony is open source under AGPL-3.0, so the code can be inspected and self-hosted. The product is designed around open code, self-hosting, and minimal data collection.
 
 - **The Discord features you expect.** Reactions, replies, unread indicators, emoji picker, avatars, markdown, message grouping, date dividers, per-channel notification settings, presence and DND, voice channels, moderation and anti-spam. All shipped.
 
@@ -53,7 +53,7 @@ Harmony's first promise is practical ownership: a Discord-class chat surface you
 
 - **Simple to self-host.** One Docker Compose command runs the current stack: Harmony's Rust API, Postgres, and Supabase's open-source auth services. No Redis, no MongoDB, no RabbitMQ.
 
-- **Keep ownership of your community.** Move to your own hardware any time: same codebase, same product surface, your infrastructure. Discord migration tooling is in development; assisted structure-only migration is available by request ([migrate@joinharmony.app](mailto:migrate@joinharmony.app)).
+- **Keep more control over your community.** Self-hosting gives communities more operational control over their instance and data. Discord migration tooling is in development; assisted structure-only migration is available by request ([migrate@joinharmony.app](mailto:migrate@joinharmony.app)).
 
 - **Web + Desktop, same codebase.** Use Harmony in the browser with zero friction, or run the Tauri desktop app for native performance. E2EE DMs will land on desktop first.
 
