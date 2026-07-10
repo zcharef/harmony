@@ -30,13 +30,17 @@ pub use channel::{Channel, ChannelType};
 pub use crypto::{ClaimedKey, DeviceKey, OneTimeKey, PreKeyBundle};
 pub use desktop_auth::DesktopAuthCode;
 pub use ids::{
-    CategoryId, ChannelId, DeviceId, DeviceKeyId, InviteCode, MegolmSessionId, MessageId,
-    ModerationRetryId, OneTimeKeyId, RoleId, SYSTEM_MODERATOR_ID, ServerId, UserId, VoiceSessionId,
+    AttachmentId, CategoryId, ChannelId, DeviceId, DeviceKeyId, InviteCode, MegolmSessionId,
+    MessageId, ModerationRetryId, OneTimeKeyId, RoleId, SYSTEM_MODERATOR_ID, ServerId, UserId,
+    VoiceSessionId,
 };
 pub use invite::Invite;
 pub use megolm_session::MegolmSession;
 pub use member::ServerMember;
-pub use message::{MentionedUser, Message, MessageType, ParentMessagePreview};
+pub use message::{
+    ALLOWED_ATTACHMENT_MIME, ATTACHMENT_PUBLIC_PATH_MARKER, Attachment, MentionedUser, Message,
+    MessageType, NewAttachment, ParentMessagePreview,
+};
 pub use message_with_author::MessageWithAuthor;
 pub use moderation::{ModerationRetry, ServerModerationSettings};
 pub use plan::{Plan, PlanLimits, ResourceKind};

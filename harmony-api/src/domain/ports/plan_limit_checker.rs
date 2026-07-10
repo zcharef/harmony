@@ -85,18 +85,44 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     //   Free: 1, Supporter: 5, Creator: 10.
     //   Implement when embed model is added.
 
-    // ── TODO(plan-limits-v3): §6 — Files (per server) ───────────────────
+    // ── TODO(plan-limits-v3): §6 — Files (remaining) ─────────────────────
+    //
+    // DONE: Attachments per message (check_attachment_count below).
+    // DONE: Per-file size (check_attachment_size below).
     //
     // async fn check_storage_limit(&self, server_id: &ServerId) -> Result<(), DomainError>;
-    // async fn check_file_size(&self, server_id: &ServerId, file_bytes: u64) -> Result<(), DomainError>;
     //
-    // check_storage_limit: compare SUM(file_size) from message_attachments against plan total.
+    // check_storage_limit: compare SUM(size) from message_attachments against plan total.
     //   Free: 1 GB, Supporter: 50 GB, Creator: 200 GB.
-    // check_file_size: compare individual file size against plan max_file_size_bytes.
-    //   Free: 8 MB, Supporter: 50 MB, Creator: 100 MB.
-    // Attachments per message:
-    //   Free: 1, Supporter: 5, Creator: 10.
-    // Call from attachment upload handler BEFORE storing in Supabase Storage.
+    //   DEFERRED (attachments ticket §3.5) — needs a SUM aggregate per send AND a
+    //   cleanup/reconciliation story on delete. Bundle with orphan-object cleanup.
+
+    /// Check if a message may carry `count` attachments on this server's plan. (§6)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::LimitExceeded` when `count` exceeds the plan's
+    /// `max_attachments_per_message`, or `DomainError::Internal` on infrastructure failure.
+    async fn check_attachment_count(
+        &self,
+        server_id: &ServerId,
+        count: u64,
+    ) -> Result<(), DomainError>;
+
+    /// Check if a single attachment of `size_bytes` fits this server's plan cap. (§6)
+    ///
+    /// The 100MB `attachments` bucket cap is the hard security boundary; this is
+    /// the per-plan UX/billing gate on the client-reported size (ticket decision D5).
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::LimitExceeded` when `size_bytes` exceeds the plan's
+    /// `max_attachment_size_bytes`, or `DomainError::Internal` on infrastructure failure.
+    async fn check_attachment_size(
+        &self,
+        server_id: &ServerId,
+        size_bytes: u64,
+    ) -> Result<(), DomainError>;
 
     /// Check if adding another voice participant would exceed the server's plan limit. (§7)
     ///
@@ -163,10 +189,7 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     // ── TODO(plan-limits-v3): §12 — Rate limits (remaining) ─────────────
     //
     // DONE: Message rate (via get_server_plan_limits in MessageService::create)
-    //
-    // Upload rate:
-    //   Free: 3/min, Supporter: 10/min, Creator: 20/min.
-    //   Implement when file upload is added.
+    // DONE: Upload rate (max_uploads_per_min via SpamGuard in MessageService::create)
     //
     // API rate limit:
     //   Free: 30 req/min, Supporter: 120/min, Creator: 300/min.

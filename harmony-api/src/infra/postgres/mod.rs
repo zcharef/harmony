@@ -1,6 +1,7 @@
 //! `PostgreSQL` adapter (Supabase Postgres via `SQLx`).
 
 mod analytics_recorder;
+mod attachment_repository;
 mod ban_repository;
 mod channel_repository;
 mod desktop_auth_repository;
@@ -21,6 +22,7 @@ mod user_preferences_repository;
 mod voice_session_repository;
 
 pub use analytics_recorder::PgAnalyticsRecorder;
+pub use attachment_repository::PgAttachmentRepository;
 pub use ban_repository::PgBanRepository;
 pub use channel_repository::PgChannelRepository;
 pub use desktop_auth_repository::PgDesktopAuthRepository;

@@ -72,6 +72,8 @@ pub enum ResourceKind {
     ActiveInvites,
     // §10 DMs (per user)
     OpenDms,
+    // §6 Files (per message)
+    AttachmentsPerMessage,
 }
 
 impl ResourceKind {
@@ -88,6 +90,7 @@ impl ResourceKind {
             Self::VoiceConcurrent => "concurrent voice participants",
             Self::ActiveInvites => "active invites",
             Self::OpenDms => "open DM conversations",
+            Self::AttachmentsPerMessage => "attachments per message",
         }
     }
 }
@@ -134,8 +137,13 @@ pub struct PlanLimits {
     pub max_bio_chars: u64,
     // §11 Profile — text limits
     pub max_custom_status_chars: u64,
+    // §6 Files (per message / per file)
+    pub max_attachments_per_message: u64,
+    pub max_attachment_size_bytes: u64,
     // §12 Rate limits (per user)
     pub max_messages_per_5s: u64,
+    /// Upload rate (attachments per rolling minute, per user).
+    pub max_uploads_per_min: u64,
     // §13 Voice (per server)
     pub voice_concurrent_limit: i32,
     pub voice_channel_limit: i32,
@@ -162,7 +170,10 @@ const FREE_LIMITS: PlanLimits = PlanLimits {
     max_open_dms: 20,
     max_bio_chars: 200,
     max_custom_status_chars: 50,
+    max_attachments_per_message: 1,
+    max_attachment_size_bytes: 8_388_608, // 8 MB
     max_messages_per_5s: 5,
+    max_uploads_per_min: 3,
     voice_concurrent_limit: 5,
     voice_channel_limit: 5,
     voice_bitrate_kbps: 64,
@@ -184,7 +195,10 @@ const SUPPORTER_LIMITS: PlanLimits = PlanLimits {
     max_open_dms: 100,
     max_bio_chars: 500,
     max_custom_status_chars: 128,
+    max_attachments_per_message: 5,
+    max_attachment_size_bytes: 52_428_800, // 50 MB
     max_messages_per_5s: 10,
+    max_uploads_per_min: 10,
     voice_concurrent_limit: 100,
     voice_channel_limit: 50,
     voice_bitrate_kbps: 128,
@@ -206,7 +220,10 @@ const CREATOR_LIMITS: PlanLimits = PlanLimits {
     max_open_dms: 500,
     max_bio_chars: 1_000,
     max_custom_status_chars: 128,
+    max_attachments_per_message: 10,
+    max_attachment_size_bytes: 104_857_600, // 100 MB
     max_messages_per_5s: 20,
+    max_uploads_per_min: 20,
     voice_concurrent_limit: 500,
     voice_channel_limit: 100,
     voice_bitrate_kbps: 256,
@@ -229,7 +246,10 @@ pub const SELF_HOSTED_LIMITS: PlanLimits = PlanLimits {
     max_open_dms: 2_000,
     max_bio_chars: 4_000,
     max_custom_status_chars: 256,
-    max_messages_per_5s: u64::MAX, // configurable
+    max_attachments_per_message: 50,
+    max_attachment_size_bytes: 104_857_600, // 100 MB (bucket hard cap)
+    max_messages_per_5s: u64::MAX,          // configurable
+    max_uploads_per_min: u64::MAX,          // configurable
     voice_concurrent_limit: 10_000,
     voice_channel_limit: 10_000,
     voice_bitrate_kbps: 512,
@@ -271,6 +291,7 @@ impl PlanLimits {
             ResourceKind::VoiceConcurrent => self.voice_concurrent_limit as u64,
             ResourceKind::ActiveInvites => self.max_active_invites,
             ResourceKind::OpenDms => self.max_open_dms,
+            ResourceKind::AttachmentsPerMessage => self.max_attachments_per_message,
         }
     }
 }
@@ -308,8 +329,12 @@ mod tests {
         // §11 Profile
         assert_eq!(limits.max_bio_chars, 200);
         assert_eq!(limits.max_custom_status_chars, 50);
+        // §6 Files
+        assert_eq!(limits.max_attachments_per_message, 1);
+        assert_eq!(limits.max_attachment_size_bytes, 8_388_608); // 8 MB
         // §12 Rate limits
         assert_eq!(limits.max_messages_per_5s, 5);
+        assert_eq!(limits.max_uploads_per_min, 3);
         // §13 Voice
         assert_eq!(limits.voice_concurrent_limit, 5);
         assert_eq!(limits.voice_channel_limit, 5);
@@ -337,7 +362,11 @@ mod tests {
         assert_eq!(limits.max_open_dms, 100);
         assert_eq!(limits.max_bio_chars, 500);
         assert_eq!(limits.max_custom_status_chars, 128);
+        // §6 Files
+        assert_eq!(limits.max_attachments_per_message, 5);
+        assert_eq!(limits.max_attachment_size_bytes, 52_428_800); // 50 MB
         assert_eq!(limits.max_messages_per_5s, 10);
+        assert_eq!(limits.max_uploads_per_min, 10);
         // §13 Voice
         assert_eq!(limits.voice_concurrent_limit, 100);
         assert_eq!(limits.voice_channel_limit, 50);
@@ -365,7 +394,11 @@ mod tests {
         assert_eq!(limits.max_open_dms, 500);
         assert_eq!(limits.max_bio_chars, 1_000);
         assert_eq!(limits.max_custom_status_chars, 128);
+        // §6 Files
+        assert_eq!(limits.max_attachments_per_message, 10);
+        assert_eq!(limits.max_attachment_size_bytes, 104_857_600); // 100 MB
         assert_eq!(limits.max_messages_per_5s, 20);
+        assert_eq!(limits.max_uploads_per_min, 20);
         // §13 Voice
         assert_eq!(limits.voice_concurrent_limit, 500);
         assert_eq!(limits.voice_channel_limit, 100);
@@ -393,7 +426,11 @@ mod tests {
         assert_eq!(limits.max_open_dms, 2_000);
         assert_eq!(limits.max_bio_chars, 4_000);
         assert_eq!(limits.max_custom_status_chars, 256);
+        // §6 Files
+        assert_eq!(limits.max_attachments_per_message, 50);
+        assert_eq!(limits.max_attachment_size_bytes, 104_857_600); // bucket hard cap
         assert_eq!(limits.max_messages_per_5s, u64::MAX); // configurable
+        assert_eq!(limits.max_uploads_per_min, u64::MAX); // configurable
         // §13 Voice
         assert_eq!(limits.voice_concurrent_limit, 10_000);
         assert_eq!(limits.voice_channel_limit, 10_000);
@@ -453,6 +490,15 @@ mod tests {
 
         assert!(free.max_messages_per_5s <= supporter.max_messages_per_5s);
         assert!(supporter.max_messages_per_5s <= creator.max_messages_per_5s);
+
+        assert!(free.max_attachments_per_message <= supporter.max_attachments_per_message);
+        assert!(supporter.max_attachments_per_message <= creator.max_attachments_per_message);
+
+        assert!(free.max_attachment_size_bytes <= supporter.max_attachment_size_bytes);
+        assert!(supporter.max_attachment_size_bytes <= creator.max_attachment_size_bytes);
+
+        assert!(free.max_uploads_per_min <= supporter.max_uploads_per_min);
+        assert!(supporter.max_uploads_per_min <= creator.max_uploads_per_min);
 
         assert!(free.voice_concurrent_limit <= supporter.voice_concurrent_limit);
         assert!(supporter.voice_concurrent_limit <= creator.voice_concurrent_limit);
@@ -581,6 +627,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn limit_for_attachments_per_message() {
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::AttachmentsPerMessage),
+            1
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Supporter).limit_for(ResourceKind::AttachmentsPerMessage),
+            5
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::AttachmentsPerMessage),
+            10
+        );
+    }
+
     // ── Plan FromStr round-trip ─────────────────────────────────────────
 
     #[test]
@@ -672,6 +734,10 @@ mod tests {
         assert_eq!(
             ResourceKind::OpenDms.display_name(),
             "open DM conversations"
+        );
+        assert_eq!(
+            ResourceKind::AttachmentsPerMessage.display_name(),
+            "attachments per message"
         );
     }
 

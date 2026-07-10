@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use super::ids::{ChannelId, MessageId, UserId};
+use super::ids::{AttachmentId, ChannelId, MessageId, UserId};
 
 /// Discriminates user messages from system announcements.
 ///
@@ -74,6 +74,102 @@ pub struct MentionedUser {
     pub username: String,
     pub display_name: Option<String>,
     pub nickname: Option<String>,
+}
+
+/// Mime types accepted for message attachments.
+///
+/// WHY duplicated from the migration: the `attachments` storage bucket
+/// enforces this list at upload time (hard boundary); the API re-checks it at
+/// message-send time so a client cannot persist an attachment row claiming a
+/// mime the bucket would never store. Keep both lists in sync
+/// (`20260711100000_create_message_attachments.sql`).
+pub const ALLOWED_ATTACHMENT_MIME: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/avif",
+    "application/pdf",
+    "text/plain",
+    "application/zip",
+    "video/mp4",
+    "video/webm",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/wav",
+];
+
+/// Public URL marker for objects in the `attachments` storage bucket.
+///
+/// WHY a marker (not a full-origin prefix): the domain layer has no access to
+/// the Supabase URL config (hexagonal purity), and the client mirror
+/// (`parseAttachmentStoragePath`) matches the same substring. The check stops
+/// arbitrary external URLs from being persisted as "attachments"; the bucket
+/// RLS + uuid paths are the actual security boundary (ticket decision D6).
+pub const ATTACHMENT_PUBLIC_PATH_MARKER: &str = "/storage/v1/object/public/attachments/";
+
+/// A file attached to a message (persisted row).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub id: AttachmentId,
+    pub message_id: MessageId,
+    /// Public Storage URL (`…/storage/v1/object/public/attachments/{uid}/{uuid}.{ext}`).
+    pub url: String,
+    pub mime: String,
+    /// Byte size as reported by the client at send time (per-plan cap input).
+    pub size: i64,
+    /// Pixel width for images; `None` for non-images.
+    pub width: Option<i32>,
+    /// Pixel height for images; `None` for non-images.
+    pub height: Option<i32>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A validated attachment awaiting insertion (pre-persist form).
+///
+/// Constructed only via [`NewAttachment::try_new`], which is the single
+/// validation funnel (parse, don't validate).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewAttachment {
+    pub url: String,
+    pub mime: String,
+    pub size: i64,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+}
+
+impl NewAttachment {
+    /// Validated construction for an attachment reference.
+    ///
+    /// # Errors
+    /// Returns a static message when the URL is not an `attachments`-bucket
+    /// public URL, the mime is not allowlisted, or the size is not positive.
+    pub fn try_new(
+        url: String,
+        mime: String,
+        size: i64,
+        width: Option<i32>,
+        height: Option<i32>,
+    ) -> Result<Self, &'static str> {
+        let is_https = url.starts_with("https://") || url.starts_with("http://");
+        if !is_https || !url.contains(ATTACHMENT_PUBLIC_PATH_MARKER) {
+            return Err("Invalid attachment URL");
+        }
+        if !ALLOWED_ATTACHMENT_MIME.contains(&mime.as_str()) {
+            return Err("Unsupported attachment type");
+        }
+        if size <= 0 {
+            return Err("Attachment size must be positive");
+        }
+        Ok(Self {
+            url,
+            mime,
+            size,
+            width,
+            height,
+        })
+    }
 }
 
 /// Lightweight preview of a parent message for reply display.

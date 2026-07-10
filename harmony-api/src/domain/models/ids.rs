@@ -108,6 +108,31 @@ impl From<Uuid> for MessageId {
     }
 }
 
+/// Unique identifier for a message attachment.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "110e8400-e29b-41d4-a716-44665544000b")]
+#[serde(transparent)]
+pub struct AttachmentId(pub Uuid);
+
+impl AttachmentId {
+    #[must_use]
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for AttachmentId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for AttachmentId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
 /// Unique identifier for a role within a server.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[schema(example = "990e8400-e29b-41d4-a716-446655440004")]

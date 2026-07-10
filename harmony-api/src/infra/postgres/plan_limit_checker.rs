@@ -236,6 +236,43 @@ impl PlanLimitChecker for PgPlanLimitChecker {
             .await
     }
 
+    async fn check_attachment_count(
+        &self,
+        server_id: &ServerId,
+        count: u64,
+    ) -> Result<(), DomainError> {
+        // WHY no COUNT query: the candidate count comes from the request being
+        // validated, not from existing rows. Reject when it EXCEEDS the cap
+        // (a message carrying exactly the cap is allowed).
+        let (plan, limits) = self.get_server_limits(server_id).await?;
+        let max = limits.max_attachments_per_message;
+        if count > max {
+            return Err(DomainError::LimitExceeded {
+                resource: crate::domain::models::ResourceKind::AttachmentsPerMessage.display_name(),
+                plan: plan.to_string(),
+                limit: max,
+            });
+        }
+        Ok(())
+    }
+
+    async fn check_attachment_size(
+        &self,
+        server_id: &ServerId,
+        size_bytes: u64,
+    ) -> Result<(), DomainError> {
+        let (plan, limits) = self.get_server_limits(server_id).await?;
+        let max = limits.max_attachment_size_bytes;
+        if size_bytes > max {
+            return Err(DomainError::LimitExceeded {
+                resource: "attachment bytes",
+                plan: plan.to_string(),
+                limit: max,
+            });
+        }
+        Ok(())
+    }
+
     async fn check_joined_server_limit(&self, user_id: &UserId) -> Result<(), DomainError> {
         let uid = user_id.0;
 

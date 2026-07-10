@@ -333,6 +333,7 @@ mod tests {
                 moderated_at: None,
                 moderation_reason: None,
                 mentions: vec![],
+                attachments: vec![],
                 created_at: Utc::now(),
             },
             channel_access: None,

@@ -1002,6 +1002,22 @@ mod tests {
         async fn check_dm_limit(&self, _user_id: &UserId) -> Result<(), DomainError> {
             Ok(())
         }
+
+        async fn check_attachment_count(
+            &self,
+            _server_id: &ServerId,
+            _count: u64,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+
+        async fn check_attachment_size(
+            &self,
+            _server_id: &ServerId,
+            _size_bytes: u64,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
     }
 
     // -- FakeLiveKit --

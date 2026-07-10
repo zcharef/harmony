@@ -7,6 +7,7 @@
 //!
 //! The core [`Message`] entity remains unchanged.
 
+use crate::domain::models::Attachment;
 use crate::domain::models::MentionedUser;
 use crate::domain::models::Message;
 use crate::domain::models::ParentMessagePreview;
@@ -35,4 +36,8 @@ pub struct MessageWithAuthor {
     /// by `MessageService` (not the repository), resolved from
     /// `message.mentioned_user_ids` at read time so pill labels stay current.
     pub mentions: Vec<MentionedUser>,
+    /// Files attached to this message, insertion order. Populated by the
+    /// `send_to_channel` transaction on write and by
+    /// `AttachmentRepository::batch_for_messages` on read (mirrors `reactions`).
+    pub attachments: Vec<Attachment>,
 }

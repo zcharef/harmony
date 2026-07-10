@@ -305,6 +305,7 @@ async fn send_persists_mentioned_user_ids() {
             None,
             None,
             vec![UserId::new(target)],
+            vec![],
             0,
         )
         .await

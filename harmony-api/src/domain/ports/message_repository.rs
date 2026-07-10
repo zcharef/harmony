@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{ChannelId, Message, MessageId, MessageWithAuthor, UserId};
+use crate::domain::models::{
+    ChannelId, Message, MessageId, MessageWithAuthor, NewAttachment, UserId,
+};
 
 /// Intent-based repository for messages.
 #[async_trait]
@@ -30,6 +32,9 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         original_content: Option<String>,
         // Server-validated mention targets to persist in `mentioned_user_ids`.
         mentioned_user_ids: Vec<UserId>,
+        // Validated attachments inserted in the SAME transaction as the message
+        // (atomicity — no orphan message, no orphan rows). Empty = no tx overhead.
+        attachments: Vec<NewAttachment>,
         slow_mode_seconds: i32,
     ) -> Result<MessageWithAuthor, DomainError>;
 

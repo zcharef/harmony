@@ -4,9 +4,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::domain::errors::DomainError;
 use crate::domain::models::{
-    ChannelId, MentionedUser, MessageId, MessageType, MessageWithAuthor, ParentMessagePreview,
-    ReactionSummary, UserId,
+    Attachment, AttachmentId, ChannelId, MentionedUser, MessageId, MessageType, MessageWithAuthor,
+    NewAttachment, ParentMessagePreview, ReactionSummary, UserId,
 };
 
 /// Request body for sending a new message.
@@ -32,6 +33,46 @@ pub struct SendMessageRequest {
     /// version-skew surface, spec §8).
     #[serde(default)]
     pub mentioned_user_ids: Option<Vec<UserId>>,
+    /// Files attached to this message. Each entry references an object the
+    /// client already uploaded to the `attachments` Supabase Storage bucket
+    /// under its own `{uid}/…` prefix. The server validates the URL belongs to
+    /// that bucket, the per-plan count + size caps, then persists the rows
+    /// atomically with the message.
+    ///
+    /// Clients MUST omit this key entirely when there are no attachments —
+    /// never send `[]` or `null` (house rule; minimizes the
+    /// `deny_unknown_fields` version-skew surface). Rejected with 400 on
+    /// `encrypted = true` messages (plaintext attachments only in v1).
+    #[serde(default)]
+    pub attachments: Option<Vec<NewAttachmentRequest>>,
+}
+
+/// A single attachment reference in a `SendMessageRequest`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NewAttachmentRequest {
+    /// Public Storage URL (`…/storage/v1/object/public/attachments/{uid}/{uuid}.{ext}`).
+    pub url: String,
+    /// Mime type — must be in the bucket allowlist.
+    pub mime: String,
+    /// Byte size the client reports (used for the per-plan cap; the bucket
+    /// enforces the 100MB hard boundary regardless).
+    pub size: i64,
+    /// Pixel width for images (omit for non-images) — drives no-CLS render.
+    #[serde(default)]
+    pub width: Option<i32>,
+    /// Pixel height for images (omit for non-images).
+    #[serde(default)]
+    pub height: Option<i32>,
+}
+
+impl TryFrom<NewAttachmentRequest> for NewAttachment {
+    type Error = DomainError;
+
+    fn try_from(req: NewAttachmentRequest) -> Result<Self, Self::Error> {
+        NewAttachment::try_new(req.url, req.mime, req.size, req.width, req.height)
+            .map_err(|msg| DomainError::ValidationError(msg.to_string()))
+    }
 }
 
 /// Request body for editing a message.
@@ -98,7 +139,40 @@ pub struct MessageResponse {
     /// the mention row highlight and the `mentions` notification level. Users who
     /// left the server still appear (nickname null); deleted accounts are omitted.
     pub mentions: Vec<MentionedUserResponse>,
+    /// Files attached to this message, in insertion order.
+    pub attachments: Vec<AttachmentResponse>,
     pub created_at: DateTime<Utc>,
+}
+
+/// A file attached to a message.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentResponse {
+    pub id: AttachmentId,
+    /// Public Storage URL of the uploaded object.
+    pub url: String,
+    pub mime: String,
+    /// Byte size (client-reported at send time).
+    pub size: i64,
+    /// Pixel width for images; omitted for non-images.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<i32>,
+    /// Pixel height for images; omitted for non-images.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<i32>,
+}
+
+impl From<Attachment> for AttachmentResponse {
+    fn from(a: Attachment) -> Self {
+        Self {
+            id: a.id,
+            url: a.url,
+            mime: a.mime,
+            size: a.size,
+            width: a.width,
+            height: a.height,
+        }
+    }
 }
 
 /// A user mentioned in a message, resolved to display data (mirrors
@@ -130,6 +204,11 @@ impl From<MessageWithAuthor> for MessageResponse {
             .into_iter()
             .map(MentionedUserResponse::from)
             .collect();
+        let attachments = mwa
+            .attachments
+            .into_iter()
+            .map(AttachmentResponse::from)
+            .collect();
         let reactions = mwa.reactions;
         let parent_message = mwa.parent_message;
         let author_username = mwa.author_username;
@@ -156,6 +235,7 @@ impl From<MessageWithAuthor> for MessageResponse {
             moderated_at: m.moderated_at,
             moderation_reason: m.moderation_reason,
             mentions,
+            attachments,
             created_at: m.created_at,
         }
     }
@@ -232,6 +312,7 @@ mod tests {
             reactions: vec![],
             parent_message: None,
             mentions: vec![],
+            attachments: vec![],
         }
     }
 
@@ -259,5 +340,140 @@ mod tests {
 
         let json = serde_json::to_value(&response).unwrap();
         assert!(json.get("authorDisplayName").is_none());
+    }
+
+    // ── Attachments (T1.3) ───────────────────────────────────────────
+
+    const VALID_ATTACHMENT_URL: &str =
+        "https://xyz.supabase.co/storage/v1/object/public/attachments/user-uuid/file-uuid.webp";
+
+    fn attachment_request(url: &str, mime: &str, size: i64) -> NewAttachmentRequest {
+        NewAttachmentRequest {
+            url: url.to_string(),
+            mime: mime.to_string(),
+            size,
+            width: Some(800),
+            height: Some(600),
+        }
+    }
+
+    /// The `TryFrom` funnel accepts a well-formed attachments-bucket URL.
+    #[test]
+    fn attachment_try_from_accepts_bucket_url() {
+        let result =
+            NewAttachment::try_from(attachment_request(VALID_ATTACHMENT_URL, "image/webp", 1024));
+        let attachment = result.unwrap();
+        assert_eq!(attachment.url, VALID_ATTACHMENT_URL);
+        assert_eq!(attachment.width, Some(800));
+    }
+
+    /// WHY: a client must not be able to persist an arbitrary external URL as
+    /// an "attachment" — only attachments-bucket public URLs pass.
+    #[test]
+    fn attachment_try_from_rejects_external_url() {
+        let result = NewAttachment::try_from(attachment_request(
+            "https://evil.example.com/image.png",
+            "image/png",
+            1024,
+        ));
+        assert!(matches!(result, Err(DomainError::ValidationError(_))));
+    }
+
+    /// WHY: the avatars bucket is NOT the attachments bucket — its URLs are
+    /// rejected so avatar objects can't masquerade as message attachments.
+    #[test]
+    fn attachment_try_from_rejects_other_bucket_url() {
+        let result = NewAttachment::try_from(attachment_request(
+            "https://xyz.supabase.co/storage/v1/object/public/avatars/uid/file.webp",
+            "image/webp",
+            1024,
+        ));
+        assert!(matches!(result, Err(DomainError::ValidationError(_))));
+    }
+
+    /// Non-http(s) schemes never pass, even with the marker embedded.
+    #[test]
+    fn attachment_try_from_rejects_non_http_scheme() {
+        let result = NewAttachment::try_from(attachment_request(
+            "javascript:alert(1)///storage/v1/object/public/attachments/x",
+            "image/png",
+            1024,
+        ));
+        assert!(matches!(result, Err(DomainError::ValidationError(_))));
+    }
+
+    /// Mime must be on the bucket allowlist.
+    #[test]
+    fn attachment_try_from_rejects_unlisted_mime() {
+        let result = NewAttachment::try_from(attachment_request(
+            VALID_ATTACHMENT_URL,
+            "application/x-msdownload",
+            1024,
+        ));
+        assert!(matches!(result, Err(DomainError::ValidationError(_))));
+    }
+
+    /// Size must be strictly positive.
+    #[test]
+    fn attachment_try_from_rejects_non_positive_size() {
+        for size in [0, -1] {
+            let result = NewAttachment::try_from(attachment_request(
+                VALID_ATTACHMENT_URL,
+                "image/png",
+                size,
+            ));
+            assert!(
+                matches!(result, Err(DomainError::ValidationError(_))),
+                "size {size} must be rejected"
+            );
+        }
+    }
+
+    /// `attachments` rides the response in camelCase; absent dims are omitted.
+    #[test]
+    fn message_response_serializes_attachments_camel_case() {
+        let mut mwa = make_message_with_author(None);
+        mwa.attachments = vec![Attachment {
+            id: crate::domain::models::AttachmentId::from(Uuid::new_v4()),
+            message_id: mwa.message.id.clone(),
+            url: VALID_ATTACHMENT_URL.to_string(),
+            mime: "application/pdf".to_string(),
+            size: 2048,
+            width: None,
+            height: None,
+            created_at: Utc::now(),
+        }];
+
+        let json = serde_json::to_value(MessageResponse::from(mwa)).unwrap();
+        let attachment = &json["attachments"][0];
+        assert_eq!(attachment["url"], VALID_ATTACHMENT_URL);
+        assert_eq!(attachment["mime"], "application/pdf");
+        assert_eq!(attachment["size"], 2048);
+        // Non-image dims are omitted entirely, not null.
+        assert!(attachment.get("width").is_none());
+        assert!(attachment.get("height").is_none());
+    }
+
+    /// A request without the `attachments` key deserializes to `None`
+    /// (rollout-safe: old clients keep working).
+    #[test]
+    fn send_message_request_attachments_key_optional() {
+        let req: SendMessageRequest = serde_json::from_str(r#"{"content": "hello"}"#).unwrap();
+        assert!(req.attachments.is_none());
+
+        let req: SendMessageRequest = serde_json::from_str(&format!(
+            r#"{{"content": "", "attachments": [{{"url": "{VALID_ATTACHMENT_URL}", "mime": "image/webp", "size": 10, "width": 4, "height": 4}}]}}"#
+        ))
+        .unwrap();
+        assert_eq!(req.attachments.unwrap().len(), 1);
+    }
+
+    /// `deny_unknown_fields` on the nested DTO — a stray key is a 400.
+    #[test]
+    fn new_attachment_request_rejects_unknown_fields() {
+        let result = serde_json::from_str::<NewAttachmentRequest>(&format!(
+            r#"{{"url": "{VALID_ATTACHMENT_URL}", "mime": "image/webp", "size": 10, "sneaky": true}}"#
+        ));
+        assert!(result.is_err());
     }
 }

@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{
-    ChannelId, Message, MessageId, MessageType, MessageWithAuthor, ParentMessagePreview, UserId,
+    Attachment, AttachmentId, ChannelId, Message, MessageId, MessageType, MessageWithAuthor,
+    NewAttachment, ParentMessagePreview, UserId,
 };
 use crate::domain::ports::MessageRepository;
 
@@ -191,8 +192,190 @@ impl MessageWithAuthorRow {
             // WHY: Mentions are resolved by MessageService from
             // message.mentioned_user_ids, not by the repository query.
             mentions: vec![],
+            // WHY: Attachments are set by the send_to_channel transaction on
+            // write and batch-fetched by MessageService on read paths.
+            attachments: vec![],
         }
     }
+}
+
+/// Insert the message row (with author + parent-preview JOINs) on the given
+/// connection.
+///
+/// WHY a shared helper on `&mut PgConnection`: the same INSERT runs on three
+/// paths (slow-mode transaction, attachments transaction, plain fast path) —
+/// previously the query was duplicated verbatim per path.
+#[allow(clippy::too_many_arguments)]
+async fn insert_message_row(
+    conn: &mut sqlx::PgConnection,
+    channel_id: Uuid,
+    author_id: Uuid,
+    content: &str,
+    encrypted: bool,
+    sender_device_id: Option<&str>,
+    parent_message_id: Option<Uuid>,
+    moderated_at: Option<DateTime<Utc>>,
+    moderation_reason: Option<&str>,
+    original_content: Option<&str>,
+    mentioned_user_ids: &[Uuid],
+) -> Result<MessageWithAuthorRow, DomainError> {
+    let row = sqlx::query!(
+        r#"
+        WITH inserted AS (
+            INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id, moderated_at, moderation_reason, original_content, mentioned_user_ids)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING
+                id,
+                channel_id,
+                author_id,
+                content,
+                edited_at,
+                deleted_at,
+                deleted_by,
+                encrypted,
+                sender_device_id,
+                message_type,
+                system_event_key,
+                parent_message_id,
+                moderated_at,
+                moderation_reason,
+                original_content,
+                mentioned_user_ids,
+                created_at
+        )
+        SELECT
+            i.id as "id!",
+            i.channel_id as "channel_id!",
+            i.author_id as "author_id!",
+            i.content,
+            i.edited_at,
+            i.deleted_at,
+            i.deleted_by,
+            i.encrypted as "encrypted!",
+            i.sender_device_id,
+            i.message_type as "message_type!: String",
+            i.system_event_key,
+            i.parent_message_id,
+            i.moderated_at,
+            i.moderation_reason,
+            i.original_content,
+            i.mentioned_user_ids as "mentioned_user_ids!",
+            i.created_at as "created_at!",
+            p.username AS "author_username?",
+            p.display_name AS "author_display_name?",
+            p.avatar_url AS "author_avatar_url?",
+            parent_p.username AS "parent_author_username?",
+            LEFT(parent_m.content, 100) AS "parent_content_preview?",
+            (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
+        FROM inserted i
+        LEFT JOIN profiles p ON p.id = i.author_id
+        LEFT JOIN messages parent_m ON parent_m.id = i.parent_message_id
+        LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
+        "#,
+        channel_id,
+        author_id,
+        content,
+        encrypted,
+        sender_device_id,
+        parent_message_id,
+        moderated_at,
+        moderation_reason,
+        original_content,
+        mentioned_user_ids,
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(super::db_err)?;
+
+    Ok(MessageWithAuthorRow {
+        id: row.id,
+        channel_id: row.channel_id,
+        author_id: row.author_id,
+        content: row.content,
+        edited_at: row.edited_at,
+        deleted_at: row.deleted_at,
+        deleted_by: row.deleted_by,
+        encrypted: row.encrypted,
+        sender_device_id: row.sender_device_id,
+        message_type: row.message_type,
+        system_event_key: row.system_event_key,
+        parent_message_id: row.parent_message_id,
+        moderated_at: row.moderated_at,
+        moderation_reason: row.moderation_reason,
+        original_content: row.original_content,
+        mentioned_user_ids: row.mentioned_user_ids,
+        created_at: row.created_at,
+        author_username: row.author_username,
+        author_display_name: row.author_display_name,
+        author_avatar_url: row.author_avatar_url,
+        parent_author_username: row.parent_author_username,
+        parent_content_preview: row.parent_content_preview,
+        parent_deleted: row.parent_deleted,
+    })
+}
+
+/// Bulk-insert attachment rows for a message on the given connection
+/// (single `UNNEST` statement), returning them in insertion order.
+///
+/// WHY `now() + ord µs`: `now()` is transaction-stable, so every row would
+/// share one timestamp and the `ORDER BY created_at, id` read path could not
+/// reconstruct insertion order (`id` is a random uuid — useless tiebreak).
+/// Adding the UNNEST ordinality as microseconds makes `created_at` strictly
+/// increasing and DETERMINISTIC — unlike `clock_timestamp()`, which can
+/// repeat within one clock tick.
+async fn insert_attachments(
+    conn: &mut sqlx::PgConnection,
+    message_id: Uuid,
+    attachments: &[NewAttachment],
+) -> Result<Vec<Attachment>, DomainError> {
+    if attachments.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let urls: Vec<String> = attachments.iter().map(|a| a.url.clone()).collect();
+    let mimes: Vec<String> = attachments.iter().map(|a| a.mime.clone()).collect();
+    let sizes: Vec<i64> = attachments.iter().map(|a| a.size).collect();
+    let widths: Vec<Option<i32>> = attachments.iter().map(|a| a.width).collect();
+    let heights: Vec<Option<i32>> = attachments.iter().map(|a| a.height).collect();
+
+    let rows = sqlx::query!(
+        r#"
+        INSERT INTO message_attachments (message_id, url, mime, size, width, height, created_at)
+        SELECT $1, u.url, u.mime, u.size, u.width, u.height,
+               now() + make_interval(secs => (u.ord - 1)::double precision / 1e6)
+        FROM UNNEST($2::text[], $3::text[], $4::bigint[], $5::int[], $6::int[])
+             WITH ORDINALITY AS u(url, mime, size, width, height, ord)
+        RETURNING id, message_id, url, mime, size, width, height, created_at
+        "#,
+        message_id,
+        &urls,
+        &mimes,
+        &sizes,
+        &widths as &[Option<i32>],
+        &heights as &[Option<i32>],
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(super::db_err)?;
+
+    // WHY sort: RETURNING row order is not guaranteed by SQL — created_at
+    // encodes the insertion order deterministically, so sorting restores it
+    // for the response/SSE payload regardless of executor ordering.
+    let mut rows = rows;
+    rows.sort_by_key(|row| row.created_at);
+    Ok(rows
+        .into_iter()
+        .map(|row| Attachment {
+            id: AttachmentId::new(row.id),
+            message_id: MessageId::new(row.message_id),
+            url: row.url,
+            mime: row.mime,
+            size: row.size,
+            width: row.width,
+            height: row.height,
+            created_at: row.created_at,
+        })
+        .collect())
 }
 
 #[async_trait]
@@ -209,15 +392,38 @@ impl MessageRepository for PgMessageRepository {
         moderation_reason: Option<String>,
         original_content: Option<String>,
         mentioned_user_ids: Vec<UserId>,
+        attachments: Vec<NewAttachment>,
         slow_mode_seconds: i32,
     ) -> Result<MessageWithAuthor, DomainError> {
         let cid = channel_id.0;
         let aid = author_id.0;
         let pmid = parent_message_id.map(|id| id.0);
-        let mod_at = moderated_at;
-        let mod_reason = moderation_reason;
-        let orig_content = original_content;
         let mentions: Vec<Uuid> = mentioned_user_ids.into_iter().map(|u| u.0).collect();
+
+        // Fast path: no slow mode and no attachments — single INSERT, no
+        // transaction overhead.
+        if slow_mode_seconds == 0 && attachments.is_empty() {
+            let mut conn = self.pool.acquire().await.map_err(super::db_err)?;
+            let row = insert_message_row(
+                &mut conn,
+                cid,
+                aid,
+                &content,
+                encrypted,
+                sender_device_id.as_deref(),
+                pmid,
+                moderated_at,
+                moderation_reason.as_deref(),
+                original_content.as_deref(),
+                &mentions,
+            )
+            .await?;
+            return Ok(row.into_message_with_author());
+        }
+
+        // Transactional path: the slow-mode TOCTOU lock and/or the atomic
+        // message+attachments write (no orphan message, no orphan rows).
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
 
         // WHY: When slow_mode_seconds > 0, we must atomically check the user's last
         // message time AND insert in the same transaction, using pg_advisory_xact_lock
@@ -225,8 +431,6 @@ impl MessageRepository for PgMessageRepository {
         // this, two concurrent requests can both pass the elapsed check before either
         // INSERT commits — a TOCTOU race that bypasses slow mode entirely.
         if slow_mode_seconds > 0 {
-            let mut tx = self.pool.begin().await.map_err(super::db_err)?;
-
             // WHY: hashtext(user_id || channel_id) produces a stable int4 hash.
             // pg_advisory_xact_lock serializes only sends from the SAME user to
             // the SAME channel — zero contention for different user/channel pairs.
@@ -274,202 +478,32 @@ impl MessageRepository for PgMessageRepository {
                     )));
                 }
             }
-
-            let row = sqlx::query!(
-            r#"
-            WITH inserted AS (
-                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id, moderated_at, moderation_reason, original_content, mentioned_user_ids)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                RETURNING
-                    id,
-                    channel_id,
-                    author_id,
-                    content,
-                    edited_at,
-                    deleted_at,
-                    deleted_by,
-                    encrypted,
-                    sender_device_id,
-                    message_type,
-                    system_event_key,
-                    parent_message_id,
-                    moderated_at,
-                    moderation_reason,
-                    original_content,
-                    mentioned_user_ids,
-                    created_at
-            )
-            SELECT
-                i.id as "id!",
-                i.channel_id as "channel_id!",
-                i.author_id as "author_id!",
-                i.content,
-                i.edited_at,
-                i.deleted_at,
-                i.deleted_by,
-                i.encrypted as "encrypted!",
-                i.sender_device_id,
-                i.message_type as "message_type!: String",
-                i.system_event_key,
-                i.parent_message_id,
-                i.moderated_at,
-                i.moderation_reason,
-                i.original_content,
-                i.mentioned_user_ids as "mentioned_user_ids!",
-                i.created_at as "created_at!",
-                p.username AS "author_username?",
-                p.display_name AS "author_display_name?",
-                p.avatar_url AS "author_avatar_url?",
-                parent_p.username AS "parent_author_username?",
-                LEFT(parent_m.content, 100) AS "parent_content_preview?",
-                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
-            FROM inserted i
-            LEFT JOIN profiles p ON p.id = i.author_id
-            LEFT JOIN messages parent_m ON parent_m.id = i.parent_message_id
-            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
-            "#,
-                cid,
-                aid,
-                content,
-                encrypted,
-                sender_device_id,
-                pmid,
-                mod_at,
-                mod_reason,
-                orig_content,
-                &mentions,
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(super::db_err)?;
-
-            tx.commit().await.map_err(super::db_err)?;
-
-            let msg = MessageWithAuthorRow {
-                id: row.id,
-                channel_id: row.channel_id,
-                author_id: row.author_id,
-                content: row.content,
-                edited_at: row.edited_at,
-                deleted_at: row.deleted_at,
-                deleted_by: row.deleted_by,
-                encrypted: row.encrypted,
-                sender_device_id: row.sender_device_id,
-                message_type: row.message_type,
-                system_event_key: row.system_event_key,
-                parent_message_id: row.parent_message_id,
-                moderated_at: row.moderated_at,
-                moderation_reason: row.moderation_reason,
-                original_content: row.original_content,
-                mentioned_user_ids: row.mentioned_user_ids,
-                created_at: row.created_at,
-                author_username: row.author_username,
-                author_display_name: row.author_display_name,
-                author_avatar_url: row.author_avatar_url,
-                parent_author_username: row.parent_author_username,
-                parent_content_preview: row.parent_content_preview,
-                parent_deleted: row.parent_deleted,
-            };
-
-            return Ok(msg.into_message_with_author());
         }
 
-        // Fast path: no slow mode — direct INSERT, no transaction overhead.
-        let row = sqlx::query!(
-            r#"
-            WITH inserted AS (
-                INSERT INTO messages (channel_id, author_id, content, encrypted, sender_device_id, parent_message_id, moderated_at, moderation_reason, original_content, mentioned_user_ids)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                RETURNING
-                    id,
-                    channel_id,
-                    author_id,
-                    content,
-                    edited_at,
-                    deleted_at,
-                    deleted_by,
-                    encrypted,
-                    sender_device_id,
-                    message_type,
-                    system_event_key,
-                    parent_message_id,
-                    moderated_at,
-                    moderation_reason,
-                    original_content,
-                    mentioned_user_ids,
-                    created_at
-            )
-            SELECT
-                i.id as "id!",
-                i.channel_id as "channel_id!",
-                i.author_id as "author_id!",
-                i.content,
-                i.edited_at,
-                i.deleted_at,
-                i.deleted_by,
-                i.encrypted as "encrypted!",
-                i.sender_device_id,
-                i.message_type as "message_type!: String",
-                i.system_event_key,
-                i.parent_message_id,
-                i.moderated_at,
-                i.moderation_reason,
-                i.original_content,
-                i.mentioned_user_ids as "mentioned_user_ids!",
-                i.created_at as "created_at!",
-                p.username AS "author_username?",
-                p.display_name AS "author_display_name?",
-                p.avatar_url AS "author_avatar_url?",
-                parent_p.username AS "parent_author_username?",
-                LEFT(parent_m.content, 100) AS "parent_content_preview?",
-                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
-            FROM inserted i
-            LEFT JOIN profiles p ON p.id = i.author_id
-            LEFT JOIN messages parent_m ON parent_m.id = i.parent_message_id
-            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
-            "#,
+        let row = insert_message_row(
+            &mut tx,
             cid,
             aid,
-            content,
+            &content,
             encrypted,
-            sender_device_id,
+            sender_device_id.as_deref(),
             pmid,
-            mod_at,
-            mod_reason,
-            orig_content,
+            moderated_at,
+            moderation_reason.as_deref(),
+            original_content.as_deref(),
             &mentions,
         )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(super::db_err)?;
+        .await?;
 
-        let msg = MessageWithAuthorRow {
-            id: row.id,
-            channel_id: row.channel_id,
-            author_id: row.author_id,
-            content: row.content,
-            edited_at: row.edited_at,
-            deleted_at: row.deleted_at,
-            deleted_by: row.deleted_by,
-            encrypted: row.encrypted,
-            sender_device_id: row.sender_device_id,
-            message_type: row.message_type,
-            system_event_key: row.system_event_key,
-            parent_message_id: row.parent_message_id,
-            moderated_at: row.moderated_at,
-            moderation_reason: row.moderation_reason,
-            original_content: row.original_content,
-            mentioned_user_ids: row.mentioned_user_ids,
-            created_at: row.created_at,
-            author_username: row.author_username,
-            author_display_name: row.author_display_name,
-            author_avatar_url: row.author_avatar_url,
-            parent_author_username: row.parent_author_username,
-            parent_content_preview: row.parent_content_preview,
-            parent_deleted: row.parent_deleted,
-        };
+        // Atomic with the message INSERT: a failure here rolls the whole
+        // transaction back, so no orphan message and no orphan rows.
+        let inserted_attachments = insert_attachments(&mut tx, row.id, &attachments).await?;
 
-        Ok(msg.into_message_with_author())
+        tx.commit().await.map_err(super::db_err)?;
+
+        let mut msg = row.into_message_with_author();
+        msg.attachments = inserted_attachments;
+        Ok(msg)
     }
 
     async fn list_for_channel(

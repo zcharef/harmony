@@ -166,6 +166,7 @@ async fn init_app_state(config: &Config) -> AppInit {
     let dm_repo = Arc::new(infra::postgres::PgDmRepository::new(pool.clone()));
     let key_repo = Arc::new(infra::postgres::PgKeyRepository::new(pool.clone()));
     let reaction_repo = Arc::new(infra::postgres::PgReactionRepository::new(pool.clone()));
+    let attachment_repo = Arc::new(infra::postgres::PgAttachmentRepository::new(pool.clone()));
     let read_state_repo = Arc::new(infra::postgres::PgReadStateRepository::new(pool.clone()));
 
     // WHY: Self-hosted deployments have no plan restrictions (AlwaysAllowedChecker).
@@ -258,6 +259,7 @@ async fn init_app_state(config: &Config) -> AppInit {
         member_repo.clone(),
         plan_limit_checker.clone(),
         reaction_repo.clone(),
+        attachment_repo,
         content_filter.clone(),
         spam_guard.clone(),
     ));

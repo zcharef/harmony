@@ -4032,6 +4032,55 @@
         },
         "additionalProperties": false
       },
+      "AttachmentId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a message attachment.",
+        "example": "110e8400-e29b-41d4-a716-44665544000b"
+      },
+      "AttachmentResponse": {
+        "type": "object",
+        "description": "A file attached to a message.",
+        "required": [
+          "id",
+          "url",
+          "mime",
+          "size"
+        ],
+        "properties": {
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Pixel height for images; omitted for non-images."
+          },
+          "id": {
+            "$ref": "#/components/schemas/AttachmentId"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Byte size (client-reported at send time)."
+          },
+          "url": {
+            "type": "string",
+            "description": "Public Storage URL of the uploaded object."
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Pixel width for images; omitted for non-images."
+          }
+        }
+      },
       "BanListQuery": {
         "type": "object",
         "description": "Query parameters for listing bans (cursor-based pagination).",
@@ -5060,9 +5109,17 @@
           "encrypted",
           "messageType",
           "mentions",
+          "attachments",
           "createdAt"
         ],
         "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentResponse"
+            },
+            "description": "Files attached to this message, in insertion order."
+          },
           "authorAvatarUrl": {
             "type": [
               "string",
@@ -5236,6 +5293,47 @@
             "description": "Available Tier 2 categories the admin can toggle."
           }
         }
+      },
+      "NewAttachmentRequest": {
+        "type": "object",
+        "description": "A single attachment reference in a `SendMessageRequest`.",
+        "required": [
+          "url",
+          "mime",
+          "size"
+        ],
+        "properties": {
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Pixel height for images (omit for non-images)."
+          },
+          "mime": {
+            "type": "string",
+            "description": "Mime type — must be in the bucket allowlist."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Byte size the client reports (used for the per-plan cap; the bucket\nenforces the 100MB hard boundary regardless)."
+          },
+          "url": {
+            "type": "string",
+            "description": "Public Storage URL (`…/storage/v1/object/public/attachments/{uid}/{uuid}.{ext}`)."
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Pixel width for images (omit for non-images) — drives no-CLS render."
+          }
+        },
+        "additionalProperties": false
       },
       "NotificationLevel": {
         "type": "string",
@@ -5593,6 +5691,16 @@
           "content"
         ],
         "properties": {
+          "attachments": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/NewAttachmentRequest"
+            },
+            "description": "Files attached to this message. Each entry references an object the\nclient already uploaded to the `attachments` Supabase Storage bucket\nunder its own `{uid}/…` prefix. The server validates the URL belongs to\nthat bucket, the per-plan count + size caps, then persists the rows\natomically with the message.\n\nClients MUST omit this key entirely when there are no attachments —\nnever send `[]` or `null` (house rule; minimizes the\n`deny_unknown_fields` version-skew surface). Rejected with 400 on\n`encrypted = true` messages (plaintext attachments only in v1)."
+          },
           "content": {
             "type": "string",
             "description": "Message content (required, non-empty). Contains ciphertext when `encrypted = true`."

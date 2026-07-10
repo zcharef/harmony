@@ -16,7 +16,7 @@ use crate::api::state::AppState;
 use crate::domain::errors::DomainError;
 use crate::domain::models::server_event::MessagePayload;
 use crate::domain::models::{
-    AnalyticsEvent, AnalyticsEventName, ChannelId, MessageId, MessageWithAuthor,
+    AnalyticsEvent, AnalyticsEventName, ChannelId, MessageId, MessageWithAuthor, NewAttachment,
     SYSTEM_MODERATOR_ID, ServerEvent, ServerId,
 };
 use crate::domain::services::content_moderation::{
@@ -68,6 +68,16 @@ pub async fn send_message(
     // this and redacts it before any client sees it.
     let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
 
+    // ADR-023: parse, don't validate — each attachment reference goes through
+    // the TryFrom funnel (bucket-URL marker, mime allowlist, positive size).
+    // The first invalid entry rejects the whole request with a 400.
+    let attachments: Vec<NewAttachment> = req
+        .attachments
+        .unwrap_or_default()
+        .into_iter()
+        .map(NewAttachment::try_from)
+        .collect::<Result<_, _>>()?;
+
     let message = state
         .message_service()
         .create(
@@ -78,6 +88,7 @@ pub async fn send_message(
             req.sender_device_id,
             req.parent_message_id,
             req.mentioned_user_ids,
+            attachments,
         )
         .await?;
 
