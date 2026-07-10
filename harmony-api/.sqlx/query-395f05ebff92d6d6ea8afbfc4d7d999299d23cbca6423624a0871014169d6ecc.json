@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE profiles\n            SET\n                avatar_url = CASE WHEN $2 THEN $3 ELSE avatar_url END,\n                display_name = CASE WHEN $4 THEN $5 ELSE display_name END,\n                custom_status = CASE WHEN $6 THEN $7 ELSE custom_status END,\n                updated_at = now()\n            WHERE id = $1\n            RETURNING\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                created_at,\n                updated_at\n            ",
+  "query": "\n            SELECT\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                bio,\n                banner_url,\n                created_at,\n                updated_at\n            FROM profiles\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -35,24 +35,28 @@
       },
       {
         "ordinal": 6,
+        "name": "bio",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "banner_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Bool",
-        "Text",
-        "Bool",
-        "Text",
-        "Bool",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -62,9 +66,11 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       false
     ]
   },
-  "hash": "3d77058d8a394a052fc8f11f646c66f2ce0f483937c2db6eeed212a5909316df"
+  "hash": "395f05ebff92d6d6ea8afbfc4d7d999299d23cbca6423624a0871014169d6ecc"
 }

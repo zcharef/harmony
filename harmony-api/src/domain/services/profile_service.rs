@@ -284,8 +284,15 @@ impl ProfileService {
         avatar_url: Option<Option<String>>,
         display_name: Option<Option<String>>,
         custom_status: Option<Option<String>>,
+        bio: Option<Option<String>>,
+        banner_url: Option<Option<String>>,
     ) -> Result<Profile, DomainError> {
-        if avatar_url.is_none() && display_name.is_none() && custom_status.is_none() {
+        if avatar_url.is_none()
+            && display_name.is_none()
+            && custom_status.is_none()
+            && bio.is_none()
+            && banner_url.is_none()
+        {
             return Err(DomainError::ValidationError(
                 "At least one field must be provided".to_string(),
             ));
@@ -327,8 +334,39 @@ impl ProfileService {
             self.content_filter.check_hard(status)?;
         }
 
+        if let Some(Some(ref bio)) = bio {
+            // WHY chars not bytes: a 190-char accented/CJK bio is valid even
+            // though it exceeds 190 bytes in UTF-8 (mirrors display_name).
+            if bio.chars().count() > 190 {
+                return Err(DomainError::ValidationError(
+                    "Bio must be at most 190 characters".to_string(),
+                ));
+            }
+            self.content_filter.check_hard(bio)?;
+        }
+
+        if let Some(Some(ref url)) = banner_url {
+            if !url.starts_with("https://") {
+                return Err(DomainError::ValidationError(
+                    "Banner URL must use HTTPS".to_string(),
+                ));
+            }
+            if url.len() > 2048 {
+                return Err(DomainError::ValidationError(
+                    "Banner URL must be at most 2048 characters".to_string(),
+                ));
+            }
+        }
+
         self.repo
-            .update(user_id, avatar_url, display_name, custom_status)
+            .update(
+                user_id,
+                avatar_url,
+                display_name,
+                custom_status,
+                bio,
+                banner_url,
+            )
             .await
     }
 }
@@ -531,6 +569,8 @@ mod tests {
             avatar_url: None,
             status: UserStatus::Offline,
             custom_status: None,
+            bio: None,
+            banner_url: None,
             created_at: now,
             updated_at: now,
         }
@@ -544,6 +584,8 @@ mod tests {
             _avatar_url: Option<Option<String>>,
             _display_name: Option<Option<String>>,
             _custom_status: Option<Option<String>>,
+            _bio: Option<Option<String>>,
+            _banner_url: Option<Option<String>>,
         ) -> Result<Profile, DomainError> {
             Ok(dummy_profile(user_id))
         }
@@ -608,6 +650,8 @@ mod tests {
                 Some(Some(too_long)),
                 None,
                 None,
+                None,
+                None,
             )
             .await
             .unwrap_err();
@@ -627,6 +671,8 @@ mod tests {
             svc.update_profile(
                 &UserId::new(Uuid::from_u128(1)),
                 Some(Some(at_limit)),
+                None,
+                None,
                 None,
                 None
             )
@@ -652,6 +698,8 @@ mod tests {
                 &UserId::new(Uuid::from_u128(1)),
                 None,
                 Some(Some(name)),
+                None,
+                None,
                 None
             )
             .await
@@ -669,6 +717,8 @@ mod tests {
                 &UserId::new(Uuid::from_u128(1)),
                 None,
                 Some(Some(too_long)),
+                None,
+                None,
                 None,
             )
             .await
@@ -689,6 +739,8 @@ mod tests {
                 None,
                 Some(Some(String::new())),
                 None,
+                None,
+                None,
             )
             .await
             .unwrap_err();
@@ -708,6 +760,8 @@ mod tests {
                 Some(Some("http://example.com/a.png".to_string())),
                 None,
                 None,
+                None,
+                None,
             )
             .await
             .unwrap_err();
@@ -724,9 +778,16 @@ mod tests {
         // WHY: Some(None) = client sent `"avatarUrl": null` — must pass the
         // "at least one field" gate and skip URL validation (nothing to validate).
         assert!(
-            svc.update_profile(&UserId::new(Uuid::from_u128(1)), Some(None), None, None)
-                .await
-                .is_ok()
+            svc.update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                Some(None),
+                None,
+                None,
+                None,
+                None
+            )
+            .await
+            .is_ok()
         );
     }
 
@@ -739,7 +800,9 @@ mod tests {
                 &UserId::new(Uuid::from_u128(1)),
                 None,
                 Some(None),
-                Some(None)
+                Some(None),
+                None,
+                None
             )
             .await
             .is_ok()
@@ -751,7 +814,148 @@ mod tests {
         let svc = profile_service();
 
         let err = svc
-            .update_profile(&UserId::new(Uuid::from_u128(1)), None, None, None)
+            .update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
+        );
+    }
+
+    // ── update_profile bio + banner_url validation (T1.6) ────────
+
+    #[tokio::test]
+    async fn update_profile_accepts_bio_at_190_multibyte_chars() {
+        let svc = profile_service();
+        // 190 chars of é = 380 bytes: a byte cap would reject, the char cap accepts.
+        let bio = "é".repeat(190);
+        assert_eq!(bio.chars().count(), 190);
+        assert!(
+            bio.len() > 190,
+            "must exceed 190 bytes to prove chars-not-bytes"
+        );
+
+        assert!(
+            svc.update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                None,
+                None,
+                Some(Some(bio)),
+                None,
+            )
+            .await
+            .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_rejects_bio_over_190_chars() {
+        let svc = profile_service();
+        let too_long = "a".repeat(191);
+
+        let err = svc
+            .update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                None,
+                None,
+                Some(Some(too_long)),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_rejects_offensive_bio() {
+        let svc = profile_service_rejecting_slurword();
+
+        let err = svc
+            .update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                None,
+                None,
+                Some(Some("slurword".to_string())),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_accepts_explicit_null_to_clear_bio_and_banner() {
+        let svc = profile_service();
+
+        // Some(None) = client sent `null` — must pass the "at least one field"
+        // gate and skip value validation (nothing to validate).
+        assert!(
+            svc.update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                None,
+                None,
+                Some(None),
+                Some(None),
+            )
+            .await
+            .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_rejects_non_https_banner_url() {
+        let svc = profile_service();
+
+        let err = svc
+            .update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                None,
+                None,
+                None,
+                Some(Some("http://example.com/banner.png".to_string())),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_profile_rejects_banner_url_over_2048_chars() {
+        let svc = profile_service();
+        // 8 ("https://") + 2041 = 2049 chars — one over the cap.
+        let too_long = format!("https://{}", "a".repeat(2041));
+
+        let err = svc
+            .update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                None,
+                None,
+                None,
+                Some(Some(too_long)),
+            )
             .await
             .unwrap_err();
         assert!(

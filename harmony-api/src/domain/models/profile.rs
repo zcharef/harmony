@@ -30,6 +30,10 @@ pub struct Profile {
     pub avatar_url: Option<String>,
     pub status: UserStatus,
     pub custom_status: Option<String>,
+    /// Bio (markdown-lite, links only, max 190 chars).
+    pub bio: Option<String>,
+    /// Banner image URL (public Storage URL, reuses the avatars bucket).
+    pub banner_url: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                created_at,\n                updated_at\n            FROM profiles\n            WHERE id = ANY($1::uuid[])\n            ",
+  "query": "\n            UPDATE profiles\n            SET\n                username = $2,\n                updated_at = now()\n            WHERE id = $1\n            RETURNING\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                bio,\n                banner_url,\n                created_at,\n                updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -35,18 +35,29 @@
       },
       {
         "ordinal": 6,
+        "name": "bio",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "banner_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "UuidArray"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -56,9 +67,11 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       false
     ]
   },
-  "hash": "0f564b7dc7ca5453349c9b32bb09fa3bf26108bfe00a64d42d9a41a7cca4c695"
+  "hash": "727285a9a1ec93e6ad3273adbce664f1e607a07abd5f0c217b04586ac510ed31"
 }

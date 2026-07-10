@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE profiles\n            SET\n                username = $2,\n                updated_at = now()\n            WHERE id = $1\n            RETURNING\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                created_at,\n                updated_at\n            ",
+  "query": "\n            INSERT INTO profiles (id, username, status, display_name)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (id) DO UPDATE\n                SET id = profiles.id\n            RETURNING\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                bio,\n                banner_url,\n                created_at,\n                updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -35,11 +35,21 @@
       },
       {
         "ordinal": 6,
+        "name": "bio",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "banner_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -47,6 +57,8 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "Text",
+        "Text",
         "Text"
       ]
     },
@@ -57,9 +69,11 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       false
     ]
   },
-  "hash": "5c08c0ebcde0ab3ce18a532a36d0447d1cbb75d4c1759f68bbc5cd0e70431293"
+  "hash": "8f8d070422469db610529a773c63a318206c4a6cd7eb32ac80113180acf24068"
 }

@@ -54,6 +54,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         // Profiles
         handlers::profiles::get_my_profile,
         handlers::profiles::update_my_profile,
+        handlers::profiles::get_profile_by_id,
         // Servers
         handlers::servers::create_server,
         handlers::servers::list_servers,

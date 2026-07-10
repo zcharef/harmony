@@ -20,6 +20,10 @@ pub struct ProfileResponse {
     pub status: UserStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bio: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner_url: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -73,6 +77,14 @@ pub struct UpdateProfileRequest {
     #[serde(default, deserialize_with = "double_option")]
     #[schema(value_type = Option<String>)]
     pub custom_status: Option<Option<String>>,
+    /// Bio (markdown-lite, links only, max 190 characters). `null` clears it.
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(value_type = Option<String>)]
+    pub bio: Option<Option<String>>,
+    /// Banner image URL (must be HTTPS, avatars bucket). `null` clears it.
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(value_type = Option<String>)]
+    pub banner_url: Option<Option<String>>,
 }
 
 impl From<Profile> for ProfileResponse {
@@ -84,6 +96,8 @@ impl From<Profile> for ProfileResponse {
             avatar_url: p.avatar_url,
             status: p.status,
             custom_status: p.custom_status,
+            bio: p.bio,
+            banner_url: p.banner_url,
             created_at: p.created_at,
             updated_at: p.updated_at,
         }
