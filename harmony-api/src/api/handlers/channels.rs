@@ -12,7 +12,9 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::ChannelPayload;
 use crate::domain::models::{ChannelId, Role, ServerEvent, ServerId, VoiceAction};
-use crate::domain::services::ensure_channel_access;
+use crate::domain::services::{
+    ensure_channel_access, resolve_channel_access, resolve_channel_access_by_id,
+};
 
 /// List all channels in a server.
 ///
@@ -95,17 +97,38 @@ pub async fn create_channel(
         )
         .await?;
 
-    let receivers = state.event_bus().publish(ServerEvent::ChannelCreated {
-        sender_id: user_id,
-        server_id: server_id.clone(),
-        channel: ChannelPayload::from(&channel),
-    });
-    tracing::debug!(
-        server_id = %server_id,
-        channel_id = %channel.id,
-        receivers,
-        "emitted channel.created"
-    );
+    // WHY resolve AFTER creation: the grant lookup needs the channel id. A
+    // fresh private channel has no channel_role_access rows yet, so only
+    // Owner/Admin receive channel.created — grants come later (Discord parity).
+    // WHY fail-CLOSED on resolver error: the channel is already committed, so
+    // the request cannot fail cleanly anymore, and publishing with an unknown
+    // scope could broadcast a private channel's name/topic to ungranted
+    // members. Suppress the event — authorized clients converge via REST on the
+    // next refetch/reconnect. Never silent: the warn is greppable.
+    match resolve_channel_access(state.channel_repository(), &channel).await {
+        Ok(channel_access) => {
+            let receivers = state.event_bus().publish(ServerEvent::ChannelCreated {
+                sender_id: user_id,
+                server_id: server_id.clone(),
+                channel: ChannelPayload::from(&channel),
+                channel_access,
+            });
+            tracing::debug!(
+                server_id = %server_id,
+                channel_id = %channel.id,
+                receivers,
+                "emitted channel.created"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                server_id = %server_id,
+                channel_id = %channel.id,
+                error = %e,
+                "channel access resolve failed — suppressing channel.created (fail closed)"
+            );
+        }
+    }
 
     Ok((StatusCode::CREATED, Json(ChannelResponse::from(channel))))
 }
@@ -174,17 +197,35 @@ pub async fn update_channel(
         )
         .await?;
 
-    let receivers = state.event_bus().publish(ServerEvent::ChannelUpdated {
-        sender_id: user_id,
-        server_id: params.id.clone(),
-        channel: ChannelPayload::from(&channel),
-    });
-    tracing::debug!(
-        server_id = %params.id,
-        channel_id = %channel.id,
-        receivers,
-        "emitted channel.updated"
-    );
+    // WHY resolve from the POST-update channel: a public→private toggle gates
+    // this very event immediately; private→public resolves to None and delivers
+    // to everyone. Fail-CLOSED on resolver error, same as channel.created: the
+    // update is committed, so suppress rather than risk broadcasting private
+    // metadata with an unknown scope.
+    match resolve_channel_access(state.channel_repository(), &channel).await {
+        Ok(channel_access) => {
+            let receivers = state.event_bus().publish(ServerEvent::ChannelUpdated {
+                sender_id: user_id,
+                server_id: params.id.clone(),
+                channel: ChannelPayload::from(&channel),
+                channel_access,
+            });
+            tracing::debug!(
+                server_id = %params.id,
+                channel_id = %channel.id,
+                receivers,
+                "emitted channel.updated"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                server_id = %params.id,
+                channel_id = %channel.id,
+                error = %e,
+                "channel access resolve failed — suppressing channel.updated (fail closed)"
+            );
+        }
+    }
 
     Ok((StatusCode::OK, Json(ChannelResponse::from(channel))))
 }
@@ -233,6 +274,21 @@ pub async fn delete_channel(
         vec![]
     };
 
+    // WHY resolve BEFORE deletion: the channel row (and its channel_role_access
+    // grants) are gone afterwards, and a missing channel resolves to None
+    // (public) — which would broadcast a private channel's deletion AND its
+    // voice roster to the whole server. A resolver error fails the request
+    // here (nothing deleted yet) — fail closed, the client simply retries.
+    // NOTE on the Ok(None)-for-missing-channel case: if a concurrent request
+    // deletes the channel between this resolve and the delete below, the
+    // delete_channel service call 404s (get_by_id + delete_if_not_last both
+    // error on a missing row) and the handler bails BEFORE any publish — so
+    // the fail-open-on-missing semantics of the resolver cannot leak here.
+    // Every orphaned voice session below is in this same channel, so the
+    // cascade Left events and channel.deleted share this one scope.
+    let channel_access =
+        resolve_channel_access_by_id(state.channel_repository(), &params.channel_id).await?;
+
     state
         .channel_service()
         .delete_channel(&params.id, &params.channel_id)
@@ -249,6 +305,7 @@ pub async fn delete_channel(
             display_name: String::new(),
             is_muted: None,
             is_deafened: None,
+            channel_access: channel_access.clone(),
         });
         tracing::debug!(
             server_id = %session.server_id,
@@ -263,6 +320,7 @@ pub async fn delete_channel(
         sender_id: user_id,
         server_id: params.id.clone(),
         channel_id: params.channel_id.clone(),
+        channel_access,
     });
     tracing::debug!(
         server_id = %params.id,

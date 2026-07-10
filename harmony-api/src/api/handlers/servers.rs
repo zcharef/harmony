@@ -1,5 +1,7 @@
 //! Server handlers.
 
+use std::collections::HashMap;
+
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::api::dto::{
@@ -8,8 +10,9 @@ use crate::api::dto::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::server_event::ServerPayload;
-use crate::domain::models::{Role, ServerEvent, ServerId, VoiceAction};
+use crate::domain::models::server_event::{ChannelAccessScope, ServerPayload};
+use crate::domain::models::{ChannelId, Role, ServerEvent, ServerId, VoiceAction};
+use crate::domain::services::resolve_channel_access_by_id;
 
 /// Create a new server.
 ///
@@ -192,6 +195,21 @@ pub async fn delete_server(
         vec![]
     };
 
+    // WHY resolve BEFORE deletion (F5): the server's channels (and their
+    // channel_role_access grants) are cascade-deleted with the server row, and
+    // a missing channel resolves to None (public) — which would broadcast a
+    // private voice channel's roster to every member. A resolver error fails
+    // the request here (nothing deleted yet) — fail closed.
+    let mut access_by_channel: HashMap<ChannelId, Option<ChannelAccessScope>> = HashMap::new();
+    for session in &orphaned_voice_sessions {
+        if !access_by_channel.contains_key(&session.channel_id) {
+            let access =
+                resolve_channel_access_by_id(state.channel_repository(), &session.channel_id)
+                    .await?;
+            access_by_channel.insert(session.channel_id.clone(), access);
+        }
+    }
+
     state.server_service().delete_server(&id).await?;
 
     // Emit voice "left" events for sessions that were CASCADE-deleted.
@@ -205,6 +223,10 @@ pub async fn delete_server(
             display_name: String::new(),
             is_muted: None,
             is_deafened: None,
+            channel_access: access_by_channel
+                .get(&session.channel_id)
+                .cloned()
+                .flatten(),
         });
         tracing::debug!(
             server_id = %session.server_id,

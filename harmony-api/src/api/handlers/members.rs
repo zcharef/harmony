@@ -13,6 +13,7 @@ use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::server_event::{MemberPayload, ServerPayload};
 use crate::domain::models::{ServerEvent, ServerId, UserId, VoiceAction};
+use crate::domain::services::resolve_channel_access_by_id;
 
 /// Default member page size.
 const DEFAULT_MEMBER_LIMIT: i64 = 50;
@@ -166,22 +167,41 @@ pub async fn leave_server(
     if let Some(voice_service) = state.voice_service() {
         match voice_service.leave_voice(&caller_id, None).await {
             Ok(Some(session)) => {
-                state.event_bus().publish(ServerEvent::VoiceStateUpdate {
-                    sender_id: caller_id.clone(),
-                    server_id: session.server_id.clone(),
-                    channel_id: session.channel_id.clone(),
-                    user_id: caller_id.clone(),
-                    action: VoiceAction::Left,
-                    display_name: String::new(),
-                    is_muted: None,
-                    is_deafened: None,
-                });
-                tracing::debug!(
-                    server_id = %session.server_id,
-                    channel_id = %session.channel_id,
-                    user_id = %caller_id,
-                    "User removed from voice channel on server leave"
-                );
+                // WHY fail-CLOSED on resolver error (F5): the session is
+                // already removed; broadcasting with an unknown scope could
+                // leak a private voice channel's roster change. Suppress and
+                // warn — rosters self-heal on the next participants fetch.
+                match resolve_channel_access_by_id(state.channel_repository(), &session.channel_id)
+                    .await
+                {
+                    Ok(channel_access) => {
+                        state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+                            sender_id: caller_id.clone(),
+                            server_id: session.server_id.clone(),
+                            channel_id: session.channel_id.clone(),
+                            user_id: caller_id.clone(),
+                            action: VoiceAction::Left,
+                            display_name: String::new(),
+                            is_muted: None,
+                            is_deafened: None,
+                            channel_access,
+                        });
+                        tracing::debug!(
+                            server_id = %session.server_id,
+                            channel_id = %session.channel_id,
+                            user_id = %caller_id,
+                            "User removed from voice channel on server leave"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            channel_id = %session.channel_id,
+                            user_id = %caller_id,
+                            error = %e,
+                            "channel access resolve failed — suppressing voice.state_update (fail closed)"
+                        );
+                    }
+                }
             }
             Ok(None) => {} // User was not in voice — nothing to clean up.
             Err(e) => {
@@ -275,22 +295,39 @@ pub async fn kick_member(
     if let Some(voice_service) = state.voice_service() {
         match voice_service.leave_voice(&path.user_id, None).await {
             Ok(Some(session)) => {
-                state.event_bus().publish(ServerEvent::VoiceStateUpdate {
-                    sender_id: path.user_id.clone(),
-                    server_id: session.server_id.clone(),
-                    channel_id: session.channel_id.clone(),
-                    user_id: path.user_id.clone(),
-                    action: VoiceAction::Left,
-                    display_name: String::new(),
-                    is_muted: None,
-                    is_deafened: None,
-                });
-                tracing::debug!(
-                    server_id = %session.server_id,
-                    channel_id = %session.channel_id,
-                    user_id = %path.user_id,
-                    "Kicked user removed from voice channel"
-                );
+                // WHY fail-CLOSED on resolver error (F5): see leave_server —
+                // suppress rather than leak a private voice roster change.
+                match resolve_channel_access_by_id(state.channel_repository(), &session.channel_id)
+                    .await
+                {
+                    Ok(channel_access) => {
+                        state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+                            sender_id: path.user_id.clone(),
+                            server_id: session.server_id.clone(),
+                            channel_id: session.channel_id.clone(),
+                            user_id: path.user_id.clone(),
+                            action: VoiceAction::Left,
+                            display_name: String::new(),
+                            is_muted: None,
+                            is_deafened: None,
+                            channel_access,
+                        });
+                        tracing::debug!(
+                            server_id = %session.server_id,
+                            channel_id = %session.channel_id,
+                            user_id = %path.user_id,
+                            "Kicked user removed from voice channel"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            channel_id = %session.channel_id,
+                            user_id = %path.user_id,
+                            error = %e,
+                            "channel access resolve failed — suppressing voice.state_update (fail closed)"
+                        );
+                    }
+                }
             }
             Ok(None) => {} // User was not in voice — nothing to clean up.
             Err(e) => {

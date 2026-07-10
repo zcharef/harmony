@@ -112,6 +112,10 @@ fn presence_visible_to(
 /// Mirrors `presence_visible_to` — a small pure function so the private-channel
 /// gate is unit-testable in isolation (see the falsification test).
 ///
+/// Variant-agnostic: since F5 it also gates the channel-lifecycle events
+/// (`ChannelCreated/Updated/Deleted`) and `VoiceStateUpdate` — any event whose
+/// `channel_access()` returns `Some` goes through this gate.
+///
 /// - `access == None` ⇒ PUBLIC channel ⇒ visible to every server member.
 /// - `Some(scope)` ⇒ PRIVATE channel ⇒ visible iff the receiver is Owner/Admin
 ///   (implicit access) OR their role is in `scope.authorized_roles`.
@@ -382,7 +386,9 @@ pub async fn sse_events(
         // ── Filter: private-channel access ─────────────────────────
         // WHY: A server member WITHOUT a grant to a PRIVATE channel must not
         // receive its message/reaction/typing events — otherwise plaintext
-        // `MessagePayload.content` (and deletes/typing/reactions) leak. The event
+        // `MessagePayload.content` (and deletes/typing/reactions) leak — nor its
+        // channel-lifecycle/voice events (F5) — otherwise the channel's
+        // name/topic and voice roster leak. The event
         // carries the channel's authorized-role set as routing metadata; drop
         // unless the receiver's role in that server grants access. `None` scope =
         // public channel = deliver. The metadata is redacted below before serialize.
@@ -699,6 +705,118 @@ mod tests {
             authorized_roles: vec![Role::Member],
         };
         assert!(!channel_visible_to(Some(&scope), None));
+    }
+
+    // ── F5: gate applies to channel-lifecycle + voice events ────────────
+
+    /// Replays the exact Stage-2 decision for an event and receiver role:
+    /// `channel_access()` feeds `channel_visible_to`, `None` scope = deliver.
+    fn passes_stage2_gate(event: &ServerEvent, receiver_role: Option<Role>) -> bool {
+        match event.channel_access() {
+            Some(scope) => channel_visible_to(Some(scope), receiver_role),
+            None => true,
+        }
+    }
+
+    /// Builds the four F5 event variants carrying the given access scope.
+    fn channel_and_voice_events(channel_access: Option<ChannelAccessScope>) -> Vec<ServerEvent> {
+        use crate::domain::models::server_event::ChannelPayload;
+        use crate::domain::models::{ChannelId, ChannelType, VoiceAction};
+        use chrono::Utc;
+
+        let channel_id = ChannelId::new(Uuid::from_u128(42));
+        let payload = ChannelPayload {
+            id: channel_id.clone(),
+            name: "ops-private".to_string(),
+            topic: Some("secret".to_string()),
+            channel_type: ChannelType::Voice,
+            position: 0,
+            is_private: true,
+            is_read_only: false,
+            encrypted: false,
+            slow_mode_seconds: 0,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        vec![
+            ServerEvent::ChannelCreated {
+                sender_id: uid(1),
+                server_id: sid(1),
+                channel: payload.clone(),
+                channel_access: channel_access.clone(),
+            },
+            ServerEvent::ChannelUpdated {
+                sender_id: uid(1),
+                server_id: sid(1),
+                channel: payload,
+                channel_access: channel_access.clone(),
+            },
+            ServerEvent::ChannelDeleted {
+                sender_id: uid(1),
+                server_id: sid(1),
+                channel_id: channel_id.clone(),
+                channel_access: channel_access.clone(),
+            },
+            ServerEvent::VoiceStateUpdate {
+                sender_id: uid(1),
+                server_id: sid(1),
+                channel_id,
+                user_id: uid(1),
+                action: VoiceAction::Joined,
+                display_name: "Ada".to_string(),
+                is_muted: None,
+                is_deafened: None,
+                channel_access,
+            },
+        ]
+    }
+
+    /// THE F5 LEAK GUARD: a plain Member with NO grant must NOT receive a
+    /// private channel's lifecycle events (name/topic) nor its voice roster
+    /// (`VoiceStateUpdate`) — while Owner/Admin (implicit) and granted roles
+    /// still do. Neutralizing the gate makes this fail.
+    #[test]
+    fn private_channel_and_voice_events_dropped_for_ungranted_member() {
+        let scope = ChannelAccessScope {
+            authorized_roles: vec![Role::Moderator],
+        };
+        for event in channel_and_voice_events(Some(scope)) {
+            assert!(
+                !passes_stage2_gate(&event, Some(Role::Member)),
+                "{} leaked to an ungranted member",
+                event.event_name()
+            );
+            assert!(
+                !passes_stage2_gate(&event, None),
+                "{} leaked to a receiver with no role",
+                event.event_name()
+            );
+            // Authorized receivers still get the event in real time.
+            assert!(passes_stage2_gate(&event, Some(Role::Moderator)));
+            assert!(passes_stage2_gate(&event, Some(Role::Admin)));
+            assert!(passes_stage2_gate(&event, Some(Role::Owner)));
+        }
+    }
+
+    /// REACTIVITY INVARIANT: public-channel lifecycle/voice events (`None`
+    /// scope) still reach every server member — the F5 gate must never
+    /// over-drop live updates for authorized users.
+    #[test]
+    fn public_channel_and_voice_events_still_delivered_to_all_members() {
+        for event in channel_and_voice_events(None) {
+            for role in [
+                Some(Role::Member),
+                Some(Role::Moderator),
+                Some(Role::Admin),
+                Some(Role::Owner),
+            ] {
+                assert!(
+                    passes_stage2_gate(&event, role),
+                    "{} wrongly dropped for {role:?}",
+                    event.event_name()
+                );
+            }
+        }
     }
 
     #[test]

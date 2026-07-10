@@ -12,6 +12,7 @@ use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiPath, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::models::{ChannelId, ServerEvent, VoiceAction, VoiceParticipant};
+use crate::domain::services::resolve_channel_access_by_id;
 
 /// Join a voice channel. Returns a `LiveKit` token for the client.
 ///
@@ -52,6 +53,13 @@ pub async fn join_voice(
         )
     })?;
 
+    // WHY resolve BEFORE the join (F5): a private voice channel's roster
+    // (userId, displayName) must only reach its authorized roles. Resolving
+    // pre-mutation lets a lookup failure fail the request cleanly (no session
+    // created, nothing broadcast) — fail closed.
+    let channel_access =
+        resolve_channel_access_by_id(state.channel_repository(), &channel_id).await?;
+
     let voice_token = voice_service.join_voice(&user_id, &channel_id).await?;
 
     // WHY: If the user was in a different channel, notify that channel's
@@ -64,23 +72,41 @@ pub async fn join_voice(
             .as_ref()
             .unwrap_or(&voice_token.server_id);
 
-        let receivers = state.event_bus().publish(ServerEvent::VoiceStateUpdate {
-            sender_id: user_id.clone(),
-            server_id: prev_server_id.clone(),
-            channel_id: prev_channel_id.clone(),
-            user_id: user_id.clone(),
-            action: VoiceAction::Left,
-            display_name: String::new(),
-            is_muted: None,
-            is_deafened: None,
-        });
-        tracing::debug!(
-            server_id = %prev_server_id,
-            channel_id = %prev_channel_id,
-            user_id = %user_id,
-            receivers,
-            "emitted voice.state_update (left previous channel)"
-        );
+        // WHY fail-CLOSED on resolver error: the auto-leave already happened
+        // inside join_voice, so the request cannot fail cleanly — and
+        // broadcasting with an unknown scope could leak a private voice
+        // channel's roster change. Suppress; rosters self-heal on the next
+        // participants fetch.
+        match resolve_channel_access_by_id(state.channel_repository(), prev_channel_id).await {
+            Ok(prev_channel_access) => {
+                let receivers = state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+                    sender_id: user_id.clone(),
+                    server_id: prev_server_id.clone(),
+                    channel_id: prev_channel_id.clone(),
+                    user_id: user_id.clone(),
+                    action: VoiceAction::Left,
+                    display_name: String::new(),
+                    is_muted: None,
+                    is_deafened: None,
+                    channel_access: prev_channel_access,
+                });
+                tracing::debug!(
+                    server_id = %prev_server_id,
+                    channel_id = %prev_channel_id,
+                    user_id = %user_id,
+                    receivers,
+                    "emitted voice.state_update (left previous channel)"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    channel_id = %prev_channel_id,
+                    user_id = %user_id,
+                    error = %e,
+                    "channel access resolve failed — suppressing voice.state_update for previous channel (fail closed)"
+                );
+            }
+        }
     }
 
     // WHY: Resolve username so SSE subscribers can render the participant
@@ -107,6 +133,7 @@ pub async fn join_voice(
         display_name,
         is_muted: None,
         is_deafened: None,
+        channel_access,
     });
     tracing::debug!(
         server_id = %voice_token.server_id,
@@ -151,6 +178,13 @@ pub async fn leave_voice(
         )
     })?;
 
+    // WHY resolve BEFORE the leave (F5): the leave is validated against this
+    // same channel_id, so the scope matches the session's channel. A lookup
+    // failure fails the request cleanly (session intact, nothing broadcast) —
+    // fail closed.
+    let channel_access =
+        resolve_channel_access_by_id(state.channel_repository(), &channel_id).await?;
+
     // WHY: Pass channel_id to the service so it validates the user is in the
     // specified channel before removing. Prevents leaving the wrong channel.
     let removed_session = voice_service
@@ -167,6 +201,7 @@ pub async fn leave_voice(
             display_name: String::new(),
             is_muted: None,
             is_deafened: None,
+            channel_access,
         });
         tracing::debug!(
             server_id = %session.server_id,
@@ -439,33 +474,51 @@ pub async fn update_voice_state(
         VoiceAction::Unmuted
     };
 
-    let receivers = state.event_bus().publish(ServerEvent::VoiceStateUpdate {
-        sender_id: user_id.clone(),
-        server_id: session.server_id.clone(),
-        channel_id: session.channel_id.clone(),
-        user_id: user_id.clone(),
-        action,
-        display_name: String::new(),
-        is_muted: Some(body.is_muted),
-        is_deafened: Some(body.is_deafened),
-    });
-    if receivers == 0 {
-        tracing::warn!(
-            server_id = %session.server_id,
-            channel_id = %session.channel_id,
-            user_id = %user_id,
-            "voice.state_update had 0 SSE receivers — mute/deaf change invisible to others"
-        );
-    } else {
-        tracing::debug!(
-            server_id = %session.server_id,
-            channel_id = %session.channel_id,
-            user_id = %user_id,
-            is_muted = body.is_muted,
-            is_deafened = body.is_deafened,
-            receivers,
-            "emitted voice.state_update (mute/deaf state change)"
-        );
+    // WHY resolve AFTER the mutation: the session (and thus the channel) is
+    // only known once the service resolves session_id. Fail-CLOSED on resolver
+    // error — the state change is committed, so suppress the event rather than
+    // risk broadcasting a private voice channel's roster state to ungranted
+    // members. Others converge on the next participants fetch.
+    match resolve_channel_access_by_id(state.channel_repository(), &session.channel_id).await {
+        Ok(channel_access) => {
+            let receivers = state.event_bus().publish(ServerEvent::VoiceStateUpdate {
+                sender_id: user_id.clone(),
+                server_id: session.server_id.clone(),
+                channel_id: session.channel_id.clone(),
+                user_id: user_id.clone(),
+                action,
+                display_name: String::new(),
+                is_muted: Some(body.is_muted),
+                is_deafened: Some(body.is_deafened),
+                channel_access,
+            });
+            if receivers == 0 {
+                tracing::warn!(
+                    server_id = %session.server_id,
+                    channel_id = %session.channel_id,
+                    user_id = %user_id,
+                    "voice.state_update had 0 SSE receivers — mute/deaf change invisible to others"
+                );
+            } else {
+                tracing::debug!(
+                    server_id = %session.server_id,
+                    channel_id = %session.channel_id,
+                    user_id = %user_id,
+                    is_muted = body.is_muted,
+                    is_deafened = body.is_deafened,
+                    receivers,
+                    "emitted voice.state_update (mute/deaf state change)"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                channel_id = %session.channel_id,
+                user_id = %user_id,
+                error = %e,
+                "channel access resolve failed — suppressing voice.state_update (fail closed)"
+            );
+        }
     }
 
     Ok(StatusCode::NO_CONTENT)

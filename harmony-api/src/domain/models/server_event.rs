@@ -261,16 +261,26 @@ pub enum ServerEvent {
         sender_id: UserId,
         server_id: ServerId,
         channel: ChannelPayload,
+        /// Private-channel access scope (routing metadata). `None` = public
+        /// channel (deliver by server membership). REDACTED before client serialize.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
     },
     ChannelUpdated {
         sender_id: UserId,
         server_id: ServerId,
         channel: ChannelPayload,
+        /// Private-channel access scope (routing metadata). See `MessageCreated`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
     },
     ChannelDeleted {
         sender_id: UserId,
         server_id: ServerId,
         channel_id: ChannelId,
+        /// Private-channel access scope (routing metadata). See `MessageCreated`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
     },
 
     // ── Server ───────────────────────────────────────────────
@@ -406,6 +416,11 @@ pub enum ServerEvent {
         /// Authoritative deafen state from the DB.
         #[serde(skip_serializing_if = "Option::is_none")]
         is_deafened: Option<bool>,
+        /// Private-channel access scope (routing metadata). See `MessageCreated`.
+        /// Gates the voice roster (`userId`, `displayName`, mute/deaf) of a
+        /// private voice channel to its authorized roles.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
     },
 
     // ── System ───────────────────────────────────────────────
@@ -536,10 +551,11 @@ impl ServerEvent {
 
     /// Private-channel access scope for channel-scoped events, if any.
     ///
-    /// `Some` only for the six channel events (message/reaction/typing) that
-    /// target a PRIVATE channel; `None` for public channels and every other
-    /// variant. The SSE Stage-2 filter uses this to gate delivery by channel
-    /// access, then redacts it (sets it to `None`) before serializing to clients.
+    /// `Some` only for the ten channel-scoped events (message/reaction/typing,
+    /// channel lifecycle, voice state) when they target a PRIVATE channel;
+    /// `None` for public channels and every other variant. The SSE Stage-2
+    /// filter uses this to gate delivery by channel access, then redacts it
+    /// (sets it to `None`) before serializing to clients.
     #[must_use]
     pub fn channel_access(&self) -> Option<&ChannelAccessScope> {
         match self {
@@ -548,20 +564,20 @@ impl ServerEvent {
             | Self::MessageDeleted { channel_access, .. }
             | Self::TypingStarted { channel_access, .. }
             | Self::ReactionAdded { channel_access, .. }
-            | Self::ReactionRemoved { channel_access, .. } => channel_access.as_ref(),
+            | Self::ReactionRemoved { channel_access, .. }
+            | Self::ChannelCreated { channel_access, .. }
+            | Self::ChannelUpdated { channel_access, .. }
+            | Self::ChannelDeleted { channel_access, .. }
+            | Self::VoiceStateUpdate { channel_access, .. } => channel_access.as_ref(),
             Self::MemberJoined { .. }
             | Self::MemberRemoved { .. }
             | Self::MemberBanned { .. }
             | Self::MemberRoleUpdated { .. }
-            | Self::ChannelCreated { .. }
-            | Self::ChannelUpdated { .. }
-            | Self::ChannelDeleted { .. }
             | Self::ServerUpdated { .. }
             | Self::ModerationSettingsUpdated { .. }
             | Self::DmCreated { .. }
             | Self::ProfileUpdated { .. }
             | Self::PresenceChanged { .. }
-            | Self::VoiceStateUpdate { .. }
             | Self::MentionReceived { .. }
             | Self::ForceDisconnect { .. } => None,
         }
@@ -584,7 +600,11 @@ impl ServerEvent {
             | Self::MessageDeleted { channel_access, .. }
             | Self::TypingStarted { channel_access, .. }
             | Self::ReactionAdded { channel_access, .. }
-            | Self::ReactionRemoved { channel_access, .. } => *channel_access = None,
+            | Self::ReactionRemoved { channel_access, .. }
+            | Self::ChannelCreated { channel_access, .. }
+            | Self::ChannelUpdated { channel_access, .. }
+            | Self::ChannelDeleted { channel_access, .. }
+            | Self::VoiceStateUpdate { channel_access, .. } => *channel_access = None,
             Self::PresenceChanged { server_ids, .. } | Self::ProfileUpdated { server_ids, .. } => {
                 server_ids.clear();
             }
@@ -592,14 +612,10 @@ impl ServerEvent {
             | Self::MemberRemoved { .. }
             | Self::MemberBanned { .. }
             | Self::MemberRoleUpdated { .. }
-            | Self::ChannelCreated { .. }
-            | Self::ChannelUpdated { .. }
-            | Self::ChannelDeleted { .. }
             | Self::ServerUpdated { .. }
             | Self::ModerationSettingsUpdated { .. }
             | Self::DmCreated { .. }
             | Self::MentionReceived { .. }
-            | Self::VoiceStateUpdate { .. }
             | Self::ForceDisconnect { .. } => {}
         }
     }
@@ -948,6 +964,114 @@ mod tests {
         assert!(json["customStatus"].is_null());
         // Empty routing metadata is omitted entirely.
         assert!(json.get("serverIds").is_none());
+    }
+
+    /// Builds each of the four F5 variants (channel lifecycle + voice) with the
+    /// given access scope, so the scoping tests below cover all of them.
+    fn f5_events(channel_access: Option<ChannelAccessScope>) -> Vec<ServerEvent> {
+        let payload = ChannelPayload {
+            id: test_channel_id(),
+            name: "ops-private".to_string(),
+            topic: Some("secret topic".to_string()),
+            channel_type: ChannelType::Text,
+            position: 0,
+            is_private: true,
+            is_read_only: false,
+            encrypted: false,
+            slow_mode_seconds: 0,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        vec![
+            ServerEvent::ChannelCreated {
+                sender_id: test_user_id(),
+                server_id: test_server_id(),
+                channel: payload.clone(),
+                channel_access: channel_access.clone(),
+            },
+            ServerEvent::ChannelUpdated {
+                sender_id: test_user_id(),
+                server_id: test_server_id(),
+                channel: payload,
+                channel_access: channel_access.clone(),
+            },
+            ServerEvent::ChannelDeleted {
+                sender_id: test_user_id(),
+                server_id: test_server_id(),
+                channel_id: test_channel_id(),
+                channel_access: channel_access.clone(),
+            },
+            ServerEvent::VoiceStateUpdate {
+                sender_id: test_user_id(),
+                server_id: test_server_id(),
+                channel_id: test_channel_id(),
+                user_id: test_user_id(),
+                action: crate::domain::models::VoiceAction::Joined,
+                display_name: "Ada".to_string(),
+                is_muted: None,
+                is_deafened: None,
+                channel_access,
+            },
+        ]
+    }
+
+    /// F5: the four channel/voice variants expose their scope through
+    /// `channel_access()` so the SSE Stage-2 gate applies to them — and
+    /// `server_id()` stays `Some` (the gate needs it to look up the receiver's
+    /// role).
+    #[test]
+    fn channel_access_returns_some_for_channel_and_voice_events() {
+        let scope = ChannelAccessScope {
+            authorized_roles: vec![Role::Moderator],
+        };
+        for event in f5_events(Some(scope.clone())) {
+            assert_eq!(
+                event.channel_access(),
+                Some(&scope),
+                "{} must expose its access scope",
+                event.event_name()
+            );
+            assert!(
+                event.server_id().is_some(),
+                "{} must stay server-scoped for the role lookup",
+                event.event_name()
+            );
+        }
+        for event in f5_events(None) {
+            assert!(
+                event.channel_access().is_none(),
+                "{} public form must carry no scope",
+                event.event_name()
+            );
+        }
+    }
+
+    /// F5: redaction clears the scope on all four variants and the wire payload
+    /// carries no `channelAccess`/`authorizedRoles` key — byte-identical to the
+    /// pre-fix client payload.
+    #[test]
+    fn redact_clears_channel_and_voice_access() {
+        let scope = ChannelAccessScope {
+            authorized_roles: vec![Role::Moderator, Role::Member],
+        };
+        for mut event in f5_events(Some(scope.clone())) {
+            // Bus path (pg_notify): the scope must survive the serde round-trip
+            // so remote instances can gate delivery.
+            let json = serde_json::to_string(&event).unwrap();
+            assert!(json.contains("channelAccess"), "bus payload must route");
+            let back: ServerEvent = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.channel_access(), Some(&scope));
+
+            // Client path: redacted before serialize — never leaks the role set.
+            event.redact_routing_metadata();
+            assert!(event.channel_access().is_none());
+            let json = serde_json::to_string(&event).unwrap();
+            assert!(
+                !json.contains("channelAccess") && !json.contains("authorizedRoles"),
+                "{} leaked routing metadata: {json}",
+                event.event_name()
+            );
+        }
     }
 
     /// `TypingStarted.display_name` carries the resolved name in camelCase when

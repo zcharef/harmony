@@ -749,8 +749,6 @@ fn spawn_moderation_retry_sweep(state: api::AppState) {
 /// clamped to 1/min max). A 15s heartbeat interval can miss up to 5 beats
 /// when the tab is backgrounded: 15s * 5 = 75s.
 fn spawn_voice_session_sweep(state: api::AppState) {
-    use domain::models::{ServerEvent, VoiceAction};
-
     /// How often the sweep runs.
     const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
     /// Sessions older than this are considered stale (disconnected).
@@ -794,9 +792,34 @@ fn spawn_voice_session_sweep(state: api::AppState) {
             let mut afk_count: usize = 0;
             let mut afk_ok = true;
 
-            // Helper closure: emit VoiceStateUpdate(Left) for each removed session.
-            let emit_left = |sessions: Vec<crate::domain::models::VoiceSession>| {
+            // Helper: emit VoiceStateUpdate(Left) for each removed session,
+            // gated on the channel's access scope (F5). Fail-CLOSED on a
+            // resolver error: broadcasting a private voice channel's roster
+            // change with an unknown scope would leak it to ungranted members —
+            // suppress that session's event and warn instead (rosters self-heal
+            // on the next participants fetch).
+            async fn emit_left(state: &api::AppState, sessions: Vec<domain::models::VoiceSession>) {
+                use domain::models::{ServerEvent, VoiceAction};
+                use domain::services::resolve_channel_access_by_id;
+
                 for session in sessions {
+                    let channel_access = match resolve_channel_access_by_id(
+                        state.channel_repository(),
+                        &session.channel_id,
+                    )
+                    .await
+                    {
+                        Ok(access) => access,
+                        Err(e) => {
+                            tracing::warn!(
+                                channel_id = %session.channel_id,
+                                user_id = %session.user_id,
+                                error = %e,
+                                "channel access resolve failed — suppressing voice.state_update (fail closed)"
+                            );
+                            continue;
+                        }
+                    };
                     let event = ServerEvent::VoiceStateUpdate {
                         sender_id: session.user_id.clone(),
                         server_id: session.server_id.clone(),
@@ -806,16 +829,17 @@ fn spawn_voice_session_sweep(state: api::AppState) {
                         display_name: String::new(),
                         is_muted: None,
                         is_deafened: None,
+                        channel_access,
                     };
                     state.event_bus().publish(event);
                 }
-            };
+            }
 
             // Step 1: Remove sessions that stopped heartbeating.
             match voice_repo.delete_stale(stale_threshold).await {
                 Ok(stale) => {
                     stale_count = stale.len();
-                    emit_left(stale);
+                    emit_left(&state, stale).await;
                 }
                 Err(e) => {
                     stale_ok = false;
@@ -828,7 +852,7 @@ fn spawn_voice_session_sweep(state: api::AppState) {
             match voice_repo.delete_alone_in_channel(alone_threshold).await {
                 Ok(alone) => {
                     alone_count = alone.len();
-                    emit_left(alone);
+                    emit_left(&state, alone).await;
                 }
                 Err(e) => {
                     alone_ok = false;
@@ -841,7 +865,7 @@ fn spawn_voice_session_sweep(state: api::AppState) {
             match voice_repo.delete_afk(afk_threshold, stale_threshold).await {
                 Ok(afk) => {
                     afk_count = afk.len();
-                    emit_left(afk);
+                    emit_left(&state, afk).await;
                 }
                 Err(e) => {
                     afk_ok = false;
