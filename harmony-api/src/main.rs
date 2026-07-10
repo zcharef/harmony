@@ -248,6 +248,32 @@ async fn init_app_state(config: &Config) -> AppInit {
             },
         );
 
+    // WHY: Construct the Klipy GIF client only when a key is configured. When
+    // absent, the `/v1/gifs/*` endpoints return 503 and the client hides the
+    // picker — no panic, mirroring Safe Browsing / LiveKit optionality.
+    let klipy_global_max = config
+        .klipy_global_max_per_hour
+        .unwrap_or(infra::klipy::DEFAULT_GLOBAL_MAX_PER_HOUR);
+    let klipy: Option<Arc<infra::klipy::KlipyClient>> = config
+        .klipy_api_key
+        .as_ref()
+        .filter(|key| !key.expose_secret().is_empty())
+        .and_then(
+            |key| match infra::klipy::KlipyClient::new(key.clone(), klipy_global_max) {
+                Ok(client) => {
+                    tracing::info!(
+                        global_max_per_hour = klipy_global_max,
+                        "Klipy GIF API enabled"
+                    );
+                    Some(Arc::new(client))
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to initialize Klipy client");
+                    None
+                }
+            },
+        );
+
     // C3: Dead-letter queue for failed AI moderation checks (Tier 1 safety).
     let moderation_retry_repo = Arc::new(infra::postgres::PgModerationRetryRepository::new(
         pool.clone(),
@@ -442,6 +468,7 @@ async fn init_app_state(config: &Config) -> AppInit {
         spam_guard,
         content_moderator,
         safe_browsing,
+        klipy,
         message_repo_for_moderation,
         server_repo_for_moderation,
         moderation_retry_repo,

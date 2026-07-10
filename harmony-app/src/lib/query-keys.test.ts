@@ -53,6 +53,19 @@ describe('queryKeys', () => {
     })
   })
 
+  describe('gifs: .all is a prefix of every specific key', () => {
+    it('enables bulk invalidation via queryKeys.gifs.all', () => {
+      const { all } = queryKeys.gifs
+      expect(isPrefix(all, queryKeys.gifs.capability())).toBe(true)
+      expect(isPrefix(all, queryKeys.gifs.trending())).toBe(true)
+      expect(isPrefix(all, queryKeys.gifs.search('cats'))).toBe(true)
+    })
+
+    it('keys search results by query string', () => {
+      expect(queryKeys.gifs.search('a')).not.toEqual(queryKeys.gifs.search('b'))
+    })
+  })
+
   // -- cross-domain isolation ---------------------------------------------
 
   it('top-level domain keys do not collide', () => {

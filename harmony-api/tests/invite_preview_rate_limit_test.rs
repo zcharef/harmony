@@ -201,6 +201,7 @@ async fn app_state(pool: PgPool, trusted_proxy_secret: Option<SecretString>) -> 
         spam_guard,
         None, // content_moderator
         None, // safe_browsing
+        None, // klipy
         message_repo,
         server_repo,
         moderation_retry_repo,

@@ -1575,6 +1575,185 @@
         ]
       }
     },
+    "/v1/gifs/search": {
+      "get": {
+        "tags": [
+          "Gifs"
+        ],
+        "summary": "Search GIFs (Klipy proxy).",
+        "description": "# Errors\n`400` empty query, `401` unauthorized, `429` per-user rate limit,\n`502` upstream failure, `503` feature disabled or global budget exhausted.",
+        "operationId": "search_gifs",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Search text. Rejected when empty/whitespace (400).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page (Klipy pagination). Default 1, clamped 1..=50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GIF search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GifListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream GIF provider failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GIF picker unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/gifs/trending": {
+      "get": {
+        "tags": [
+          "Gifs"
+        ],
+        "summary": "Trending GIFs (Klipy proxy).",
+        "description": "# Errors\n`401` unauthorized, `429` per-user rate limit, `502` upstream failure,\n`503` feature disabled or global budget exhausted.",
+        "operationId": "trending_gifs",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page (Klipy pagination). Default 1, clamped 1..=50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trending GIFs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GifListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream GIF provider failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GIF picker unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/invites/{code}": {
       "get": {
         "tags": [
@@ -5260,6 +5439,109 @@
           }
         }
       },
+      "GifItem": {
+        "type": "object",
+        "description": "A single GIF in a picker result.",
+        "required": [
+          "id",
+          "title",
+          "url",
+          "previewUrl",
+          "width",
+          "height"
+        ],
+        "properties": {
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Klipy slug/id (stable key for React lists + telemetry)."
+          },
+          "previewUrl": {
+            "type": "string",
+            "description": "A smaller preview URL for the picker grid (webp preferred, gif fallback)."
+          },
+          "title": {
+            "type": "string",
+            "description": "Alt text for a11y (falls back to the query if Klipy gives none)."
+          },
+          "url": {
+            "type": "string",
+            "description": "Hosted animated GIF URL — this is what gets inserted as message content."
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "GifListResponse": {
+        "type": "object",
+        "description": "One page of GIF results.",
+        "required": [
+          "items",
+          "hasNext",
+          "page"
+        ],
+        "properties": {
+          "hasNext": {
+            "type": "boolean",
+            "description": "True when a next page exists (Klipy `has_next`) — drives infinite scroll."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GifItem"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "GifSearchQuery": {
+        "type": "object",
+        "description": "Query parameters for `GET /v1/gifs/search`.",
+        "required": [
+          "q"
+        ],
+        "properties": {
+          "page": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "1-based page (Klipy pagination). Default 1, clamped 1..=50.",
+            "minimum": 0
+          },
+          "q": {
+            "type": "string",
+            "description": "Search text. Rejected when empty/whitespace (400)."
+          }
+        }
+      },
+      "GifTrendingQuery": {
+        "type": "object",
+        "description": "Query parameters for `GET /v1/gifs/trending`.",
+        "properties": {
+          "page": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "1-based page (Klipy pagination). Default 1, clamped 1..=50.",
+            "minimum": 0
+          }
+        }
+      },
       "HealthResponse": {
         "type": "object",
         "description": "Deep health check response with component status.",
@@ -7058,6 +7340,10 @@
     {
       "name": "Reactions",
       "description": "Message reactions"
+    },
+    {
+      "name": "Gifs",
+      "description": "GIF picker (Klipy proxy)"
     },
     {
       "name": "ReadStates",

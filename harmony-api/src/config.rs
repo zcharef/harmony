@@ -67,6 +67,17 @@ pub struct Config {
     /// When set, URLs in messages are checked against Google's threat lists.
     pub safe_browsing_api_key: Option<SecretString>,
 
+    /// Klipy GIF API key (optional). When absent, the `/v1/gifs/*` proxy
+    /// endpoints return `503` and the client hides the GIF picker button.
+    /// Server-side only — this key is NEVER exposed to the browser.
+    pub klipy_api_key: Option<SecretString>,
+
+    /// Process-global Klipy budget: max upstream calls per rolling hour across
+    /// all users. Guards the shared upstream budget (test key: 100/hr) that the
+    /// per-user rate limit alone cannot protect. Default 90 — raise or disable
+    /// for the unlimited production key.
+    pub klipy_global_max_per_hour: Option<u32>,
+
     /// `LiveKit` server URL (e.g., `wss://my-project.livekit.cloud`).
     /// Voice channels are disabled when absent.
     pub livekit_url: Option<String>,
@@ -192,6 +203,11 @@ impl std::fmt::Debug for Config {
                 "safe_browsing_api_key",
                 &self.safe_browsing_api_key.as_ref().map(|_| "[REDACTED]"),
             )
+            .field(
+                "klipy_api_key",
+                &self.klipy_api_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("klipy_global_max_per_hour", &self.klipy_global_max_per_hour)
             .field("livekit_url", &self.livekit_url)
             .field(
                 "livekit_api_key",

@@ -18,6 +18,7 @@ use crate::domain::services::{
     ReadStateService, ServerService, SpamGuard, UserPreferencesService, VoiceService,
 };
 use crate::infra::PgPresenceTracker;
+use crate::infra::klipy::KlipyClient;
 use crate::infra::postgres::PgMigrationDashboardRepository;
 use crate::infra::safe_browsing::SafeBrowsingClient;
 
@@ -89,6 +90,8 @@ pub struct AppState {
     content_moderator: Option<Arc<dyn ContentModerator>>,
     /// Google Safe Browsing URL scanner. None = disabled.
     safe_browsing: Option<Arc<SafeBrowsingClient>>,
+    /// Klipy GIF proxy client. None = `KLIPY_API_KEY` unset (feature disabled).
+    klipy: Option<Arc<KlipyClient>>,
     /// Message repository for async moderation soft-delete.
     message_repository: Arc<dyn MessageRepository>,
     /// Server repository for fetching moderation categories inside `tokio::spawn`.
@@ -148,6 +151,7 @@ impl std::fmt::Debug for AppState {
             .field("spam_guard", &self.spam_guard)
             .field("content_moderator", &self.content_moderator.is_some())
             .field("safe_browsing", &self.safe_browsing.is_some())
+            .field("klipy", &self.klipy.is_some())
             .field("server_repository", &self.server_repository)
             .field("moderation_semaphore", &self.moderation_semaphore)
             .field(
@@ -202,6 +206,7 @@ impl AppState {
         spam_guard: Arc<SpamGuard>,
         content_moderator: Option<Arc<dyn ContentModerator>>,
         safe_browsing: Option<Arc<SafeBrowsingClient>>,
+        klipy: Option<Arc<KlipyClient>>,
         message_repository_for_moderation: Arc<dyn MessageRepository>,
         server_repository_for_moderation: Arc<dyn ServerRepository>,
         moderation_retry_repository: Arc<dyn ModerationRetryRepository>,
@@ -250,6 +255,7 @@ impl AppState {
             spam_guard,
             content_moderator,
             safe_browsing,
+            klipy,
             message_repository: message_repository_for_moderation,
             server_repository: server_repository_for_moderation,
             moderation_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_MODERATIONS)),
@@ -426,6 +432,12 @@ impl AppState {
     #[must_use]
     pub fn safe_browsing(&self) -> Option<&Arc<SafeBrowsingClient>> {
         self.safe_browsing.as_ref()
+    }
+
+    /// Access the Klipy GIF proxy client. None = feature disabled (no key).
+    #[must_use]
+    pub fn klipy(&self) -> Option<&Arc<KlipyClient>> {
+        self.klipy.as_ref()
     }
 
     /// Access the message repository for async moderation soft-delete.

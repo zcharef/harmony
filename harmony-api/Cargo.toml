@@ -135,6 +135,10 @@ must_use_candidate = "warn"
 [dev-dependencies]
 tokio-test = "0.4"
 
+# External HTTP mocking for adapter tests (ADR-018 — the only sanctioned way to
+# fake an upstream; mockall/mock frameworks are banned).
+wiremock = "0.6"
+
 # Meta-linting: AST parsing for static analysis tests
 syn = { version = "2.0", features = ["full", "visit", "extra-traits"] }
 walkdir = "2"

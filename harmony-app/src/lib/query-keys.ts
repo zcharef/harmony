@@ -66,6 +66,12 @@ export const queryKeys = {
     all: ['voice'] as const,
     participants: (channelId: string) => ['voice', 'participants', channelId] as const,
   },
+  gifs: {
+    all: ['gifs'] as const,
+    capability: () => ['gifs', 'capability'] as const,
+    trending: () => ['gifs', 'trending'] as const,
+    search: (query: string) => ['gifs', 'search', query] as const,
+  },
   invites: {
     all: ['invites'] as const,
     preview: (code: string) => ['invites', 'preview', code] as const,
