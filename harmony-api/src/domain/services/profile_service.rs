@@ -110,6 +110,58 @@ impl ProfileService {
             .await
     }
 
+    /// Re-validate a freshly-chosen username on the `sync_profile` hot path (F7).
+    ///
+    /// The signup DB trigger `handle_new_user()` honors `user_metadata.username`
+    /// but cannot run the compile-time-embedded content filter, so a direct
+    /// `POST /auth/v1/signup` bypasses `check_hard` entirely. This closes that
+    /// gap: when the stored username was chosen at THIS signup (JWT metadata
+    /// matches the stored value) and is reserved or offensive, it is silently
+    /// replaced with the deterministic safe username and persisted.
+    ///
+    /// Grandfathered usernames are NEVER touched: `metadata_username` absent
+    /// (email-derived) or different from the stored value (renamed / pre-filter
+    /// account) returns the profile unchanged — the same contract the
+    /// `sync_profile` early return protects.
+    ///
+    /// # Errors
+    /// Returns a repository error if persisting the regenerated username fails.
+    /// Deliberately NOT swallowed: a silent failure would leave the offensive
+    /// username persisted (ADR-027) — the client retries on next login.
+    pub async fn remediate_bypassed_username(
+        &self,
+        profile: Profile,
+        metadata_username: Option<&str>,
+    ) -> Result<Profile, DomainError> {
+        let Some(meta_username) = metadata_username else {
+            return Ok(profile);
+        };
+
+        // WHY lowercased: the JWT carries the raw client value (may be
+        // mixed-case) while the trigger stores lower(...); the stored username
+        // is always lowercase (DB CHECK constraint).
+        if meta_username.to_lowercase() != profile.username {
+            return Ok(profile);
+        }
+
+        // WHY reserved here too: defense-in-depth against drift between the
+        // SQL v_reserved copy (trigger) and this Rust list.
+        let is_reserved = RESERVED_USERNAMES.contains(&profile.username.as_str());
+        if !is_reserved && self.content_filter.check_hard(&profile.username).is_ok() {
+            return Ok(profile);
+        }
+
+        // WHY the username is never logged: it is the abusive content itself
+        // (same discipline as the content filter's rejection reasons).
+        tracing::warn!(
+            user_id = %profile.id,
+            "chosen username bypassed signup validation (reserved or offensive), regenerating"
+        );
+
+        let safe_username = generate_safe_username(&profile.id);
+        self.repo.update_username(&profile.id, &safe_username).await
+    }
+
     /// Validate an optional signup display name, FAIL-SOFT.
     ///
     /// Mirrors the `update_profile` display-name rules (trim, 1-32 chars,
@@ -412,8 +464,12 @@ mod tests {
 
     /// Minimal `ProfileRepository` fake: `update` succeeds with a dummy
     /// profile; the tests assert on the validation gate, not persistence.
-    #[derive(Debug)]
-    struct FakeProfileRepo;
+    /// `update_username_calls` counts remediation writes so tests can assert
+    /// the no-op paths never touch the repository.
+    #[derive(Debug, Default)]
+    struct FakeProfileRepo {
+        update_username_calls: std::sync::atomic::AtomicUsize,
+    }
 
     fn dummy_profile(user_id: &UserId) -> Profile {
         let now = Utc::now();
@@ -456,6 +512,20 @@ mod tests {
             profile.display_name = display_name;
             Ok(profile)
         }
+        async fn update_username(
+            &self,
+            user_id: &UserId,
+            username: &str,
+        ) -> Result<Profile, DomainError> {
+            self.update_username_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // WHY: Echo the new username so remediation tests can assert the
+            // regenerated value flows back out of the service.
+            let mut profile = dummy_profile(user_id);
+            profile.username = username.to_string();
+            Ok(profile)
+        }
+
         // -- unused by update_profile --
         async fn get_by_id(&self, _user_id: &UserId) -> Result<Option<Profile>, DomainError> {
             Ok(None)
@@ -469,7 +539,10 @@ mod tests {
     }
 
     fn profile_service() -> ProfileService {
-        ProfileService::new(Arc::new(FakeProfileRepo), Arc::new(ContentFilter::noop()))
+        ProfileService::new(
+            Arc::new(FakeProfileRepo::default()),
+            Arc::new(ContentFilter::noop()),
+        )
     }
 
     #[tokio::test]
@@ -648,7 +721,7 @@ mod tests {
     /// a no-op filter that never rejects).
     fn profile_service_rejecting_slurword() -> ProfileService {
         ProfileService::new(
-            Arc::new(FakeProfileRepo),
+            Arc::new(FakeProfileRepo::default()),
             Arc::new(ContentFilter::from_words(&["slurword"])),
         )
     }
@@ -812,5 +885,149 @@ mod tests {
             .unwrap();
 
         assert_eq!(profile.display_name, None);
+    }
+
+    // ── remediate_bypassed_username (F7 signup-bypass hot-path check) ─────
+    //
+    // A direct POST /auth/v1/signup skips check-username; the DB trigger
+    // stores the chosen name unfiltered. These tests pin the remediation
+    // decision logic: regenerate ONLY when the stored username was chosen at
+    // this signup (metadata matches) AND is reserved/offensive — grandfathered
+    // names (metadata absent or different) are never touched.
+
+    use std::sync::atomic::Ordering;
+
+    /// Service + repo handle so tests can assert whether the remediation
+    /// write actually reached the repository.
+    fn remediation_fixture(filter: ContentFilter) -> (ProfileService, Arc<FakeProfileRepo>) {
+        let repo = Arc::new(FakeProfileRepo::default());
+        let svc = ProfileService::new(repo.clone(), Arc::new(filter));
+        (svc, repo)
+    }
+
+    fn profile_named(user_id: &UserId, username: &str) -> Profile {
+        let mut profile = dummy_profile(user_id);
+        profile.username = username.to_string();
+        profile
+    }
+
+    #[tokio::test]
+    async fn remediate_regenerates_when_metadata_matches_and_filter_fails() {
+        let (svc, repo) = remediation_fixture(ContentFilter::from_words(&["slurword"]));
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let profile = svc
+            .remediate_bypassed_username(profile_named(&user_id, "slurword"), Some("slurword"))
+            .await
+            .unwrap();
+
+        assert!(
+            profile.username.starts_with("user_"),
+            "must be regenerated to the safe fallback: {}",
+            profile.username
+        );
+        let len = profile.username.len();
+        assert!(
+            (3..=32).contains(&len)
+                && profile
+                    .username
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
+            "regenerated username must pass format validation: {}",
+            profile.username
+        );
+        assert_eq!(repo.update_username_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn remediate_noop_when_metadata_absent() {
+        // Grandfathered email-derived name: metadata.username never existed.
+        let (svc, repo) = remediation_fixture(ContentFilter::from_words(&["slurword"]));
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let profile = svc
+            .remediate_bypassed_username(profile_named(&user_id, "slurword"), None)
+            .await
+            .unwrap();
+
+        assert_eq!(profile.username, "slurword", "must be returned untouched");
+        assert_eq!(
+            repo.update_username_calls.load(Ordering::SeqCst),
+            0,
+            "no-op path must never write"
+        );
+    }
+
+    #[tokio::test]
+    async fn remediate_noop_when_metadata_differs() {
+        // Grandfathered user who renamed since signup: stored != metadata.
+        let (svc, repo) = remediation_fixture(ContentFilter::from_words(&["slurword"]));
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let profile = svc
+            .remediate_bypassed_username(profile_named(&user_id, "slurword"), Some("otherbadname"))
+            .await
+            .unwrap();
+
+        assert_eq!(profile.username, "slurword", "must be returned untouched");
+        assert_eq!(repo.update_username_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn remediate_noop_when_clean() {
+        let (svc, repo) = remediation_fixture(ContentFilter::from_words(&["slurword"]));
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let profile = svc
+            .remediate_bypassed_username(profile_named(&user_id, "goodname"), Some("goodname"))
+            .await
+            .unwrap();
+
+        assert_eq!(profile.username, "goodname", "clean name must pass through");
+        assert_eq!(
+            repo.update_username_calls.load(Ordering::SeqCst),
+            0,
+            "clean happy path must not touch the repository"
+        );
+    }
+
+    #[tokio::test]
+    async fn remediate_regenerates_when_reserved() {
+        // Noop filter: proves the reserved branch fires independently of the
+        // content filter (defense-in-depth against SQL/Rust list drift).
+        let (svc, repo) = remediation_fixture(ContentFilter::noop());
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let profile = svc
+            .remediate_bypassed_username(profile_named(&user_id, "admin"), Some("admin"))
+            .await
+            .unwrap();
+
+        assert!(
+            profile.username.starts_with("user_"),
+            "reserved name must be regenerated: {}",
+            profile.username
+        );
+        assert_eq!(repo.update_username_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn remediate_case_insensitive_match() {
+        // The JWT carries the raw client value (mixed-case); the trigger stores
+        // lower(...). The comparison must mirror that lowering.
+        let (svc, repo) = remediation_fixture(ContentFilter::from_words(&["slurword"]));
+        let user_id = UserId::new(Uuid::from_u128(1));
+
+        let profile = svc
+            .remediate_bypassed_username(profile_named(&user_id, "slurword"), Some("SLURWORD"))
+            .await
+            .unwrap();
+
+        assert!(
+            profile.username.starts_with("user_"),
+            "case-mismatched metadata must still trigger remediation: {}",
+            profile.username
+        );
+        assert_eq!(repo.update_username_calls.load(Ordering::SeqCst), 1);
     }
 }

@@ -57,6 +57,21 @@ pub async fn sync_profile(
     // DB upsert is a no-op for existing profiles, skip the entire validation
     // chain and return the existing profile directly.
     if let Some(existing) = state.profile_service().get_by_id_optional(&user_id).await? {
+        // WHY (F7): The signup trigger honors user_metadata.username but cannot
+        // run the content filter, so a direct /auth/v1/signup bypasses it. Only
+        // a username chosen at THIS signup (metadata == stored) is re-validated
+        // and regenerated — grandfathered names are untouched. Runs BEFORE
+        // auto-join so MemberJoined broadcasts the corrected username.
+        let metadata_username: Option<&str> = auth_user
+            .user_metadata
+            .as_ref()
+            .and_then(|m: &serde_json::Value| m.get("username"))
+            .and_then(serde_json::Value::as_str);
+        let existing = state
+            .profile_service()
+            .remediate_bypassed_username(existing, metadata_username)
+            .await?;
+
         // WHY: The DB trigger handle_new_user() creates the profile before
         // sync_profile runs, so new users always land here. Check membership
         // and auto-join if needed — the membership check avoids duplicate

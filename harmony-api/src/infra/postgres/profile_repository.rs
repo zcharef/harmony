@@ -293,4 +293,61 @@ impl ProfileRepository for PgProfileRepository {
 
         Ok(profile_row.into_profile())
     }
+
+    async fn update_username(
+        &self,
+        user_id: &UserId,
+        username: &str,
+    ) -> Result<Profile, DomainError> {
+        let id = user_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            UPDATE profiles
+            SET
+                username = $2,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id,
+                username,
+                display_name,
+                avatar_url,
+                status,
+                custom_status,
+                created_at,
+                updated_at
+            "#,
+            id,
+            username,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| match e {
+            // WHY: The safe username is derived from the user's own UUID, so a
+            // collision is effectively impossible — mapped for completeness,
+            // mirroring upsert_from_auth.
+            sqlx::Error::Database(ref db_err) if db_err.is_unique_violation() => {
+                DomainError::Conflict("Username is already taken".to_string())
+            }
+            other => super::db_err(other),
+        })?
+        .ok_or_else(|| DomainError::NotFound {
+            resource_type: "Profile",
+            id: user_id.to_string(),
+        })?;
+
+        let profile_row = ProfileRow {
+            id: row.id,
+            username: row.username,
+            display_name: row.display_name,
+            avatar_url: row.avatar_url,
+            status: row.status,
+            custom_status: row.custom_status,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        };
+
+        Ok(profile_row.into_profile())
+    }
 }
