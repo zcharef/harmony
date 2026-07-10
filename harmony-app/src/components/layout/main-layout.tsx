@@ -644,11 +644,18 @@ export function MainLayout() {
   /** WHY: One-time first-run flow takes precedence over the welcome empty state
    *  (ticket §5.3). Gated on server-persisted onboardingCompleted === false;
    *  never shown while preferences is cold or errored (no flash, no trap).
-   *  Skip in DM view — the DmSidebar must stay reachable. */
+   *  Skip in DM view — the DmSidebar must stay reachable.
+   *  WHY onSelectServer={handleOnboardingSelect}: an explicit rail click must
+   *  win over the flow (same rule as the showWelcome guard). It completes
+   *  onboarding + navigates, exactly like the explore CTA — otherwise the
+   *  click only highlights the rail item while the content stays trapped on
+   *  the flow (a user action with no visible effect). Background auto-select
+   *  (localStorage restore) does NOT go through this callback, so it cannot
+   *  silently complete onboarding. */
   if (showOnboarding && !isDmView) {
     return (
       <OnboardingView
-        onSelectServer={handleSelectServer}
+        onSelectServer={handleOnboardingSelect}
         onSelectDmView={handleSelectDmView}
         officialServerId={officialServerId}
         onSelectAndComplete={handleOnboardingSelect}

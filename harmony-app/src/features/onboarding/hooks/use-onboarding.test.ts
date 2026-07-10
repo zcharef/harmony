@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 import type { UserPreferencesResponse } from '@/lib/api'
+import { queryKeys } from '@/lib/query-keys'
 import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 import { useOnboarding } from './use-onboarding'
 
@@ -110,5 +111,36 @@ describe('useOnboarding', () => {
     })
     // Optimistic cache write makes the gate flip immediately (no refetch).
     await waitFor(() => expect(result.current.showOnboarding).toBe(false))
+  })
+
+  // WHY: Regression for the rollback re-trap. A failed completion PATCH rolls
+  // the optimistic cache back to onboardingCompleted: false — without the
+  // completedThisSession latch, showOnboarding would flip back to true and
+  // yank the user out of the app mid-session (§6.2 says they proceed for this
+  // session and only see onboarding again on next load).
+  it('showOnboarding stays false this session when the completion PATCH fails and rolls back', async () => {
+    vi.mocked(getPreferences).mockResolvedValue({
+      data: buildPreferences({ onboardingCompleted: false }),
+    } as never)
+    vi.mocked(updatePreferences).mockRejectedValue(new Error('offline'))
+
+    const queryClient = createTestQueryClient()
+    const { result } = renderHook(() => useOnboarding(), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+    await waitFor(() => expect(result.current.showOnboarding).toBe(true))
+
+    await act(async () => {
+      result.current.completeOnboarding()
+    })
+
+    // Wait for onError's rollback to restore onboardingCompleted: false in cache.
+    await waitFor(() => {
+      const cached = queryClient.getQueryData<UserPreferencesResponse>(queryKeys.preferences.me())
+      expect(cached?.onboardingCompleted).toBe(false)
+    })
+
+    // The latch keeps the flow hidden despite the cache saying "not completed".
+    expect(result.current.showOnboarding).toBe(false)
   })
 })
