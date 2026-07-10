@@ -99,7 +99,9 @@ pub async fn create_invite(
         (status = 404, description = "Invite not found or no longer valid", body = ProblemDetails),
     )
 )]
-#[tracing::instrument(skip(state))]
+// WHY skip(code): the raw invite code is a join capability — it must never
+// land in span fields. The handler logs only its hash (hash_invite_code).
+#[tracing::instrument(skip(state, code))]
 pub async fn preview_invite(
     State(state): State<AppState>,
     ApiPath(code): ApiPath<InviteCode>,

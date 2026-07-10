@@ -37,22 +37,26 @@ export function InviteLandingPage({ code, onDone }: InviteLandingPageProps) {
 
   const isAuthed = session !== null
   const serverId = preview.data?.serverId
+  // WHY destructured: mutate is referentially stable in TanStack Query v5;
+  // depending on the whole mutation object would re-run the effect on every
+  // state transition of the mutation.
+  const { mutate: acceptMutate, isIdle: acceptIsIdle } = acceptInvite
 
   // WHY: "account creation AFTER intent" — a pre-auth accept click was
   // recorded in sessionStorage; once the user is back here authenticated,
   // finish the join without demanding a second click.
   useEffect(() => {
     if (!isAuthed || serverId === undefined || !hasInviteIntent(code)) return
-    if (!acceptInvite.isIdle) return
+    if (!acceptIsIdle) return
 
     clearInviteIntent(code)
-    acceptInvite.mutate(
+    acceptMutate(
       { serverId, code },
       {
         onSuccess: (joinedServerId) => onDone(joinedServerId),
       },
     )
-  }, [isAuthed, serverId, code, acceptInvite, onDone])
+  }, [isAuthed, serverId, code, acceptIsIdle, acceptMutate, onDone])
 
   function handleAccept() {
     if (serverId === undefined) return

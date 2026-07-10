@@ -89,9 +89,18 @@ export async function onRequestGet(context: PagesContext): Promise<Response> {
 
     waitUntil(cache.put(request, response.clone()))
     return response
-  } catch {
-    // WHY swallow: fail-open contract. The SPA itself will render the real
-    // preview (or the invalid state) client-side.
+  } catch (error) {
+    // WHY swallow-but-log: fail-open contract — the SPA renders the real
+    // preview (or the invalid state) client-side. console.error is the
+    // Workers-native log route (Cloudflare real-time logs / analytics);
+    // the app's logger lib does not exist in this runtime.
+    // biome-ignore lint/suspicious/noConsole: console is the only log sink in the Workers runtime — @/lib/logger targets the browser and does not exist here
+    console.error(
+      JSON.stringify({
+        event: 'invite_og_fail_open',
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    )
     return serveSpaShell()
   }
 }

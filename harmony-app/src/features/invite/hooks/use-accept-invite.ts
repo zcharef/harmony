@@ -42,7 +42,16 @@ export function useAcceptInvite() {
       // WHY await: MainLayout mounts immediately after this flow finishes and
       // clears any selected server missing from the cached list — refetch
       // first so the just-joined server is present before navigation.
-      await queryClient.refetchQueries({ queryKey: queryKeys.servers.list() })
+      // WHY try/catch: the join itself succeeded — a refetch failure must not
+      // abort the caller-level onSuccess (navigation) or misreport the join
+      // as failed. MainLayout refetches on mount anyway.
+      try {
+        await queryClient.refetchQueries({ queryKey: queryKeys.servers.list() })
+      } catch (refetchError) {
+        logger.warn('invite_servers_refetch_failed', {
+          error: refetchError instanceof Error ? refetchError.message : String(refetchError),
+        })
+      }
     },
     onError: (error) => {
       // WHY log-only here: the landing page renders the failure inline

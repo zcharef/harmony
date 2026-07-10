@@ -1,6 +1,6 @@
 import { HeroUIProvider, Spinner, ToastProvider } from '@heroui/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { FeatureErrorBoundary } from '@/components/shared/error-boundary'
 import { UpdateNotification } from '@/components/shared/update-notification'
@@ -13,11 +13,12 @@ import {
   VerifyEmailScreen,
 } from '@/features/auth'
 import { CryptoProvider } from '@/features/crypto'
-import { getInviteCodeFromPath, InviteLandingPage } from '@/features/invite'
+import { InviteLandingPage } from '@/features/invite'
 import { useAppUpdater } from '@/hooks/use-app-updater'
 import { useDockBadge } from '@/hooks/use-dock-badge'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { useFaviconBadge } from '@/hooks/use-favicon-badge'
+import { getInviteCodeFromPath } from '@/lib/invite-path'
 import { ROUTES } from '@/lib/routes'
 
 const queryClient = new QueryClient({
@@ -61,12 +62,15 @@ function AppContent() {
   const [inviteResult, setInviteResult] = useState<{ serverId: string | null } | null>(null)
   const isInviteFlow = inviteCode !== null && inviteResult === null
 
-  function handleInviteDone(serverId: string | null) {
+  // WHY useCallback: this is an effect dependency inside InviteLandingPage
+  // (intent auto-join) — a fresh reference on every AppContent render would
+  // re-run that effect needlessly.
+  const handleInviteDone = useCallback((serverId: string | null) => {
     // WHY replaceState: leave /invite/:code without a reload and without
     // polluting history — Back must not re-trigger the join flow.
     window.history.replaceState(null, '', ROUTES.home())
     setInviteResult({ serverId })
-  }
+  }, [])
 
   if (isLoading) {
     return (
