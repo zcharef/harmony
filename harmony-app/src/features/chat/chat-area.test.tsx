@@ -196,8 +196,11 @@ describe('ChatArea mention wiring', () => {
     await insertAliceViaPopup(input)
 
     expect(sendMutate).not.toHaveBeenCalled()
-    // The trailing space ends the token — the popup is gone after insertion.
-    expect(screen.queryAllByTestId('mention-option')).toHaveLength(0)
+    // The trailing space ends the token — the popup closes after insertion.
+    // WHY waitFor: the HeroUI Popover keeps its content mounted through the
+    // exit animation — the rows leave the DOM asynchronously, so a synchronous
+    // queryAll races the animation (flaked in CI).
+    await waitFor(() => expect(screen.queryAllByTestId('mention-option')).toHaveLength(0))
   })
 
   it('Enter after insertion sends the transformed content WITH the mentions key (spec §5.2)', async () => {
