@@ -13,6 +13,7 @@ import { isProblemDetails } from '@/lib/api-error'
 import { resolveDisplayName } from '@/lib/display-name'
 import { queryKeys } from '@/lib/query-keys'
 import { useProfile } from '../hooks/use-profile'
+import { FoundingBadge } from './founding-badge'
 import { ProfileBio } from './profile-bio'
 
 // WHY a local role badge (not the members feature's RoleBadge): importing from
@@ -179,6 +180,9 @@ function ProfileCard({
               {label}
             </span>
             {memberContext !== null && <CardRoleBadge role={memberContext.role} />}
+            <FoundingBadge
+              isFounding={profile?.isFounding === true || memberContext?.isFounding === true}
+            />
           </div>
           <span className="truncate text-sm text-default-500" data-test="profile-card-username">
             @{username}

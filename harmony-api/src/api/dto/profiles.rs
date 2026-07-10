@@ -24,6 +24,8 @@ pub struct ProfileResponse {
     pub bio: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub banner_url: Option<String>,
+    /// Whether this user holds the `founding` badge (one of the first accounts).
+    pub is_founding: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -98,8 +100,46 @@ impl From<Profile> for ProfileResponse {
             custom_status: p.custom_status,
             bio: p.bio,
             banner_url: p.banner_url,
+            is_founding: p.is_founding,
             created_at: p.created_at,
             updated_at: p.updated_at,
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    fn make_profile(is_founding: bool) -> Profile {
+        let now = Utc::now();
+        Profile {
+            id: UserId::from(Uuid::new_v4()),
+            username: "alice".to_string(),
+            display_name: None,
+            avatar_url: None,
+            status: UserStatus::Offline,
+            custom_status: None,
+            bio: None,
+            banner_url: None,
+            is_founding,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// WHY: The profile hover card renders the founding badge from this flag.
+    /// The From conversion must carry `is_founding` and serde must emit the
+    /// camelCase `isFounding` key (ADR-039), always present.
+    #[test]
+    fn profile_response_carries_founding_flag() {
+        let json = serde_json::to_value(ProfileResponse::from(make_profile(true))).unwrap();
+        assert_eq!(json["isFounding"], true);
+
+        let json = serde_json::to_value(ProfileResponse::from(make_profile(false))).unwrap();
+        assert_eq!(json["isFounding"], false);
     }
 }

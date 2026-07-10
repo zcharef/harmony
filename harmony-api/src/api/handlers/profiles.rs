@@ -88,6 +88,17 @@ pub async fn sync_profile(
                 auto_join_official_server(&state, official_server_id, &user_id).await;
             }
         }
+
+        // Founding-member badge: issue on login while the cohort is open
+        // (idempotent). Best-effort — a grant failure must never block sign-in.
+        if let Err(e) = state
+            .profile_service()
+            .grant_founding_if_eligible(&user_id, existing.created_at)
+            .await
+        {
+            tracing::warn!(error = %e, "founding-badge grant failed (best-effort)");
+        }
+
         return Ok((StatusCode::OK, Json(ProfileResponse::from(existing))));
     }
 
@@ -139,6 +150,15 @@ pub async fn sync_profile(
     // Skipped when OFFICIAL_SERVER_ID is unset (self-hosted instances).
     if let Some(official_server_id) = state.official_server_id() {
         auto_join_official_server(&state, official_server_id, &user_id).await;
+    }
+
+    // Founding-member badge for a brand-new account (idempotent, best-effort).
+    if let Err(e) = state
+        .profile_service()
+        .grant_founding_if_eligible(&user_id, profile.created_at)
+        .await
+    {
+        tracing::warn!(error = %e, "founding-badge grant failed (best-effort)");
     }
 
     Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
@@ -222,6 +242,7 @@ async fn auto_join_official_server(
                     avatar_url: member.avatar_url,
                     nickname: member.nickname,
                     role: member.role,
+                    is_founding: member.is_founding,
                     joined_at: member.joined_at,
                 },
             };

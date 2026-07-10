@@ -43,6 +43,7 @@ function buildMemberList(): MemberListResponse {
         avatarUrl: 'https://cdn.example.com/old.webp',
         nickname: 'ServerNick',
         role: 'member',
+        isFounding: false,
         joinedAt: '2026-03-01T00:00:00Z',
       },
       {
@@ -52,6 +53,7 @@ function buildMemberList(): MemberListResponse {
         avatarUrl: null,
         nickname: null,
         role: 'member',
+        isFounding: false,
         joinedAt: '2026-03-02T00:00:00Z',
       },
     ],
@@ -109,6 +111,7 @@ function buildProfile(): ProfileResponse {
     avatarUrl: 'https://cdn.example.com/old.webp',
     customStatus: 'old status',
     status: 'online',
+    isFounding: false,
     createdAt: '2026-03-01T00:00:00Z',
     updatedAt: '2026-03-01T00:00:00Z',
   }

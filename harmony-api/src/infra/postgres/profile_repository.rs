@@ -32,6 +32,7 @@ struct ProfileRow {
     custom_status: Option<String>,
     bio: Option<String>,
     banner_url: Option<String>,
+    is_founding: bool,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -47,6 +48,7 @@ impl ProfileRow {
             custom_status: self.custom_status,
             bio: self.bio,
             banner_url: self.banner_url,
+            is_founding: self.is_founding,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -104,6 +106,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
+                ) AS "is_founding!",
                 created_at,
                 updated_at
             "#,
@@ -130,6 +136,7 @@ impl ProfileRepository for PgProfileRepository {
             custom_status: row.custom_status,
             bio: row.bio,
             banner_url: row.banner_url,
+            is_founding: row.is_founding,
             created_at: row.created_at,
             updated_at: row.updated_at,
         };
@@ -163,6 +170,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
+                ) AS "is_founding!",
                 created_at,
                 updated_at
             FROM profiles
@@ -184,6 +195,7 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status: r.custom_status,
                 bio: r.bio,
                 banner_url: r.banner_url,
+                is_founding: r.is_founding,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             }
@@ -210,6 +222,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
+                ) AS "is_founding!",
                 created_at,
                 updated_at
             FROM profiles
@@ -233,6 +249,7 @@ impl ProfileRepository for PgProfileRepository {
                     custom_status: r.custom_status,
                     bio: r.bio,
                     banner_url: r.banner_url,
+                    is_founding: r.is_founding,
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                 }
@@ -287,6 +304,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
+                ) AS "is_founding!",
                 created_at,
                 updated_at
             "#,
@@ -319,11 +340,41 @@ impl ProfileRepository for PgProfileRepository {
             custom_status: row.custom_status,
             bio: row.bio,
             banner_url: row.banner_url,
+            is_founding: row.is_founding,
             created_at: row.created_at,
             updated_at: row.updated_at,
         };
 
         Ok(profile_row.into_profile())
+    }
+
+    async fn count_badge_holders(&self, badge: &str) -> Result<i64, DomainError> {
+        let count = sqlx::query_scalar!(
+            r#"SELECT COALESCE(COUNT(*)::BIGINT, 0) as "count!" FROM user_badges WHERE badge = $1"#,
+            badge,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(count)
+    }
+
+    async fn grant_badge(&self, user_id: &UserId, badge: &str) -> Result<(), DomainError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO user_badges (user_id, badge)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id, badge) DO NOTHING
+            "#,
+            user_id.0,
+            badge,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(())
     }
 
     async fn update_username(
@@ -349,6 +400,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
+                ) AS "is_founding!",
                 created_at,
                 updated_at
             "#,
@@ -380,6 +435,7 @@ impl ProfileRepository for PgProfileRepository {
             custom_status: row.custom_status,
             bio: row.bio,
             banner_url: row.banner_url,
+            is_founding: row.is_founding,
             created_at: row.created_at,
             updated_at: row.updated_at,
         };

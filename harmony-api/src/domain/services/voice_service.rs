@@ -1112,6 +1112,7 @@ mod tests {
             avatar_url: None,
             nickname: None,
             role: Role::Member,
+            is_founding: false,
             joined_at: Utc::now(),
         }
     }

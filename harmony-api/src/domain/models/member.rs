@@ -19,5 +19,8 @@ pub struct ServerMember {
     pub avatar_url: Option<String>,
     pub nickname: Option<String>,
     pub role: Role,
+    /// Whether this member holds the `founding` badge (one of the first accounts).
+    /// Derived from `user_badges` at read time (a per-account, ~immutable flag).
+    pub is_founding: bool,
     pub joined_at: DateTime<Utc>,
 }

@@ -13,6 +13,7 @@ const members: MemberResponse[] = [
     nickname: 'Ali',
     avatarUrl: 'https://cdn.example.com/alice.webp',
     role: 'member',
+    isFounding: false,
     joinedAt: '2026-03-01T00:00:00Z',
   },
   {
@@ -20,6 +21,7 @@ const members: MemberResponse[] = [
     username: 'bob',
     nickname: null,
     role: 'member',
+    isFounding: false,
     joinedAt: '2026-03-02T00:00:00Z',
   },
   {
@@ -28,6 +30,7 @@ const members: MemberResponse[] = [
     nickname: null,
     displayName: 'Carol Danvers',
     role: 'member',
+    isFounding: false,
     joinedAt: '2026-03-03T00:00:00Z',
   },
 ]

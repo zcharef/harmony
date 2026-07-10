@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE profiles\n            SET\n                username = $2,\n                updated_at = now()\n            WHERE id = $1\n            RETURNING\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                bio,\n                banner_url,\n                created_at,\n                updated_at\n            ",
+  "query": "\n            SELECT\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                bio,\n                banner_url,\n                EXISTS(\n                    SELECT 1 FROM user_badges ub\n                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'\n                ) AS \"is_founding!\",\n                created_at,\n                updated_at\n            FROM profiles\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -45,19 +45,23 @@
       },
       {
         "ordinal": 8,
+        "name": "is_founding!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -69,9 +73,10 @@
       true,
       true,
       true,
+      null,
       false,
       false
     ]
   },
-  "hash": "727285a9a1ec93e6ad3273adbce664f1e607a07abd5f0c217b04586ac510ed31"
+  "hash": "6fc1ac731d64114817f1aef7042303e6c567fd558e4acf72d3f3cd1e0761d0ce"
 }

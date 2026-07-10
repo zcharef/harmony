@@ -5388,6 +5388,7 @@
           "userId",
           "username",
           "role",
+          "isFounding",
           "joinedAt"
         ],
         "properties": {
@@ -5403,6 +5404,10 @@
               "null"
             ],
             "description": "Member's display name (if set)."
+          },
+          "isFounding": {
+            "type": "boolean",
+            "description": "Whether this member holds the `founding` badge (one of the first accounts)."
           },
           "joinedAt": {
             "type": "string",
@@ -5977,6 +5982,7 @@
           "id",
           "username",
           "status",
+          "isFounding",
           "createdAt",
           "updatedAt"
         ],
@@ -6017,6 +6023,10 @@
           },
           "id": {
             "$ref": "#/components/schemas/UserId"
+          },
+          "isFounding": {
+            "type": "boolean",
+            "description": "Whether this user holds the `founding` badge (one of the first accounts)."
           },
           "status": {
             "$ref": "#/components/schemas/UserStatus"

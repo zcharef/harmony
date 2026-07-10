@@ -9,8 +9,9 @@ import remarkGfm from 'remark-gfm'
 import { ExternalLinkWarning } from '@/components/shared/external-link-warning'
 import type { DecryptResult } from '@/features/crypto'
 import { EncryptedMessageContent } from '@/features/crypto'
+import { useIsFounding } from '@/features/members'
 import { usePreferences } from '@/features/preferences'
-import { ProfilePopover } from '@/features/profiles'
+import { FoundingBadge, ProfilePopover } from '@/features/profiles'
 import type { MessageResponse } from '@/lib/api'
 import { resolveDisplayName } from '@/lib/display-name'
 import { isTauri } from '@/lib/platform'
@@ -599,6 +600,9 @@ function MessageHeader({
 }) {
   const { t } = useTranslation('messages')
   const { t: tCrypto } = useTranslation('crypto')
+  // WHY: Founding status rides the member cache (ticket §4), not the message
+  // payload — read it by author id for the current server context.
+  const isFoundingAuthor = useIsFounding(message.authorId, serverId)
 
   return (
     <div className="flex items-baseline gap-2">
@@ -615,6 +619,7 @@ function MessageHeader({
           {authorLabel}
         </span>
       </ProfilePopover>
+      <FoundingBadge isFounding={isFoundingAuthor} />
       <span data-test="message-timestamp" className="text-xs text-default-500">
         {isPending ? t('sending') : formatTimestamp(message.createdAt, t)}
       </span>

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                sm.user_id,\n                sm.server_id,\n                p.username,\n                p.display_name,\n                p.avatar_url,\n                sm.nickname,\n                sm.role as \"role!\",\n                sm.joined_at\n            FROM server_members sm\n            INNER JOIN profiles p ON p.id = sm.user_id\n            WHERE sm.server_id = $1\n            ORDER BY sm.joined_at\n            ",
+  "query": "\n            SELECT\n                sm.user_id,\n                sm.server_id,\n                p.username,\n                p.display_name,\n                p.avatar_url,\n                sm.nickname,\n                sm.role as \"role!\",\n                EXISTS(\n                    SELECT 1 FROM user_badges ub\n                    WHERE ub.user_id = sm.user_id AND ub.badge = 'founding'\n                ) AS \"is_founding!\",\n                sm.joined_at\n            FROM server_members sm\n            INNER JOIN profiles p ON p.id = sm.user_id\n            WHERE sm.server_id = $1 AND sm.user_id = $2\n            ",
   "describe": {
     "columns": [
       {
@@ -40,12 +40,18 @@
       },
       {
         "ordinal": 7,
+        "name": "is_founding!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
         "name": "joined_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Uuid"
       ]
     },
@@ -57,8 +63,9 @@
       true,
       true,
       false,
+      null,
       false
     ]
   },
-  "hash": "cf64b5356f291320ef0a3b47d9ca050e772e90f38628b36253188bc9ae943715"
+  "hash": "0cd9745e8986a74686fcc62e6f0ee37d2663f3f39f918e62bbdef6b051f9e212"
 }

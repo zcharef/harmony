@@ -47,6 +47,7 @@ function buildProfile(overrides: Partial<ProfileResponse> = {}): ProfileResponse
     bio: null,
     status: 'online',
     customStatus: null,
+    isFounding: false,
     createdAt: '2026-03-01T00:00:00Z',
     updatedAt: '2026-03-01T00:00:00Z',
     ...overrides,
@@ -63,6 +64,7 @@ function memberList(): MemberListResponse {
         avatarUrl: null,
         nickname: null,
         role: 'member',
+        isFounding: false,
         joinedAt: '2026-03-01T00:00:00Z',
       },
     ],
@@ -129,6 +131,22 @@ describe('ProfilePopover states', () => {
     expect(await screen.findByTestId('profile-card')).toBeTruthy()
     expect(screen.queryByTestId('profile-bio')).toBeNull()
     expect(screen.getByTestId('profile-card-banner-empty')).toBeTruthy()
+  })
+
+  it('FOUNDING: renders the founding badge in the name row', async () => {
+    mockProfileQuery({ data: buildProfile({ isFounding: true }) })
+    renderAndOpen({ withContext: true })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    expect(screen.getByTestId('founding-badge')).toBeTruthy()
+  })
+
+  it('NON-FOUNDING: no founding badge on the card', async () => {
+    mockProfileQuery({ data: buildProfile({ isFounding: false }) })
+    renderAndOpen({ withContext: true })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    expect(screen.queryByTestId('founding-badge')).toBeNull()
   })
 
   it('ERROR (context present, non-404): shows an inline retry, keeps the context tier', async () => {

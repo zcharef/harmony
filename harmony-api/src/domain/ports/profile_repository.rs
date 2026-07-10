@@ -59,4 +59,15 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
         user_id: &UserId,
         username: &str,
     ) -> Result<Profile, DomainError>;
+
+    /// Count how many users currently hold `badge` (e.g. `"founding"`).
+    ///
+    /// Used by the founding-grant gate: the badge is issued to the first N
+    /// accounts, so the number already granted is the live cursor.
+    async fn count_badge_holders(&self, badge: &str) -> Result<i64, DomainError>;
+
+    /// Idempotently grant `badge` to `user_id` (no-op if already held).
+    ///
+    /// Writes to the service-role-only `user_badges` table (ADR-040 RLS).
+    async fn grant_badge(&self, user_id: &UserId, badge: &str) -> Result<(), DomainError>;
 }

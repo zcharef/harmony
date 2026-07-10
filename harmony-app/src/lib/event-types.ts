@@ -101,6 +101,9 @@ const memberPayloadSchema = z.object({
   avatarUrl: z.string().nullable(),
   nickname: z.string().nullable(),
   role: z.string(),
+  // WHY optional: rollout-safe — an event minted by a pre-deploy API instance
+  // omits it; the cache handler defaults it to false until the next refetch.
+  isFounding: z.boolean().optional(),
   joinedAt: z.string(),
 })
 

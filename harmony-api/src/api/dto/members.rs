@@ -20,6 +20,8 @@ pub struct MemberResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nickname: Option<String>,
     pub role: String,
+    /// Whether this member holds the `founding` badge (one of the first accounts).
+    pub is_founding: bool,
     pub joined_at: DateTime<Utc>,
 }
 
@@ -32,6 +34,7 @@ impl From<ServerMember> for MemberResponse {
             avatar_url: m.avatar_url,
             nickname: m.nickname,
             role: m.role.to_string(),
+            is_founding: m.is_founding,
             joined_at: m.joined_at,
         }
     }
@@ -112,6 +115,7 @@ mod tests {
             avatar_url: None,
             nickname: None,
             role: Role::Member,
+            is_founding: false,
             joined_at: Utc::now(),
         }
     }
@@ -139,5 +143,19 @@ mod tests {
 
         let json = serde_json::to_value(&response).unwrap();
         assert!(json.get("displayName").is_none());
+    }
+
+    /// WHY: The member list drives the founding badge next to member names.
+    /// The From conversion must carry `is_founding` through and serde must emit
+    /// the camelCase `isFounding` key (ADR-039), always present (never skipped).
+    #[test]
+    fn member_response_carries_founding_flag() {
+        let mut member = make_member(None);
+        member.is_founding = true;
+        let json = serde_json::to_value(MemberResponse::from(member)).unwrap();
+        assert_eq!(json["isFounding"], true);
+
+        let json = serde_json::to_value(MemberResponse::from(make_member(None))).unwrap();
+        assert_eq!(json["isFounding"], false);
     }
 }

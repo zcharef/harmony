@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                bio,\n                banner_url,\n                created_at,\n                updated_at\n            FROM profiles\n            WHERE id = $1\n            ",
+  "query": "\n            SELECT\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                bio,\n                banner_url,\n                EXISTS(\n                    SELECT 1 FROM user_badges ub\n                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'\n                ) AS \"is_founding!\",\n                created_at,\n                updated_at\n            FROM profiles\n            WHERE id = ANY($1::uuid[])\n            ",
   "describe": {
     "columns": [
       {
@@ -45,18 +45,23 @@
       },
       {
         "ordinal": 8,
+        "name": "is_founding!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "UuidArray"
       ]
     },
     "nullable": [
@@ -68,9 +73,10 @@
       true,
       true,
       true,
+      null,
       false,
       false
     ]
   },
-  "hash": "395f05ebff92d6d6ea8afbfc4d7d999299d23cbca6423624a0871014169d6ecc"
+  "hash": "9219bca21daf8d1d36e75223fdfd6e3146b0a51d3cba30e979a316cfe1037f5e"
 }

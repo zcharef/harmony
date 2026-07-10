@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO user_badges (user_id, badge)\n            VALUES ($1, $2)\n            ON CONFLICT (user_id, badge) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c64cee805956bb3e992bcdc006f224f6b3c3bad0c64149aceb746970637109ad"
+}

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
 import { StatusIndicator, usePresenceStore } from '@/features/presence'
-import { ProfilePopover } from '@/features/profiles'
+import { FoundingBadge, ProfilePopover } from '@/features/profiles'
 import type { MemberResponse, UserStatus } from '@/lib/api'
 import { resolveDisplayName } from '@/lib/display-name'
 import { cn } from '@/lib/utils'
@@ -266,6 +266,7 @@ function MemberRow({
             {displayName}
           </span>
           <RoleBadge role={role} />
+          <FoundingBadge isFounding={member.isFounding} />
         </button>
       </ProfilePopover>
       <MemberContextMenu
