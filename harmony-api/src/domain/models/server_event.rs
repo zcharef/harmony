@@ -334,6 +334,26 @@ pub enum ServerEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channel_access: Option<ChannelAccessScope>,
     },
+    /// A private channel's `channel_role_access` grant set changed. Server-scoped:
+    /// every member re-evaluates whether they can now see (or must now hide) the
+    /// channel. Carries only the channel id + the granted role set — NOT the
+    /// name/topic — so a non-granted member learns a private channel id exists but
+    /// nothing about it (same bounded-metadata posture as `ChannelCreated`, which
+    /// is already server-scoped; name/topic are only ever fetched through the
+    /// access-gated `list_channels`, which never returns a channel the caller
+    /// cannot see — no content leak).
+    ///
+    /// DELIBERATELY carries NO `channel_access` routing scope: unlike message /
+    /// channel-lifecycle events, this one's entire job is to reach a member whose
+    /// role is being newly granted (or revoked). Gating it by the CURRENT grant
+    /// set would starve the very member who just gained access, so it fans out by
+    /// server membership and the bounded id+roles payload is the accepted cost.
+    ChannelAccessUpdated {
+        sender_id: UserId,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        authorized_roles: Vec<Role>,
+    },
 
     // ── Server ───────────────────────────────────────────────
     ServerUpdated {
@@ -518,6 +538,7 @@ impl ServerEvent {
             Self::ChannelCreated { .. } => "channel.created",
             Self::ChannelUpdated { .. } => "channel.updated",
             Self::ChannelDeleted { .. } => "channel.deleted",
+            Self::ChannelAccessUpdated { .. } => "channel.access_updated",
             Self::ServerUpdated { .. } => "server.updated",
             Self::ModerationSettingsUpdated { .. } => "server.moderation_settings_updated",
             Self::DmCreated { .. } => "dm.created",
@@ -547,6 +568,7 @@ impl ServerEvent {
             | Self::ChannelCreated { sender_id, .. }
             | Self::ChannelUpdated { sender_id, .. }
             | Self::ChannelDeleted { sender_id, .. }
+            | Self::ChannelAccessUpdated { sender_id, .. }
             | Self::ServerUpdated { sender_id, .. }
             | Self::ModerationSettingsUpdated { sender_id, .. }
             | Self::DmCreated { sender_id, .. }
@@ -576,6 +598,7 @@ impl ServerEvent {
             | Self::ChannelCreated { server_id, .. }
             | Self::ChannelUpdated { server_id, .. }
             | Self::ChannelDeleted { server_id, .. }
+            | Self::ChannelAccessUpdated { server_id, .. }
             | Self::ServerUpdated { server_id, .. }
             | Self::ModerationSettingsUpdated { server_id, .. }
             | Self::TypingStarted { server_id, .. }
@@ -608,6 +631,7 @@ impl ServerEvent {
             | Self::ChannelCreated { .. }
             | Self::ChannelUpdated { .. }
             | Self::ChannelDeleted { .. }
+            | Self::ChannelAccessUpdated { .. }
             | Self::ServerUpdated { .. }
             | Self::ModerationSettingsUpdated { .. }
             | Self::ProfileUpdated { .. }
@@ -643,6 +667,7 @@ impl ServerEvent {
             | Self::MemberRemoved { .. }
             | Self::MemberBanned { .. }
             | Self::MemberRoleUpdated { .. }
+            | Self::ChannelAccessUpdated { .. }
             | Self::ServerUpdated { .. }
             | Self::ModerationSettingsUpdated { .. }
             | Self::DmCreated { .. }
@@ -682,6 +707,7 @@ impl ServerEvent {
             | Self::MemberRemoved { .. }
             | Self::MemberBanned { .. }
             | Self::MemberRoleUpdated { .. }
+            | Self::ChannelAccessUpdated { .. }
             | Self::ServerUpdated { .. }
             | Self::ModerationSettingsUpdated { .. }
             | Self::DmCreated { .. }
@@ -1361,6 +1387,54 @@ mod tests {
         } else {
             panic!("expected MessageCreated");
         }
+    }
+
+    /// `ChannelAccessUpdated` is a server-scoped broadcast (no target, no
+    /// `channel_access` routing scope — it must reach the newly-granted member,
+    /// so gating by the current grant set would starve them) and carries the
+    /// granted role set as camelCase `authorizedRoles`.
+    #[test]
+    fn channel_access_updated_name_and_routing() {
+        let event = ServerEvent::ChannelAccessUpdated {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            authorized_roles: vec![Role::Moderator, Role::Member],
+        };
+        assert_eq!(event.event_name(), "channel.access_updated");
+        assert!(event.server_id().is_some(), "must stay server-scoped");
+        assert!(event.target_user_id().is_none(), "broadcast, not targeted");
+        assert!(
+            event.channel_access().is_none(),
+            "must NOT be gated by the current grant set"
+        );
+    }
+
+    /// `redact_routing_metadata` is a no-op for `ChannelAccessUpdated` (its
+    /// payload is the client-facing data), and the tagged-union round-trip
+    /// preserves the granted roles.
+    #[test]
+    fn channel_access_updated_round_trip_and_redaction_noop() {
+        let mut event = ServerEvent::ChannelAccessUpdated {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            authorized_roles: vec![Role::Member],
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "channelAccessUpdated");
+        assert!(json["channelId"].is_string());
+        assert_eq!(json["authorizedRoles"][0], "member");
+
+        event.redact_routing_metadata();
+        let after = serde_json::to_value(&event).unwrap();
+        assert_eq!(
+            after["authorizedRoles"][0], "member",
+            "redaction must not strip the client-facing grant set"
+        );
+
+        let back: ServerEvent = serde_json::from_value(after).unwrap();
+        assert_eq!(back.event_name(), "channel.access_updated");
     }
 
     /// `TypingStarted.display_name` carries the resolved name in camelCase when

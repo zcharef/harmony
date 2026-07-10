@@ -3159,6 +3159,178 @@
         ]
       }
     },
+    "/v1/servers/{id}/channels/{channel_id}/role-access": {
+      "get": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "List the role-access grant set of a private channel. Requires admin+ role.",
+        "description": "Only admins manage channel access, so this is admin-gated: a plain member\nnever needs to enumerate grants (they either see the channel or they don't).\n\n# Errors\nReturns `ApiError` on authorization failure or if the channel is not found /\ndoes not belong to the path server.",
+        "operationId": "get_channel_role_access",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channel role-access grant set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelRoleAccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Channels"
+        ],
+        "summary": "Replace the role-access grant set of a private channel. Requires admin+ role.",
+        "description": "Idempotent, replace-the-set semantics (last-writer-wins, race-safe): the body\nis the DESIRED set of grantable roles. Only `moderator`/`member` are accepted.\n\n# Errors\nReturns `ApiError` on authorization failure, an ungrantable role in the body,\nor if the channel is not found / does not belong to the path server.",
+        "operationId": "set_channel_role_access",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetChannelRoleAccessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Grant set replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelRoleAccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "admin/owner cannot be granted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/servers/{id}/invites": {
       "post": {
         "tags": [
@@ -4593,6 +4765,26 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "ChannelRoleAccessResponse": {
+        "type": "object",
+        "description": "The role-access grant set of a private channel (the raw `channel_role_access`\nrows). `Owner`/`Admin` are never present — they hold implicit access.",
+        "required": [
+          "channelId",
+          "roles"
+        ],
+        "properties": {
+          "channelId": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            },
+            "description": "Roles with an explicit grant. Never contains `admin`/`owner`."
           }
         }
       },
@@ -6323,6 +6515,23 @@
             "format": "date-time"
           }
         }
+      },
+      "SetChannelRoleAccessRequest": {
+        "type": "object",
+        "description": "Desired set of roles granted access to a private channel. Full replacement —\nthe server deletes grant rows not present and inserts rows not yet stored.\n\nOnly `moderator` and `member` are accepted; `admin`/`owner` hold IMPLICIT\naccess to every private channel and are rejected (the read path assumes the\ngrant table only ever stores grantable roles). An empty `roles` means\nadmins/owner only.",
+        "required": [
+          "roles"
+        ],
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            },
+            "description": "Grantable roles (subset of {`moderator`, `member`}). Empty = admins/owner only."
+          }
+        },
+        "additionalProperties": false
       },
       "TransferOwnershipRequest": {
         "type": "object",

@@ -117,6 +117,11 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             "/v1/servers/{id}/channels/{channel_id}",
             patch(handlers::channels::update_channel).delete(handlers::channels::delete_channel),
         )
+        .route(
+            "/v1/servers/{id}/channels/{channel_id}/role-access",
+            get(handlers::channels::get_channel_role_access)
+                .put(handlers::channels::set_channel_role_access),
+        )
         // Invites
         .route(
             "/v1/servers/{id}/invites",

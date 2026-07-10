@@ -50,6 +50,19 @@ impl Role {
         !matches!(self, Self::Owner)
     }
 
+    /// Whether this role may be stored as an explicit `channel_role_access` grant.
+    ///
+    /// WHY: Admin and Owner hold IMPLICIT access to every private channel
+    /// (`has_private_channel_access` short-circuits on them). Persisting them in
+    /// `channel_role_access` would break the read path's invariant that the table
+    /// only ever holds `moderator`/`member`, so the grant-write endpoint rejects
+    /// them (a repeated fix would otherwise re-introduce the drift the read path
+    /// tolerates with a `warn`). Only `Moderator`/`Member` are grantable.
+    #[must_use]
+    pub fn is_channel_grantable(self) -> bool {
+        matches!(self, Self::Moderator | Self::Member)
+    }
+
     /// The canonical lowercase string stored in the DB.
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -168,6 +181,16 @@ mod tests {
         assert!(Role::Admin.is_assignable());
         assert!(Role::Moderator.is_assignable());
         assert!(Role::Member.is_assignable());
+    }
+
+    /// Only `moderator`/`member` may be persisted as `channel_role_access` grants;
+    /// `admin`/`owner` hold implicit access and must be rejected by the write path.
+    #[test]
+    fn only_moderator_and_member_are_channel_grantable() {
+        assert!(Role::Moderator.is_channel_grantable());
+        assert!(Role::Member.is_channel_grantable());
+        assert!(!Role::Admin.is_channel_grantable());
+        assert!(!Role::Owner.is_channel_grantable());
     }
 
     #[test]

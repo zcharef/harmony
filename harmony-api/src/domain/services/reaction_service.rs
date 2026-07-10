@@ -439,6 +439,14 @@ mod tests {
             Ok(vec![])
         }
 
+        async fn replace_role_access(
+            &self,
+            _channel_id: &ChannelId,
+            _roles: &[Role],
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+
         // -- unused by add/remove_reaction --
         async fn list_for_server(
             &self,

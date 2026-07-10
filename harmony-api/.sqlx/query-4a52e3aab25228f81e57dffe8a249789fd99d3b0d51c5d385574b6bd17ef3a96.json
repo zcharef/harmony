@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM channel_role_access\n            WHERE channel_id = $1 AND role <> ALL($2::text[])\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a52e3aab25228f81e57dffe8a249789fd99d3b0d51c5d385574b6bd17ef3a96"
+}

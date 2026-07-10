@@ -528,4 +528,56 @@ impl ChannelRepository for PgChannelRepository {
         }
         Ok(roles)
     }
+
+    async fn replace_role_access(
+        &self,
+        channel_id: &ChannelId,
+        roles: &[Role],
+    ) -> Result<(), DomainError> {
+        let cid = channel_id.0;
+        // Canonical DB strings for the desired set. Deduped defensively so a
+        // caller passing `[member, member]` cannot cause a redundant insert.
+        let mut keep: Vec<String> = roles.iter().map(|r| r.as_str().to_string()).collect();
+        keep.sort_unstable();
+        keep.dedup();
+
+        // WHY one transaction: a reader gating private-channel visibility must
+        // never observe the intermediate state between the prune and the inserts
+        // (which could momentarily drop a still-granted role). Last-writer-wins.
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
+
+        // Prune rows no longer desired. `role <> ALL('{}')` is TRUE for every
+        // row, so an empty `keep` revokes all grants — the intended "roles: []".
+        sqlx::query!(
+            r#"
+            DELETE FROM channel_role_access
+            WHERE channel_id = $1 AND role <> ALL($2::text[])
+            "#,
+            cid,
+            &keep,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        // Insert the desired rows; existing rows collide on the composite PK and
+        // are skipped, keeping the operation idempotent.
+        for role in &keep {
+            sqlx::query!(
+                r#"
+                INSERT INTO channel_role_access (channel_id, role)
+                VALUES ($1, $2)
+                ON CONFLICT (channel_id, role) DO NOTHING
+                "#,
+                cid,
+                role,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(super::db_err)?;
+        }
+
+        tx.commit().await.map_err(super::db_err)?;
+        Ok(())
+    }
 }

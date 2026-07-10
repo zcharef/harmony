@@ -589,6 +589,14 @@ mod tests {
         ) -> Result<Vec<Role>, DomainError> {
             Ok(vec![])
         }
+
+        async fn replace_role_access(
+            &self,
+            _channel_id: &ChannelId,
+            _roles: &[Role],
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
     }
 
     // -- InMemoryMemberRepo --
