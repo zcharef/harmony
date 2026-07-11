@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import type { InvitePreviewResponse } from '@/lib/api'
 import { previewInvite } from '@/lib/api'
+import { getInviteCodeFromInput } from '@/lib/invite-path'
 import { useJoinServer } from './hooks/use-join-server'
 
 function inviteCodeSchema(t: TFunction<'servers'>) {
@@ -61,7 +62,7 @@ export function JoinServerDialog({ isOpen, onClose, onJoined }: JoinServerDialog
   })
 
   function onPreview(values: InviteCodeForm) {
-    const code = values.code.trim()
+    const code = getInviteCodeFromInput(values.code)
     setPreviewCode(code)
     previewMutation.mutate(code, {
       onSuccess: (data) => {

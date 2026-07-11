@@ -1,4 +1,26 @@
-import { getInviteCodeFromPath } from './invite-path'
+import { getInviteCodeFromInput, getInviteCodeFromPath } from './invite-path'
+
+describe('getInviteCodeFromInput', () => {
+  it('keeps a raw invite code unchanged', () => {
+    expect(getInviteCodeFromInput('abc123XY')).toBe('abc123XY')
+  })
+
+  it('extracts the invite code when a user pastes a Harmony invite URL', () => {
+    expect(getInviteCodeFromInput('https://joinharmony.app/invite/abc123XY')).toBe('abc123XY')
+    expect(getInviteCodeFromInput('https://app.joinharmony.app/invite/abc123XY/')).toBe('abc123XY')
+  })
+
+  it('trims whitespace around pasted invite codes or URLs', () => {
+    expect(getInviteCodeFromInput('  abc123XY  ')).toBe('abc123XY')
+    expect(getInviteCodeFromInput('\nhttps://joinharmony.app/invite/abc123XY\t')).toBe('abc123XY')
+  })
+
+  it('returns invalid input unchanged so existing validation/API errors still surface', () => {
+    expect(getInviteCodeFromInput('https://example.com/not-an-invite')).toBe(
+      'https://example.com/not-an-invite',
+    )
+  })
+})
 
 describe('getInviteCodeFromPath', () => {
   it('extracts a valid alphanumeric code', () => {
