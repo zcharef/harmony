@@ -16,6 +16,12 @@ export const queryKeys = {
     detail: (profileId: string) => ['profiles', 'detail', profileId] as const,
     search: (query: string) => ['profiles', 'search', query] as const,
   },
+  badges: {
+    all: ['badges'] as const,
+    // The set of user IDs holding the `official` verified badge. Fetched once,
+    // cached, checked per message author; refetched on SSE reconnect.
+    official: () => ['badges', 'official'] as const,
+  },
   servers: {
     all: ['servers'] as const,
     list: () => ['servers', 'list'] as const,

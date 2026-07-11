@@ -69,6 +69,13 @@ function renderMessageItem(
   const onAddReaction = vi.fn()
   const onRemoveReaction = vi.fn()
   const queryClient = options.queryClient ?? createTestQueryClient()
+  // WHY seed an empty official set by default: MessageHeader calls
+  // useOfficialBadges; without a cache entry it would fire a real (rejecting)
+  // request whose async settle re-renders the row and destabilizes the
+  // timing-sensitive picker tests. Tests that need holders pass their own client.
+  if (queryClient.getQueryData(queryKeys.badges.official()) === undefined) {
+    queryClient.setQueryData(queryKeys.badges.official(), { userIds: [] })
+  }
   // WHY wrapper: MentionPill subscribes to the members cache via useQuery,
   // which requires a QueryClientProvider even when the cache is empty.
   const Wrapper = createQueryWrapper(queryClient)
@@ -689,5 +696,31 @@ describe('MessageItem attachments (T1.3 part 1)', () => {
     fireEvent.click(screen.getByTestId('attachment-image'))
 
     expect(screen.queryByTestId('external-link-warning')).not.toBeNull()
+  })
+})
+
+describe('MessageItem official badge', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders the Official badge next to an author in the official set', () => {
+    const queryClient = createTestQueryClient()
+    // Seed the cached official-set so useOfficialBadges resolves synchronously.
+    queryClient.setQueryData(queryKeys.badges.official(), { userIds: ['user-42'] })
+
+    renderMessageItem(buildMessage({ authorId: 'user-42' }), { queryClient })
+
+    expect(screen.getByTestId('official-badge')).toBeTruthy()
+    expect(screen.getByLabelText('Harmony Official')).toBeTruthy()
+  })
+
+  it('does NOT render the Official badge for an author outside the set', () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(queryKeys.badges.official(), { userIds: ['someone-else'] })
+
+    renderMessageItem(buildMessage({ authorId: 'user-42' }), { queryClient })
+
+    expect(screen.queryByTestId('official-badge')).toBeNull()
   })
 })

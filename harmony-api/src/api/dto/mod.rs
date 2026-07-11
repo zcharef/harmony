@@ -1,5 +1,6 @@
 //! Data Transfer Objects (request/response types).
 
+pub mod badges;
 pub mod bans;
 pub mod channels;
 pub mod desktop_auth;
@@ -21,6 +22,7 @@ pub mod servers;
 pub mod user_preferences;
 pub mod voice;
 
+pub use badges::{OfficialBadgeGrantRequest, OfficialBadgesResponse};
 pub use bans::{BanListQuery, BanListResponse, BanResponse, BanUserRequest};
 pub use channels::{
     ChannelListResponse, ChannelResponse, ChannelRoleAccessResponse, CreateChannelRequest,

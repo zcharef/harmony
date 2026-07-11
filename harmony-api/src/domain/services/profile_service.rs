@@ -13,6 +13,14 @@ use crate::domain::services::content_filter::ContentFilter;
 /// backfill literal in `20260713100000_create_user_badges.sql`.
 pub const FOUNDING_BADGE: &str = "founding";
 
+/// The `official` badge key stored in `user_badges`.
+///
+/// Unlike `founding` (auto-granted to the first N accounts), `official` is a
+/// MANUAL grant applied by the platform owner to verify staff accounts and
+/// prevent impersonation. It rides the same `user_badges` table and
+/// service-role-only write posture; only the grant trigger differs.
+pub const OFFICIAL_BADGE: &str = "official";
+
 /// How many accounts receive the founding badge (ticket §2 default: 500).
 /// `SSoT` for the live signup path; the migration backfill mirrors this literal.
 pub const FOUNDING_MAX_ACCOUNTS: i64 = 500;
@@ -340,6 +348,55 @@ impl ProfileService {
         Ok(())
     }
 
+    /// Resolve a profile by its (case-sensitive) username.
+    ///
+    /// WHY: The owner-only badge-grant action accepts a subject by handle as
+    /// well as by UUID; this resolves the handle to a profile (and thus a
+    /// `UserId`) before the grant. Returns `None` when no such username exists.
+    ///
+    /// # Errors
+    /// Returns a repository error on DB failure.
+    pub async fn get_by_username(&self, username: &str) -> Result<Option<Profile>, DomainError> {
+        self.repo.get_by_username(username).await
+    }
+
+    /// The set of user IDs currently holding the `official` badge.
+    ///
+    /// WHY: Powers the lightweight official-set read the SPA caches once and
+    /// checks per message author — far cheaper than stamping an `isOfficial`
+    /// flag onto every message payload. The set is tiny (staff accounts only).
+    ///
+    /// # Errors
+    /// Returns a repository error on DB failure.
+    pub async fn list_official_user_ids(&self) -> Result<Vec<UserId>, DomainError> {
+        self.repo.list_badge_holders(OFFICIAL_BADGE).await
+    }
+
+    /// Grant the `official` verified badge to `user_id` (idempotent).
+    ///
+    /// WHY: MANUAL, owner-gated grant — there is NO self-serve path (contrast
+    /// `grant_founding_if_eligible`). The write goes through `service_role`;
+    /// clients are locked out by RLS. Re-granting is a no-op (`ON CONFLICT`).
+    ///
+    /// # Errors
+    /// Returns a repository error on DB failure (e.g. the subject profile does
+    /// not exist → FK violation).
+    pub async fn grant_official_badge(&self, user_id: &UserId) -> Result<(), DomainError> {
+        self.repo.grant_badge(user_id, OFFICIAL_BADGE).await?;
+        tracing::info!(user_id = %user_id, "granted official badge");
+        Ok(())
+    }
+
+    /// Revoke the `official` verified badge from `user_id` (idempotent).
+    ///
+    /// # Errors
+    /// Returns a repository error on DB failure.
+    pub async fn revoke_official_badge(&self, user_id: &UserId) -> Result<(), DomainError> {
+        self.repo.revoke_badge(user_id, OFFICIAL_BADGE).await?;
+        tracing::info!(user_id = %user_id, "revoked official badge");
+        Ok(())
+    }
+
     /// Update profile fields for the authenticated user.
     ///
     /// Each field is double-optional: outer `None` = not provided (unchanged),
@@ -590,6 +647,45 @@ mod tests {
         assert_eq!(repo_full.grant_calls.load(SeqCst), 0);
     }
 
+    // ── official badge (manual owner grant) ─────────────────────
+
+    #[tokio::test]
+    async fn grant_official_then_list_returns_the_user() {
+        use std::sync::atomic::Ordering::SeqCst;
+
+        let repo = Arc::new(FakeProfileRepo::default());
+        let svc = ProfileService::new(repo.clone(), Arc::new(ContentFilter::noop()));
+        let user = UserId::new(Uuid::from_u128(7));
+
+        // Not official until granted.
+        assert!(svc.list_official_user_ids().await.unwrap().is_empty());
+
+        svc.grant_official_badge(&user).await.unwrap();
+        assert_eq!(repo.grant_calls.load(SeqCst), 1);
+
+        let holders = svc.list_official_user_ids().await.unwrap();
+        assert_eq!(holders, vec![user.clone()]);
+
+        // Idempotent: re-granting does not duplicate the holder.
+        svc.grant_official_badge(&user).await.unwrap();
+        assert_eq!(svc.list_official_user_ids().await.unwrap(), vec![user]);
+    }
+
+    #[tokio::test]
+    async fn revoke_official_removes_the_user_from_the_set() {
+        use std::sync::atomic::Ordering::SeqCst;
+
+        let repo = Arc::new(FakeProfileRepo::default());
+        let svc = ProfileService::new(repo.clone(), Arc::new(ContentFilter::noop()));
+        let user = UserId::new(Uuid::from_u128(8));
+
+        svc.grant_official_badge(&user).await.unwrap();
+        svc.revoke_official_badge(&user).await.unwrap();
+
+        assert_eq!(repo.revoke_calls.load(SeqCst), 1);
+        assert!(svc.list_official_user_ids().await.unwrap().is_empty());
+    }
+
     // ── NotFound error construction ─────────────────────────────
 
     #[test]
@@ -719,6 +815,11 @@ mod tests {
         founding_holders: std::sync::atomic::AtomicI64,
         /// How many times `grant_badge` was invoked (founding-grant assertions).
         grant_calls: std::sync::atomic::AtomicUsize,
+        /// How many times `revoke_badge` was invoked (official-revoke assertions).
+        revoke_calls: std::sync::atomic::AtomicUsize,
+        /// Users granted the `official` badge, so the list roundtrip can assert.
+        /// `tokio::sync::Mutex` (never `std::sync::Mutex`, ADR-022).
+        official_holders: tokio::sync::Mutex<Vec<UserId>>,
     }
 
     fn dummy_profile(user_id: &UserId) -> Profile {
@@ -785,6 +886,9 @@ mod tests {
         async fn get_by_id(&self, _user_id: &UserId) -> Result<Option<Profile>, DomainError> {
             Ok(None)
         }
+        async fn get_by_username(&self, _username: &str) -> Result<Option<Profile>, DomainError> {
+            Ok(None)
+        }
         async fn is_username_taken(&self, _username: &str) -> Result<bool, DomainError> {
             Ok(false)
         }
@@ -799,10 +903,30 @@ mod tests {
                 .founding_holders
                 .load(std::sync::atomic::Ordering::SeqCst))
         }
-        async fn grant_badge(&self, _user_id: &UserId, _badge: &str) -> Result<(), DomainError> {
+        async fn grant_badge(&self, user_id: &UserId, badge: &str) -> Result<(), DomainError> {
             self.grant_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if badge == OFFICIAL_BADGE {
+                let mut holders = self.official_holders.lock().await;
+                if !holders.iter().any(|h| h == user_id) {
+                    holders.push(user_id.clone());
+                }
+            }
             Ok(())
+        }
+        async fn revoke_badge(&self, user_id: &UserId, badge: &str) -> Result<(), DomainError> {
+            self.revoke_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if badge == OFFICIAL_BADGE {
+                self.official_holders.lock().await.retain(|h| h != user_id);
+            }
+            Ok(())
+        }
+        async fn list_badge_holders(&self, badge: &str) -> Result<Vec<UserId>, DomainError> {
+            if badge == OFFICIAL_BADGE {
+                return Ok(self.official_holders.lock().await.clone());
+            }
+            Ok(Vec::new())
         }
     }
 

@@ -68,6 +68,146 @@
         }
       }
     },
+    "/v1/admin/badges/official/grant": {
+      "post": {
+        "tags": [
+          "Badges"
+        ],
+        "summary": "Grant the `official` verified badge to a user. Platform-owner only.",
+        "description": "Identify the subject by exactly one of `userId` or `username`. Idempotent —\nre-granting is a no-op.\n\n# Errors\nReturns `ApiError` 403 if the caller is not the platform owner, 400 if the\nsubject is under- or over-specified, 404 if the subject does not exist.",
+        "operationId": "grant_official_badge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfficialBadgeGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Badge granted"
+          },
+          "400": {
+            "description": "Subject under- or over-specified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the platform owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Subject not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/badges/official/revoke": {
+      "post": {
+        "tags": [
+          "Badges"
+        ],
+        "summary": "Revoke the `official` verified badge from a user. Platform-owner only.",
+        "description": "Identify the subject by exactly one of `userId` or `username`. Idempotent —\nrevoking a badge the user never held is a no-op.\n\n# Errors\nReturns `ApiError` 403 if the caller is not the platform owner, 400 if the\nsubject is under- or over-specified, 404 if the subject does not exist.",
+        "operationId": "revoke_official_badge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfficialBadgeGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Badge revoked"
+          },
+          "400": {
+            "description": "Subject under- or over-specified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the platform owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Subject not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/auth/check-username": {
       "get": {
         "tags": [
@@ -267,144 +407,24 @@
         ]
       }
     },
-    "/v1/blocks": {
+    "/v1/badges/official": {
       "get": {
         "tags": [
-          "Friends"
+          "Badges"
         ],
-        "summary": "List the authenticated user's blocked users (newest first).",
-        "description": "# Errors\nReturns `ApiError` on repository failure.",
-        "operationId": "list_blocks",
+        "summary": "List the user IDs holding the `official` verified badge.",
+        "description": "Authenticated (badges are as public as the profiles they decorate). Returns\nthe whole set in one small payload; the SPA caches it and checks author-id\nmembership per message rather than stamping a flag on every message.\n\n# Errors\nReturns `ApiError` on a repository failure.",
+        "operationId": "list_official_badges",
         "responses": {
           "200": {
-            "description": "Blocked users",
+            "description": "Official badge holders",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BlockedListResponse"
+                  "$ref": "#/components/schemas/OfficialBadgesResponse"
                 }
               }
             }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
-    "/v1/blocks/{user_id}": {
-      "put": {
-        "tags": [
-          "Friends"
-        ],
-        "summary": "Block a user (idempotent PUT).",
-        "description": "# Errors\nReturns `ApiError` on self-block, not-found, cap, or rate-limit.",
-        "operationId": "block_user",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "description": "User to block",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/UserId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Blocked"
-          },
-          "400": {
-            "description": "Self-block",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "User not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Blocks cap reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "Friends"
-        ],
-        "summary": "Unblock a user (idempotent).",
-        "description": "# Errors\nReturns `ApiError` on repository failure.",
-        "operationId": "unblock_user",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "description": "User to unblock",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/UserId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Unblocked"
           },
           "401": {
             "description": "Unauthorized",
@@ -1788,366 +1808,6 @@
             "content": {
               "text/event-stream": {}
             }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
-    "/v1/friends": {
-      "get": {
-        "tags": [
-          "Friends"
-        ],
-        "summary": "List the authenticated user's friends (username order, whole list).",
-        "description": "# Errors\nReturns `ApiError` on repository failure.",
-        "operationId": "list_friends",
-        "responses": {
-          "200": {
-            "description": "Friends list",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FriendListResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
-    "/v1/friends/requests": {
-      "get": {
-        "tags": [
-          "Friends"
-        ],
-        "summary": "List the authenticated user's pending friend requests in one direction.",
-        "description": "# Errors\nReturns `ApiError` on repository failure.",
-        "operationId": "list_requests",
-        "parameters": [
-          {
-            "name": "direction",
-            "in": "query",
-            "description": "`incoming` or `outgoing`.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/RequestDirection"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Pending requests",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FriendRequestListResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad direction",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Friends"
-        ],
-        "summary": "Send a friend request (by user id or exact username).",
-        "description": "# Errors\nReturns `ApiError` on validation, block, cap, rate-limit, or not-found.",
-        "operationId": "send_request",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SendFriendRequestRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Idempotent replay or auto-accept",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FriendRequestResultResponse"
-                }
-              }
-            }
-          },
-          "201": {
-            "description": "Request sent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FriendRequestResultResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Self-request / bad body",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Blocked",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "User not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Cap reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
-    "/v1/friends/requests/{user_id}": {
-      "delete": {
-        "tags": [
-          "Friends"
-        ],
-        "summary": "Decline (incoming) or cancel (outgoing) a pending request.",
-        "description": "# Errors\nReturns `ApiError` on not-found (no pending request with that user).",
-        "operationId": "remove_request",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "description": "Counterpart user ID",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/UserId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Removed"
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No pending request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
-    "/v1/friends/requests/{user_id}/accept": {
-      "post": {
-        "tags": [
-          "Friends"
-        ],
-        "summary": "Accept a pending incoming friend request.",
-        "description": "# Errors\nReturns `ApiError` on not-found (no pending request) or cap.",
-        "operationId": "accept_request",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "description": "Requester user ID",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/UserId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FriendAcceptedResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No pending request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Friends cap reached",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
-    "/v1/friends/{user_id}": {
-      "delete": {
-        "tags": [
-          "Friends"
-        ],
-        "summary": "Unfriend (idempotent — 204 even when not friends).",
-        "description": "# Errors\nReturns `ApiError` on repository failure.",
-        "operationId": "unfriend",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "description": "Friend user ID",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/UserId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Unfriended"
           },
           "401": {
             "description": "Unauthorized",
@@ -4573,139 +4233,6 @@
         ]
       }
     },
-    "/v1/servers/{id}/messages/search": {
-      "get": {
-        "tags": [
-          "Messages"
-        ],
-        "summary": "Full-text search messages within a server, gated by per-channel access.",
-        "description": "Takes only structured params (the filter grammar is parsed client-side).\nResults are ordered most-recent-first with keyset pagination via `before`.\nA per-user rate limit (30 / 60s) guards the heaviest read in the app.\n\n# Errors\nReturns `ApiError` for a missing/oversized `q` (400), an invalid `before`\ncursor (400), a non-member caller or an inaccessible explicit `channelId`\n(403), or when the per-user search rate limit is exceeded (429).",
-        "operationId": "search_messages",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Server ID",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ServerId"
-            }
-          },
-          {
-            "name": "q",
-            "in": "query",
-            "description": "Full-text query. Required, 1..=200 chars after trim. Parsed by Postgres\n`websearch_to_tsquery` (\"quoted phrases\", OR, -negation supported).",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "channelId",
-            "in": "query",
-            "description": "`in:` filter — restrict to a single channel of this server.",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/ChannelId"
-            }
-          },
-          {
-            "name": "authorId",
-            "in": "query",
-            "description": "`from:` filter — restrict to a single author.",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/UserId"
-            }
-          },
-          {
-            "name": "has",
-            "in": "query",
-            "description": "`has:` filter. Accepts `link` or `image`. Any other value is ignored.\n(Repeatable via comma, e.g. `has=link,image`.)",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "before",
-            "in": "query",
-            "description": "ISO 8601 keyset cursor — messages created before this time.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "description": "Max results (1..=50, default 25).",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Search results",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageSearchResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid query, cursor, or limit",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Not a server member or channel forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Search rate limit exceeded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
     "/v1/servers/{id}/migration/cohort": {
       "get": {
         "tags": [
@@ -5571,44 +5098,6 @@
         },
         "additionalProperties": false
       },
-      "BlockedListResponse": {
-        "type": "object",
-        "description": "Envelope for a blocked-users list. `next_cursor` always `None` (§3.1).",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BlockedUserResponse"
-            }
-          },
-          "nextCursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
-      "BlockedUserResponse": {
-        "type": "object",
-        "description": "A single blocked user.",
-        "required": [
-          "user",
-          "blockedAt"
-        ],
-        "properties": {
-          "blockedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "user": {
-            "$ref": "#/components/schemas/FriendUserResponse"
-          }
-        }
-      },
       "CategoryId": {
         "type": "string",
         "format": "uuid",
@@ -6240,176 +5729,6 @@
           "notYetActive": {
             "type": "integer",
             "format": "int64"
-          }
-        }
-      },
-      "FriendAcceptedResponse": {
-        "type": "object",
-        "description": "A single friend (accept response).",
-        "required": [
-          "user",
-          "friendsSince"
-        ],
-        "properties": {
-          "friendsSince": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "user": {
-            "$ref": "#/components/schemas/FriendUserResponse"
-          }
-        }
-      },
-      "FriendListResponse": {
-        "type": "object",
-        "description": "Envelope for the friends list. `next_cursor` is always `None` (§3.1).",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FriendResponse"
-            }
-          },
-          "nextCursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
-      "FriendRequestListQuery": {
-        "type": "object",
-        "description": "Query params for `GET /v1/friends/requests`.",
-        "required": [
-          "direction"
-        ],
-        "properties": {
-          "direction": {
-            "$ref": "#/components/schemas/RequestDirection",
-            "description": "`incoming` or `outgoing`."
-          }
-        }
-      },
-      "FriendRequestListResponse": {
-        "type": "object",
-        "description": "Envelope for a pending-requests list. `next_cursor` always `None` (§3.1).",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FriendRequestResponse"
-            }
-          },
-          "nextCursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
-      "FriendRequestResponse": {
-        "type": "object",
-        "description": "A single pending friend request.",
-        "required": [
-          "user",
-          "direction",
-          "createdAt"
-        ],
-        "properties": {
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "direction": {
-            "$ref": "#/components/schemas/RequestDirection"
-          },
-          "user": {
-            "$ref": "#/components/schemas/FriendUserResponse"
-          }
-        }
-      },
-      "FriendRequestResultResponse": {
-        "type": "object",
-        "description": "Response for a friend-request POST.",
-        "required": [
-          "state",
-          "user",
-          "createdAt"
-        ],
-        "properties": {
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "state": {
-            "$ref": "#/components/schemas/FriendRequestState"
-          },
-          "user": {
-            "$ref": "#/components/schemas/FriendUserResponse"
-          }
-        }
-      },
-      "FriendRequestState": {
-        "type": "string",
-        "description": "Result state of a friend-request POST.",
-        "enum": [
-          "pendingOutgoing",
-          "autoAccepted",
-          "alreadyRequested",
-          "alreadyFriends"
-        ]
-      },
-      "FriendResponse": {
-        "type": "object",
-        "description": "A single friend (accepted friendship).",
-        "required": [
-          "user",
-          "friendsSince"
-        ],
-        "properties": {
-          "friendsSince": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Maps to `friendships.updated_at` (accept time)."
-          },
-          "user": {
-            "$ref": "#/components/schemas/FriendUserResponse"
-          }
-        }
-      },
-      "FriendUserResponse": {
-        "type": "object",
-        "description": "Counterpart profile embedded in friendship responses (shape of\n`DmRecipientResponse`, own type per feature).",
-        "required": [
-          "id",
-          "username"
-        ],
-        "properties": {
-          "avatarUrl": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "displayName": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "$ref": "#/components/schemas/UserId"
-          },
-          "username": {
-            "type": "string"
           }
         }
       },
@@ -7116,84 +6435,6 @@
           }
         }
       },
-      "MessageSearchQuery": {
-        "type": "object",
-        "description": "Query parameters for full-text message search.",
-        "properties": {
-          "authorId": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/UserId",
-                "description": "`from:` filter — restrict to a single author."
-              }
-            ]
-          },
-          "before": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "ISO 8601 keyset cursor — messages created before this time."
-          },
-          "channelId": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ChannelId",
-                "description": "`in:` filter — restrict to a single channel of this server."
-              }
-            ]
-          },
-          "has": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "`has:` filter. Accepts `link` or `image`. Any other value is ignored.\n(Repeatable via comma, e.g. `has=link,image`.)"
-          },
-          "limit": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Max results (1..=50, default 25)."
-          },
-          "q": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Full-text query. Required, 1..=200 chars after trim. Parsed by Postgres\n`websearch_to_tsquery` (\"quoted phrases\", OR, -negation supported)."
-          }
-        }
-      },
-      "MessageSearchResponse": {
-        "type": "object",
-        "description": "Search results envelope. Same shape as `MessageListResponse` but a distinct\ntype so future search-only fields (snippets, rank) don't leak into the list\nendpoint.",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MessageResponse"
-            }
-          },
-          "nextCursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
       "MessageType": {
         "type": "string",
         "description": "Discriminates user messages from system announcements.\n\n`Default` = regular user message. `System` = server-generated event\n(join, leave, etc.) whose display text is resolved from `system_event_key`\non the frontend via i18n templates.",
@@ -7370,6 +6611,47 @@
           },
           "level": {
             "$ref": "#/components/schemas/NotificationLevel"
+          }
+        }
+      },
+      "OfficialBadgeGrantRequest": {
+        "type": "object",
+        "description": "Request body for the owner-only grant/revoke of the `official` badge.\n\nExactly one of `userId` / `username` identifies the subject. The handler\nrejects the request when neither (or both) is provided.",
+        "properties": {
+          "userId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "The subject's user ID. Mutually exclusive with `username`."
+              }
+            ]
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The subject's username. Mutually exclusive with `userId`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OfficialBadgesResponse": {
+        "type": "object",
+        "description": "The set of user IDs currently holding the `official` verified badge.\n\nWHY a flat ID list (not per-user objects): the SPA fetches this once, caches\nit, and checks author-id membership per message — keeping the payload tiny\navoids bloating every message with an `isOfficial` flag.",
+        "required": [
+          "userIds"
+        ],
+        "properties": {
+          "userIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserId"
+            },
+            "description": "User IDs that hold the `official` badge, ordered by grant time."
           }
         }
       },
@@ -7741,14 +7023,6 @@
         },
         "additionalProperties": false
       },
-      "RequestDirection": {
-        "type": "string",
-        "description": "Direction of a pending friend request relative to the querying user.\n\nLives in the DOMAIN (not the DTO layer) so both the DTO response and the\n`FriendRequestPayload` SSE event can carry it without the domain importing\nfrom `api/` (which the hexagonal boundary test forbids). Same treatment as\n[`super::UserStatus`]. Single words, so `camelCase` yields lowercase\n`incoming`/`outgoing` — the shape the Zod mirror expects.",
-        "enum": [
-          "incoming",
-          "outgoing"
-        ]
-      },
       "Role": {
         "type": "string",
         "description": "Strongly-typed role enum matching the `server_members.role` TEXT column.\n\nVariants are ordered by authority level (Member < Moderator < Admin < Owner).\n`PartialOrd`/`Ord` are manually avoided to prevent accidental comparisons;\nuse `level()` or `can_moderate()` for hierarchy checks.",
@@ -7758,29 +7032,6 @@
           "admin",
           "owner"
         ]
-      },
-      "SendFriendRequestRequest": {
-        "type": "object",
-        "description": "Body for `POST /v1/friends/requests` — exactly one of the two fields.",
-        "properties": {
-          "addresseeId": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/UserId"
-              }
-            ]
-          },
-          "username": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "additionalProperties": false
       },
       "SendMessageRequest": {
         "type": "object",
@@ -8450,10 +7701,6 @@
     {
       "name": "DirectMessages",
       "description": "Direct message conversations"
-    },
-    {
-      "name": "Friends",
-      "description": "Friendships, friend requests, and blocks"
     },
     {
       "name": "Keys",

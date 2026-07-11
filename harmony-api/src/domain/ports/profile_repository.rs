@@ -25,6 +25,12 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
     /// Get a profile by user ID. Returns `None` if not found.
     async fn get_by_id(&self, user_id: &UserId) -> Result<Option<Profile>, DomainError>;
 
+    /// Get a profile by (case-sensitive) username. Returns `None` if not found.
+    ///
+    /// Used by the owner-only badge-grant admin action to resolve a subject
+    /// passed by handle instead of UUID.
+    async fn get_by_username(&self, username: &str) -> Result<Option<Profile>, DomainError>;
+
     /// Check whether a username is already taken.
     async fn is_username_taken(&self, username: &str) -> Result<bool, DomainError>;
 
@@ -76,4 +82,15 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
     ///
     /// Writes to the service-role-only `user_badges` table (ADR-040 RLS).
     async fn grant_badge(&self, user_id: &UserId, badge: &str) -> Result<(), DomainError>;
+
+    /// Revoke `badge` from `user_id` (no-op if the user never held it).
+    ///
+    /// Writes to the service-role-only `user_badges` table (ADR-040 RLS).
+    async fn revoke_badge(&self, user_id: &UserId, badge: &str) -> Result<(), DomainError>;
+
+    /// List every user currently holding `badge` (e.g. `"official"`).
+    ///
+    /// Powers the lightweight official-set read the SPA caches to decorate
+    /// message authors without bloating every message payload.
+    async fn list_badge_holders(&self, badge: &str) -> Result<Vec<UserId>, DomainError>;
 }

@@ -422,6 +422,31 @@ impl ProfileRepository for PgProfileRepository {
         Ok(())
     }
 
+    async fn revoke_badge(&self, user_id: &UserId, badge: &str) -> Result<(), DomainError> {
+        sqlx::query!(
+            r#"DELETE FROM user_badges WHERE user_id = $1 AND badge = $2"#,
+            user_id.0,
+            badge,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(())
+    }
+
+    async fn list_badge_holders(&self, badge: &str) -> Result<Vec<UserId>, DomainError> {
+        let rows = sqlx::query_scalar!(
+            r#"SELECT user_id AS "user_id!" FROM user_badges WHERE badge = $1 ORDER BY granted_at ASC"#,
+            badge,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(rows.into_iter().map(UserId::new).collect())
+    }
+
     async fn update_username(
         &self,
         user_id: &UserId,

@@ -11,5 +11,7 @@
   "bannerAlt": "Profile banner",
   "openCard": "Open {{name}}'s profile",
   "foundingTooltip": "Founding member — here since the beginning",
-  "foundingLabel": "Founding member"
+  "foundingLabel": "Founding member",
+  "officialTooltip": "Harmony Official — verified account",
+  "officialLabel": "Harmony Official"
 }

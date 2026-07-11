@@ -19,7 +19,8 @@ use super::dto::{
     GifTrendingQuery, InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse,
     MarkReadRequest, MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
     MentionedUserResponse, MessageListQuery, MessageListResponse, MessageResponse,
-    MessageSearchQuery, MessageSearchResponse, NewAttachmentRequest, OneTimeKeyDto,
+    MessageSearchQuery, MessageSearchResponse, NewAttachmentRequest, OfficialBadgeGrantRequest,
+    OfficialBadgesResponse, OneTimeKeyDto,
     PreKeyBundleResponse, ProfileResponse, RedeemDesktopAuthRequest, RedeemDesktopAuthResponse,
     RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
     SetChannelRoleAccessRequest, TransferOwnershipRequest, UpdateChannelRequest,
@@ -57,6 +58,10 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         handlers::profiles::get_my_profile,
         handlers::profiles::update_my_profile,
         handlers::profiles::get_profile_by_id,
+        // Badges (official verified badge)
+        handlers::badges::list_official_badges,
+        handlers::badges::grant_official_badge,
+        handlers::badges::revoke_official_badge,
         // Servers
         handlers::servers::create_server,
         handlers::servers::list_servers,
@@ -179,6 +184,9 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             CheckUsernameQuery,
             CheckUsernameResponse,
             UpdateProfileRequest,
+            // Badge DTOs
+            OfficialBadgesResponse,
+            OfficialBadgeGrantRequest,
             // Server DTOs
             CreateServerRequest,
             UpdateServerRequest,

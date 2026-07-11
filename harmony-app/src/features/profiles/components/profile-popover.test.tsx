@@ -73,10 +73,19 @@ function memberList(): MemberListResponse {
 }
 
 /** Renders the popover with an optional member-context seed, then opens it. */
-function renderAndOpen({ withContext }: { withContext: boolean }) {
+function renderAndOpen({
+  withContext,
+  officialUserIds,
+}: {
+  withContext: boolean
+  officialUserIds?: string[]
+}) {
   const queryClient = createTestQueryClient()
   if (withContext) {
     queryClient.setQueryData(queryKeys.servers.members(SERVER), memberList())
+  }
+  if (officialUserIds !== undefined) {
+    queryClient.setQueryData(queryKeys.badges.official(), { userIds: officialUserIds })
   }
   render(
     <ProfilePopover userId={SUBJECT} serverId={withContext ? SERVER : null}>
@@ -147,6 +156,23 @@ describe('ProfilePopover states', () => {
 
     expect(await screen.findByTestId('profile-card')).toBeTruthy()
     expect(screen.queryByTestId('founding-badge')).toBeNull()
+  })
+
+  it('OFFICIAL: renders the Harmony Official badge in the name row', async () => {
+    mockProfileQuery({ data: buildProfile() })
+    renderAndOpen({ withContext: true, officialUserIds: [SUBJECT] })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    expect(screen.getByTestId('official-badge')).toBeTruthy()
+    expect(screen.getByLabelText('Harmony Official')).toBeTruthy()
+  })
+
+  it('NON-OFFICIAL: no official badge on the card', async () => {
+    mockProfileQuery({ data: buildProfile() })
+    renderAndOpen({ withContext: true, officialUserIds: ['someone-else'] })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    expect(screen.queryByTestId('official-badge')).toBeNull()
   })
 
   it('ERROR (context present, non-404): shows an inline retry, keeps the context tier', async () => {
