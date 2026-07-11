@@ -935,11 +935,14 @@ impl MessageService {
     /// # Errors
     /// Returns `DomainError::NotFound` if the message doesn't exist or is deleted,
     /// `DomainError::Forbidden` if the caller is neither the author nor a moderator+.
+    /// Returns `true` when the deletion was a **moderator** action (the caller
+    /// is not the author), so the handler can append an audit-log row. A
+    /// self-delete returns `false` and is never logged.
     pub async fn delete_message(
         &self,
         message_id: &MessageId,
         user_id: &UserId,
-    ) -> Result<(), DomainError> {
+    ) -> Result<bool, DomainError> {
         let message =
             self.repo
                 .find_by_id(message_id)
@@ -949,7 +952,9 @@ impl MessageService {
                     id: message_id.to_string(),
                 })?;
 
-        if message.author_id != *user_id {
+        let is_moderator_delete = message.author_id != *user_id;
+
+        if is_moderator_delete {
             // WHY: Moderator+ can delete any message in their server (moderation).
             // Lookup chain: message.channel_id → channel.server_id → member.role.
             // Matches RLS policy messages_update_moderator_softdelete.
@@ -982,7 +987,8 @@ impl MessageService {
 
         // WHY: None = skip stale-content guard. User/moderator deletes should
         // always proceed regardless of edits (they're intentional human actions).
-        self.repo.soft_delete(message_id, user_id, None).await
+        self.repo.soft_delete(message_id, user_id, None).await?;
+        Ok(is_moderator_delete)
     }
 
     /// Per-channel pin cap (Discord parity). Soft cap — a concurrent 49→50→51

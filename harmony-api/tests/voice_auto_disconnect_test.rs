@@ -409,6 +409,13 @@ async fn build_app_state_with_voice(pool: PgPool) -> AppState {
         server_repo.clone(),
         ban_repo.clone(),
         member_repo.clone(),
+        channel_repo.clone(),
+        message_repo.clone(),
+        Arc::new(harmony_api::infra::postgres::PgModerationLogRepository::new(pool.clone())),
+        Arc::new(harmony_api::infra::postgres::PgReportRepository::new(
+            pool.clone(),
+        )),
+        spam_guard.clone(),
     ));
     let friendship_service = Arc::new(harmony_api::domain::services::FriendshipService::new(
         friendship_repo.clone(),

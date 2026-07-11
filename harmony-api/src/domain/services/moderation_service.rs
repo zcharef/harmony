@@ -5,36 +5,87 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Role, Server, ServerBan, ServerId, UserId};
-use crate::domain::ports::{BanRepository, MemberRepository, ServerRepository};
+use crate::domain::models::{
+    ChannelId, MessageId, MessageReport, ModerationAction, ModerationLogEntry, NewMessageReport,
+    NewModerationLogEntry, ReportId, ReportReason, ReportStatus, Role, Server, ServerBan, ServerId,
+    UserId,
+};
+use crate::domain::ports::{
+    BanRepository, ChannelRepository, MemberRepository, MessageRepository, ModerationLogRepository,
+    ReportRepository, ServerRepository,
+};
+use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_moderation::{TIER1_CATEGORIES, TIER2_CATEGORIES};
+use crate::domain::services::spam_guard::SpamGuard;
 
 /// Maximum length for a ban reason. Validated in `ban_user`.
 const MAX_BAN_REASON_LENGTH: usize = 512;
 
-/// Service for moderation-related business logic (ban, kick, unban, roles).
+/// Anti-report-spam limiter: at most this many reports per window per user.
+const REPORT_RATE_MAX: usize = 5;
+/// Report rate-limit window.
+const REPORT_RATE_WINDOW: Duration = Duration::from_secs(60);
+
+/// Service for moderation-related business logic (ban, kick, unban, roles,
+/// audit log, reports).
 #[derive(Debug)]
 pub struct ModerationService {
     server_repo: Arc<dyn ServerRepository>,
     ban_repo: Arc<dyn BanRepository>,
     member_repo: Arc<dyn MemberRepository>,
+    channel_repo: Arc<dyn ChannelRepository>,
+    message_repo: Arc<dyn MessageRepository>,
+    mod_log_repo: Arc<dyn ModerationLogRepository>,
+    report_repo: Arc<dyn ReportRepository>,
+    spam_guard: Arc<SpamGuard>,
 }
 
 impl ModerationService {
+    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         server_repo: Arc<dyn ServerRepository>,
         ban_repo: Arc<dyn BanRepository>,
         member_repo: Arc<dyn MemberRepository>,
+        channel_repo: Arc<dyn ChannelRepository>,
+        message_repo: Arc<dyn MessageRepository>,
+        mod_log_repo: Arc<dyn ModerationLogRepository>,
+        report_repo: Arc<dyn ReportRepository>,
+        spam_guard: Arc<SpamGuard>,
     ) -> Self {
         Self {
             server_repo,
             ban_repo,
             member_repo,
+            channel_repo,
+            message_repo,
+            mod_log_repo,
+            report_repo,
+            spam_guard,
+        }
+    }
+
+    /// Best-effort append to the moderation audit log. Called AFTER an
+    /// enforcement mutation commits. A failure is logged at `error!` (→ Sentry,
+    /// ADR-046: a broken audit trail is a compliance problem) but never fails
+    /// the enforcement action — the mutation is the source of truth (§3.2).
+    async fn record_action(&self, entry: NewModerationLogEntry) {
+        let action = entry.action;
+        let server_id = entry.server_id.clone();
+        let actor_id = entry.actor_id.clone();
+        if let Err(e) = self.mod_log_repo.record(entry).await {
+            tracing::error!(
+                action = action.as_db_str(),
+                server_id = %server_id,
+                actor_id = %actor_id,
+                error = ?e,
+                "moderation_log write failed — action succeeded, audit lost"
+            );
         }
     }
 
@@ -173,9 +224,22 @@ impl ModerationService {
             )));
         }
 
-        self.ban_repo
+        let ban = self
+            .ban_repo
             .ban_user(server_id, target_user_id, caller_id, reason)
-            .await
+            .await?;
+
+        self.record_action(NewModerationLogEntry::new(
+            server_id.clone(),
+            ModerationAction::MemberBan,
+            caller_id.clone(),
+            Some(target_user_id.clone()),
+            None,
+            ban.reason.clone(),
+        ))
+        .await;
+
+        Ok(ban)
     }
 
     /// Unban a user from a server. Requires admin+ role.
@@ -191,7 +255,19 @@ impl ModerationService {
     ) -> Result<(), DomainError> {
         self.require_role(server_id, caller_id, Role::Admin).await?;
 
-        self.ban_repo.unban_user(server_id, target_user_id).await
+        self.ban_repo.unban_user(server_id, target_user_id).await?;
+
+        self.record_action(NewModerationLogEntry::new(
+            server_id.clone(),
+            ModerationAction::MemberUnban,
+            caller_id.clone(),
+            Some(target_user_id.clone()),
+            None,
+            None,
+        ))
+        .await;
+
+        Ok(())
     }
 
     /// Leave a server voluntarily. Any member can leave except the owner.
@@ -285,7 +361,19 @@ impl ModerationService {
 
         self.member_repo
             .remove_member(server_id, target_user_id)
-            .await
+            .await?;
+
+        self.record_action(NewModerationLogEntry::new(
+            server_id.clone(),
+            ModerationAction::MemberKick,
+            caller_id.clone(),
+            Some(target_user_id.clone()),
+            None,
+            None,
+        ))
+        .await;
+
+        Ok(())
     }
 
     /// List bans for a server with cursor-based pagination. Requires admin+ role.
@@ -461,6 +549,183 @@ impl ModerationService {
             .get_moderation_categories(server_id)
             .await?;
         Ok(filter_stale_categories(categories))
+    }
+
+    // ── Audit log (T3.3) ─────────────────────────────────────────
+
+    /// List a server's moderation audit log, newest-first, cursor-paginated.
+    /// Requires **admin+** (matches the ban-list gate).
+    ///
+    /// # Errors
+    /// - `DomainError::NotFound` if the server doesn't exist.
+    /// - `DomainError::Forbidden` if the caller is below admin.
+    pub async fn list_moderation_log(
+        &self,
+        server_id: &ServerId,
+        caller_id: &UserId,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<ModerationLogEntry>, DomainError> {
+        self.require_role(server_id, caller_id, Role::Admin).await?;
+        self.mod_log_repo
+            .list_paginated(server_id, cursor, limit)
+            .await
+    }
+
+    /// Record a best-effort audit-log row for an externally-performed action
+    /// (e.g. a message delete handled by `MessageService`, or an automod
+    /// delete in the message handler). Never fails the caller (§3.2).
+    pub async fn log_message_delete(
+        &self,
+        server_id: &ServerId,
+        actor_id: &UserId,
+        message_id: &MessageId,
+        reason: Option<String>,
+    ) {
+        self.record_action(NewModerationLogEntry::new(
+            server_id.clone(),
+            ModerationAction::MessageDelete,
+            actor_id.clone(),
+            None,
+            Some(message_id.0),
+            reason,
+        ))
+        .await;
+    }
+
+    // ── Reports queue (T3.3) ─────────────────────────────────────
+
+    /// File a report against a message. Any member with access to the channel
+    /// may report. Rate-limited to 5 reports / 60s / user (anti-report-spam).
+    ///
+    /// # Errors
+    /// - `DomainError::NotFound` if the message doesn't exist in the channel.
+    /// - `DomainError::Forbidden` if the reporter cannot access the channel.
+    /// - `DomainError::RateLimited` if the reporter exceeds the report budget.
+    /// - `DomainError::Conflict` if the reporter already has an open report for
+    ///   this message.
+    /// - `DomainError::ValidationError` if the reason/detail is invalid.
+    pub async fn create_report(
+        &self,
+        channel_id: &ChannelId,
+        message_id: &MessageId,
+        reporter_id: &UserId,
+        reason: ReportReason,
+        detail: Option<String>,
+    ) -> Result<MessageReport, DomainError> {
+        let stored_reason = reason
+            .resolve_stored_reason(detail.as_deref())
+            .map_err(|e| DomainError::ValidationError(e.to_string()))?;
+
+        let channel = self
+            .channel_repo
+            .get_by_id(channel_id)
+            .await?
+            .ok_or_else(|| DomainError::NotFound {
+                resource_type: "Channel",
+                id: channel_id.to_string(),
+            })?;
+
+        // Channel access gate (server membership + private-channel grant). Runs
+        // BEFORE the message lookup so a non-member never learns a message
+        // exists in a channel they cannot see (§6.1, no information leak).
+        ensure_channel_access(
+            &*self.channel_repo,
+            &*self.member_repo,
+            &channel,
+            reporter_id,
+        )
+        .await?;
+
+        let message = self
+            .message_repo
+            .find_by_id(message_id)
+            .await?
+            .ok_or_else(|| DomainError::NotFound {
+                resource_type: "Message",
+                id: message_id.to_string(),
+            })?;
+
+        // Bind the message to the path channel — a report filed through a
+        // channel the reporter CAN see must not target a message in another
+        // channel. 404 (not 403) so we never reveal cross-channel existence.
+        if message.channel_id != *channel_id {
+            return Err(DomainError::NotFound {
+                resource_type: "Message",
+                id: message_id.to_string(),
+            });
+        }
+
+        // Rate limit only after the request is otherwise valid, so rejected
+        // (unauthorized) attempts never consume the reporter's budget.
+        self.spam_guard.check_and_record_action(
+            reporter_id,
+            "report",
+            REPORT_RATE_MAX,
+            REPORT_RATE_WINDOW,
+        )?;
+
+        self.report_repo
+            .create(NewMessageReport {
+                server_id: channel.server_id.clone(),
+                channel_id: channel_id.clone(),
+                message_id: message_id.0,
+                reporter_id: reporter_id.clone(),
+                reported_user_id: message.author_id.clone(),
+                reason: stored_reason,
+            })
+            .await
+    }
+
+    /// List a server's OPEN reports (newest-first, cursor-paginated) plus the
+    /// total open count for the badge. Requires **moderator+**.
+    ///
+    /// # Errors
+    /// - `DomainError::NotFound` if the server doesn't exist.
+    /// - `DomainError::Forbidden` if the caller is below moderator.
+    pub async fn list_reports(
+        &self,
+        server_id: &ServerId,
+        caller_id: &UserId,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<(Vec<MessageReport>, i64), DomainError> {
+        self.require_role(server_id, caller_id, Role::Moderator)
+            .await?;
+
+        let items = self
+            .report_repo
+            .list_open_paginated(server_id, cursor, limit)
+            .await?;
+        let open_count = self.report_repo.count_open(server_id).await?;
+        Ok((items, open_count))
+    }
+
+    /// Resolve or dismiss an open report. Requires **moderator+**.
+    ///
+    /// # Errors
+    /// - `DomainError::NotFound` if the server or open report doesn't exist.
+    /// - `DomainError::Forbidden` if the caller is below moderator.
+    /// - `DomainError::ValidationError` if `status` is not a terminal state.
+    pub async fn resolve_report(
+        &self,
+        server_id: &ServerId,
+        caller_id: &UserId,
+        report_id: &ReportId,
+        status: ReportStatus,
+    ) -> Result<MessageReport, DomainError> {
+        self.require_role(server_id, caller_id, Role::Moderator)
+            .await?;
+
+        if !status.is_terminal() {
+            return Err(DomainError::ValidationError(
+                "Report status must be 'resolved' or 'dismissed'".to_string(),
+            ));
+        }
+
+        self.report_repo
+            .resolve(server_id, report_id, status, caller_id)
+            .await
     }
 }
 

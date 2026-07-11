@@ -12,6 +12,7 @@ pub mod keys;
 pub mod members;
 pub mod messages;
 pub mod migration;
+pub mod moderation;
 pub mod moderation_settings;
 pub mod notification_settings;
 pub mod pagination;
@@ -58,6 +59,10 @@ pub use messages::{
     AttachmentResponse, EditMessageRequest, MentionedUserResponse, MessageListQuery,
     MessageListResponse, MessageResponse, MessageSearchQuery, MessageSearchResponse,
     NewAttachmentRequest, PinnedMessagesResponse, SendMessageRequest,
+};
+pub use moderation::{
+    ModerationLogListResponse, ModerationLogQuery, ModerationLogResponse, ReportListQuery,
+    ReportListResponse, ReportMessageRequest, ReportResponse, ResolveReportRequest,
 };
 pub use moderation_settings::{ModerationSettingsResponse, UpdateModerationSettingsRequest};
 pub use pagination::PaginatedResponse;

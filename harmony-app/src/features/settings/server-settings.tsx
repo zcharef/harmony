@@ -1,9 +1,10 @@
 import { Button, Spinner } from '@heroui/react'
-import { Ban, Hash, Info, Shield, ShieldCheck, Smile, X } from 'lucide-react'
+import { Ban, Flag, Hash, Info, ScrollText, Shield, ShieldCheck, Smile, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/features/auth'
 import { ROLE_HIERARCHY, useMyMemberRole } from '@/features/members'
+import { AuditLogTab, ReportsTab, useReports } from '@/features/moderation'
 import { EmojiSettingsTab } from '@/features/server-emojis'
 import { useServers } from '@/features/server-nav'
 import { cn } from '@/lib/utils'
@@ -14,7 +15,15 @@ import { OverviewTab } from './overview-tab'
 import { RolesTab } from './roles-tab'
 import { useSettingsUiStore } from './stores/settings-ui-store'
 
-type SettingsTab = 'overview' | 'roles' | 'channels' | 'emojis' | 'moderation' | 'bans'
+type SettingsTab =
+  | 'overview'
+  | 'roles'
+  | 'channels'
+  | 'emojis'
+  | 'moderation'
+  | 'reports'
+  | 'audit'
+  | 'bans'
 
 const TABS: Array<{ key: SettingsTab; icon: typeof Info; labelKey: string }> = [
   { key: 'overview', icon: Info, labelKey: 'tabOverview' },
@@ -22,6 +31,8 @@ const TABS: Array<{ key: SettingsTab; icon: typeof Info; labelKey: string }> = [
   { key: 'channels', icon: Hash, labelKey: 'tabChannels' },
   { key: 'emojis', icon: Smile, labelKey: 'tabEmojis' },
   { key: 'moderation', icon: ShieldCheck, labelKey: 'tabModeration' },
+  { key: 'reports', icon: Flag, labelKey: 'tabReports' },
+  { key: 'audit', icon: ScrollText, labelKey: 'tabAudit' },
   { key: 'bans', icon: Ban, labelKey: 'tabBans' },
 ]
 
@@ -38,6 +49,11 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
   const currentUserId = useAuthStore((s) => s.user?.id ?? '')
   const isOwner = server?.ownerId === currentUserId
   const [activeTab, setActiveTab] = useState<SettingsTab>('overview')
+  // WHY here (not only inside ReportsTab): the badge count must render on the
+  // sidebar tab regardless of which tab is open. Moderator+ gate mirrors the API.
+  const canModerate = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.moderator
+  const { data: reportsData } = useReports(serverId, canModerate)
+  const openReports = reportsData?.openCount ?? 0
 
   /** WHY: Non-admin users must not access server settings. Auto-close if they lack permission. */
   const isAdmin = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
@@ -81,7 +97,15 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
               data-test={`settings-tab-${key}`}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              <span>{t(labelKey)}</span>
+              <span className="flex-1 text-left">{t(labelKey)}</span>
+              {key === 'reports' && openReports > 0 && (
+                <span
+                  className="rounded-full bg-danger px-1.5 text-xs font-semibold text-danger-foreground tabular-nums"
+                  data-test="reports-tab-badge"
+                >
+                  {openReports}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -118,6 +142,8 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
           )}
           {activeTab === 'emojis' && <EmojiSettingsTab serverId={serverId} />}
           {activeTab === 'moderation' && <ModerationTab serverId={serverId} isOwner={isOwner} />}
+          {activeTab === 'reports' && <ReportsTab serverId={serverId} callerRole={callerRole} />}
+          {activeTab === 'audit' && <AuditLogTab serverId={serverId} callerRole={callerRole} />}
           {activeTab === 'bans' && <BansTab serverId={serverId} callerRole={callerRole} />}
         </div>
       </div>

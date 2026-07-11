@@ -1,0 +1,120 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT r.id,\n                   r.server_id,\n                   r.channel_id,\n                   r.message_id,\n                   r.reporter_id,\n                   COALESCE(reporter.username, '') AS \"reporter_username!\",\n                   r.reported_user_id,\n                   COALESCE(reported.username, '') AS \"reported_username!\",\n                   r.reason,\n                   r.status::text                  AS \"status!\",\n                   m.id                            AS \"message_row_id?\",\n                   m.content                       AS \"message_content?\",\n                   m.deleted_at                    AS \"message_deleted_at?\",\n                   m.encrypted                     AS \"message_encrypted?\",\n                   r.resolved_by,\n                   r.resolved_at,\n                   r.created_at\n            FROM message_reports r\n            LEFT JOIN profiles reporter ON reporter.id = r.reporter_id\n            LEFT JOIN profiles reported ON reported.id = r.reported_user_id\n            LEFT JOIN messages m        ON m.id        = r.message_id\n            WHERE r.server_id = $1\n              AND r.status = 'open'\n              AND ($2::timestamptz IS NULL OR r.created_at < $2)\n            ORDER BY r.created_at DESC, r.id DESC\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "reporter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "reporter_username!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "reported_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "reported_username!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "message_row_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "message_content?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "message_deleted_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "message_encrypted?",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 14,
+        "name": "resolved_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 15,
+        "name": "resolved_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      null,
+      false,
+      null,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "3e8a95dda658e885aafc5e55bd51966529099bb5131e5c069580750ecb569d85"
+}

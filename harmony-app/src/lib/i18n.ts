@@ -12,6 +12,7 @@ import invite from '@/lib/locales/en/invite.json'
 import members from '@/lib/locales/en/members.json'
 import messages from '@/lib/locales/en/messages.json'
 import migration from '@/lib/locales/en/migration.json'
+import moderation from '@/lib/locales/en/moderation.json'
 import onboarding from '@/lib/locales/en/onboarding.json'
 import profiles from '@/lib/locales/en/profiles.json'
 import search from '@/lib/locales/en/search.json'
@@ -39,6 +40,7 @@ const resources = {
     servers,
     members,
     migration,
+    moderation,
     settings,
     voice,
     profiles,
@@ -65,6 +67,7 @@ i18n.use(initReactI18next).init({
     'servers',
     'members',
     'migration',
+    'moderation',
     'settings',
     'voice',
     'profiles',

@@ -4,6 +4,11 @@
 
 use utoipa::OpenApi;
 
+use super::dto::moderation::{
+    ModerationLogListResponse, ModerationLogQuery, ModerationLogResponse, ReportListQuery,
+    ReportListResponse, ReportMessageRequest, ReportResponse, ReportedMessageDto,
+    ResolveReportRequest,
+};
 use super::dto::voice::{
     RefreshVoiceTokenRequest, RefreshVoiceTokenResponse, UpdateVoiceStateRequest,
     VoiceHeartbeatRequest, VoiceParticipantResponse, VoiceParticipantsResponse, VoiceTokenResponse,
@@ -31,8 +36,9 @@ use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
 use crate::domain::models::{
     AttachmentId, AttachmentModerationStatus, CategoryId, ChannelId, ChannelType, DeviceId,
-    DeviceKeyId, EmojiId, InviteCode, MegolmSessionId, MessageId, MessageType, OneTimeKeyId,
-    ServerId, UserId, UserStatus, VoiceAction,
+    DeviceKeyId, EmojiId, InviteCode, MegolmSessionId, MessageId, MessageType, ModerationAction,
+    ModerationLogId, OneTimeKeyId, ReportId, ReportReason, ReportStatus, ServerId, UserId,
+    UserStatus, VoiceAction,
 };
 use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
 
@@ -101,6 +107,11 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         // Moderation Settings
         handlers::moderation_settings::get_moderation_settings,
         handlers::moderation_settings::update_moderation_settings,
+        // Moderation Dashboard v2 (audit log + reports)
+        handlers::moderation::list_moderation_log,
+        handlers::moderation::report_message,
+        handlers::moderation::list_reports,
+        handlers::moderation::resolve_report,
         // Messages
         handlers::messages::send_message,
         handlers::messages::list_messages,
@@ -235,6 +246,21 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             BanResponse,
             BanListResponse,
             BanListQuery,
+            // Moderation Dashboard v2 DTOs
+            ModerationAction,
+            ModerationLogId,
+            ModerationLogResponse,
+            ModerationLogListResponse,
+            ModerationLogQuery,
+            ReportId,
+            ReportReason,
+            ReportStatus,
+            ReportMessageRequest,
+            ReportedMessageDto,
+            ReportResponse,
+            ReportListResponse,
+            ReportListQuery,
+            ResolveReportRequest,
             // Message DTOs
             SendMessageRequest,
             EditMessageRequest,

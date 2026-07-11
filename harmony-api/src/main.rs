@@ -356,10 +356,19 @@ async fn init_app_state(config: &Config) -> AppInit {
         plan_limit_checker.clone(),
         content_filter,
     ));
+    let moderation_log_repo = Arc::new(infra::postgres::PgModerationLogRepository::new(
+        pool.clone(),
+    ));
+    let report_repo = Arc::new(infra::postgres::PgReportRepository::new(pool.clone()));
     let moderation_service = Arc::new(domain::services::ModerationService::new(
         server_repo.clone(),
         ban_repo.clone(),
         member_repo.clone(),
+        channel_repo.clone(),
+        message_repo.clone(),
+        moderation_log_repo,
+        report_repo,
+        spam_guard.clone(),
     ));
     let friendship_service = Arc::new(domain::services::FriendshipService::new(
         friendship_repo.clone(),

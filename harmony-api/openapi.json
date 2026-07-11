@@ -1073,6 +1073,123 @@
         ]
       }
     },
+    "/v1/channels/{channel_id}/messages/{message_id}/report": {
+      "post": {
+        "tags": [
+          "Moderation"
+        ],
+        "summary": "Report a message for moderator review (any member with channel access).",
+        "description": "# Errors\nReturns `ApiError`: 400 invalid reason · 403 no channel access · 404 message\n· 409 already reported · 429 rate limited.",
+        "operationId": "report_message",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MessageId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Report filed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid reason/detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No channel access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already reported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many reports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/channels/{channel_id}/pins": {
       "get": {
         "tags": [
@@ -5642,6 +5759,306 @@
         ]
       }
     },
+    "/v1/servers/{id}/moderation-log": {
+      "get": {
+        "tags": [
+          "Moderation"
+        ],
+        "summary": "List the moderation audit log for a server (admin+), newest-first.",
+        "description": "# Errors\nReturns `ApiError` on invalid cursor, authorization failure, or repo error.",
+        "operationId": "list_moderation_log",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "ISO 8601 timestamp cursor — fetch entries created before this time.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of entries to return (1-100, default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit log page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModerationLogListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (< admin)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers/{id}/reports": {
+      "get": {
+        "tags": [
+          "Moderation"
+        ],
+        "summary": "List a server's OPEN reports (moderator+), newest-first, with open count.",
+        "description": "# Errors\nReturns `ApiError` on invalid cursor, authorization failure, or repo error.",
+        "operationId": "list_reports",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only `open` is supported in v1 (the queue lists open reports). Accepted\nfor forward-compatibility; other values yield an empty page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "ISO 8601 timestamp cursor — fetch reports created before this time.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of reports to return (1-100, default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reports page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (< moderator)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers/{id}/reports/{report_id}": {
+      "patch": {
+        "tags": [
+          "Moderation"
+        ],
+        "summary": "Resolve or dismiss an open report (moderator+).",
+        "description": "# Errors\nReturns `ApiError`: 400 bad status · 403 < moderator · 404 report/server.",
+        "operationId": "resolve_report",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "report_id",
+            "in": "path",
+            "description": "Report ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ReportId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Report resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Non-terminal status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (< moderator)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Report or server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/servers/{id}/transfer-ownership": {
       "post": {
         "tags": [
@@ -7970,6 +8387,137 @@
           }
         }
       },
+      "ModerationAction": {
+        "type": "string",
+        "description": "A logged moderator action. Matches the Postgres `moderation_action` enum\n(`snake_case` labels). Unknown DB values fail loudly (see [`Self::from_db_str`]).",
+        "enum": [
+          "member_kick",
+          "member_ban",
+          "member_unban",
+          "member_timeout",
+          "member_timeout_remove",
+          "message_delete",
+          "message_bulk_delete"
+        ]
+      },
+      "ModerationLogId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a moderation log entry (audit trail).",
+        "example": "330e8400-e29b-41d4-a716-44665544000d"
+      },
+      "ModerationLogListResponse": {
+        "type": "object",
+        "description": "Cursor-paginated envelope for the audit log (ADR-036).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModerationLogResponse"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ModerationLogQuery": {
+        "type": "object",
+        "description": "Query parameters for listing the moderation audit log (cursor pagination).",
+        "properties": {
+          "before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp cursor — fetch entries created before this time."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Maximum number of entries to return (1-100, default 50)."
+          }
+        }
+      },
+      "ModerationLogResponse": {
+        "type": "object",
+        "description": "A single moderation audit-log entry.",
+        "required": [
+          "id",
+          "action",
+          "actorId",
+          "actorUsername",
+          "metadata",
+          "createdAt"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ModerationAction"
+          },
+          "actorAvatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actorId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "actorUsername": {
+            "type": "string",
+            "description": "Actor display name. Empty when the actor profile was removed."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metadata": {
+            "description": "Action-specific extras (`{\"count\":12}` etc). Always a JSON object."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "targetMessageId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "targetUserId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserId"
+              }
+            ]
+          },
+          "targetUsername": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "ModerationSettingsResponse": {
         "type": "object",
         "description": "Response for server moderation settings.",
@@ -8546,6 +9094,209 @@
         },
         "additionalProperties": false
       },
+      "ReportId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a user-filed message report.",
+        "example": "440e8400-e29b-41d4-a716-44665544000e"
+      },
+      "ReportListQuery": {
+        "type": "object",
+        "description": "Query parameters for listing reports.",
+        "properties": {
+          "before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp cursor — fetch reports created before this time."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Maximum number of reports to return (1-100, default 50)."
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only `open` is supported in v1 (the queue lists open reports). Accepted\nfor forward-compatibility; other values yield an empty page."
+          }
+        }
+      },
+      "ReportListResponse": {
+        "type": "object",
+        "description": "Cursor-paginated envelope for the reports queue, plus the open badge count.",
+        "required": [
+          "items",
+          "openCount"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReportResponse"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "openCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total OPEN reports for the server (drives the tab badge)."
+          }
+        }
+      },
+      "ReportMessageRequest": {
+        "type": "object",
+        "description": "Request body for reporting a message.",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Free-text context. Required when `reason` is `other`; capped at 512."
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ReportReason"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReportReason": {
+        "type": "string",
+        "description": "Report reason taxonomy. Serialized `snake_case` for the API DTO; the chosen\nvalue (or the free-text detail when [`ReportReason::Other`]) is what gets\npersisted to the `reason` column.",
+        "enum": [
+          "spam",
+          "harassment",
+          "nsfw",
+          "violence",
+          "other"
+        ]
+      },
+      "ReportResponse": {
+        "type": "object",
+        "description": "A single report as shown in the moderator queue.",
+        "required": [
+          "id",
+          "serverId",
+          "channelId",
+          "messageId",
+          "reporterId",
+          "reporterUsername",
+          "reportedUserId",
+          "reportedUsername",
+          "reason",
+          "status",
+          "message",
+          "createdAt"
+        ],
+        "properties": {
+          "channelId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "$ref": "#/components/schemas/ReportedMessageDto"
+          },
+          "messageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Stored reason: a taxonomy label (spam/harassment/nsfw/violence) or the\nfree-text detail when the reporter chose `other`."
+          },
+          "reportedUserId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "reportedUsername": {
+            "type": "string"
+          },
+          "reporterId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "reporterUsername": {
+            "type": "string"
+          },
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "resolvedBy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserId"
+              }
+            ]
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReportStatus"
+          }
+        }
+      },
+      "ReportStatus": {
+        "type": "string",
+        "description": "Lifecycle status of a report. Matches the Postgres `report_status` enum.",
+        "enum": [
+          "open",
+          "resolved",
+          "dismissed"
+        ]
+      },
+      "ReportedMessageDto": {
+        "type": "object",
+        "description": "Reported-message snapshot shown in the queue.",
+        "required": [
+          "deleted",
+          "encrypted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "encrypted": {
+            "type": "boolean"
+          },
+          "snippet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plaintext preview. Absent when the message is deleted/encrypted/purged."
+          }
+        }
+      },
       "RequestDirection": {
         "type": "string",
         "description": "Direction of a pending friend request relative to the querying user.\n\nLives in the DOMAIN (not the DTO layer) so both the DTO response and the\n`FriendRequestPayload` SSE event can carry it without the domain importing\nfrom `api/` (which the hexagonal boundary test forbids). Same treatment as\n[`super::UserStatus`]. Single words, so `camelCase` yields lowercase\n`incoming`/`outgoing` — the shape the Zod mirror expects.",
@@ -8553,6 +9304,20 @@
           "incoming",
           "outgoing"
         ]
+      },
+      "ResolveReportRequest": {
+        "type": "object",
+        "description": "Request body for resolving/dismissing a report.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ReportStatus",
+            "description": "Terminal status to transition the report into: `resolved` or `dismissed`."
+          }
+        },
+        "additionalProperties": false
       },
       "Role": {
         "type": "string",
