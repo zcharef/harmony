@@ -12,8 +12,8 @@ use crate::domain::models::{
     UserId,
 };
 use crate::domain::ports::{
-    AroundWindow, AttachmentRepository, ChannelRepository, MemberRepository, MessageRepository,
-    PlanLimitChecker, ReactionRepository,
+    AroundWindow, AttachmentRepository, ChannelRepository, FriendshipRepository, MemberRepository,
+    MessageRepository, PlanLimitChecker, ReactionRepository,
 };
 use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
@@ -47,6 +47,7 @@ pub struct MessageService {
     attachment_repo: Arc<dyn AttachmentRepository>,
     content_filter: Arc<ContentFilter>,
     spam_guard: Arc<SpamGuard>,
+    friendship_repo: Arc<dyn FriendshipRepository>,
 }
 
 /// Maximum message length (DB ceiling — self-hosted max).
@@ -75,6 +76,7 @@ impl MessageService {
         attachment_repo: Arc<dyn AttachmentRepository>,
         content_filter: Arc<ContentFilter>,
         spam_guard: Arc<SpamGuard>,
+        friendship_repo: Arc<dyn FriendshipRepository>,
     ) -> Self {
         Self {
             repo,
@@ -85,6 +87,7 @@ impl MessageService {
             attachment_repo,
             content_filter,
             spam_guard,
+            friendship_repo,
         }
     }
 
@@ -142,6 +145,19 @@ impl MessageService {
         let channel = self
             .verify_channel_membership(channel_id, author_id)
             .await?;
+
+        // WHY: In a DM channel, a block in either direction hard-stops new
+        // message sends (§3.4). Reads membership metadata only — E2EE unaffected.
+        // No-op (false) for non-DM channels.
+        if self
+            .friendship_repo
+            .dm_send_blocked(author_id, channel_id)
+            .await?
+        {
+            return Err(DomainError::Forbidden(
+                "Cannot send messages to this user".to_string(),
+            ));
+        }
 
         // WHY: A client sending encrypted=true on a plaintext channel would bypass
         // ALL content moderation (word filter, invite blocking, AI moderation, URL

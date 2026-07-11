@@ -85,4 +85,22 @@ describe('queryKeys', () => {
   it('different IDs produce different keys', () => {
     expect(queryKeys.servers.detail('a')).not.toEqual(queryKeys.servers.detail('b'))
   })
+
+  // -- friends prefix invariants (T2.1) -----------------------------------
+
+  describe('friends: .all is a prefix of every specific key', () => {
+    it('enables bulk invalidation via queryKeys.friends.all', () => {
+      const { all } = queryKeys.friends
+      expect(isPrefix(all, queryKeys.friends.list())).toBe(true)
+      expect(isPrefix(all, queryKeys.friends.requests('incoming'))).toBe(true)
+      expect(isPrefix(all, queryKeys.friends.requests('outgoing'))).toBe(true)
+      expect(isPrefix(all, queryKeys.friends.blocks())).toBe(true)
+    })
+
+    it('distinguishes request directions', () => {
+      expect(queryKeys.friends.requests('incoming')).not.toEqual(
+        queryKeys.friends.requests('outgoing'),
+      )
+    })
+  })
 })

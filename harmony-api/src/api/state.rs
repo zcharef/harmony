@@ -13,9 +13,10 @@ use crate::domain::ports::{
     ModerationRetryRepository, PlanLimitChecker, ServerRepository, VoiceSessionRepository,
 };
 use crate::domain::services::{
-    ChannelService, DmService, InviteService, KeyService, MessageService, MigrationService,
-    ModerationService, NotificationSettingsService, ProfileService, ReactionService,
-    ReadStateService, ServerService, SpamGuard, UserPreferencesService, VoiceService,
+    ChannelService, DmService, FriendshipService, InviteService, KeyService, MessageService,
+    MigrationService, ModerationService, NotificationSettingsService, ProfileService,
+    ReactionService, ReadStateService, ServerService, SpamGuard, UserPreferencesService,
+    VoiceService,
 };
 use crate::infra::PgPresenceTracker;
 use crate::infra::klipy::KlipyClient;
@@ -55,6 +56,8 @@ pub struct AppState {
     moderation_service: Arc<ModerationService>,
     /// DM domain service (create/list/close direct messages).
     dm_service: Arc<DmService>,
+    /// Friendship domain service (friend requests, unfriend, blocks).
+    friendship_service: Arc<FriendshipService>,
     /// Key distribution domain service (E2EE device keys and pre-key bundles).
     key_service: Arc<KeyService>,
     /// Reaction domain service (add/remove message reactions).
@@ -131,6 +134,7 @@ impl std::fmt::Debug for AppState {
             .field("channel_service", &self.channel_service)
             .field("moderation_service", &self.moderation_service)
             .field("dm_service", &self.dm_service)
+            .field("friendship_service", &self.friendship_service)
             .field("key_service", &self.key_service)
             .field("reaction_service", &self.reaction_service)
             .field("read_state_service", &self.read_state_service)
@@ -190,6 +194,7 @@ impl AppState {
         channel_service: Arc<ChannelService>,
         moderation_service: Arc<ModerationService>,
         dm_service: Arc<DmService>,
+        friendship_service: Arc<FriendshipService>,
         key_service: Arc<KeyService>,
         reaction_service: Arc<ReactionService>,
         read_state_service: Arc<ReadStateService>,
@@ -238,6 +243,7 @@ impl AppState {
             channel_service,
             moderation_service,
             dm_service,
+            friendship_service,
             key_service,
             reaction_service,
             read_state_service,
@@ -316,6 +322,12 @@ impl AppState {
     #[must_use]
     pub fn dm_service(&self) -> &DmService {
         &self.dm_service
+    }
+
+    /// Access the friendship domain service.
+    #[must_use]
+    pub fn friendship_service(&self) -> &FriendshipService {
+        &self.friendship_service
     }
 
     /// Access the key distribution domain service (E2EE).

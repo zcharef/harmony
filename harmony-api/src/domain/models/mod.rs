@@ -7,6 +7,7 @@ mod ban;
 mod channel;
 mod crypto;
 mod desktop_auth;
+pub mod friendship;
 mod ids;
 mod invite;
 mod megolm_session;
@@ -30,6 +31,10 @@ pub use ban::ServerBan;
 pub use channel::{Channel, ChannelType};
 pub use crypto::{ClaimedKey, DeviceKey, OneTimeKey, PreKeyBundle};
 pub use desktop_auth::DesktopAuthCode;
+pub use friendship::{
+    BlockOutcome, BlockedUserRow, FriendRequestRow, FriendRow, Friendship, FriendshipStatus,
+    RequestDirection, RequestOutcome,
+};
 pub use ids::{
     AttachmentId, CategoryId, ChannelId, DeviceId, DeviceKeyId, InviteCode, MegolmSessionId,
     MessageId, ModerationRetryId, OneTimeKeyId, RoleId, SYSTEM_MODERATOR_ID, ServerId, UserId,

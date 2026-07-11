@@ -28,6 +28,12 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
     /// Check whether a username is already taken.
     async fn is_username_taken(&self, username: &str) -> Result<bool, DomainError>;
 
+    /// Get a profile by exact (lowercase) username. Returns `None` if not found.
+    ///
+    /// Usernames are globally unique and lowercase, so this is the natural handle
+    /// for Add-Friend-by-username (§3.1). The caller normalizes before lookup.
+    async fn get_by_username(&self, username: &str) -> Result<Option<Profile>, DomainError>;
+
     /// Batch-fetch profiles by a list of user IDs.
     ///
     /// Returns only the profiles that exist — missing IDs are silently skipped.

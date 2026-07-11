@@ -7,6 +7,7 @@ import {
   Mic,
   MicOff,
   Settings,
+  Users,
   X,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -14,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { useUnreadStore } from '@/features/channels'
+import { useFriendRequests } from '@/features/friends'
 import { StatusPicker } from '@/features/preferences'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { ProfilePopover } from '@/features/profiles'
@@ -159,10 +161,14 @@ function DmConversationItem({
 interface DmSidebarProps {
   selectedServerId: string | null
   onSelectDm: (serverId: string, channelId: string) => void
+  onSelectFriends: () => void
 }
 
-export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
+export function DmSidebar({ selectedServerId, onSelectDm, onSelectFriends }: DmSidebarProps) {
   const { t } = useTranslation('dms')
+  const { t: tFriends } = useTranslation('friends')
+  const incomingRequests = useFriendRequests('incoming')
+  const pendingCount = incomingRequests.data?.length ?? 0
   const { t: tVoice } = useTranslation('voice')
   const { t: tSettings } = useTranslation('settings')
   const openUserSettings = useSettingsUiStore((s) => s.openUserSettings)
@@ -196,8 +202,31 @@ export function DmSidebar({ selectedServerId, onSelectDm }: DmSidebarProps) {
         <span className="font-semibold text-foreground">{t('directMessages')}</span>
       </div>
 
-      {/* New message button */}
+      {/* Friends home nav — active when no conversation is selected */}
       <div className="px-2 pt-3 pb-1">
+        <Button
+          data-test="dm-friends-nav"
+          variant={selectedServerId === null ? 'flat' : 'light'}
+          size="sm"
+          className="w-full justify-start gap-2"
+          startContent={<Users className="h-4 w-4" />}
+          onPress={onSelectFriends}
+        >
+          <span className="flex-1 text-left">{tFriends('friendsNav')}</span>
+          {pendingCount > 0 && (
+            <span
+              role="status"
+              aria-label={tFriends('pendingBadgeLabel', { count: pendingCount })}
+              className="flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-xs text-danger-foreground"
+            >
+              {pendingCount > 99 ? '99+' : pendingCount}
+            </span>
+          )}
+        </Button>
+      </div>
+
+      {/* New message button */}
+      <div className="px-2 pb-1">
         <Button
           data-test="dm-new-message-button"
           variant="flat"

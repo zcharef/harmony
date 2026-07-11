@@ -7,6 +7,7 @@ mod channel_service;
 pub mod content_filter;
 pub mod content_moderation;
 pub mod dm_service;
+pub mod friendship_service;
 mod invite_service;
 mod key_service;
 mod message_service;
@@ -35,6 +36,7 @@ pub use content_moderation::{
     ModerationDecision, SCORE_THRESHOLD, TIER1_CATEGORIES, TIER2_CATEGORIES, evaluate_moderation,
 };
 pub use dm_service::DmService;
+pub use friendship_service::FriendshipService;
 pub use invite_service::InviteService;
 pub use key_service::KeyService;
 pub use message_service::MessageService;

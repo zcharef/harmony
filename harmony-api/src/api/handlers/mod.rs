@@ -5,6 +5,7 @@ pub mod channels;
 pub mod desktop_auth;
 pub mod dms;
 pub mod events;
+pub mod friends;
 pub mod gifs;
 pub mod invites;
 pub mod keys;

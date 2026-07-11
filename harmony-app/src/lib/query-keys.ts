@@ -59,6 +59,12 @@ export const queryKeys = {
     all: ['dms'] as const,
     list: () => ['dms', 'list'] as const,
   },
+  friends: {
+    all: ['friends'] as const,
+    list: () => ['friends', 'list'] as const,
+    requests: (direction: 'incoming' | 'outgoing') => ['friends', 'requests', direction] as const,
+    blocks: () => ['friends', 'blocks'] as const,
+  },
   crypto: {
     all: ['crypto'] as const,
     keyCount: (deviceId: string) => ['crypto', 'keyCount', deviceId] as const,

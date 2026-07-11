@@ -15,6 +15,7 @@ use super::ChannelType;
 use super::MentionedUser;
 use super::MessageWithAuthor;
 use super::UserStatus;
+use super::friendship::RequestDirection;
 use super::ids::{AttachmentId, ChannelId, MessageId, ServerId, UserId};
 use super::message::MessageType;
 use super::role::Role;
@@ -219,6 +220,34 @@ pub struct DmPayload {
     pub other_avatar_url: Option<String>,
 }
 
+/// Friend-request payload embedded in `FriendRequestCreated`. Carries the
+/// counterpart's profile + the direction FROM THE RECEIVER's perspective so the
+/// receiving tab can `setQueryData` without a refetch (ADR-SSE-003).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendRequestPayload {
+    pub user_id: UserId,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub direction: RequestDirection,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Friend payload embedded in `FriendAdded`. Carries the counterpart's LIVE
+/// presence status (read at publish time) so a freshly accepted friend never
+/// renders offline while online (§4.1). `friends_since` maps to `updated_at`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendPayload {
+    pub user_id: UserId,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub status: UserStatus,
+    pub friends_since: DateTime<Utc>,
+}
+
 /// Bounded routing metadata: the roles explicitly granted access to a PRIVATE
 /// channel (its `channel_role_access` rows). Attached to message/reaction/typing
 /// events so the SSE layer can gate delivery by channel access, not by server
@@ -376,6 +405,39 @@ pub enum ServerEvent {
         sender_id: UserId,
         target_user_id: UserId,
         dm: DmPayload,
+    },
+
+    // ── Friends (user-scoped, routed via target_user_id) ─────
+    FriendRequestCreated {
+        sender_id: UserId,
+        target_user_id: UserId,
+        request: FriendRequestPayload,
+    },
+    FriendRequestRemoved {
+        sender_id: UserId,
+        target_user_id: UserId,
+        user_id: UserId,
+    },
+    FriendAdded {
+        sender_id: UserId,
+        target_user_id: UserId,
+        friend: FriendPayload,
+    },
+    FriendRemoved {
+        sender_id: UserId,
+        target_user_id: UserId,
+        user_id: UserId,
+    },
+    // ── Blocks (self-sync only, target = the blocker) ────────
+    BlockCreated {
+        sender_id: UserId,
+        target_user_id: UserId,
+        user_id: UserId,
+    },
+    BlockRemoved {
+        sender_id: UserId,
+        target_user_id: UserId,
+        user_id: UserId,
     },
 
     // ── Profiles (user-scoped, not server-scoped) ────────────
@@ -546,6 +608,12 @@ impl ServerEvent {
             Self::ServerUpdated { .. } => "server.updated",
             Self::ModerationSettingsUpdated { .. } => "server.moderation_settings_updated",
             Self::DmCreated { .. } => "dm.created",
+            Self::FriendRequestCreated { .. } => "friend.request_created",
+            Self::FriendRequestRemoved { .. } => "friend.request_removed",
+            Self::FriendAdded { .. } => "friend.added",
+            Self::FriendRemoved { .. } => "friend.removed",
+            Self::BlockCreated { .. } => "block.created",
+            Self::BlockRemoved { .. } => "block.removed",
             Self::ProfileUpdated { .. } => "profile.updated",
             Self::TypingStarted { .. } => "typing.started",
             Self::PresenceChanged { .. } => "presence.changed",
@@ -576,6 +644,12 @@ impl ServerEvent {
             | Self::ServerUpdated { sender_id, .. }
             | Self::ModerationSettingsUpdated { sender_id, .. }
             | Self::DmCreated { sender_id, .. }
+            | Self::FriendRequestCreated { sender_id, .. }
+            | Self::FriendRequestRemoved { sender_id, .. }
+            | Self::FriendAdded { sender_id, .. }
+            | Self::FriendRemoved { sender_id, .. }
+            | Self::BlockCreated { sender_id, .. }
+            | Self::BlockRemoved { sender_id, .. }
             | Self::ProfileUpdated { sender_id, .. }
             | Self::TypingStarted { sender_id, .. }
             | Self::PresenceChanged { sender_id, .. }
@@ -611,9 +685,15 @@ impl ServerEvent {
             | Self::VoiceStateUpdate { server_id, .. }
             | Self::MentionReceived { server_id, .. }
             | Self::ForceDisconnect { server_id, .. } => Some(server_id),
-            Self::DmCreated { .. } | Self::ProfileUpdated { .. } | Self::PresenceChanged { .. } => {
-                None
-            }
+            Self::DmCreated { .. }
+            | Self::FriendRequestCreated { .. }
+            | Self::FriendRequestRemoved { .. }
+            | Self::FriendAdded { .. }
+            | Self::FriendRemoved { .. }
+            | Self::BlockCreated { .. }
+            | Self::BlockRemoved { .. }
+            | Self::ProfileUpdated { .. }
+            | Self::PresenceChanged { .. } => None,
         }
     }
 
@@ -623,6 +703,12 @@ impl ServerEvent {
     pub fn target_user_id(&self) -> Option<&UserId> {
         match self {
             Self::DmCreated { target_user_id, .. }
+            | Self::FriendRequestCreated { target_user_id, .. }
+            | Self::FriendRequestRemoved { target_user_id, .. }
+            | Self::FriendAdded { target_user_id, .. }
+            | Self::FriendRemoved { target_user_id, .. }
+            | Self::BlockCreated { target_user_id, .. }
+            | Self::BlockRemoved { target_user_id, .. }
             | Self::MemberBanned { target_user_id, .. }
             | Self::MentionReceived { target_user_id, .. }
             | Self::ForceDisconnect { target_user_id, .. } => Some(target_user_id),
@@ -675,6 +761,12 @@ impl ServerEvent {
             | Self::ServerUpdated { .. }
             | Self::ModerationSettingsUpdated { .. }
             | Self::DmCreated { .. }
+            | Self::FriendRequestCreated { .. }
+            | Self::FriendRequestRemoved { .. }
+            | Self::FriendAdded { .. }
+            | Self::FriendRemoved { .. }
+            | Self::BlockCreated { .. }
+            | Self::BlockRemoved { .. }
             | Self::ProfileUpdated { .. }
             | Self::PresenceChanged { .. }
             | Self::MentionReceived { .. }
@@ -715,6 +807,12 @@ impl ServerEvent {
             | Self::ServerUpdated { .. }
             | Self::ModerationSettingsUpdated { .. }
             | Self::DmCreated { .. }
+            | Self::FriendRequestCreated { .. }
+            | Self::FriendRequestRemoved { .. }
+            | Self::FriendAdded { .. }
+            | Self::FriendRemoved { .. }
+            | Self::BlockCreated { .. }
+            | Self::BlockRemoved { .. }
             | Self::MentionReceived { .. }
             | Self::ForceDisconnect { .. } => {}
         }
@@ -1439,6 +1537,116 @@ mod tests {
 
         let back: ServerEvent = serde_json::from_value(after).unwrap();
         assert_eq!(back.event_name(), "channel.access_updated");
+    }
+
+    /// All six friend/block variants ride the `target_user_id` delivery path
+    /// (Some target, no server scope, no channel access) and name correctly.
+    #[test]
+    fn friend_and_block_events_are_user_targeted() {
+        let target = test_user_id();
+        let cases: Vec<(ServerEvent, &str)> = vec![
+            (
+                ServerEvent::FriendRequestCreated {
+                    sender_id: test_user_id(),
+                    target_user_id: target.clone(),
+                    request: FriendRequestPayload {
+                        user_id: test_user_id(),
+                        username: "alice".to_string(),
+                        display_name: None,
+                        avatar_url: None,
+                        direction: RequestDirection::Incoming,
+                        created_at: Utc::now(),
+                    },
+                },
+                "friend.request_created",
+            ),
+            (
+                ServerEvent::FriendRequestRemoved {
+                    sender_id: test_user_id(),
+                    target_user_id: target.clone(),
+                    user_id: test_user_id(),
+                },
+                "friend.request_removed",
+            ),
+            (
+                ServerEvent::FriendAdded {
+                    sender_id: test_user_id(),
+                    target_user_id: target.clone(),
+                    friend: FriendPayload {
+                        user_id: test_user_id(),
+                        username: "bob".to_string(),
+                        display_name: None,
+                        avatar_url: None,
+                        status: UserStatus::Online,
+                        friends_since: Utc::now(),
+                    },
+                },
+                "friend.added",
+            ),
+            (
+                ServerEvent::FriendRemoved {
+                    sender_id: test_user_id(),
+                    target_user_id: target.clone(),
+                    user_id: test_user_id(),
+                },
+                "friend.removed",
+            ),
+            (
+                ServerEvent::BlockCreated {
+                    sender_id: test_user_id(),
+                    target_user_id: target.clone(),
+                    user_id: test_user_id(),
+                },
+                "block.created",
+            ),
+            (
+                ServerEvent::BlockRemoved {
+                    sender_id: test_user_id(),
+                    target_user_id: target.clone(),
+                    user_id: test_user_id(),
+                },
+                "block.removed",
+            ),
+        ];
+        for (event, name) in cases {
+            assert_eq!(event.event_name(), name);
+            assert_eq!(event.target_user_id(), Some(&target), "{name} must target");
+            assert!(event.server_id().is_none(), "{name} is user-scoped");
+            assert!(
+                event.channel_access().is_none(),
+                "{name} has no channel scope"
+            );
+        }
+    }
+
+    /// `friend.added` carries the counterpart's live `status` (camelCase) so the
+    /// client seeds presence — verified through the tagged-union round-trip (§4.1).
+    #[test]
+    fn friend_added_carries_status_through_round_trip() {
+        let event = ServerEvent::FriendAdded {
+            sender_id: test_user_id(),
+            target_user_id: test_user_id(),
+            friend: FriendPayload {
+                user_id: test_user_id(),
+                username: "ada".to_string(),
+                display_name: Some("Ada".to_string()),
+                avatar_url: None,
+                status: UserStatus::DoNotDisturb,
+                friends_since: Utc::now(),
+            },
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "friendAdded");
+        assert_eq!(json["friend"]["status"], "dnd");
+        assert_eq!(json["friend"]["username"], "ada");
+
+        let back: ServerEvent = serde_json::from_value(json).unwrap();
+        match back {
+            ServerEvent::FriendAdded { friend, .. } => {
+                assert_eq!(friend.status, UserStatus::DoNotDisturb);
+            }
+            _ => panic!("expected FriendAdded"),
+        }
     }
 
     /// `TypingStarted.display_name` carries the resolved name in camelCase when

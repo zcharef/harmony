@@ -17,6 +17,7 @@ import {
 } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
 import { DmSidebar, useDms, useRealtimeDms } from '@/features/dms'
+import { FriendsPanel, useRealtimeFriends } from '@/features/friends'
 import {
   MemberList,
   useForceDisconnect,
@@ -494,6 +495,10 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
   // server). The backend now dynamically updates the server_ids filter via a
   // watch channel, so no client-side reconnect is needed.
   useRealtimeDms()
+  // WHY: Mounted here (not in FriendsPanel) so friend/block events + the eager
+  // list queries (badges, context-menu state) stay warm across DM/server view
+  // switches — FriendsPanel unmounts constantly (§5.2, §4.6).
+  useRealtimeFriends()
   // WHY: Mounted here (not in ChatArea) so unread increments happen even when
   // no channel is selected (e.g. DM view with no conversation open). The
   // previous approach coupled incrementing to useRealtimeMessages(channelId)
@@ -721,7 +726,11 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
           <Panel data-test="server-sidebar" defaultSize="20%" minSize="15%" maxSize="30%">
             <FeatureErrorBoundary name={isDmView ? 'DmSidebar' : 'ChannelSidebar'}>
               {isDmView ? (
-                <DmSidebar selectedServerId={selectedServerId} onSelectDm={handleSelectDm} />
+                <DmSidebar
+                  selectedServerId={selectedServerId}
+                  onSelectDm={handleSelectDm}
+                  onSelectFriends={handleSelectDmView}
+                />
               ) : (
                 <ChannelSidebar
                   serverId={selectedServerId}
@@ -738,17 +747,24 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
 
           <Panel defaultSize={isDmView ? '80%' : '60%'} minSize="30%">
             <FeatureErrorBoundary name="ChatArea">
-              <ChatArea
-                channelId={selectedChannelId}
-                channelName={chatHeaderName}
-                serverId={selectedServerId}
-                currentUserRole={currentUserRole}
-                isDm={chatProps.isDm}
-                dmRecipient={chatProps.dmRecipient}
-                isReadOnly={chatProps.isReadOnly}
-                isChannelEncrypted={chatProps.isChannelEncrypted}
-                slowModeSeconds={chatProps.slowModeSeconds}
-              />
+              {/* WHY: In DM view with no conversation selected, the Friends home
+                  replaces ChatArea (Discord parity). Entering DM view resets the
+                  selection to null, so this is the DM-view landing screen. */}
+              {isDmView && selectedChannelId === null ? (
+                <FriendsPanel onNavigateDm={handleNavigateDm} />
+              ) : (
+                <ChatArea
+                  channelId={selectedChannelId}
+                  channelName={chatHeaderName}
+                  serverId={selectedServerId}
+                  currentUserRole={currentUserRole}
+                  isDm={chatProps.isDm}
+                  dmRecipient={chatProps.dmRecipient}
+                  isReadOnly={chatProps.isReadOnly}
+                  isChannelEncrypted={chatProps.isChannelEncrypted}
+                  slowModeSeconds={chatProps.slowModeSeconds}
+                />
+              )}
             </FeatureErrorBoundary>
           </Panel>
 

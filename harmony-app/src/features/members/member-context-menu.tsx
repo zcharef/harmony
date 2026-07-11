@@ -5,9 +5,10 @@ import {
   DropdownSection,
   DropdownTrigger,
 } from '@heroui/react'
-import { MessageSquare } from 'lucide-react'
+import { MessageSquare, UserPlus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useCreateDm } from '@/features/dms'
+import { useBlocks, useFriendRequests, useFriends, useSendFriendRequest } from '@/features/friends'
 import type { AssignRoleRequest } from '@/lib/api'
 import { useChangeRole } from './hooks/use-change-role'
 import { type MemberRole, ROLE_HIERARCHY } from './moderation-types'
@@ -73,15 +74,40 @@ export function MemberContextMenu({
   onNavigateDm,
 }: MemberContextMenuProps) {
   const { t } = useTranslation('members')
+  const { t: tFriends } = useTranslation('friends')
   const changeRole = useChangeRole(serverId)
   const createDm = useCreateDm()
+  const sendFriendRequest = useSendFriendRequest()
   const perms = usePermissions(callerRole, targetRole, isSelf)
   const assignableRoles = useAssignableRoles(callerRole, targetRole)
+
+  // Relationship state derives from the three cached lists (warm via §5.2
+  // eager mounting) — no per-user endpoint, no RelationshipState domain model.
+  const friends = useFriends()
+  const blocks = useBlocks()
+  const outgoing = useFriendRequests('outgoing')
+  const isFriend = (friends.data ?? []).some((f) => f.user.id === targetUserId)
+  const isBlocked = (blocks.data ?? []).some((b) => b.user.id === targetUserId)
+  const hasOutgoingPending = (outgoing.data ?? []).some((r) => r.user.id === targetUserId)
 
   const hasModerationAction = perms.canChangeRole || perms.canKick || perms.canBan
   // WHY: "Send Message" is always available for non-self members,
   // so the menu is never empty when viewing another user.
   const canSendMessage = isSelf === false
+  // Add Friend: only for non-self, not-yet-friends. Disabled (with a reason
+  // label) when blocked or an outgoing request already exists (CLAUDE.md §6:
+  // disable the UI before the 403).
+  const showAddFriend = isSelf === false && isFriend === false
+  const addFriend = {
+    show: showAddFriend,
+    disabled: isBlocked || hasOutgoingPending || sendFriendRequest.isPending,
+    label: isBlocked
+      ? tFriends('blocked')
+      : hasOutgoingPending
+        ? tFriends('friendRequestSent')
+        : tFriends('addFriendAction'),
+    onPress: () => sendFriendRequest.mutate({ addresseeId: targetUserId }),
+  }
 
   function handleRoleChange(role: AssignRoleRequest['role']) {
     changeRole.mutate({ userId: targetUserId, role })
@@ -108,11 +134,14 @@ export function MemberContextMenu({
       <DropdownTrigger>{children}</DropdownTrigger>
       <DropdownMenu
         aria-label={t('memberActions', { username: targetUsername })}
-        disabledKeys={
-          canSendMessage === false && hasModerationAction === false ? ['no-actions'] : []
-        }
+        disabledKeys={[
+          ...(canSendMessage === false && hasModerationAction === false && addFriend.show === false
+            ? ['no-actions']
+            : []),
+          ...(addFriend.disabled ? ['add-friend'] : []),
+        ]}
       >
-        {canSendMessage === false && hasModerationAction === false ? (
+        {canSendMessage === false && hasModerationAction === false && addFriend.show === false ? (
           <DropdownItem key="no-actions" className="text-default-400" data-test="no-actions-item">
             {t('noActionsAvailable')}
           </DropdownItem>
@@ -127,6 +156,7 @@ export function MemberContextMenu({
             t,
             perms,
             canSendMessage,
+            addFriend,
             assignableRoles,
             targetUsername,
             onRoleChange: handleRoleChange,
@@ -148,6 +178,7 @@ function renderContextMenuActions({
   t,
   perms,
   canSendMessage,
+  addFriend,
   assignableRoles,
   targetUsername,
   onRoleChange,
@@ -158,6 +189,7 @@ function renderContextMenuActions({
   t: (key: string, options?: Record<string, string>) => string
   perms: { canChangeRole: boolean; canKick: boolean; canBan: boolean }
   canSendMessage: boolean
+  addFriend: { show: boolean; disabled: boolean; label: string; onPress: () => void }
   assignableRoles: Array<{ key: AssignRoleRequest['role']; label: string }>
   targetUsername: string
   onRoleChange: (role: AssignRoleRequest['role']) => void
@@ -166,19 +198,38 @@ function renderContextMenuActions({
   onBan: () => void
 }) {
   const hasModerationAction = perms.canChangeRole || perms.canKick || perms.canBan
+  const hasContactAction = canSendMessage || addFriend.show
 
   return (
     <>
-      {canSendMessage && (
+      {hasContactAction && (
         <DropdownSection showDivider={hasModerationAction}>
-          <DropdownItem
-            key="send-message"
-            startContent={<MessageSquare className="h-4 w-4" />}
-            onPress={onSendMessage}
-            data-test="send-message-item"
-          >
-            {t('sendMessage', { username: targetUsername })}
-          </DropdownItem>
+          {[
+            ...(canSendMessage
+              ? [
+                  <DropdownItem
+                    key="send-message"
+                    startContent={<MessageSquare className="h-4 w-4" />}
+                    onPress={onSendMessage}
+                    data-test="send-message-item"
+                  >
+                    {t('sendMessage', { username: targetUsername })}
+                  </DropdownItem>,
+                ]
+              : []),
+            ...(addFriend.show
+              ? [
+                  <DropdownItem
+                    key="add-friend"
+                    startContent={<UserPlus className="h-4 w-4" />}
+                    onPress={addFriend.onPress}
+                    data-test="add-friend-item"
+                  >
+                    {addFriend.label}
+                  </DropdownItem>,
+                ]
+              : []),
+          ]}
         </DropdownSection>
       )}
       {perms.canChangeRole && (

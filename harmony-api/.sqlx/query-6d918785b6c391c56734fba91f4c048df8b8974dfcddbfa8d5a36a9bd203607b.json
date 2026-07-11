@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT requester_id, status\n               FROM friendships\n               WHERE (requester_id = $1 AND addressee_id = $2)\n                  OR (requester_id = $2 AND addressee_id = $1)\n               FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "requester_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "status",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "6d918785b6c391c56734fba91f4c048df8b8974dfcddbfa8d5a36a9bd203607b"
+}

@@ -8,7 +8,8 @@ use crate::domain::errors::DomainError;
 use crate::domain::models::{ChannelId, ServerId, UserId};
 use crate::domain::ports::dm_repository::DmRow;
 use crate::domain::ports::{
-    DmRepository, MemberRepository, PlanLimitChecker, ProfileRepository, ServerRepository,
+    DmRepository, FriendshipRepository, MemberRepository, PlanLimitChecker, ProfileRepository,
+    ServerRepository,
 };
 
 /// Hydrated DM conversation returned from service methods.
@@ -53,6 +54,7 @@ pub struct DmService {
     server_repo: Arc<dyn ServerRepository>,
     member_repo: Arc<dyn MemberRepository>,
     plan_checker: Arc<dyn PlanLimitChecker>,
+    friendship_repo: Arc<dyn FriendshipRepository>,
 }
 
 impl DmService {
@@ -63,6 +65,7 @@ impl DmService {
         server_repo: Arc<dyn ServerRepository>,
         member_repo: Arc<dyn MemberRepository>,
         plan_checker: Arc<dyn PlanLimitChecker>,
+        friendship_repo: Arc<dyn FriendshipRepository>,
     ) -> Self {
         Self {
             dm_repo,
@@ -70,6 +73,7 @@ impl DmService {
             server_repo,
             member_repo,
             plan_checker,
+            friendship_repo,
         }
     }
 
@@ -138,6 +142,35 @@ impl DmService {
                 joined_at: now,
             };
             return Ok((conversation, false));
+        }
+
+        // WHY these gates sit AFTER the existing-DM early-return (§3.4): existing
+        // conversations stay open (unfriending/blocking never locks people out of
+        // history); the gates apply to NEW DMs only.
+        // Gate 1: a block in either direction hard-stops new DM creation.
+        if self
+            .friendship_repo
+            .is_blocked_between(caller_id, recipient_id)
+            .await?
+        {
+            return Err(DomainError::Forbidden(
+                "Cannot send messages to this user".to_string(),
+            ));
+        }
+        // Gate 2: friends OR a shared non-DM server. (Mostly vacuous in prod while
+        // official-server auto-join is on — the block gate is the effective bar.)
+        let allowed = self
+            .friendship_repo
+            .are_friends(caller_id, recipient_id)
+            .await?
+            || self
+                .friendship_repo
+                .share_non_dm_server(caller_id, recipient_id)
+                .await?;
+        if !allowed {
+            return Err(DomainError::Forbidden(
+                "Cannot send messages to this user".to_string(),
+            ));
         }
 
         // WHY: Rate limit NEW DM creation only. Returning existing DMs is free
