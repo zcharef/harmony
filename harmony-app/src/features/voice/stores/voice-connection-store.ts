@@ -12,6 +12,12 @@ import { DisconnectReason, LocalAudioTrack, Room, RoomEvent, Track } from 'livek
 import { create } from 'zustand'
 
 import { logger } from '@/lib/logger'
+import {
+  type AudioDeviceKind,
+  clearPreferredDeviceId,
+  loadPreferredDeviceId,
+  savePreferredDeviceId,
+} from '../lib/device-preferences'
 import { createSpeakingDetector } from '../lib/speaking-detector'
 
 export type VoiceConnectionStatus =
@@ -43,9 +49,16 @@ interface VoiceConnectionState {
   pttShortcut: string
 
   /** WHY: Survives room recreation (token refresh). Without these, a new Room()
-   * defaults to system audio devices, losing the user's selection mid-call. */
+   * defaults to system audio devices, losing the user's selection mid-call.
+   * Hydrated from localStorage so the next session reuses the same devices. */
   preferredAudioInputId: string | null
   preferredAudioOutputId: string | null
+
+  /** WHY: Kinds whose preferred device disappeared mid-call (unplugged) and
+   * fell back to the system default. A list, not a single value: unplugging a
+   * USB headset kills input AND output at once and both notices must survive.
+   * The connection bar shows an inline notice — a dead mic must never be silent. */
+  deviceFallbacks: AudioDeviceKind[]
 
   connect: (channelId: string, serverId: string, token: string, url: string) => Promise<void>
   disconnect: () => Promise<void>
@@ -59,9 +72,14 @@ interface VoiceConnectionState {
   setPttMicEnabled: (enabled: boolean) => void
   togglePttMode: () => void
   setPttShortcut: (shortcut: string) => void
-  setPreferredDevice: (kind: 'audioinput' | 'audiooutput', deviceId: string) => void
+  setPreferredDevice: (kind: AudioDeviceKind, deviceId: string) => void
+  clearDeviceFallback: () => void
   reset: () => void
 }
+
+/** WHY named constant: gives the empty array an explicit element type without
+ * an `as` assertion (ADR-035). Never mutated — updates always replace it. */
+const NO_DEVICE_FALLBACKS: AudioDeviceKind[] = []
 
 const INITIAL_STATE = {
   status: 'idle' as const,
@@ -73,8 +91,11 @@ const INITIAL_STATE = {
   isKrispEnabled: true,
   isPttMode: false,
   pttShortcut: 'Space',
-  preferredAudioInputId: null,
-  preferredAudioOutputId: null,
+  // WHY: Hydrated once at module init so a fresh session restores the devices
+  // the user picked last time (restorePreferredDevices applies them on connect).
+  preferredAudioInputId: loadPreferredDeviceId('audioinput'),
+  preferredAudioOutputId: loadPreferredDeviceId('audiooutput'),
+  deviceFallbacks: NO_DEVICE_FALLBACKS,
   error: null,
   activeSpeakers: new Set<string>(),
 }
@@ -224,6 +245,76 @@ function updateSpeaker(identity: string, speaking: boolean, get: GetState, set: 
   }
 }
 
+/** WHY: Extracted so both audio kinds share one code path. When the user's
+ * preferred device disappears (unplugged), switch the live session to the
+ * system default, drop the stored preference (the hardware is gone), and set
+ * deviceFallback so the connection bar shows an inline notice — the user must
+ * never end up with a silently dead mic or speaker. */
+async function fallBackIfDeviceGone(
+  room: Room,
+  kind: AudioDeviceKind,
+  preferredId: string,
+  get: GetState,
+  set: SetState,
+): Promise<void> {
+  let devices: MediaDeviceInfo[]
+  try {
+    devices = await Room.getLocalDevices(kind)
+  } catch (err: unknown) {
+    logger.warn('voice_device_enumeration_failed', {
+      kind,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return
+  }
+  if (devices.some((d) => d.deviceId === preferredId)) return
+
+  // WHY: Re-read after the await — rapid MediaDevicesChanged bursts (docking/
+  // undocking) spawn concurrent invocations; only the one still matching the
+  // current preference proceeds, preventing duplicate fallback switches.
+  const current = get()
+  const currentId =
+    kind === 'audioinput' ? current.preferredAudioInputId : current.preferredAudioOutputId
+  if (currentId !== preferredId) return
+
+  logger.warn('voice_preferred_device_unplugged', { kind, deviceId: preferredId })
+  clearPreferredDeviceId(kind)
+  const fallbacks = current.deviceFallbacks
+  const nextFallbacks = fallbacks.includes(kind) ? fallbacks : [...fallbacks, kind]
+  if (kind === 'audioinput') {
+    set({ preferredAudioInputId: null, deviceFallbacks: nextFallbacks })
+  } else {
+    set({ preferredAudioOutputId: null, deviceFallbacks: nextFallbacks })
+  }
+
+  // WHY: Chromium exposes a synthetic 'default' device; prefer it, otherwise
+  // the first available device (Firefox/Safari have no 'default' entry).
+  const fallback = devices.find((d) => d.deviceId === 'default') ?? devices[0]
+  if (fallback === undefined) return
+  try {
+    await room.switchActiveDevice(kind, fallback.deviceId)
+  } catch (err: unknown) {
+    logger.warn('voice_device_fallback_switch_failed', {
+      kind,
+      deviceId: fallback.deviceId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/** WHY: Runs on RoomEvent.MediaDevicesChanged (hot plug/unplug). Only preferred
+ * devices need checking — with no stored preference the browser already tracks
+ * the system default on its own. */
+function handleMediaDevicesChanged(room: Room, get: GetState, set: SetState): void {
+  const { preferredAudioInputId, preferredAudioOutputId } = get()
+  if (preferredAudioInputId !== null) {
+    void fallBackIfDeviceGone(room, 'audioinput', preferredAudioInputId, get, set)
+  }
+  if (preferredAudioOutputId !== null) {
+    void fallBackIfDeviceGone(room, 'audiooutput', preferredAudioOutputId, get, set)
+  }
+}
+
 /** WHY: Per LiveKit docs, KRISP attaches via LocalTrackPublished event on the
  * mic track. Dynamic import keeps the WASM bundle out of the critical path.
  * Sets krispInitPromise so toggleKrisp() can await ongoing init (P0-6). */
@@ -322,6 +413,7 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
 
   onRoom(RoomEvent.MediaDevicesChanged, () => {
     logger.info('voice_media_devices_changed')
+    if (get().room === room) handleMediaDevicesChanged(room, get, set)
   })
 
   onRoom(RoomEvent.AudioPlaybackStatusChanged, () => {
@@ -583,6 +675,7 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       error: null,
       isMuted: false,
       isDeafened: false,
+      deviceFallbacks: [],
       activeSpeakers: new Set(),
     })
   },
@@ -716,8 +809,15 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
   },
 
   setPreferredDevice: (kind, deviceId) => {
+    // WHY: Persist immediately so the choice survives a page reload even if the
+    // user never disconnects cleanly.
+    savePreferredDeviceId(kind, deviceId)
     if (kind === 'audioinput') set({ preferredAudioInputId: deviceId })
     else set({ preferredAudioOutputId: deviceId })
+  },
+
+  clearDeviceFallback: () => {
+    set({ deviceFallbacks: [] })
   },
 
   reset: () => {

@@ -161,6 +161,10 @@ vi.mock('livekit-client', () => {
     return instance
   }
 
+  // WHY: The store's device-unplug fallback calls the STATIC Room.getLocalDevices.
+  // Default to no devices; tests override per scenario.
+  MockRoomConstructor.getLocalDevices = vi.fn().mockResolvedValue([])
+
   return {
     Room: MockRoomConstructor,
     RoomEvent: {
@@ -229,6 +233,7 @@ function addRemoteParticipant(room: MockRoom, identity: string) {
 
 beforeEach(() => {
   vi.useFakeTimers()
+  localStorage.clear()
   useVoiceConnectionStore.setState(initialState, true)
   vi.clearAllMocks()
 })
@@ -1297,6 +1302,142 @@ describe('useVoiceConnectionStore', () => {
 
       expect(useVoiceConnectionStore.getState().preferredAudioInputId).toBe('mic-123')
       expect(useVoiceConnectionStore.getState().status).toBe('idle')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Device preference persistence (localStorage)
+  // -------------------------------------------------------------------------
+  describe('device preference persistence', () => {
+    it('setPreferredDevice persists the input choice to localStorage', async () => {
+      await connectStore()
+
+      useVoiceConnectionStore.getState().setPreferredDevice('audioinput', 'mic-123')
+
+      expect(localStorage.getItem('voice_preferred_audio_input')).toBe('mic-123')
+    })
+
+    it('setPreferredDevice persists the output choice to localStorage', async () => {
+      await connectStore()
+
+      useVoiceConnectionStore.getState().setPreferredDevice('audiooutput', 'speaker-456')
+
+      expect(localStorage.getItem('voice_preferred_audio_output')).toBe('speaker-456')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Device unplug fallback (MediaDevicesChanged)
+  // -------------------------------------------------------------------------
+  describe('device unplug fallback', () => {
+    async function mockLocalDevices(devices: Array<{ deviceId: string }>) {
+      const { Room } = await import('livekit-client')
+      const getLocalDevices = (Room as unknown as { getLocalDevices: Mock }).getLocalDevices
+      getLocalDevices.mockResolvedValue(devices)
+      return getLocalDevices
+    }
+
+    it('falls back to the default device when the preferred input disappears', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.getState().setPreferredDevice('audioinput', 'mic-123')
+      await mockLocalDevices([{ deviceId: 'default' }, { deviceId: 'other-mic' }])
+
+      room.__emit('mediaDevicesChanged')
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(room.switchActiveDevice).toHaveBeenCalledWith('audioinput', 'default')
+      expect(useVoiceConnectionStore.getState().preferredAudioInputId).toBeNull()
+      expect(useVoiceConnectionStore.getState().deviceFallbacks).toEqual(['audioinput'])
+      expect(localStorage.getItem('voice_preferred_audio_input')).toBeNull()
+    })
+
+    it('records both fallbacks when input and output disappear together (USB headset)', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.getState().setPreferredDevice('audioinput', 'headset-mic')
+      useVoiceConnectionStore.getState().setPreferredDevice('audiooutput', 'headset-speaker')
+      await mockLocalDevices([{ deviceId: 'default' }])
+
+      room.__emit('mediaDevicesChanged')
+      await vi.advanceTimersByTimeAsync(0)
+
+      const state = useVoiceConnectionStore.getState()
+      expect(state.preferredAudioInputId).toBeNull()
+      expect(state.preferredAudioOutputId).toBeNull()
+      expect([...state.deviceFallbacks].sort()).toEqual(['audioinput', 'audiooutput'])
+    })
+
+    it('falls back to the first device when no synthetic default exists', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.getState().setPreferredDevice('audiooutput', 'speaker-456')
+      await mockLocalDevices([{ deviceId: 'builtin-speaker' }])
+
+      room.__emit('mediaDevicesChanged')
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(room.switchActiveDevice).toHaveBeenCalledWith('audiooutput', 'builtin-speaker')
+      expect(useVoiceConnectionStore.getState().deviceFallbacks).toEqual(['audiooutput'])
+    })
+
+    it('does nothing when the preferred device is still present', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.getState().setPreferredDevice('audioinput', 'mic-123')
+      await mockLocalDevices([{ deviceId: 'default' }, { deviceId: 'mic-123' }])
+      vi.clearAllMocks()
+
+      room.__emit('mediaDevicesChanged')
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(room.switchActiveDevice).not.toHaveBeenCalled()
+      expect(useVoiceConnectionStore.getState().preferredAudioInputId).toBe('mic-123')
+      expect(useVoiceConnectionStore.getState().deviceFallbacks).toEqual([])
+    })
+
+    it('does nothing when no preference is set', async () => {
+      const room = await connectStore()
+      const getLocalDevices = await mockLocalDevices([{ deviceId: 'default' }])
+      vi.clearAllMocks()
+
+      room.__emit('mediaDevicesChanged')
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(getLocalDevices).not.toHaveBeenCalled()
+      expect(room.switchActiveDevice).not.toHaveBeenCalled()
+    })
+
+    it('clearDeviceFallback resets the notice state', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.getState().setPreferredDevice('audioinput', 'mic-123')
+      await mockLocalDevices([{ deviceId: 'default' }])
+      room.__emit('mediaDevicesChanged')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(useVoiceConnectionStore.getState().deviceFallbacks).toEqual(['audioinput'])
+
+      useVoiceConnectionStore.getState().clearDeviceFallback()
+
+      expect(useVoiceConnectionStore.getState().deviceFallbacks).toEqual([])
+    })
+
+    it('clears deviceFallbacks on disconnect', async () => {
+      await connectStore()
+      useVoiceConnectionStore.setState({ deviceFallbacks: ['audioinput'] })
+
+      await useVoiceConnectionStore.getState().disconnect()
+
+      expect(useVoiceConnectionStore.getState().deviceFallbacks).toEqual([])
+    })
+
+    it('keeps state intact when enumeration fails', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.getState().setPreferredDevice('audioinput', 'mic-123')
+      const { Room } = await import('livekit-client')
+      const getLocalDevices = (Room as unknown as { getLocalDevices: Mock }).getLocalDevices
+      getLocalDevices.mockRejectedValueOnce(new Error('enumeration blocked'))
+
+      room.__emit('mediaDevicesChanged')
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(useVoiceConnectionStore.getState().preferredAudioInputId).toBe('mic-123')
+      expect(useVoiceConnectionStore.getState().deviceFallbacks).toEqual([])
     })
   })
 })

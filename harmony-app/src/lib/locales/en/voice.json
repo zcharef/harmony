@@ -3,6 +3,7 @@
   "reconnecting": "Reconnecting...",
   "voiceConnected": "Voice Connected",
   "connectionFailed": "Connection failed",
+  "retry": "Retry",
   "disconnected": "Disconnected",
   "disconnect": "Disconnect",
   "audioSettings": "Audio Settings",
@@ -18,5 +19,10 @@
   "speaker": "Speaker",
   "switchMicrophoneFailed": "Failed to switch microphone",
   "switchSpeakerFailed": "Failed to switch speaker",
+  "microphoneUnplugged": "Microphone disconnected — switched to the default device",
+  "speakerUnplugged": "Speaker disconnected — switched to the default device",
+  "audioDevicesUnplugged": "Audio devices disconnected — switched to the defaults",
+  "participantCount_one": "{{count}} participant in voice",
+  "participantCount_other": "{{count}} participants in voice",
   "unknownParticipant": "Unknown user"
 }

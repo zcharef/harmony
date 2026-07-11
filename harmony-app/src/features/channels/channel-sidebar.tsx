@@ -37,6 +37,7 @@ import { useSettingsUiStore } from '@/features/settings'
 import {
   AudioAutoplayPrompt,
   useVoiceConnectionStore,
+  VoiceChannelOccupancy,
   VoiceConnectionBar,
   VoiceParticipantList,
 } from '@/features/voice'
@@ -137,6 +138,7 @@ export function ChannelButton({
         {channel.encrypted && <EncryptedChannelBadge />}
         {channel.isPrivate && <Lock className="h-3 w-3 shrink-0 text-default-400" />}
         {channel.isReadOnly && <Megaphone className="h-3 w-3 shrink-0 text-default-400" />}
+        {channel.channelType === 'voice' && <VoiceChannelOccupancy channelId={channel.id} />}
         {unreadCount > 0 && (
           <span
             data-test="channel-unread-pill"

@@ -21,11 +21,24 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { isTauri } from '@/lib/platform'
 import { useVoiceConnection } from '../hooks/use-voice-connection'
+import type { AudioDeviceKind } from '../lib/device-preferences'
 import {
   useVoiceConnectionStore,
   type VoiceConnectionStatus,
 } from '../stores/voice-connection-store'
 import { AudioDeviceSelector } from './audio-device-selector'
+
+/** WHY: A USB headset unplug drops input AND output at once — collapse the
+ * two notices into one combined message instead of stacking near-duplicates. */
+function fallbackNoticeKey(
+  kinds: AudioDeviceKind[],
+): 'audioDevicesUnplugged' | 'microphoneUnplugged' | 'speakerUnplugged' {
+  const hasInput = kinds.includes('audioinput')
+  const hasOutput = kinds.includes('audiooutput')
+  if (hasInput && hasOutput) return 'audioDevicesUnplugged'
+  if (hasInput) return 'microphoneUnplugged'
+  return 'speakerUnplugged'
+}
 
 interface VoiceConnectionBarProps {
   /** WHY: Channel name is passed as a prop because the voice store only holds the
@@ -76,6 +89,7 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
   const { t } = useTranslation('voice')
   const status = useVoiceConnectionStore((s) => s.status)
   const error = useVoiceConnectionStore((s) => s.error)
+  const deviceFallbacks = useVoiceConnectionStore((s) => s.deviceFallbacks)
   const isKrispEnabled = useVoiceConnectionStore((s) => s.isKrispEnabled)
   const isPttMode = useVoiceConnectionStore((s) => s.isPttMode)
   const pttShortcut = useVoiceConnectionStore((s) => s.pttShortcut)
@@ -122,10 +136,23 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
                   onPress={onRetry}
                   data-test="voice-retry-btn"
                 >
-                  Retry
+                  {t('retry')}
                 </Button>
               )}
             </div>
+
+            {/* WHY: Inline notice when a preferred device was unplugged and the
+             * session fell back to the system default (ADR-028: user-relevant
+             * state change, inline > toast). Cleared when the user picks a
+             * device in the selector, or on disconnect. */}
+            {deviceFallbacks.length > 0 && (
+              <p
+                className="mb-1 px-1 text-xs text-warning"
+                data-test="voice-device-fallback-notice"
+              >
+                {t(fallbackNoticeKey(deviceFallbacks))}
+              </p>
+            )}
 
             {/* Control buttons row — only when connected or reconnecting */}
             {showControls && (
