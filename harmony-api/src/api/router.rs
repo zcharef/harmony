@@ -25,6 +25,20 @@ use super::handlers;
 use super::openapi::ApiDoc;
 use super::state::AppState;
 
+/// HTTP verbs the CORS layer allows. MUST cover every verb the routes below use.
+/// PUT is load-bearing (message pin, private-channel role-access, block user) —
+/// a missing verb here silently fails the browser preflight while curl succeeds.
+fn cors_allowed_methods() -> [Method; 6] {
+    [
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::PATCH,
+        Method::DELETE,
+        Method::OPTIONS,
+    ]
+}
+
 /// Build the main application router with production middleware stack.
 ///
 /// Layers are applied in reverse order of declaration:
@@ -61,13 +75,12 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
         } else {
             AllowOrigin::mirror_request()
         })
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PATCH,
-            Method::DELETE,
-            Method::OPTIONS,
-        ])
+        // WHY PUT is explicit here: the router registers PUT routes (message pin,
+        // private-channel role-access, block user). Omitting PUT makes the CORS
+        // preflight reject them from every browser origin while curl still works —
+        // a class of "dead from the app, fine from the CLI" bug. Keep this list in
+        // sync with every HTTP verb the routes below use.
+        .allow_methods(cors_allowed_methods())
         .allow_headers([
             header::CONTENT_TYPE,
             header::AUTHORIZATION,
@@ -494,4 +507,30 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
         .layer(SetRequestIdLayer::new(request_id_header, MakeRequestUuid))
         .layer(SentryHttpLayer::default().enable_transaction())
         .layer(NewSentryLayer::new_from_top())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Method, cors_allowed_methods};
+
+    /// Regression guard: PUT routes (pin, role-access, block) are dead from any
+    /// browser origin if PUT drops out of the CORS allow-list. Pin every verb the
+    /// router uses so a removal fails here instead of silently in production.
+    #[test]
+    fn cors_allows_every_verb_the_router_uses() {
+        let methods = cors_allowed_methods();
+        for verb in [
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ] {
+            assert!(
+                methods.contains(&verb),
+                "CORS allow_methods is missing {verb}; routes using it will fail the browser preflight",
+            );
+        }
+    }
 }
