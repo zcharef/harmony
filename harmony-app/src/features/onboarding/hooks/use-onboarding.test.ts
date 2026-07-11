@@ -23,6 +23,8 @@ vi.mock('i18next', () => ({
 }))
 
 const { getPreferences, updatePreferences } = await import('@/lib/api')
+const { toast } = await import('@/lib/toast')
+const { logger } = await import('@/lib/logger')
 
 function buildPreferences(
   overrides: Partial<UserPreferencesResponse> = {},
@@ -169,6 +171,28 @@ describe('useOnboarding', () => {
         throwOnError: true,
       }),
     )
+    expect(result.current.showOnboarding).toBe(false)
+  })
+
+  // WHY: The deep-land PATCH is a background side-effect the user never
+  // initiated — a transient failure (offline, 5xx) must not surface a
+  // "preferences update failed" toast about a screen they have never seen
+  // (ADR-045). User-clicked completion keeps its toast (covered in
+  // use-update-preferences.test.ts).
+  it('invite deep-land completion failure does not toast', async () => {
+    vi.mocked(getPreferences).mockResolvedValue({
+      data: buildPreferences({ onboardingCompleted: false }),
+    } as never)
+    vi.mocked(updatePreferences).mockRejectedValue(new Error('offline'))
+
+    const { result } = renderOnboarding(true)
+
+    // Wait until onError has actually run (it always logs), then assert
+    // the toast branch was skipped and the flow stayed suppressed.
+    await waitFor(() =>
+      expect(logger.error).toHaveBeenCalledWith('update_preferences_failed', expect.anything()),
+    )
+    expect(toast.error).not.toHaveBeenCalled()
     expect(result.current.showOnboarding).toBe(false)
   })
 

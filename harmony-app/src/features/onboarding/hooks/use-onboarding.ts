@@ -48,12 +48,19 @@ export function useOnboarding(inviteDeepLand = false) {
 
   // WHY effect (not render-time): completing writes server state; it must
   // run once when the deep-land is known, not on every render. The
-  // completedThisSession latch inside completeOnboarding makes it idempotent.
+  // completedThisSession latch makes it idempotent.
+  // WHY silent: unlike every other completion call site (user clicks inside
+  // the flow), this PATCH is a background side-effect the user never
+  // initiated — a transient failure must not toast about a screen they have
+  // never seen (ADR-045). Rollback + logging still happen inside
+  // useUpdatePreferences; the flag lands there because the hook-level
+  // onError always runs, so only it can skip the toast.
   useEffect(() => {
     if (inviteDeepLand && needsOnboarding) {
-      completeOnboarding()
+      setCompletedThisSession(true)
+      mutate({ onboardingCompleted: true, silent: true })
     }
-  }, [inviteDeepLand, needsOnboarding, completeOnboarding])
+  }, [inviteDeepLand, needsOnboarding, mutate])
 
   return { showOnboarding, completeOnboarding }
 }

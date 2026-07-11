@@ -8,6 +8,19 @@ import { queryKeys } from '@/lib/query-keys'
 import { toast } from '@/lib/toast'
 
 /**
+ * WHY silent: some updates are background side-effects the user never
+ * initiated (e.g. the invite deep-land auto-completing onboarding). Per
+ * ADR-045 those must fail silently — rollback + log only, never a toast
+ * about a screen the user has not interacted with. The flag lives in the
+ * mutation variables (stripped before the request) because TanStack v5
+ * runs the hook-level onError in addition to any mutate-level callback,
+ * so suppression at the call site alone cannot stop the toast.
+ */
+type UpdatePreferencesVariables = UpdateUserPreferencesRequest & {
+  silent?: boolean
+}
+
+/**
  * WHY: Optimistic mutation for PATCH /v1/preferences (204 response).
  * Sets cache immediately on mutate, rolls back on error.
  * No invalidateQueries in onSettled — optimistic update is final (no SSE sync in v1).
@@ -16,7 +29,7 @@ export function useUpdatePreferences() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (patch: UpdateUserPreferencesRequest) => {
+    mutationFn: async ({ silent: _silent, ...patch }: UpdatePreferencesVariables) => {
       await updatePreferences({
         body: patch,
         throwOnError: true,
@@ -46,7 +59,7 @@ export function useUpdatePreferences() {
 
       return { previousData }
     },
-    onError: (error, _patch, context) => {
+    onError: (error, patch, context) => {
       // WHY: Rollback defaults to the server-default object when no previous
       // cache entry exists (first-ever toggle, no GET has resolved yet).
       queryClient.setQueryData<UserPreferencesResponse>(
@@ -67,7 +80,9 @@ export function useUpdatePreferences() {
       logger.error('update_preferences_failed', {
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('preferences.updateFailed')))
+      if (patch.silent !== true) {
+        toast.error(getApiErrorDetail(error, i18n.t('preferences.updateFailed')))
+      }
     },
   })
 }
