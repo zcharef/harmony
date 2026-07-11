@@ -97,11 +97,14 @@ export function useCreateEmoji(serverId: string | null) {
     onSuccess: (created) => {
       if (serverId === null) return
       // WHY setQueryData (not invalidate): instant UI, no refetch (§5.4 rule).
-      queryClient.setQueryData<EmojiListResponse>(queryKeys.servers.emojis(serverId), (old) =>
-        old === undefined
-          ? { items: [created], total: 1 }
-          : { items: [...old.items, created], total: old.total + 1 },
-      )
+      queryClient.setQueryData<EmojiListResponse>(queryKeys.servers.emojis(serverId), (old) => {
+        if (old === undefined) return { items: [created], total: 1 }
+        // WHY dedupe: the POST publishes emoji.created before returning 201 and
+        // the echo is not self-suppressed, so handleCreated may insert this id
+        // before onSuccess runs. Mirror its guard to avoid a double-insert.
+        if (old.items.some((e) => e.id === created.id)) return old
+        return { items: [...old.items, created], total: old.total + 1 }
+      })
     },
 
     onError: (error) => {

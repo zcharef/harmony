@@ -70,13 +70,18 @@ export function useRealtimeEmojis() {
       }
       queryClient.setQueryData<EmojiListResponse>(
         queryKeys.servers.emojis(parsed.data.serverId),
-        (old) =>
-          old === undefined
-            ? old
-            : {
-                items: old.items.filter((e) => e.id !== parsed.data.emojiId),
-                total: Math.max(0, old.total - 1),
-              },
+        (old) => {
+          if (old === undefined) return old
+          // WHY presence guard: the deleting admin already decremented `total`
+          // optimistically (use-delete-emoji onMutate) and still receives their
+          // own emoji.deleted echo (not self-suppressed). Without this the echo
+          // decrements a second time, drifting total below items.length.
+          if (!old.items.some((e) => e.id === parsed.data.emojiId)) return old
+          return {
+            items: old.items.filter((e) => e.id !== parsed.data.emojiId),
+            total: Math.max(0, old.total - 1),
+          }
+        },
       )
     },
     [queryClient],
