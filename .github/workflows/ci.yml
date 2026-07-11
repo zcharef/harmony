@@ -216,7 +216,9 @@ jobs:
           SUPABASE_URL: http://127.0.0.1:64321
           ENVIRONMENT: test
           SERVER_PORT: "3000"
-        run: cargo test --test voice_endpoint_test -- --ignored
+        run: |
+          cargo test --test voice_endpoint_test -- --ignored
+          cargo test --test analytics_emission_test -- --ignored
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Job 3: Rust Security & License Audit
