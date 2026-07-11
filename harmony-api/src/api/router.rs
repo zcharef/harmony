@@ -135,6 +135,16 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             get(handlers::channels::get_channel_role_access)
                 .put(handlers::channels::set_channel_role_access),
         )
+        // Custom server emoji
+        .route(
+            "/v1/servers/{id}/emojis",
+            get(handlers::server_emojis::list_server_emojis)
+                .post(handlers::server_emojis::create_server_emoji),
+        )
+        .route(
+            "/v1/servers/{id}/emojis/{emoji_id}",
+            delete(handlers::server_emojis::delete_server_emoji),
+        )
         // Invites
         .route(
             "/v1/servers/{id}/invites",

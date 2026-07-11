@@ -11,7 +11,7 @@ import {
   SmilePlus,
   Trash2,
 } from 'lucide-react'
-import { type ComponentPropsWithoutRef, memo, useCallback, useRef, useState } from 'react'
+import { type ComponentPropsWithoutRef, memo, useCallback, useMemo, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
@@ -21,7 +21,13 @@ import type { DecryptResult } from '@/features/crypto'
 import { EncryptedMessageContent } from '@/features/crypto'
 import { usePreferences } from '@/features/preferences'
 import { OfficialBadge, ProfilePopover, useOfficialBadges } from '@/features/profiles'
-import type { MessageResponse } from '@/lib/api'
+import {
+  extendSanitizeForEmoji,
+  parseEmojiToken,
+  remarkCustomEmoji,
+  useServerEmojiMap,
+} from '@/features/server-emojis'
+import type { EmojiResponse, MessageResponse } from '@/lib/api'
 import { resolveDisplayName } from '@/lib/display-name'
 import { isTauri } from '@/lib/platform'
 import { maskProfanity } from '@/lib/profanity-filter'
@@ -38,6 +44,27 @@ import {
   remarkMentions,
 } from './lib/mention-tokens'
 import { messageSanitizeSchema } from './lib/message-sanitize'
+
+// WHY module-level: the schema never changes — extend the shared mention/image
+// sanitize schema once to allowlist the custom-emoji span's data attributes.
+const emojiSanitizeSchema = extendSanitizeForEmoji(messageSanitizeSchema)
+
+/**
+ * Renders a resolved custom emoji as a small inline image. Sizing mirrors
+ * Discord's inline emoji (~1.375em tall, baseline-nudged) via Tailwind
+ * arbitrary values — no global CSS, no inline style (ADR-044).
+ */
+function InlineCustomEmoji({ name, url }: { name: string; url: string }) {
+  return (
+    <img
+      src={url}
+      alt={`:${name}:`}
+      className="inline-block h-[1.375em] w-auto align-[-0.25em]"
+      draggable={false}
+      data-test="inline-custom-emoji"
+    />
+  )
+}
 
 interface MessageItemProps {
   message: MessageResponse
@@ -119,6 +146,8 @@ function normalizeUrl(url: string): string {
 type MarkdownSpanProps = ComponentPropsWithoutRef<'span'> & {
   node?: unknown
   'data-mention-id'?: string
+  'data-emoji-name'?: string
+  'data-emoji-url'?: string
 }
 
 // WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
@@ -155,6 +184,13 @@ function MessageContent({
   const [pendingUrl, setPendingUrl] = useState<string | null>(null)
   const { data: prefs } = usePreferences()
   const hideProfanity = prefs?.hideProfanity ?? true
+  // WHY: `:name:` tokens resolve against this server's emoji. Empty while the
+  // query loads ⇒ tokens stay literal, then re-render on cache fill (§1).
+  const emojiMap = useServerEmojiMap(serverId)
+  const remarkPlugins = useMemo(
+    () => [remarkGfm, remarkMentions, remarkCustomEmoji(emojiMap)],
+    [emojiMap],
+  )
 
   // WHY: Defense-in-depth — rehype-sanitize already strips dangerous protocols,
   // but we re-check here to guard against future config changes or plugin swaps.
@@ -298,16 +334,25 @@ function MessageContent({
   return (
     <div data-test="message-content" className="text-sm text-foreground/90">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMentions]}
-        rehypePlugins={[[rehypeSanitize, messageSanitizeSchema]]}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={[[rehypeSanitize, emojiSanitizeSchema]]}
         urlTransform={normalizeUrl}
         components={{
           p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
-          // WHY: remarkMentions emits spans carrying data-mention-id — render
-          // them as pills; any other span falls through untouched.
-          span: ({ node: _node, 'data-mention-id': mentionId, ...rest }: MarkdownSpanProps) =>
+          // WHY: remark plugins emit spans carrying data-mention-id (mentions)
+          // or data-emoji-name/url (custom emoji) — render each as its element;
+          // any other span falls through untouched.
+          span: ({
+            node: _node,
+            'data-mention-id': mentionId,
+            'data-emoji-name': emojiName,
+            'data-emoji-url': emojiUrl,
+            ...rest
+          }: MarkdownSpanProps) =>
             mentionId !== undefined ? (
               <MentionPill userId={mentionId} mentions={message.mentions} serverId={serverId} />
+            ) : emojiName !== undefined && emojiUrl !== undefined ? (
+              <InlineCustomEmoji name={emojiName} url={emojiUrl} />
             ) : (
               <span {...rest} />
             ),
@@ -477,14 +522,34 @@ export function ReactionTooltipContent({
 }
 
 // WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
+/** Render a reaction key: a custom `:name:` in the map → image, else the raw text. */
+function ReactionEmoji({
+  emoji,
+  emojiMap,
+}: {
+  emoji: string
+  emojiMap: ReadonlyMap<string, EmojiResponse>
+}) {
+  const name = parseEmojiToken(emoji)
+  const custom = name !== null ? emojiMap.get(name) : undefined
+  if (custom !== undefined) {
+    return <InlineCustomEmoji name={custom.name} url={custom.url} />
+  }
+  return <span>{emoji}</span>
+}
+
 function ReactionBar({
   reactions,
   isDeleted,
+  serverId,
+  emojiMap,
   onAddReaction,
   onRemoveReaction,
 }: {
   reactions: MessageResponse['reactions']
   isDeleted: boolean
+  serverId: string | null
+  emojiMap: ReadonlyMap<string, EmojiResponse>
   onAddReaction?: (emoji: string) => void
   onRemoveReaction?: (emoji: string) => void
 }) {
@@ -511,7 +576,7 @@ function ReactionBar({
             }
             className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors${r.reactedByMe === true ? ' border-primary bg-primary/10 text-primary' : ' border-default-200 bg-default-50 hover:bg-default-100'}`}
           >
-            <span>{r.emoji}</span>
+            <ReactionEmoji emoji={r.emoji} emojiMap={emojiMap} />
             <span>{r.count}</span>
           </button>
         </Tooltip>
@@ -522,6 +587,7 @@ function ReactionBar({
           isOpen={isPickerOpen}
           onOpenChange={setIsPickerOpen}
           onEmojiSelect={onAddReaction}
+          serverId={serverId}
           placement="top-start"
         >
           <button
@@ -784,6 +850,9 @@ export const MessageItem = memo(function MessageItem({
   getCachedPlaintext,
 }: MessageItemProps) {
   const { t } = useTranslation('messages')
+  // WHY here (not only in MessageContent): the ReactionBar renders custom
+  // `:name:` reaction pills as images too — both read the same cached map.
+  const emojiMap = useServerEmojiMap(serverId)
   // WHY: Hooks must be called before any conditional returns (React rules of hooks).
   // The buffer is seeded when editing OPENS (not at mount) so a message edited
   // via SSE/AutoMod in between never leaks stale content into the editor
@@ -889,6 +958,8 @@ export const MessageItem = memo(function MessageItem({
         <ReactionBar
           reactions={message.reactions}
           isDeleted={isDeleted}
+          serverId={serverId}
+          emojiMap={emojiMap}
           onAddReaction={onAddReaction}
           onRemoveReaction={onRemoveReaction}
         />

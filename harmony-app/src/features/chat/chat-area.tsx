@@ -552,6 +552,7 @@ function MessageInput({
   textareaRef,
   attachments,
   attachmentsEnabled,
+  serverId,
 }: {
   isInputDisabled: boolean
   placeholder: string
@@ -561,6 +562,8 @@ function MessageInput({
   onSendTyping: () => void
   /** WHY: a picked GIF sends immediately as its own message (Discord behavior). */
   onGifSelect: (gifUrl: string) => void
+  /** The active channel's server — surfaces its custom emoji in the picker. */
+  serverId: string | null
   /** WHY: state lives in ChatArea (useMentionAutocomplete) — the send transform needs its map. */
   mention: UseMentionAutocompleteResult
   /** WHY lifted: the autocomplete hook reads the caret from this node. */
@@ -777,6 +780,7 @@ function MessageInput({
               isOpen={isEmojiOpen}
               onOpenChange={setIsEmojiOpen}
               onEmojiSelect={handleEmojiSelect}
+              serverId={serverId}
               placement="top-end"
             >
               <Button variant="light" isIconOnly size="sm" aria-label={t('emojiPicker')}>
@@ -987,6 +991,7 @@ function ChatInputSection({
   textareaRef,
   attachments,
   attachmentsEnabled,
+  serverId,
 }: {
   isBlocked: boolean
   isInputDisabled: boolean
@@ -1004,6 +1009,8 @@ function ChatInputSection({
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
   attachments: ComposerAttachments
   attachmentsEnabled: boolean
+  /** The active channel's server — surfaces its custom emoji in the picker. */
+  serverId: string | null
 }) {
   const { t: tCrypto } = useTranslation('crypto')
 
@@ -1032,6 +1039,7 @@ function ChatInputSection({
         textareaRef={textareaRef}
         attachments={attachments}
         attachmentsEnabled={attachmentsEnabled}
+        serverId={serverId}
       />
     </>
   )
@@ -1777,6 +1785,7 @@ export function ChatArea({
         textareaRef={composerRef}
         attachments={attachments}
         attachmentsEnabled={attachmentsEnabled}
+        serverId={serverId}
       />
 
       {/* Verify identity modal — only rendered on desktop DMs */}

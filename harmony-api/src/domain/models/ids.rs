@@ -133,6 +133,31 @@ impl From<Uuid> for AttachmentId {
     }
 }
 
+/// Unique identifier for a custom server emoji.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "220e8400-e29b-41d4-a716-44665544000c")]
+#[serde(transparent)]
+pub struct EmojiId(pub Uuid);
+
+impl EmojiId {
+    #[must_use]
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for EmojiId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for EmojiId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
 /// Unique identifier for a role within a server.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[schema(example = "990e8400-e29b-41d4-a716-446655440004")]

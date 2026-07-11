@@ -4495,6 +4495,230 @@
         ]
       }
     },
+    "/v1/servers/{id}/emojis": {
+      "get": {
+        "tags": [
+          "Emoji"
+        ],
+        "summary": "List all custom emoji in a server. Requires server membership.",
+        "description": "# Errors\nReturns `ApiError` if the caller is not a member, or on repository error.",
+        "operationId": "list_server_emojis",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Emoji list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmojiListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a server member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Emoji"
+        ],
+        "summary": "Create a custom emoji. Requires admin+ role.",
+        "description": "# Errors\nReturns `ApiError` on validation failure, insufficient role, plan-limit\nbreach, duplicate name, or repository error.",
+        "operationId": "create_server_emoji",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEmojiRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Emoji created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmojiResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role or plan limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate emoji name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/servers/{id}/emojis/{emoji_id}": {
+      "delete": {
+        "tags": [
+          "Emoji"
+        ],
+        "summary": "Delete a custom emoji. Requires admin+ role.",
+        "description": "# Errors\nReturns `ApiError` on insufficient role, a missing emoji, a cross-server id,\nor repository error.",
+        "operationId": "delete_server_emoji",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "emoji_id",
+            "in": "path",
+            "description": "Emoji ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EmojiId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Emoji deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role or cross-server id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Emoji not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/servers/{id}/invites": {
       "post": {
         "tags": [
@@ -6346,6 +6570,29 @@
         },
         "additionalProperties": false
       },
+      "CreateEmojiRequest": {
+        "type": "object",
+        "description": "Request body to register a custom emoji (bytes already uploaded to Storage).",
+        "required": [
+          "name",
+          "url",
+          "isAnimated"
+        ],
+        "properties": {
+          "isAnimated": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string",
+            "description": "2–32 chars, lowercased + validated server-side to `^[a-z0-9_]{2,32}$`."
+          },
+          "url": {
+            "type": "string",
+            "description": "Public URL from the `server-emojis` bucket (client uploaded direct).\nThe server validates the host/prefix; it never fetches the bytes."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateInviteRequest": {
         "type": "object",
         "description": "Request body for creating a new invite.",
@@ -6623,6 +6870,70 @@
           }
         },
         "additionalProperties": false
+      },
+      "EmojiId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a custom server emoji.",
+        "example": "220e8400-e29b-41d4-a716-44665544000c"
+      },
+      "EmojiListResponse": {
+        "type": "object",
+        "description": "Collection envelope for the server's emoji set (ADR-036).",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmojiResponse"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "EmojiResponse": {
+        "type": "object",
+        "description": "A single custom emoji.",
+        "required": [
+          "id",
+          "serverId",
+          "name",
+          "url",
+          "isAnimated",
+          "createdBy",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "id": {
+            "$ref": "#/components/schemas/EmojiId"
+          },
+          "isAnimated": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string",
+            "description": "The name WITHOUT colons; the client wraps it in `:name:` for the token."
+          },
+          "serverId": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
       },
       "FollowThroughResponse": {
         "type": "object",
@@ -8928,6 +9239,10 @@
     {
       "name": "Reactions",
       "description": "Message reactions"
+    },
+    {
+      "name": "Emoji",
+      "description": "Custom server emoji"
     },
     {
       "name": "Gifs",

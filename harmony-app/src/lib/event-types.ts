@@ -48,6 +48,8 @@ export const SSE_EVENT_NAMES = [
   'unread.sync',
   'reaction.added',
   'reaction.removed',
+  'emoji.created',
+  'emoji.deleted',
   'mention.received',
   'voice.state_update',
   'force.disconnect',
@@ -426,6 +428,28 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     // WHY: the "who reacted" list is keyed by username, so removal needs it to
     // drop the matching entry.
     username: z.string(),
+  }),
+
+  // Custom emoji (server-scoped)
+  z.object({
+    type: z.literal('emojiCreated'),
+    senderId: z.string(),
+    serverId: z.string(),
+    emoji: z.object({
+      id: z.string(),
+      serverId: z.string(),
+      name: z.string(),
+      url: z.string().url(),
+      isAnimated: z.boolean(),
+      createdBy: z.string(),
+      createdAt: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('emojiDeleted'),
+    senderId: z.string(),
+    serverId: z.string(),
+    emojiId: z.string(),
   }),
 
   // Mentions (user-targeted)

@@ -34,6 +34,7 @@ import {
 import { OnboardingFlow, useOnboarding } from '@/features/onboarding'
 import { usePresence } from '@/features/presence'
 import { SearchOverlay } from '@/features/search'
+import { useRealtimeEmojis } from '@/features/server-emojis'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, UserSettingsModal, useSettingsUiStore } from '@/features/settings'
 import { useVoiceConnection } from '@/features/voice'
@@ -487,6 +488,11 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
   // torn down — events would be silently missed until the panel re-opens.
   useRealtimeChannels()
   useRealtimeMembers()
+  // WHY: Live custom-emoji resolution — appends/removes from every server's
+  // emoji cache on emoji.created/deleted so `:name:` tokens resolve (or degrade
+  // to text) without a refetch. Mounted here (not a sidebar) so it survives
+  // view switches (§4.6); keyed on the event's serverId, one mount covers all.
+  useRealtimeEmojis()
   // WHY: Live identity rehydration — patches every cached member list, DM,
   // message page, and the own-profile cache on profile.updated. Mounted here
   // (not in a sidebar) so it survives DM/server view switches (§4.6).

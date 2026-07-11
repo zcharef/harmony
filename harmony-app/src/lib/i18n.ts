@@ -15,6 +15,7 @@ import migration from '@/lib/locales/en/migration.json'
 import onboarding from '@/lib/locales/en/onboarding.json'
 import profiles from '@/lib/locales/en/profiles.json'
 import search from '@/lib/locales/en/search.json'
+import serverEmojis from '@/lib/locales/en/server-emojis.json'
 import servers from '@/lib/locales/en/servers.json'
 import settings from '@/lib/locales/en/settings.json'
 import voice from '@/lib/locales/en/voice.json'
@@ -42,6 +43,7 @@ const resources = {
     voice,
     profiles,
     search,
+    'server-emojis': serverEmojis,
   },
 } as const
 
@@ -67,6 +69,7 @@ i18n.use(initReactI18next).init({
     'voice',
     'profiles',
     'search',
+    'server-emojis',
   ],
   defaultNS,
   resources,

@@ -74,6 +74,8 @@ pub enum ResourceKind {
     OpenDms,
     // §6 Files (per message)
     AttachmentsPerMessage,
+    // §9 Emoji (per server)
+    CustomEmoji,
 }
 
 impl ResourceKind {
@@ -91,6 +93,7 @@ impl ResourceKind {
             Self::ActiveInvites => "active invites",
             Self::OpenDms => "open DM conversations",
             Self::AttachmentsPerMessage => "attachments per message",
+            Self::CustomEmoji => "custom emoji",
         }
     }
 }
@@ -140,6 +143,15 @@ pub struct PlanLimits {
     // §6 Files (per message / per file)
     pub max_attachments_per_message: u64,
     pub max_attachment_size_bytes: u64,
+    // §9 Emoji (per server)
+    /// Max custom emoji per server. Free is **0** (RED LINE — never raise;
+    /// custom emoji is a paid feature).
+    pub max_custom_emojis: u64,
+    /// Per-emoji byte cap. Enforced client-side (the API never reads the bytes);
+    /// the bucket hard-ceils at the Creator max (1 MB).
+    pub max_emoji_bytes: u64,
+    /// Whether animated (GIF) emoji are allowed on this plan.
+    pub emoji_animated_allowed: bool,
     // §12 Rate limits (per user)
     pub max_messages_per_5s: u64,
     /// Upload rate (attachments per rolling minute, per user).
@@ -172,6 +184,9 @@ const FREE_LIMITS: PlanLimits = PlanLimits {
     max_custom_status_chars: 50,
     max_attachments_per_message: 1,
     max_attachment_size_bytes: 8_388_608, // 8 MB
+    max_custom_emojis: 0,                 // RED LINE — Free never gets custom emoji
+    max_emoji_bytes: 0,
+    emoji_animated_allowed: false,
     max_messages_per_5s: 5,
     max_uploads_per_min: 3,
     voice_concurrent_limit: 5,
@@ -197,6 +212,9 @@ const SUPPORTER_LIMITS: PlanLimits = PlanLimits {
     max_custom_status_chars: 128,
     max_attachments_per_message: 5,
     max_attachment_size_bytes: 52_428_800, // 50 MB
+    max_custom_emojis: 100,
+    max_emoji_bytes: 524_288, // 512 KB
+    emoji_animated_allowed: true,
     max_messages_per_5s: 10,
     max_uploads_per_min: 10,
     voice_concurrent_limit: 100,
@@ -222,6 +240,9 @@ const CREATOR_LIMITS: PlanLimits = PlanLimits {
     max_custom_status_chars: 128,
     max_attachments_per_message: 10,
     max_attachment_size_bytes: 104_857_600, // 100 MB
+    max_custom_emojis: 500,
+    max_emoji_bytes: 1_048_576, // 1 MB
+    emoji_animated_allowed: true,
     max_messages_per_5s: 20,
     max_uploads_per_min: 20,
     voice_concurrent_limit: 500,
@@ -248,8 +269,11 @@ pub const SELF_HOSTED_LIMITS: PlanLimits = PlanLimits {
     max_custom_status_chars: 256,
     max_attachments_per_message: 50,
     max_attachment_size_bytes: 104_857_600, // 100 MB (bucket hard cap)
-    max_messages_per_5s: u64::MAX,          // configurable
-    max_uploads_per_min: u64::MAX,          // configurable
+    max_custom_emojis: 10_000,
+    max_emoji_bytes: 1_048_576, // 1 MB (bucket hard cap)
+    emoji_animated_allowed: true,
+    max_messages_per_5s: u64::MAX, // configurable
+    max_uploads_per_min: u64::MAX, // configurable
     voice_concurrent_limit: 10_000,
     voice_channel_limit: 10_000,
     voice_bitrate_kbps: 512,
@@ -292,6 +316,7 @@ impl PlanLimits {
             ResourceKind::ActiveInvites => self.max_active_invites,
             ResourceKind::OpenDms => self.max_open_dms,
             ResourceKind::AttachmentsPerMessage => self.max_attachments_per_message,
+            ResourceKind::CustomEmoji => self.max_custom_emojis,
         }
     }
 }
@@ -332,6 +357,10 @@ mod tests {
         // §6 Files
         assert_eq!(limits.max_attachments_per_message, 1);
         assert_eq!(limits.max_attachment_size_bytes, 8_388_608); // 8 MB
+        // §9 Emoji — RED LINE: Free never gets custom emoji
+        assert_eq!(limits.max_custom_emojis, 0);
+        assert_eq!(limits.max_emoji_bytes, 0);
+        assert!(!limits.emoji_animated_allowed);
         // §12 Rate limits
         assert_eq!(limits.max_messages_per_5s, 5);
         assert_eq!(limits.max_uploads_per_min, 3);
@@ -365,6 +394,10 @@ mod tests {
         // §6 Files
         assert_eq!(limits.max_attachments_per_message, 5);
         assert_eq!(limits.max_attachment_size_bytes, 52_428_800); // 50 MB
+        // §9 Emoji
+        assert_eq!(limits.max_custom_emojis, 100);
+        assert_eq!(limits.max_emoji_bytes, 524_288); // 512 KB
+        assert!(limits.emoji_animated_allowed);
         assert_eq!(limits.max_messages_per_5s, 10);
         assert_eq!(limits.max_uploads_per_min, 10);
         // §13 Voice
@@ -397,6 +430,10 @@ mod tests {
         // §6 Files
         assert_eq!(limits.max_attachments_per_message, 10);
         assert_eq!(limits.max_attachment_size_bytes, 104_857_600); // 100 MB
+        // §9 Emoji
+        assert_eq!(limits.max_custom_emojis, 500);
+        assert_eq!(limits.max_emoji_bytes, 1_048_576); // 1 MB
+        assert!(limits.emoji_animated_allowed);
         assert_eq!(limits.max_messages_per_5s, 20);
         assert_eq!(limits.max_uploads_per_min, 20);
         // §13 Voice
@@ -429,6 +466,10 @@ mod tests {
         // §6 Files
         assert_eq!(limits.max_attachments_per_message, 50);
         assert_eq!(limits.max_attachment_size_bytes, 104_857_600); // bucket hard cap
+        // §9 Emoji
+        assert_eq!(limits.max_custom_emojis, 10_000);
+        assert_eq!(limits.max_emoji_bytes, 1_048_576); // 1 MB (bucket hard cap)
+        assert!(limits.emoji_animated_allowed);
         assert_eq!(limits.max_messages_per_5s, u64::MAX); // configurable
         assert_eq!(limits.max_uploads_per_min, u64::MAX); // configurable
         // §13 Voice
@@ -496,6 +537,17 @@ mod tests {
 
         assert!(free.max_attachment_size_bytes <= supporter.max_attachment_size_bytes);
         assert!(supporter.max_attachment_size_bytes <= creator.max_attachment_size_bytes);
+
+        assert!(free.max_custom_emojis <= supporter.max_custom_emojis);
+        assert!(supporter.max_custom_emojis <= creator.max_custom_emojis);
+
+        assert!(free.max_emoji_bytes <= supporter.max_emoji_bytes);
+        assert!(supporter.max_emoji_bytes <= creator.max_emoji_bytes);
+
+        // WHY `<=` on the bool: `false <= true` holds, so animated availability
+        // never regresses up the tiers.
+        assert!(free.emoji_animated_allowed <= supporter.emoji_animated_allowed);
+        assert!(supporter.emoji_animated_allowed <= creator.emoji_animated_allowed);
 
         assert!(free.max_uploads_per_min <= supporter.max_uploads_per_min);
         assert!(supporter.max_uploads_per_min <= creator.max_uploads_per_min);
@@ -643,6 +695,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn limit_for_custom_emoji() {
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::CustomEmoji),
+            0
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Supporter).limit_for(ResourceKind::CustomEmoji),
+            100
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::CustomEmoji),
+            500
+        );
+    }
+
     // ── Plan FromStr round-trip ─────────────────────────────────────────
 
     #[test]
@@ -739,6 +807,7 @@ mod tests {
             ResourceKind::AttachmentsPerMessage.display_name(),
             "attachments per message"
         );
+        assert_eq!(ResourceKind::CustomEmoji.display_name(), "custom emoji");
     }
 
     // ── Display impls ───────────────────────────────────────────────────
