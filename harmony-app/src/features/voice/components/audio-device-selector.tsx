@@ -23,6 +23,7 @@ export function AudioDeviceSelector() {
   const { t } = useTranslation('voice')
   const room = useVoiceConnectionStore((s) => s.room)
   const setPreferredDevice = useVoiceConnectionStore((s) => s.setPreferredDevice)
+  const clearDeviceFallback = useVoiceConnectionStore((s) => s.clearDeviceFallback)
   const preferredAudioInputId = useVoiceConnectionStore((s) => s.preferredAudioInputId)
   const preferredAudioOutputId = useVoiceConnectionStore((s) => s.preferredAudioOutputId)
 
@@ -105,6 +106,9 @@ export function AudioDeviceSelector() {
         if (kind === 'audioinput') setActiveInputId(deviceId)
         else setActiveOutputId(deviceId)
         setPreferredDevice(kind, deviceId)
+        // WHY: The user just picked a device deliberately — the "fell back to
+        // default" notice no longer describes the current state.
+        clearDeviceFallback()
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)

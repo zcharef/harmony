@@ -1,5 +1,6 @@
 export { AudioAutoplayPrompt } from './components/audio-autoplay-prompt'
 export { AudioDeviceSelector } from './components/audio-device-selector'
+export { VoiceChannelOccupancy } from './components/voice-channel-occupancy'
 export { VoiceConnectionBar } from './components/voice-connection-bar'
 export { VoiceParticipantList } from './components/voice-participant-list'
 export { usePushToTalk } from './hooks/use-push-to-talk'
