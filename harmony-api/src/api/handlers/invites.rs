@@ -29,6 +29,15 @@ const INVITE_PREVIEW_RATE_MAX: usize = 20;
 /// Window for the per-client invite preview rate limit.
 const INVITE_PREVIEW_RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// How long after account creation a join-via-invite still counts as a
+/// signup driven by that invite (`signup_via_invite` attribution).
+///
+/// WHY 24h: the invited-signup round trip includes an email confirmation
+/// the user may open hours later — a tight window undercounts the funnel.
+/// The event is once-per-user (partial unique index + ON CONFLICT DO
+/// NOTHING), so a generous window cannot double-count.
+const SIGNUP_VIA_INVITE_WINDOW_HOURS: i64 = 24;
+
 /// Create a new invite for a server.
 ///
 /// The authenticated user must be a member of the server. Returns a shareable
@@ -152,15 +161,14 @@ pub async fn preview_invite(
         .get_by_id_optional(&invite.creator_id)
         .await?;
 
-    // WHY: Funnel instrumentation for invite→join conversion (growth-plan §7).
-    // The analytics `funnel_events` table has not landed yet, so this degrades
-    // to a structured log per the invite-landing ticket. The raw code is a
-    // join capability — log only its hash.
-    tracing::info!(
-        event = "invite_preview_viewed",
-        invite_code_hash = %hash_invite_code(&code),
-        server_id = %invite.server_id,
-        "Invite preview viewed"
+    // Funnel top: landing-page views (invite→join conversion, growth-plan §7).
+    // No user (pre-auth surface) and no IP; the raw code is a join capability,
+    // so only its truncated hash is stored (fire-and-forget).
+    super::track(
+        &state,
+        AnalyticsEvent::new(AnalyticsEventName::InviteViewed)
+            .server(invite.server_id.clone())
+            .properties(serde_json::json!({ "code_hash": hash_invite_code(&code) })),
     );
 
     let preview = InvitePreviewResponse::new(&invite, &server, member_count, inviter.as_ref());
@@ -224,6 +232,10 @@ pub async fn join_server(
         .join_via_invite(&code, &user_id)
         .await?;
 
+    // WHY computed before the tracks below: `json!({ "code": code })` moves
+    // the code; the hash is needed afterwards for signup_via_invite.
+    let code_hash = hash_invite_code(&code);
+
     // §10 referral + activation funnel: invite conversion and the joined-a-
     // server milestone (fire-and-forget). The inviter is derivable from the
     // code via the invites/events log — no duplication here.
@@ -241,6 +253,37 @@ pub async fn join_server(
             .server(server_id.clone())
             .properties(serde_json::json!({ "via": "invite" })),
     );
+
+    // Referral attribution: an account created within the attribution window
+    // that redeems an invite signed up BECAUSE of it (signup_via_invite).
+    // Best-effort — a failed profile read must not fail the join.
+    match state.profile_service().get_by_id_optional(&user_id).await {
+        Ok(Some(profile)) => {
+            let account_age = Utc::now() - profile.created_at;
+            if account_age <= Duration::hours(SIGNUP_VIA_INVITE_WINDOW_HOURS) {
+                super::track(
+                    &state,
+                    AnalyticsEvent::new(AnalyticsEventName::SignupViaInvite)
+                        .user(user_id.clone())
+                        .server(server_id.clone())
+                        .properties(serde_json::json!({ "code_hash": code_hash })),
+                );
+            }
+        }
+        Ok(None) => {
+            tracing::warn!(
+                user_id = %user_id,
+                "Profile missing after join — skipping signup_via_invite attribution"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                user_id = %user_id,
+                error = ?e,
+                "Profile read failed — skipping signup_via_invite attribution"
+            );
+        }
+    }
 
     // WHY: Best-effort system message — announce the join in the default channel.
     // Must never fail the join itself. If the announcement fails (e.g. no default

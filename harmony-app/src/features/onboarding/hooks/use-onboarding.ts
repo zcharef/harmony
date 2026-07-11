@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { usePreferences, useUpdatePreferences } from '@/features/preferences'
 
 /**
@@ -22,20 +22,45 @@ import { usePreferences, useUpdatePreferences } from '@/features/preferences'
  * ("the user still proceeds into the app for this session"). The latch is
  * plain useState in a hook mounted by MainLayout (never unmounts), so a
  * rollback only re-shows onboarding on the next full load, as specified.
+ *
+ * WHY inviteDeepLand: a user who just joined a server through an invite
+ * (invite-landing deep-land) must land INSIDE that server, never in the
+ * generic tour — the tour's terminal goal (get into a server) is already
+ * met. The flag both suppresses the flow this render AND persists
+ * completion so the tour does not resurface on the next load. Non-invite
+ * first-runs are unaffected.
  */
-export function useOnboarding() {
+export function useOnboarding(inviteDeepLand = false) {
   const { data: preferences } = usePreferences()
   const updatePreferences = useUpdatePreferences()
   const [completedThisSession, setCompletedThisSession] = useState(false)
 
-  const showOnboarding =
+  const needsOnboarding =
     !completedThisSession && preferences !== undefined && preferences.onboardingCompleted === false
+
+  const showOnboarding = !inviteDeepLand && needsOnboarding
 
   const { mutate } = updatePreferences
   const completeOnboarding = useCallback(() => {
     setCompletedThisSession(true)
     mutate({ onboardingCompleted: true })
   }, [mutate])
+
+  // WHY effect (not render-time): completing writes server state; it must
+  // run once when the deep-land is known, not on every render. The
+  // completedThisSession latch makes it idempotent.
+  // WHY silent: unlike every other completion call site (user clicks inside
+  // the flow), this PATCH is a background side-effect the user never
+  // initiated — a transient failure must not toast about a screen they have
+  // never seen (ADR-045). Rollback + logging still happen inside
+  // useUpdatePreferences; the flag lands there because the hook-level
+  // onError always runs, so only it can skip the toast.
+  useEffect(() => {
+    if (inviteDeepLand && needsOnboarding) {
+      setCompletedThisSession(true)
+      mutate({ onboardingCompleted: true, silent: true })
+    }
+  }, [inviteDeepLand, needsOnboarding, mutate])
 
   return { showOnboarding, completeOnboarding }
 }

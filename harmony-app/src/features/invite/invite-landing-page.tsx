@@ -13,9 +13,10 @@
 
 import { Avatar, Button, Card, CardBody, CardHeader, Chip, Spinner } from '@heroui/react'
 import { Users } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LoginPage, useAuthStore } from '@/features/auth'
+import { useServers } from '@/features/server-nav'
 import type { InvitePreviewResponse } from '@/lib/api'
 import { getApiErrorDetail } from '@/lib/api-error'
 import { useAcceptInvite } from './hooks/use-accept-invite'
@@ -45,6 +46,10 @@ export function InviteLandingPage({ code, onDone }: InviteLandingPageProps) {
   // WHY: "account creation AFTER intent" — a pre-auth accept click was
   // recorded in sessionStorage; once the user is back here authenticated,
   // finish the join without demanding a second click.
+  // WHY no membership guard: an already-member visitor with a stale intent
+  // fires one redundant join that 409s — which useAcceptInvite maps to
+  // success, converging on the same onDone. Guarding would lift membership
+  // state out of the authed subtree for a rare, self-healing case.
   useEffect(() => {
     if (!isAuthed || serverId === undefined || !hasInviteIntent(code)) return
     if (!acceptIsIdle) return
@@ -57,6 +62,17 @@ export function InviteLandingPage({ code, onDone }: InviteLandingPageProps) {
       },
     )
   }, [isAuthed, serverId, code, acceptIsIdle, acceptMutate, onDone])
+
+  // WHY: Already-a-member visitors skip the accept step entirely — the CTA
+  // would only round-trip to a 409. Clear any stale intent so the auto-join
+  // effect cannot re-fire on a later visit to the same code.
+  const handleAlreadyMember = useCallback(
+    (memberServerId: string) => {
+      clearInviteIntent(code)
+      onDone(memberServerId)
+    },
+    [code, onDone],
+  )
 
   function handleAccept() {
     if (serverId === undefined) return
@@ -106,7 +122,7 @@ export function InviteLandingPage({ code, onDone }: InviteLandingPageProps) {
             <InviteLoadError onRetry={() => void preview.refetch()} />
           )}
 
-          {preview.isSuccess && (
+          {preview.isSuccess && !isAuthed && (
             <InvitePreviewCard
               preview={preview.data}
               isAuthed={isAuthed}
@@ -117,9 +133,76 @@ export function InviteLandingPage({ code, onDone }: InviteLandingPageProps) {
               onAccept={handleAccept}
             />
           )}
+
+          {preview.isSuccess && isAuthed && (
+            <AuthedInviteBody
+              preview={preview.data}
+              isJoining={acceptInvite.isPending}
+              joinError={
+                acceptInvite.isError ? getApiErrorDetail(acceptInvite.error, t('joinFailed')) : null
+              }
+              onAccept={handleAccept}
+              onAlreadyMember={handleAlreadyMember}
+            />
+          )}
         </CardBody>
       </Card>
     </div>
+  )
+}
+
+/**
+ * Authenticated branch — membership is checked BEFORE offering the CTA so an
+ * existing member goes straight into the server (no accept round-trip).
+ *
+ * WHY a separate component: `useServers` hits an authenticated endpoint; the
+ * unauthenticated landing must never mount it (a 401 would trip the global
+ * interceptor). Conditional rendering keeps the hook behind the auth gate.
+ * WHY fall back to the card on servers-query failure: the accept path treats
+ * 409 already-a-member as success, so the CTA remains a correct (one click
+ * slower) degradation — never a dead end.
+ */
+function AuthedInviteBody({
+  preview,
+  isJoining,
+  joinError,
+  onAccept,
+  onAlreadyMember,
+}: {
+  preview: InvitePreviewResponse
+  isJoining: boolean
+  joinError: string | null
+  onAccept: () => void
+  onAlreadyMember: (memberServerId: string) => void
+}) {
+  const servers = useServers()
+  const isMember = servers.data?.some((server) => server.id === preview.serverId) === true
+  const serverId = preview.serverId
+
+  useEffect(() => {
+    if (isMember) {
+      onAlreadyMember(serverId)
+    }
+  }, [isMember, serverId, onAlreadyMember])
+
+  // WHY spinner while pending OR member: the accept CTA must not flash for a
+  // visitor who is about to be handed straight into the server.
+  if (servers.isPending || isMember) {
+    return (
+      <div className="flex flex-col items-center py-6">
+        <Spinner size="lg" color="primary" data-test="invite-loading" />
+      </div>
+    )
+  }
+
+  return (
+    <InvitePreviewCard
+      preview={preview}
+      isAuthed
+      isJoining={isJoining}
+      joinError={joinError}
+      onAccept={onAccept}
+    />
   )
 }
 

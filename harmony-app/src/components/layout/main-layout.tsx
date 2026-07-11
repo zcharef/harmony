@@ -582,7 +582,10 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
 
   // WHY: Onboarding terminal paths — every one writes the completion flag
   // exactly once, then navigates (fire-and-forget optimistic, ticket §6.2).
-  const { showOnboarding, completeOnboarding } = useOnboarding()
+  // WHY initialServerId !== null: arriving from the invite landing means the
+  // user already joined a server — deep-land into it and mark the generic
+  // first-run tour complete instead of showing it (invite-landing deep-land).
+  const { showOnboarding, completeOnboarding } = useOnboarding(initialServerId !== null)
   const handleOnboardingSelect = useCallback(
     (serverId: string) => {
       completeOnboarding()

@@ -163,6 +163,39 @@ describe('useUpdatePreferences', () => {
     expect(toast.error).toHaveBeenCalledOnce()
   })
 
+  // WHY: silent marks background (non-user-initiated) updates — a transient
+  // failure must roll back and log but never toast (ADR-045). The flag must
+  // also never leak into the PATCH body.
+  it('silent: true suppresses the error toast but still rolls back', async () => {
+    vi.mocked(updatePreferences).mockRejectedValueOnce(new Error('boom'))
+
+    const { result } = renderPreferencesHooks(buildPreferences({ onboardingCompleted: false }))
+
+    await act(async () => {
+      result.current.update.mutate({ onboardingCompleted: true, silent: true })
+    })
+    await waitFor(() => expect(result.current.update.isError).toBe(true))
+
+    await waitFor(() => expect(result.current.preferences.data?.onboardingCompleted).toBe(false))
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('strips silent from the request body', async () => {
+    vi.mocked(updatePreferences).mockResolvedValueOnce({} as never)
+
+    const { result } = renderPreferencesHooks(buildPreferences())
+
+    await act(async () => {
+      result.current.update.mutate({ dndEnabled: true, silent: true })
+    })
+    await waitFor(() => expect(result.current.update.isSuccess).toBe(true))
+
+    expect(updatePreferences).toHaveBeenCalledWith({
+      body: { dndEnabled: true },
+      throwOnError: true,
+    })
+  })
+
   it('rolls back to server defaults on error when no previous cache exists', async () => {
     vi.mocked(updatePreferences).mockRejectedValueOnce(new Error('boom'))
 
