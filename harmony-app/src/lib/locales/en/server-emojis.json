@@ -13,5 +13,7 @@
   "errorTooLarge": "That image is too large.",
   "errorAnimatedNotAllowed": "Animated emoji aren't available on this plan.",
   "errorDuplicateName": "An emoji with that name already exists.",
-  "errorUploadFailed": "Couldn't upload that emoji. Try again."
+  "errorUploadFailed": "Couldn't upload that emoji. Try again.",
+  "rejectedTitle": "Emoji rejected",
+  "rejectedBody": "\":{{name}}:\" did not pass our content review and was not added."
 }

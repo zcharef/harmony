@@ -1,6 +1,7 @@
 pub mod attachment_scan;
 pub mod client_ip;
 pub mod dto;
+pub mod emoji_image_scan;
 pub mod errors;
 pub mod extractors;
 pub mod handlers;

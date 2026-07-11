@@ -91,6 +91,16 @@ impl ServerService {
             .await
     }
 
+    /// The shared banned-word filter this service uses for server names.
+    ///
+    /// WHY exposed: the application state constructs the emoji service internally
+    /// and reuses THIS instance so emoji names are moderated by the same
+    /// config-driven policy (one filter, not a second parallel one).
+    #[must_use]
+    pub fn content_filter(&self) -> &Arc<ContentFilter> {
+        &self.content_filter
+    }
+
     /// List all non-DM servers the user is a member of (for the server list UI).
     ///
     /// # Errors

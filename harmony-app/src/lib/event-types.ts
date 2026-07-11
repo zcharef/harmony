@@ -56,6 +56,7 @@ export const SSE_EVENT_NAMES = [
   'reaction.removed',
   'emoji.created',
   'emoji.deleted',
+  'emoji.rejected',
   'mention.received',
   'voice.state_update',
   'force.disconnect',
@@ -463,6 +464,16 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     senderId: z.string(),
     serverId: z.string(),
     emojiId: z.string(),
+  }),
+  // A pending custom emoji was rejected by the async image scan (scan-before-
+  // reveal). User-scoped to the creator: it was never revealed to other members.
+  z.object({
+    type: z.literal('emojiRejected'),
+    senderId: z.string(),
+    targetUserId: z.string(),
+    serverId: z.string(),
+    emojiId: z.string(),
+    name: z.string(),
   }),
 
   // Mentions (user-targeted)

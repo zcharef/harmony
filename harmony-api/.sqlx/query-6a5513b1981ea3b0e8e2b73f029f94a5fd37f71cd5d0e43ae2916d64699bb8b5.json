@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT emoji_id, url, retry_count, last_error, created_at\n            FROM emoji_image_scan_retry\n            WHERE retry_count < 5\n            ORDER BY created_at ASC\n            LIMIT $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "emoji_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "retry_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "6a5513b1981ea3b0e8e2b73f029f94a5fd37f71cd5d0e43ae2916d64699bb8b5"
+}

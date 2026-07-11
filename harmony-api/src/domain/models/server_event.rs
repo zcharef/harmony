@@ -541,6 +541,18 @@ pub enum ServerEvent {
         server_id: ServerId,
         emoji_id: EmojiId,
     },
+    /// A newly-created custom emoji was REJECTED by the async image scan and
+    /// never revealed (scan-before-reveal). User-scoped to the creator: it was
+    /// never shown to other members, so only the creator is notified (drop the
+    /// optimistic emoji + show a rejection notice). Carries `name` for the
+    /// notice copy and `emoji_id` so the creator's cache patch is exact.
+    EmojiRejected {
+        sender_id: UserId,
+        target_user_id: UserId,
+        server_id: ServerId,
+        emoji_id: EmojiId,
+        name: String,
+    },
 
     // ── Profiles (user-scoped, not server-scoped) ────────────
     /// A user's public profile changed (display name / avatar / custom status /
@@ -730,6 +742,7 @@ impl ServerEvent {
             Self::BlockRemoved { .. } => "block.removed",
             Self::EmojiCreated { .. } => "emoji.created",
             Self::EmojiDeleted { .. } => "emoji.deleted",
+            Self::EmojiRejected { .. } => "emoji.rejected",
             Self::ProfileUpdated { .. } => "profile.updated",
             Self::TypingStarted { .. } => "typing.started",
             Self::PresenceChanged { .. } => "presence.changed",
@@ -770,6 +783,7 @@ impl ServerEvent {
             | Self::BlockRemoved { sender_id, .. }
             | Self::EmojiCreated { sender_id, .. }
             | Self::EmojiDeleted { sender_id, .. }
+            | Self::EmojiRejected { sender_id, .. }
             | Self::ProfileUpdated { sender_id, .. }
             | Self::TypingStarted { sender_id, .. }
             | Self::PresenceChanged { sender_id, .. }
@@ -808,6 +822,7 @@ impl ServerEvent {
             | Self::MentionReceived { server_id, .. }
             | Self::EmojiCreated { server_id, .. }
             | Self::EmojiDeleted { server_id, .. }
+            | Self::EmojiRejected { server_id, .. }
             | Self::ForceDisconnect { server_id, .. } => Some(server_id),
             Self::DmCreated { .. }
             | Self::FriendRequestCreated { .. }
@@ -835,6 +850,7 @@ impl ServerEvent {
             | Self::BlockRemoved { target_user_id, .. }
             | Self::MemberBanned { target_user_id, .. }
             | Self::MentionReceived { target_user_id, .. }
+            | Self::EmojiRejected { target_user_id, .. }
             | Self::ForceDisconnect { target_user_id, .. } => Some(target_user_id),
             Self::MessageCreated { .. }
             | Self::MessageUpdated { .. }
@@ -899,6 +915,7 @@ impl ServerEvent {
             | Self::BlockRemoved { .. }
             | Self::EmojiCreated { .. }
             | Self::EmojiDeleted { .. }
+            | Self::EmojiRejected { .. }
             | Self::ProfileUpdated { .. }
             | Self::PresenceChanged { .. }
             | Self::MentionReceived { .. }
@@ -949,6 +966,7 @@ impl ServerEvent {
             | Self::BlockRemoved { .. }
             | Self::EmojiCreated { .. }
             | Self::EmojiDeleted { .. }
+            | Self::EmojiRejected { .. }
             | Self::MentionReceived { .. }
             | Self::ForceDisconnect { .. } => {}
         }

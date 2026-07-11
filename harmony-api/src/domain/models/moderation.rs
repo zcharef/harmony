@@ -7,7 +7,9 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
-use super::ids::{AttachmentId, ChannelId, MessageId, ModerationRetryId, ServerId, UserId};
+use super::ids::{
+    AttachmentId, ChannelId, EmojiId, MessageId, ModerationRetryId, ServerId, UserId,
+};
 
 /// Per-server AI moderation configuration (Tier 2 category toggles).
 /// WHY: Separate from `Server` to avoid rippling through every SELECT/DTO.
@@ -60,6 +62,20 @@ pub struct AttachmentScanRetry {
 pub struct IdentityImageScanRetry {
     pub user_id: UserId,
     pub kind: super::IdentityImageKind,
+    /// Public object URL to re-fetch and scan.
+    pub url: String,
+    pub retry_count: i32,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A failed custom-emoji image content-moderation scan awaiting retry — the
+/// emoji analogue of [`IdentityImageScanRetry`], keyed by `emoji_id`.
+/// Fail-closed: while a row exists the emoji stays `pending` (never revealed to
+/// other members). The sweep re-runs the scan.
+#[derive(Debug, Clone)]
+pub struct EmojiImageScanRetry {
+    pub emoji_id: EmojiId,
     /// Public object URL to re-fetch and scan.
     pub url: String,
     pub retry_count: i32,
