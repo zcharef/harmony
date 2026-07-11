@@ -25,6 +25,8 @@ const mockProfile: ProfileResponse = {
   customStatus: null,
   status: 'online',
   isFounding: false,
+  avatarModerationStatus: 'approved',
+  bannerModerationStatus: 'approved',
   createdAt: '2026-03-16T00:00:00.000Z',
   updatedAt: '2026-03-16T00:00:00.000Z',
 }

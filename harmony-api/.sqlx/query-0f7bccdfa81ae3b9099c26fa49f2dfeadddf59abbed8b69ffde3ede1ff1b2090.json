@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO identity_image_scan_retry\n                (user_id, image_kind, url, last_error)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (user_id, image_kind) DO UPDATE\n            SET retry_count = identity_image_scan_retry.retry_count + 1,\n                url = EXCLUDED.url,\n                last_error = EXCLUDED.last_error,\n                updated_at = now()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0f7bccdfa81ae3b9099c26fa49f2dfeadddf59abbed8b69ffde3ede1ff1b2090"
+}

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Profile, UserId};
+use crate::domain::models::{IdentityImageKind, Profile, UserId};
 use crate::domain::ports::ProfileRepository;
 use crate::domain::services::content_filter::ContentFilter;
 
@@ -491,16 +491,96 @@ impl ProfileService {
             }
         }
 
+        // Apply text fields first. Identity IMAGES are NOT written here: a
+        // newly-set avatar/banner must be scanned before it is revealed to
+        // other users (scan-before-reveal), so it is routed to a PENDING slot
+        // via `set_pending_image` and only promoted into the live column by the
+        // async scan. Passing `None` for both image fields leaves the live
+        // approved image untouched.
+        let mut profile = self
+            .repo
+            .update(user_id, None, display_name, custom_status, bio, None)
+            .await?;
+
+        profile = self
+            .apply_image_update(user_id, IdentityImageKind::Avatar, avatar_url, profile)
+            .await?;
+        profile = self
+            .apply_image_update(user_id, IdentityImageKind::Banner, banner_url, profile)
+            .await?;
+
+        Ok(profile)
+    }
+
+    /// Route one identity-image patch field through the scan-before-reveal flow.
+    ///
+    /// - omitted (`None`) → leave everything as-is.
+    /// - explicit `null` (`Some(None)`) → clear the live image immediately
+    ///   (clearing is always safe — there is nothing to scan).
+    /// - a NEW url (`Some(Some(url))`, different from the current approved one)
+    ///   → stage it PENDING (the HTTP handler spawns the async scan after this
+    ///   returns; this method only stages, it does not scan).
+    /// - the SAME url as the already-approved image → no-op (never re-scan an
+    ///   image that is already live).
+    async fn apply_image_update(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+        field: Option<Option<String>>,
+        current: Profile,
+    ) -> Result<Profile, DomainError> {
+        let Some(value) = field else {
+            return Ok(current);
+        };
+        match value {
+            None => self.repo.clear_image(user_id, kind).await,
+            Some(url) => {
+                let approved = match kind {
+                    IdentityImageKind::Avatar => current.avatar_url.as_deref(),
+                    IdentityImageKind::Banner => current.banner_url.as_deref(),
+                };
+                if approved == Some(url.as_str()) {
+                    return Ok(current);
+                }
+                self.repo.set_pending_image(user_id, kind, &url).await
+            }
+        }
+    }
+
+    /// Promote a pending identity-image candidate to live (scan verdict clean).
+    ///
+    /// Thin pass-through to the repository's superseded-safe promotion. Returns
+    /// `None` when a newer candidate replaced this one meanwhile.
+    ///
+    /// # Errors
+    /// Returns a repository error on failure.
+    pub async fn promote_identity_image(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+        url: &str,
+        nsfw_score: Option<f32>,
+    ) -> Result<Option<Profile>, DomainError> {
         self.repo
-            .update(
-                user_id,
-                avatar_url,
-                display_name,
-                custom_status,
-                bio,
-                banner_url,
-            )
+            .promote_image(user_id, kind, url, nsfw_score)
             .await
+    }
+
+    /// Reject a pending identity-image candidate (scan verdict flagged).
+    ///
+    /// The live approved image is unchanged; the candidate is dropped. Returns
+    /// `None` when a newer candidate replaced this one meanwhile.
+    ///
+    /// # Errors
+    /// Returns a repository error on failure.
+    pub async fn reject_identity_image(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+        url: &str,
+        nsfw_score: Option<f32>,
+    ) -> Result<Option<Profile>, DomainError> {
+        self.repo.reject_image(user_id, kind, url, nsfw_score).await
     }
 }
 
@@ -833,6 +913,10 @@ mod tests {
             custom_status: None,
             bio: None,
             banner_url: None,
+            pending_avatar_url: None,
+            avatar_moderation_status: Default::default(),
+            pending_banner_url: None,
+            banner_moderation_status: Default::default(),
             is_founding: false,
             created_at: now,
             updated_at: now,
@@ -880,6 +964,72 @@ mod tests {
             let mut profile = dummy_profile(user_id);
             profile.username = username.to_string();
             Ok(profile)
+        }
+
+        async fn set_pending_image(
+            &self,
+            user_id: &UserId,
+            kind: IdentityImageKind,
+            url: &str,
+        ) -> Result<Profile, DomainError> {
+            let mut profile = dummy_profile(user_id);
+            match kind {
+                IdentityImageKind::Avatar => {
+                    profile.pending_avatar_url = Some(url.to_string());
+                    profile.avatar_moderation_status =
+                        crate::domain::models::IdentityImageModerationStatus::Pending;
+                }
+                IdentityImageKind::Banner => {
+                    profile.pending_banner_url = Some(url.to_string());
+                    profile.banner_moderation_status =
+                        crate::domain::models::IdentityImageModerationStatus::Pending;
+                }
+            }
+            Ok(profile)
+        }
+
+        async fn clear_image(
+            &self,
+            user_id: &UserId,
+            _kind: IdentityImageKind,
+        ) -> Result<Profile, DomainError> {
+            Ok(dummy_profile(user_id))
+        }
+
+        async fn promote_image(
+            &self,
+            user_id: &UserId,
+            kind: IdentityImageKind,
+            url: &str,
+            _nsfw_score: Option<f32>,
+        ) -> Result<Option<Profile>, DomainError> {
+            let mut profile = dummy_profile(user_id);
+            match kind {
+                IdentityImageKind::Avatar => profile.avatar_url = Some(url.to_string()),
+                IdentityImageKind::Banner => profile.banner_url = Some(url.to_string()),
+            }
+            Ok(Some(profile))
+        }
+
+        async fn reject_image(
+            &self,
+            user_id: &UserId,
+            kind: IdentityImageKind,
+            _url: &str,
+            _nsfw_score: Option<f32>,
+        ) -> Result<Option<Profile>, DomainError> {
+            let mut profile = dummy_profile(user_id);
+            match kind {
+                IdentityImageKind::Avatar => {
+                    profile.avatar_moderation_status =
+                        crate::domain::models::IdentityImageModerationStatus::Rejected;
+                }
+                IdentityImageKind::Banner => {
+                    profile.banner_moderation_status =
+                        crate::domain::models::IdentityImageModerationStatus::Rejected;
+                }
+            }
+            Ok(Some(profile))
         }
 
         // -- unused by update_profile --

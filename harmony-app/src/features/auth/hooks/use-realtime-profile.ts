@@ -11,6 +11,7 @@ import type {
 } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 /**
  * WHY local schema: use-fetch-sse already validates the full discriminated
@@ -28,6 +29,11 @@ const profileUpdatedSchema = z.object({
   customStatus: z.string().optional().nullable(),
   bio: z.string().optional().nullable(),
   bannerUrl: z.string().optional().nullable(),
+  // Scan verdicts for the subject's identity images (scan-before-reveal). Only
+  // the subject's OWN client acts on these — an image the async scan rejected
+  // must surface a notice (never silent, ADR-045).
+  avatarModerationStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
+  bannerModerationStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
 })
 
 /** The subject's new identity, normalized so cleared fields are `null`. */
@@ -152,6 +158,28 @@ function patchProfileDetail(queryClient: QueryClient, id: Identity) {
 }
 
 /**
+ * Surface a notice when the subject's own avatar/banner was rejected by the
+ * async image scan (scan-before-reveal). The previous approved image stays live;
+ * the user must be told their new image did not pass review (never silent —
+ * ADR-045: an explicit user action that failed gets visible feedback).
+ */
+function notifyRejectedImages(
+  avatarStatus: 'pending' | 'approved' | 'rejected' | undefined,
+  bannerStatus: 'pending' | 'approved' | 'rejected' | undefined,
+) {
+  if (avatarStatus === 'rejected') {
+    toast.error('Your new avatar was rejected', {
+      description: 'It did not pass our content review. Your previous avatar was kept.',
+    })
+  }
+  if (bannerStatus === 'rejected') {
+    toast.error('Your new banner was rejected', {
+      description: 'It did not pass our content review. Your previous banner was kept.',
+    })
+  }
+}
+
+/**
  * Live rehydration of a user's identity (display name / avatar / custom status)
  * everywhere it is cached — Discord-style. On `profile.updated` (delivered only
  * to users sharing a server or DM with the subject, plus the subject's own
@@ -192,6 +220,7 @@ export function useRealtimeProfile(currentUserId: string | null) {
       // WHY guard: only the current user's own-profile cache should track this.
       if (currentUserId !== null && id.userId === currentUserId) {
         patchOwnProfile(queryClient, id)
+        notifyRejectedImages(parsed.data.avatarModerationStatus, parsed.data.bannerModerationStatus)
       }
     },
     [queryClient, currentUserId],

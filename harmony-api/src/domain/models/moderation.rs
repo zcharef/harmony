@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
-use super::ids::{AttachmentId, ChannelId, MessageId, ModerationRetryId, ServerId};
+use super::ids::{AttachmentId, ChannelId, MessageId, ModerationRetryId, ServerId, UserId};
 
 /// Per-server AI moderation configuration (Tier 2 category toggles).
 /// WHY: Separate from `Server` to avoid rippling through every SELECT/DTO.
@@ -47,6 +47,21 @@ pub struct AttachmentScanRetry {
     /// Public object URL to re-fetch and scan.
     pub url: String,
     pub mime: String,
+    pub retry_count: i32,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A failed identity-image (avatar/banner) content-moderation scan awaiting
+/// retry — the identity analogue of [`AttachmentScanRetry`], keyed by
+/// `(user_id, image_kind)`. Fail-closed: while a row exists the candidate stays
+/// in `pending_{kind}_url` (never revealed). The sweep re-runs the scan.
+#[derive(Debug, Clone)]
+pub struct IdentityImageScanRetry {
+    pub user_id: UserId,
+    pub kind: super::IdentityImageKind,
+    /// Public object URL to re-fetch and scan.
+    pub url: String,
     pub retry_count: i32,
     pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,

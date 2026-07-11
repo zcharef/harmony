@@ -59,10 +59,12 @@ pub use migration::{
     ALIVE_MIN_MESSAGES, ALIVE_MIN_NON_OWNER_ACTIVE, MemberCohortPage, MemberFollowThrough,
     MigrationProgress, NotYetActiveMember, RecommendedAction, ServerAliveSnapshot,
 };
-pub use moderation::{AttachmentScanRetry, ModerationRetry, ServerModerationSettings};
+pub use moderation::{
+    AttachmentScanRetry, IdentityImageScanRetry, ModerationRetry, ServerModerationSettings,
+};
 pub use moderation_log::{ModerationAction, ModerationLogEntry, NewModerationLogEntry};
 pub use plan::{Plan, PlanLimits, ResourceKind};
-pub use profile::{Profile, UserStatus};
+pub use profile::{IdentityImageKind, IdentityImageModerationStatus, Profile, UserStatus};
 pub use reaction::{EmojiVariety, ReactionSummary, Reactor};
 pub use read_state::ChannelReadState;
 pub use role::Role;

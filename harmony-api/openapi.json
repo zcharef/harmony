@@ -7683,6 +7683,15 @@
           }
         }
       },
+      "IdentityImageModerationStatus": {
+        "type": "string",
+        "description": "Terminal moderation state of an identity image (avatar/banner).\n\nAn identity image has no channel context (an avatar is global), so — unlike\n[`AttachmentModerationStatus`](super::AttachmentModerationStatus) — there is\nno `gated`/`blocked` middle ground: a flagged image is `Rejected` (never\nrevealed to other users; the previous approved image stays live).",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected"
+        ]
+      },
       "InviteCode": {
         "type": "string",
         "description": "Invite code for joining a server.",
@@ -8872,16 +8881,26 @@
           "id",
           "username",
           "status",
+          "avatarModerationStatus",
+          "bannerModerationStatus",
           "isFounding",
           "createdAt",
           "updatedAt"
         ],
         "properties": {
+          "avatarModerationStatus": {
+            "$ref": "#/components/schemas/IdentityImageModerationStatus",
+            "description": "Scan state of the avatar. `avatar_url` always carries the APPROVED image;\n`pending`/`rejected` here lets the OWNER'S client show a \"under review\" /\n\"rejected\" notice. Always present."
+          },
           "avatarUrl": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "bannerModerationStatus": {
+            "$ref": "#/components/schemas/IdentityImageModerationStatus",
+            "description": "Scan state of the banner (see `avatar_moderation_status`)."
           },
           "bannerUrl": {
             "type": [
@@ -8917,6 +8936,20 @@
           "isFounding": {
             "type": "boolean",
             "description": "Whether this user holds the `founding` badge (one of the first accounts)."
+          },
+          "pendingAvatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The owner's not-yet-approved avatar candidate — populated ONLY on the\nself endpoints (`/profiles/me`), so the owner can preview their pending\nimage. NEVER exposed for another user (their pending image must not be\nrevealed before it clears)."
+          },
+          "pendingBannerUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The owner's not-yet-approved banner candidate (self endpoints only)."
           },
           "status": {
             "$ref": "#/components/schemas/UserStatus"

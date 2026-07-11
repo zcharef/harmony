@@ -14,7 +14,13 @@
  */
 
 import { z } from 'zod'
-import { zChannelType, zMessageType, zUserStatus, zVoiceAction } from '@/lib/api/zod.gen'
+import {
+  zChannelType,
+  zIdentityImageModerationStatus,
+  zMessageType,
+  zUserStatus,
+  zVoiceAction,
+} from '@/lib/api/zod.gen'
 
 // ── SSE event names (dot-separated, as sent in the `event:` field) ───
 
@@ -366,6 +372,13 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     customStatus: z.string().optional().nullable(),
     bio: z.string().optional().nullable(),
     bannerUrl: z.string().optional().nullable(),
+    // Scan state of the (avatar|banner) candidate. `avatarUrl`/`bannerUrl`
+    // always carry the APPROVED image, so renders are unaffected; the subject's
+    // own client reads these to know a pending image was approved (revealed) or
+    // rejected (notice). WHY optional: omitted by older API instances during a
+    // rolling deploy.
+    avatarModerationStatus: zIdentityImageModerationStatus.optional(),
+    bannerModerationStatus: zIdentityImageModerationStatus.optional(),
   }),
 
   // Ephemeral

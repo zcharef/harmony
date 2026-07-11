@@ -6,7 +6,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Profile, UserId, UserStatus};
+use crate::domain::models::{
+    IdentityImageKind, IdentityImageModerationStatus, Profile, UserId, UserStatus,
+};
 use crate::domain::ports::ProfileRepository;
 
 /// PostgreSQL-backed profile repository.
@@ -32,6 +34,10 @@ struct ProfileRow {
     custom_status: Option<String>,
     bio: Option<String>,
     banner_url: Option<String>,
+    pending_avatar_url: Option<String>,
+    avatar_moderation_status: String,
+    pending_banner_url: Option<String>,
+    banner_moderation_status: String,
     is_founding: bool,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -48,6 +54,14 @@ impl ProfileRow {
             custom_status: self.custom_status,
             bio: self.bio,
             banner_url: self.banner_url,
+            pending_avatar_url: self.pending_avatar_url,
+            avatar_moderation_status: IdentityImageModerationStatus::from_db_str(
+                &self.avatar_moderation_status,
+            ),
+            pending_banner_url: self.pending_banner_url,
+            banner_moderation_status: IdentityImageModerationStatus::from_db_str(
+                &self.banner_moderation_status,
+            ),
             is_founding: self.is_founding,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -106,6 +120,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                pending_avatar_url,
+                avatar_moderation_status::text AS "avatar_moderation_status!",
+                pending_banner_url,
+                banner_moderation_status::text AS "banner_moderation_status!",
                 EXISTS(
                     SELECT 1 FROM user_badges ub
                     WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
@@ -136,6 +154,10 @@ impl ProfileRepository for PgProfileRepository {
             custom_status: row.custom_status,
             bio: row.bio,
             banner_url: row.banner_url,
+            pending_avatar_url: row.pending_avatar_url,
+            avatar_moderation_status: row.avatar_moderation_status,
+            pending_banner_url: row.pending_banner_url,
+            banner_moderation_status: row.banner_moderation_status,
             is_founding: row.is_founding,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -170,6 +192,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                pending_avatar_url,
+                avatar_moderation_status::text AS "avatar_moderation_status!",
+                pending_banner_url,
+                banner_moderation_status::text AS "banner_moderation_status!",
                 EXISTS(
                     SELECT 1 FROM user_badges ub
                     WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
@@ -195,6 +221,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status: r.custom_status,
                 bio: r.bio,
                 banner_url: r.banner_url,
+                pending_avatar_url: r.pending_avatar_url,
+                avatar_moderation_status: r.avatar_moderation_status,
+                pending_banner_url: r.pending_banner_url,
+                banner_moderation_status: r.banner_moderation_status,
                 is_founding: r.is_founding,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
@@ -215,6 +245,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                pending_avatar_url,
+                avatar_moderation_status::text AS "avatar_moderation_status!",
+                pending_banner_url,
+                banner_moderation_status::text AS "banner_moderation_status!",
                 EXISTS(
                     SELECT 1 FROM user_badges ub
                     WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
@@ -240,6 +274,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status: r.custom_status,
                 bio: r.bio,
                 banner_url: r.banner_url,
+                pending_avatar_url: r.pending_avatar_url,
+                avatar_moderation_status: r.avatar_moderation_status,
+                pending_banner_url: r.pending_banner_url,
+                banner_moderation_status: r.banner_moderation_status,
                 is_founding: r.is_founding,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
@@ -267,6 +305,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                pending_avatar_url,
+                avatar_moderation_status::text AS "avatar_moderation_status!",
+                pending_banner_url,
+                banner_moderation_status::text AS "banner_moderation_status!",
                 EXISTS(
                     SELECT 1 FROM user_badges ub
                     WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
@@ -294,6 +336,10 @@ impl ProfileRepository for PgProfileRepository {
                     custom_status: r.custom_status,
                     bio: r.bio,
                     banner_url: r.banner_url,
+                    pending_avatar_url: r.pending_avatar_url,
+                    avatar_moderation_status: r.avatar_moderation_status,
+                    pending_banner_url: r.pending_banner_url,
+                    banner_moderation_status: r.banner_moderation_status,
                     is_founding: r.is_founding,
                     created_at: r.created_at,
                     updated_at: r.updated_at,
@@ -349,6 +395,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                pending_avatar_url,
+                avatar_moderation_status::text AS "avatar_moderation_status!",
+                pending_banner_url,
+                banner_moderation_status::text AS "banner_moderation_status!",
                 EXISTS(
                     SELECT 1 FROM user_badges ub
                     WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
@@ -385,6 +435,10 @@ impl ProfileRepository for PgProfileRepository {
             custom_status: row.custom_status,
             bio: row.bio,
             banner_url: row.banner_url,
+            pending_avatar_url: row.pending_avatar_url,
+            avatar_moderation_status: row.avatar_moderation_status,
+            pending_banner_url: row.pending_banner_url,
+            banner_moderation_status: row.banner_moderation_status,
             is_founding: row.is_founding,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -447,6 +501,318 @@ impl ProfileRepository for PgProfileRepository {
         Ok(rows.into_iter().map(UserId::new).collect())
     }
 
+    async fn set_pending_image(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+        url: &str,
+    ) -> Result<Profile, DomainError> {
+        // WHY one query branching on `is_avatar` instead of two: the avatar and
+        // banner columns are the only difference, so a single CASE-guarded
+        // UPDATE keeps the pending-set logic in one place (one pattern per
+        // concern). The live `{kind}_url` is deliberately NOT touched.
+        let is_avatar = matches!(kind, IdentityImageKind::Avatar);
+        let row = sqlx::query!(
+            r#"
+            UPDATE profiles
+            SET
+                pending_avatar_url = CASE WHEN $2 THEN $3 ELSE pending_avatar_url END,
+                avatar_moderation_status = CASE WHEN $2
+                    THEN 'pending'::identity_image_moderation_status
+                    ELSE avatar_moderation_status END,
+                pending_banner_url = CASE WHEN NOT $2 THEN $3 ELSE pending_banner_url END,
+                banner_moderation_status = CASE WHEN NOT $2
+                    THEN 'pending'::identity_image_moderation_status
+                    ELSE banner_moderation_status END,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id,
+                username,
+                display_name,
+                avatar_url,
+                status,
+                custom_status,
+                bio,
+                banner_url,
+                pending_avatar_url,
+                avatar_moderation_status::text AS "avatar_moderation_status!",
+                pending_banner_url,
+                banner_moderation_status::text AS "banner_moderation_status!",
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
+                ) AS "is_founding!",
+                created_at,
+                updated_at
+            "#,
+            user_id.0,
+            is_avatar,
+            url,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?
+        .ok_or_else(|| DomainError::NotFound {
+            resource_type: "Profile",
+            id: user_id.to_string(),
+        })?;
+
+        Ok(ProfileRow {
+            id: row.id,
+            username: row.username,
+            display_name: row.display_name,
+            avatar_url: row.avatar_url,
+            status: row.status,
+            custom_status: row.custom_status,
+            bio: row.bio,
+            banner_url: row.banner_url,
+            pending_avatar_url: row.pending_avatar_url,
+            avatar_moderation_status: row.avatar_moderation_status,
+            pending_banner_url: row.pending_banner_url,
+            banner_moderation_status: row.banner_moderation_status,
+            is_founding: row.is_founding,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+        .into_profile())
+    }
+
+    async fn clear_image(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+    ) -> Result<Profile, DomainError> {
+        let is_avatar = matches!(kind, IdentityImageKind::Avatar);
+        let row = sqlx::query!(
+            r#"
+            UPDATE profiles
+            SET
+                avatar_url = CASE WHEN $2 THEN NULL ELSE avatar_url END,
+                pending_avatar_url = CASE WHEN $2 THEN NULL ELSE pending_avatar_url END,
+                avatar_moderation_status = CASE WHEN $2
+                    THEN 'approved'::identity_image_moderation_status
+                    ELSE avatar_moderation_status END,
+                banner_url = CASE WHEN NOT $2 THEN NULL ELSE banner_url END,
+                pending_banner_url = CASE WHEN NOT $2 THEN NULL ELSE pending_banner_url END,
+                banner_moderation_status = CASE WHEN NOT $2
+                    THEN 'approved'::identity_image_moderation_status
+                    ELSE banner_moderation_status END,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id,
+                username,
+                display_name,
+                avatar_url,
+                status,
+                custom_status,
+                bio,
+                banner_url,
+                pending_avatar_url,
+                avatar_moderation_status::text AS "avatar_moderation_status!",
+                pending_banner_url,
+                banner_moderation_status::text AS "banner_moderation_status!",
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
+                ) AS "is_founding!",
+                created_at,
+                updated_at
+            "#,
+            user_id.0,
+            is_avatar,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?
+        .ok_or_else(|| DomainError::NotFound {
+            resource_type: "Profile",
+            id: user_id.to_string(),
+        })?;
+
+        Ok(ProfileRow {
+            id: row.id,
+            username: row.username,
+            display_name: row.display_name,
+            avatar_url: row.avatar_url,
+            status: row.status,
+            custom_status: row.custom_status,
+            bio: row.bio,
+            banner_url: row.banner_url,
+            pending_avatar_url: row.pending_avatar_url,
+            avatar_moderation_status: row.avatar_moderation_status,
+            pending_banner_url: row.pending_banner_url,
+            banner_moderation_status: row.banner_moderation_status,
+            is_founding: row.is_founding,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+        .into_profile())
+    }
+
+    async fn promote_image(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+        url: &str,
+        nsfw_score: Option<f32>,
+    ) -> Result<Option<Profile>, DomainError> {
+        // WHY the `pending_{kind}_url = $3` guard: a newer upload may have
+        // replaced this candidate while the scan ran. Guarding on the exact URL
+        // makes a stale verdict a no-op (0 rows → None) so it never reveals a
+        // superseded image.
+        let is_avatar = matches!(kind, IdentityImageKind::Avatar);
+        let row = sqlx::query!(
+            r#"
+            UPDATE profiles
+            SET
+                avatar_url = CASE WHEN $2 THEN $3 ELSE avatar_url END,
+                pending_avatar_url = CASE WHEN $2 THEN NULL ELSE pending_avatar_url END,
+                avatar_moderation_status = CASE WHEN $2
+                    THEN 'approved'::identity_image_moderation_status
+                    ELSE avatar_moderation_status END,
+                avatar_nsfw_score = CASE WHEN $2 THEN $4 ELSE avatar_nsfw_score END,
+                avatar_scanned_at = CASE WHEN $2 THEN now() ELSE avatar_scanned_at END,
+                banner_url = CASE WHEN NOT $2 THEN $3 ELSE banner_url END,
+                pending_banner_url = CASE WHEN NOT $2 THEN NULL ELSE pending_banner_url END,
+                banner_moderation_status = CASE WHEN NOT $2
+                    THEN 'approved'::identity_image_moderation_status
+                    ELSE banner_moderation_status END,
+                banner_nsfw_score = CASE WHEN NOT $2 THEN $4 ELSE banner_nsfw_score END,
+                banner_scanned_at = CASE WHEN NOT $2 THEN now() ELSE banner_scanned_at END,
+                updated_at = now()
+            WHERE id = $1
+              AND (($2 AND pending_avatar_url = $3) OR (NOT $2 AND pending_banner_url = $3))
+            RETURNING
+                id,
+                username,
+                display_name,
+                avatar_url,
+                status,
+                custom_status,
+                bio,
+                banner_url,
+                pending_avatar_url,
+                avatar_moderation_status::text AS "avatar_moderation_status!",
+                pending_banner_url,
+                banner_moderation_status::text AS "banner_moderation_status!",
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
+                ) AS "is_founding!",
+                created_at,
+                updated_at
+            "#,
+            user_id.0,
+            is_avatar,
+            url,
+            nsfw_score,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|row| {
+            ProfileRow {
+                id: row.id,
+                username: row.username,
+                display_name: row.display_name,
+                avatar_url: row.avatar_url,
+                status: row.status,
+                custom_status: row.custom_status,
+                bio: row.bio,
+                banner_url: row.banner_url,
+                pending_avatar_url: row.pending_avatar_url,
+                avatar_moderation_status: row.avatar_moderation_status,
+                pending_banner_url: row.pending_banner_url,
+                banner_moderation_status: row.banner_moderation_status,
+                is_founding: row.is_founding,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            }
+            .into_profile()
+        }))
+    }
+
+    async fn reject_image(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+        url: &str,
+        nsfw_score: Option<f32>,
+    ) -> Result<Option<Profile>, DomainError> {
+        let is_avatar = matches!(kind, IdentityImageKind::Avatar);
+        let row = sqlx::query!(
+            r#"
+            UPDATE profiles
+            SET
+                pending_avatar_url = CASE WHEN $2 THEN NULL ELSE pending_avatar_url END,
+                avatar_moderation_status = CASE WHEN $2
+                    THEN 'rejected'::identity_image_moderation_status
+                    ELSE avatar_moderation_status END,
+                avatar_nsfw_score = CASE WHEN $2 THEN $4 ELSE avatar_nsfw_score END,
+                avatar_scanned_at = CASE WHEN $2 THEN now() ELSE avatar_scanned_at END,
+                pending_banner_url = CASE WHEN NOT $2 THEN NULL ELSE pending_banner_url END,
+                banner_moderation_status = CASE WHEN NOT $2
+                    THEN 'rejected'::identity_image_moderation_status
+                    ELSE banner_moderation_status END,
+                banner_nsfw_score = CASE WHEN NOT $2 THEN $4 ELSE banner_nsfw_score END,
+                banner_scanned_at = CASE WHEN NOT $2 THEN now() ELSE banner_scanned_at END,
+                updated_at = now()
+            WHERE id = $1
+              AND (($2 AND pending_avatar_url = $3) OR (NOT $2 AND pending_banner_url = $3))
+            RETURNING
+                id,
+                username,
+                display_name,
+                avatar_url,
+                status,
+                custom_status,
+                bio,
+                banner_url,
+                pending_avatar_url,
+                avatar_moderation_status::text AS "avatar_moderation_status!",
+                pending_banner_url,
+                banner_moderation_status::text AS "banner_moderation_status!",
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
+                ) AS "is_founding!",
+                created_at,
+                updated_at
+            "#,
+            user_id.0,
+            is_avatar,
+            url,
+            nsfw_score,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|row| {
+            ProfileRow {
+                id: row.id,
+                username: row.username,
+                display_name: row.display_name,
+                avatar_url: row.avatar_url,
+                status: row.status,
+                custom_status: row.custom_status,
+                bio: row.bio,
+                banner_url: row.banner_url,
+                pending_avatar_url: row.pending_avatar_url,
+                avatar_moderation_status: row.avatar_moderation_status,
+                pending_banner_url: row.pending_banner_url,
+                banner_moderation_status: row.banner_moderation_status,
+                is_founding: row.is_founding,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            }
+            .into_profile()
+        }))
+    }
+
     async fn update_username(
         &self,
         user_id: &UserId,
@@ -470,6 +836,10 @@ impl ProfileRepository for PgProfileRepository {
                 custom_status,
                 bio,
                 banner_url,
+                pending_avatar_url,
+                avatar_moderation_status::text AS "avatar_moderation_status!",
+                pending_banner_url,
+                banner_moderation_status::text AS "banner_moderation_status!",
                 EXISTS(
                     SELECT 1 FROM user_badges ub
                     WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
@@ -505,6 +875,10 @@ impl ProfileRepository for PgProfileRepository {
             custom_status: row.custom_status,
             bio: row.bio,
             banner_url: row.banner_url,
+            pending_avatar_url: row.pending_avatar_url,
+            avatar_moderation_status: row.avatar_moderation_status,
+            pending_banner_url: row.pending_banner_url,
+            banner_moderation_status: row.banner_moderation_status,
             is_founding: row.is_founding,
             created_at: row.created_at,
             updated_at: row.updated_at,

@@ -18,7 +18,12 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }))
 
+vi.mock('@/lib/toast', () => ({
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}))
+
 const { logger } = await import('@/lib/logger')
+const { toast } = await import('@/lib/toast')
 
 const SUBJECT_ID = 'user-subject'
 const OTHER_ID = 'user-other'
@@ -113,6 +118,8 @@ function buildProfile(): ProfileResponse {
     customStatus: 'old status',
     status: 'online',
     isFounding: false,
+    avatarModerationStatus: 'approved',
+    bannerModerationStatus: 'approved',
     createdAt: '2026-03-01T00:00:00Z',
     updatedAt: '2026-03-01T00:00:00Z',
   }
@@ -230,6 +237,51 @@ describe('useRealtimeProfile', () => {
     expect(data?.customStatus).toBe('new status')
     // Non-identity fields survive.
     expect(data?.username).toBe('subject')
+  })
+
+  it('surfaces a toast when the current user’s avatar was rejected by the scan', () => {
+    const queryClient = createTestQueryClient()
+
+    renderHook(() => useRealtimeProfile(SUBJECT_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('profile.updated', buildEvent({ avatarModerationStatus: 'rejected' }))
+    })
+
+    expect(toast.error).toHaveBeenCalledWith(
+      'Your new avatar was rejected',
+      expect.objectContaining({ description: expect.any(String) }),
+    )
+  })
+
+  it('does NOT toast when the rejected image belongs to a different user', () => {
+    const queryClient = createTestQueryClient()
+
+    renderHook(() => useRealtimeProfile(OTHER_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('profile.updated', buildEvent({ avatarModerationStatus: 'rejected' }))
+    })
+
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('does NOT toast when the current user’s image was approved', () => {
+    const queryClient = createTestQueryClient()
+
+    renderHook(() => useRealtimeProfile(SUBJECT_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('profile.updated', buildEvent({ avatarModerationStatus: 'approved' }))
+    })
+
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('does NOT patch the own-profile cache when the subject is a different user', () => {

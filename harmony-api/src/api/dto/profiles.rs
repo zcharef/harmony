@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::serde_helpers::double_option;
-use crate::domain::models::{Profile, UserId, UserStatus};
+use crate::domain::models::{IdentityImageModerationStatus, Profile, UserId, UserStatus};
 
 /// Profile response returned to API consumers.
 #[derive(Debug, Serialize, ToSchema)]
@@ -24,10 +24,44 @@ pub struct ProfileResponse {
     pub bio: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub banner_url: Option<String>,
+    /// Scan state of the avatar. `avatar_url` always carries the APPROVED image;
+    /// `pending`/`rejected` here lets the OWNER'S client show a "under review" /
+    /// "rejected" notice. Always present.
+    pub avatar_moderation_status: IdentityImageModerationStatus,
+    /// Scan state of the banner (see `avatar_moderation_status`).
+    pub banner_moderation_status: IdentityImageModerationStatus,
+    /// The owner's not-yet-approved avatar candidate — populated ONLY on the
+    /// self endpoints (`/profiles/me`), so the owner can preview their pending
+    /// image. NEVER exposed for another user (their pending image must not be
+    /// revealed before it clears).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_avatar_url: Option<String>,
+    /// The owner's not-yet-approved banner candidate (self endpoints only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_banner_url: Option<String>,
     /// Whether this user holds the `founding` badge (one of the first accounts).
     pub is_founding: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl ProfileResponse {
+    /// Build a response for the SUBJECT'S OWN profile (`/profiles/me`).
+    ///
+    /// Unlike [`From<Profile>`] (used for other users), this includes the
+    /// `pending_{avatar,banner}_url` candidates so the owner can preview an
+    /// image that is still under scan. Those pending URLs are NEVER included in
+    /// the public conversion — another user must not see an unscanned image.
+    #[must_use]
+    pub fn from_self(p: Profile) -> Self {
+        let pending_avatar_url = p.pending_avatar_url.clone();
+        let pending_banner_url = p.pending_banner_url.clone();
+        Self {
+            pending_avatar_url,
+            pending_banner_url,
+            ..Self::from(p)
+        }
+    }
 }
 
 // WHY: Query parameter structs cannot use deny_unknown_fields because
@@ -100,6 +134,12 @@ impl From<Profile> for ProfileResponse {
             custom_status: p.custom_status,
             bio: p.bio,
             banner_url: p.banner_url,
+            avatar_moderation_status: p.avatar_moderation_status,
+            banner_moderation_status: p.banner_moderation_status,
+            // WHY None: the PUBLIC conversion must never carry a pending
+            // (unscanned) image. Only `from_self` includes these.
+            pending_avatar_url: None,
+            pending_banner_url: None,
             is_founding: p.is_founding,
             created_at: p.created_at,
             updated_at: p.updated_at,
@@ -125,6 +165,10 @@ mod tests {
             custom_status: None,
             bio: None,
             banner_url: None,
+            pending_avatar_url: None,
+            avatar_moderation_status: Default::default(),
+            pending_banner_url: None,
+            banner_moderation_status: Default::default(),
             is_founding,
             created_at: now,
             updated_at: now,

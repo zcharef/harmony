@@ -13,6 +13,7 @@ use super::Attachment;
 use super::AttachmentModerationStatus;
 use super::Channel;
 use super::ChannelType;
+use super::IdentityImageModerationStatus;
 use super::MentionedUser;
 use super::MessageWithAuthor;
 use super::ServerEmoji;
@@ -559,6 +560,16 @@ pub enum ServerEvent {
         bio: Option<String>,
         /// Banner URL (full snapshot; `null` = cleared). Client-facing.
         banner_url: Option<String>,
+        /// Scan state of the avatar candidate. `avatar_url` always carries the
+        /// APPROVED image, so every render surface is unaffected; the subject's
+        /// own client reads this to know its pending image cleared (`approved`)
+        /// or was `rejected` (surface a notice). `#[serde(default)]` keeps a
+        /// rolling deploy / older instance forward-compatible.
+        #[serde(default)]
+        avatar_moderation_status: IdentityImageModerationStatus,
+        /// Scan state of the banner candidate (see `avatar_moderation_status`).
+        #[serde(default)]
+        banner_moderation_status: IdentityImageModerationStatus,
         /// Routing metadata: the subject's server memberships (incl. DM
         /// servers), used by the SSE layer to deliver profile updates only to
         /// users sharing a server or DM. Like `PresenceChanged.server_ids` it
@@ -1357,6 +1368,8 @@ mod tests {
             custom_status: None,
             bio: None,
             banner_url: None,
+            avatar_moderation_status: IdentityImageModerationStatus::Approved,
+            banner_moderation_status: IdentityImageModerationStatus::Approved,
             server_ids: vec![test_server_id()],
         };
         assert_eq!(event.event_name(), "profile.updated");
@@ -1379,6 +1392,8 @@ mod tests {
             custom_status: None,
             bio: Some("hello world".to_string()),
             banner_url: Some("https://cdn.example/banner.png".to_string()),
+            avatar_moderation_status: IdentityImageModerationStatus::Approved,
+            banner_moderation_status: IdentityImageModerationStatus::Approved,
             server_ids: vec![test_server_id()],
         };
         let json = serde_json::to_string(&routed).unwrap();
@@ -1417,6 +1432,8 @@ mod tests {
             custom_status: None,
             bio: None,
             banner_url: None,
+            avatar_moderation_status: IdentityImageModerationStatus::Approved,
+            banner_moderation_status: IdentityImageModerationStatus::Approved,
             server_ids: Vec::new(),
         };
         let json = serde_json::to_value(&event).unwrap();

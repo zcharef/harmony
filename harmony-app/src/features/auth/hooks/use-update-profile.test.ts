@@ -41,6 +41,8 @@ function buildProfile(overrides: Partial<ProfileResponse> = {}): ProfileResponse
     status: 'online',
     customStatus: null,
     isFounding: false,
+    avatarModerationStatus: 'approved',
+    bannerModerationStatus: 'approved',
     createdAt: '2026-03-16T00:00:00.000Z',
     updatedAt: '2026-03-16T00:00:00.000Z',
     ...overrides,

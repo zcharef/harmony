@@ -12,7 +12,6 @@
 //! `pending` — an unscanned image is NEVER revealed.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::api::state::AppState;
 use crate::domain::models::server_event::MessagePayload;
@@ -22,13 +21,11 @@ use crate::domain::models::{
 };
 use crate::domain::ports::{
     AttachmentRepository, AttachmentScanRetryRepository, ChannelRepository, CsamMatcher, EventBus,
-    ImageClassifier, NsfwLabel,
+    ImageClassifier,
 };
 use crate::domain::services::attachment_moderation::{AttachmentContext, resolve_status};
 use crate::domain::services::{MessageService, resolve_channel_access_by_id};
 
-/// How long to wait when fetching object bytes for a real scan.
-const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 /// NSFW score at/above which content is treated as adult-NSFW (spec §d Phase 2).
 /// Only meaningful for a real classifier; the Noop always scores 0.0.
 pub const NSFW_SCORE_THRESHOLD: f32 = 0.85;
@@ -185,10 +182,18 @@ async fn apply_one(
     // Four Golden Signals (latency): time the classifiers on the scan path so a
     // slow/degrading model is observable, not just the per-inference log.
     let started = std::time::Instant::now();
-    match classify(deps, attachment).await {
-        Ok((label, csam_match, score)) => {
+    match crate::api::image_scan::classify_image(
+        &deps.classifier,
+        &deps.matcher,
+        &attachment.url,
+        &attachment.mime,
+    )
+    .await
+    {
+        Ok(verdict) => {
             let scan_latency_ms = started.elapsed().as_millis();
-            let status = resolve_status(*ctx, label, csam_match);
+            let status = resolve_status(*ctx, verdict.nsfw, verdict.csam_match);
+            let score = verdict.score;
             let reason = match status {
                 AttachmentModerationStatus::Gated => "adult_nsfw_gated",
                 AttachmentModerationStatus::Blocked => "adult_nsfw_blocked",
@@ -233,55 +238,6 @@ async fn apply_one(
             false
         }
     }
-}
-
-/// Run the classifiers over one image, returning `(nsfw_label, csam_match,
-/// score)`. Fetches object bytes only when a real detector needs them (the Noop
-/// ignores them, so the happy path makes no network call). The caller maps the
-/// result to a status via the decision table.
-async fn classify(
-    deps: &AttachmentScanDeps,
-    attachment: &Attachment,
-) -> Result<(NsfwLabel, bool, f32), crate::domain::errors::DomainError> {
-    let bytes = if deps.classifier.is_configured() || deps.matcher.is_configured() {
-        fetch_bytes(&attachment.url).await?
-    } else {
-        Vec::new()
-    };
-
-    // CSAM first (highest priority, short-circuits). Noop → never a match.
-    let csam = deps.matcher.match_hash(&bytes, &attachment.mime).await?;
-    if csam.is_match {
-        return Ok((NsfwLabel::Clean, true, 1.0));
-    }
-    let nsfw = deps
-        .classifier
-        .classify_nsfw(&bytes, &attachment.mime)
-        .await?;
-    Ok((nsfw.label, false, nsfw.score))
-}
-
-/// Fetch raw object bytes for a real scan.
-async fn fetch_bytes(url: &str) -> Result<Vec<u8>, crate::domain::errors::DomainError> {
-    let client = reqwest::Client::builder()
-        .timeout(FETCH_TIMEOUT)
-        .build()
-        .map_err(|e| crate::domain::errors::DomainError::ExternalService(e.to_string()))?;
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| crate::domain::errors::DomainError::ExternalService(e.to_string()))?;
-    if !resp.status().is_success() {
-        return Err(crate::domain::errors::DomainError::ExternalService(
-            format!("object fetch returned {}", resp.status()),
-        ));
-    }
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| crate::domain::errors::DomainError::ExternalService(e.to_string()))?;
-    Ok(bytes.to_vec())
 }
 
 /// Persist a terminal verdict + clear any dead-letter row. Returns `true` on
