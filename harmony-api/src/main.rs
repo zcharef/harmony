@@ -65,6 +65,7 @@ async fn main() {
     spawn_presence_sweep(state.clone());
     spawn_spam_guard_sweep(state.spam_guard().clone());
     spawn_moderation_retry_sweep(state.clone());
+    spawn_attachment_scan_sweep(state.clone());
     spawn_voice_session_sweep(state.clone());
 
     // Background tasks: PG LISTEN/NOTIFY workers for cross-instance SSE + presence
@@ -280,6 +281,36 @@ async fn init_app_state(config: &Config) -> AppInit {
         pool.clone(),
     ));
 
+    // Image content-moderation (spec §c.3). Phase 1 wires the Noop classifier +
+    // matcher so the whole pending→scan→approved pipeline + SSE flip runs with
+    // no external dependency. The in-process ONNX NSFW classifier (Phase 2) and
+    // a real CSAM matcher (Phase 3) are documented follow-ups — swapping them in
+    // touches only this wiring, never the pipeline.
+    let image_classifier: Arc<dyn domain::ports::ImageClassifier> = {
+        if config.nsfw_classifier_enabled {
+            tracing::warn!(
+                model_path = ?config.nsfw_model_path,
+                "NSFW_CLASSIFIER_ENABLED is set but the ONNX classifier is not built in this release — using Noop (images auto-approved)"
+            );
+        } else {
+            tracing::info!("Adult-NSFW image classifier: Noop (disabled)");
+        }
+        Arc::new(infra::NoopImageClassifier)
+    };
+    let csam_matcher: Arc<dyn domain::ports::CsamMatcher> = Arc::new(infra::NoopCsamMatcher);
+    if config.attachments_require_csam_scan && !csam_matcher.is_configured() {
+        tracing::warn!(
+            "ATTACHMENTS_REQUIRE_CSAM_SCAN is set but no real CSAM matcher is configured — image attachments will be REFUSED (fail closed)"
+        );
+    }
+    let attachment_scan_retry_repo = Arc::new(
+        infra::postgres::PgAttachmentScanRetryRepository::new(pool.clone()),
+    );
+    // WHY clone before the move into MessageService: the async scan task writes
+    // moderation status through this same repository port.
+    let attachment_repo_for_scan: Arc<dyn domain::ports::AttachmentRepository> =
+        attachment_repo.clone();
+
     let message_service = Arc::new(domain::services::MessageService::new(
         message_repo.clone(),
         channel_repo.clone(),
@@ -481,6 +512,11 @@ async fn init_app_state(config: &Config) -> AppInit {
         message_repo_for_moderation,
         server_repo_for_moderation,
         moderation_retry_repo,
+        image_classifier,
+        csam_matcher,
+        attachment_repo_for_scan,
+        attachment_scan_retry_repo,
+        config.attachments_require_csam_scan,
         voice_service,
         voice_session_repo,
         config.official_server_id.as_deref().map(|id| {
@@ -576,6 +612,83 @@ fn spawn_spam_guard_sweep(spam_guard: std::sync::Arc<domain::services::SpamGuard
                 spam_guard.sweep_expired();
             })) {
                 tracing::error!(error = ?e, "SpamGuard sweep panicked — will retry next interval");
+            }
+        }
+    });
+}
+
+/// Spawn a background task that retries failed image content-moderation scans
+/// every 60s (spec §c.1 step 6). Fetches dead-lettered attachments, re-runs the
+/// scan, and on success writes the verdict + emits `MessageUpdated`. Fail-closed:
+/// a still-failing scan bumps the retry count and stays `pending`. Logs the
+/// dead-letter depth each cycle as the saturation signal (Four Golden Signals).
+fn spawn_attachment_scan_sweep(state: api::AppState) {
+    use crate::api::attachment_scan::{AttachmentScanDeps, rescan_attachment};
+    use domain::models::{Attachment, AttachmentModerationStatus};
+
+    const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+    /// Maximum records to process per sweep cycle.
+    const BATCH_LIMIT: i64 = 10;
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(SWEEP_INTERVAL);
+        loop {
+            interval.tick().await;
+
+            let retry_repo = state.attachment_scan_retry_repository();
+            let message_repo = state.message_repository_for_moderation();
+
+            // Saturation signal: how deep is the unmoderated backlog?
+            if let Ok(depth) = retry_repo.count_pending().await
+                && depth > 0
+            {
+                tracing::info!(dead_letter_depth = depth, "attachment scan retry backlog");
+            }
+
+            let pending = match retry_repo.list_pending(BATCH_LIMIT).await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    tracing::warn!(error = %e, "attachment scan sweep: failed to fetch pending retries");
+                    continue;
+                }
+            };
+            if pending.is_empty() {
+                continue;
+            }
+
+            let deps = AttachmentScanDeps::from_state(&state);
+            for retry in pending {
+                // Resolve the author (needed for the own-server decision cell). A
+                // missing/deleted message means the attachment is gone — clear it.
+                let author_id = match message_repo.find_by_id(&retry.message_id).await {
+                    Ok(Some(m)) => m.author_id,
+                    Ok(None) => {
+                        if let Err(e) = retry_repo.delete(&retry.attachment_id).await {
+                            tracing::warn!(attachment_id = %retry.attachment_id, error = %e, "attachment scan sweep: failed to clear orphaned retry");
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        tracing::warn!(message_id = %retry.message_id, error = %e, "attachment scan sweep: message lookup failed");
+                        continue;
+                    }
+                };
+
+                let attachment = Attachment {
+                    id: retry.attachment_id.clone(),
+                    message_id: retry.message_id.clone(),
+                    url: retry.url.clone(),
+                    mime: retry.mime.clone(),
+                    size: 0,
+                    width: None,
+                    height: None,
+                    moderation_status: AttachmentModerationStatus::Pending,
+                    created_at: retry.created_at,
+                };
+
+                // rescan_attachment writes + clears + emits on success; on a
+                // repeat failure the dead-letter UPSERT bumps the retry count.
+                rescan_attachment(&deps, &attachment, &author_id, &retry.channel_id).await;
             }
         }
     });

@@ -5600,6 +5600,17 @@
         "description": "Unique identifier for a message attachment.",
         "example": "110e8400-e29b-41d4-a716-44665544000b"
       },
+      "AttachmentModerationStatus": {
+        "type": "string",
+        "description": "Terminal moderation state of an image/file attachment (mirrors the Postgres\n`attachment_moderation_status` enum). Drives the client render:\n- `Pending` → blurred \"Scanning…\" placeholder (default on insert; the bytes\n  are never shown in the clear before a verdict).\n- `Approved` → normal inline render.\n- `Gated` → blurred + spoiler + per-viewer click-to-reveal.\n- `Blocked` → removed-placeholder chip (\"not permitted here\"); no reveal.\n- `Quarantined` → the whole message is tombstoned; the URL never reaches a\n  client (CSAM path — Noop this phase, so never produced).",
+        "enum": [
+          "pending",
+          "approved",
+          "gated",
+          "blocked",
+          "quarantined"
+        ]
+      },
       "AttachmentResponse": {
         "type": "object",
         "description": "A file attached to a message.",
@@ -5607,7 +5618,8 @@
           "id",
           "url",
           "mime",
-          "size"
+          "size",
+          "moderationStatus"
         ],
         "properties": {
           "height": {
@@ -5623,6 +5635,10 @@
           },
           "mime": {
             "type": "string"
+          },
+          "moderationStatus": {
+            "$ref": "#/components/schemas/AttachmentModerationStatus",
+            "description": "Content-moderation verdict driving the client render (blur/reveal/\nremoved). `nsfwScore` is server-side only and never shipped."
           },
           "size": {
             "type": "integer",

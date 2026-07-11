@@ -183,6 +183,14 @@ async fn app_state(pool: PgPool, trusted_proxy_secret: Option<SecretString>) -> 
         harmony_api::infra::postgres::PgAnalyticsRecorder::new(pool.clone()),
     );
 
+    let attachment_repo_for_scan: std::sync::Arc<
+        dyn harmony_api::domain::ports::AttachmentRepository,
+    > = std::sync::Arc::new(harmony_api::infra::postgres::PgAttachmentRepository::new(
+        pool.clone(),
+    ));
+    let attachment_scan_retry_repo = std::sync::Arc::new(
+        harmony_api::infra::postgres::PgAttachmentScanRetryRepository::new(pool.clone()),
+    );
     AppState::new(
         pool,
         SecretString::from(TEST_JWT_SECRET.to_string()),
@@ -216,9 +224,14 @@ async fn app_state(pool: PgPool, trusted_proxy_secret: Option<SecretString>) -> 
         message_repo,
         server_repo,
         moderation_retry_repo,
-        None, // voice_service
-        None, // voice_session_repository
-        None, // official_server_id
+        std::sync::Arc::new(harmony_api::infra::NoopImageClassifier),
+        std::sync::Arc::new(harmony_api::infra::NoopCsamMatcher),
+        attachment_repo_for_scan,
+        attachment_scan_retry_repo,
+        false, // attachments_require_csam_scan
+        None,  // voice_service
+        None,  // voice_session_repository
+        None,  // official_server_id
         analytics_recorder,
         Some("https://test.supabase.co".to_string()), // attachment_url_origin
         trusted_proxy_secret,

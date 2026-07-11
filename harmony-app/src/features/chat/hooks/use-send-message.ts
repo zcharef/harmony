@@ -58,6 +58,9 @@ function toOptimisticAttachment(attachment: NewAttachmentRequest): AttachmentRes
     ...(attachment.height !== undefined && attachment.height !== null
       ? { height: attachment.height }
       : {}),
+    // The sender's own echo starts blurred/pending like every reader's, then
+    // flips when the scan verdict arrives via message.updated.
+    moderationStatus: 'pending',
   }
 }
 

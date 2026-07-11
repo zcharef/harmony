@@ -110,6 +110,54 @@ pub const ALLOWED_ATTACHMENT_MIME: &[&str] = &[
 /// own uploaded URLs (non-security use).
 pub const ATTACHMENT_PUBLIC_PATH_MARKER: &str = "/storage/v1/object/public/attachments/";
 
+/// Terminal moderation state of an image/file attachment (mirrors the Postgres
+/// `attachment_moderation_status` enum). Drives the client render:
+/// - `Pending` → blurred "Scanning…" placeholder (default on insert; the bytes
+///   are never shown in the clear before a verdict).
+/// - `Approved` → normal inline render.
+/// - `Gated` → blurred + spoiler + per-viewer click-to-reveal.
+/// - `Blocked` → removed-placeholder chip ("not permitted here"); no reveal.
+/// - `Quarantined` → the whole message is tombstoned; the URL never reaches a
+///   client (CSAM path — Noop this phase, so never produced).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AttachmentModerationStatus {
+    Pending,
+    Approved,
+    Gated,
+    Blocked,
+    Quarantined,
+}
+
+impl AttachmentModerationStatus {
+    /// Postgres enum label. WHY hand-mapped (not the sqlx `Type` derive): the
+    /// repository casts the enum column to/from `text` in SQL (mirroring
+    /// `message_type`), so no offline-metadata coupling to a custom SQL type.
+    #[must_use]
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Approved => "approved",
+            Self::Gated => "gated",
+            Self::Blocked => "blocked",
+            Self::Quarantined => "quarantined",
+        }
+    }
+
+    /// Parse a Postgres enum label. Unknown values fail CLOSED to `Pending`
+    /// (blurred/withheld) — never silently reveal an unrecognized state.
+    #[must_use]
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "approved" => Self::Approved,
+            "gated" => Self::Gated,
+            "blocked" => Self::Blocked,
+            "quarantined" => Self::Quarantined,
+            _ => Self::Pending,
+        }
+    }
+}
+
 /// A file attached to a message (persisted row).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -125,6 +173,9 @@ pub struct Attachment {
     pub width: Option<i32>,
     /// Pixel height for images; `None` for non-images.
     pub height: Option<i32>,
+    /// Content-moderation verdict. `Pending` until the async scan resolves it
+    /// (scan-before-reveal, spec §c.1).
+    pub moderation_status: AttachmentModerationStatus,
     pub created_at: DateTime<Utc>,
 }
 

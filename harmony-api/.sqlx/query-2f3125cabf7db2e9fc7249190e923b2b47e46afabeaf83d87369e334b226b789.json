@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, message_id, url, mime, size, width, height, created_at\n            FROM message_attachments\n            WHERE message_id = ANY($1::uuid[])\n            ORDER BY created_at, id\n            ",
+  "query": "\n            SELECT attachment_id, message_id, channel_id, url, mime,\n                   retry_count, last_error, created_at\n            FROM attachment_scan_retry\n            WHERE retry_count < 5\n            ORDER BY created_at ASC\n            LIMIT $1\n            ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "attachment_id",
         "type_info": "Uuid"
       },
       {
@@ -15,28 +15,28 @@
       },
       {
         "ordinal": 2,
+        "name": "channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
         "name": "url",
         "type_info": "Text"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "mime",
         "type_info": "Text"
       },
       {
-        "ordinal": 4,
-        "name": "size",
-        "type_info": "Int8"
-      },
-      {
         "ordinal": 5,
-        "name": "width",
+        "name": "retry_count",
         "type_info": "Int4"
       },
       {
         "ordinal": 6,
-        "name": "height",
-        "type_info": "Int4"
+        "name": "last_error",
+        "type_info": "Text"
       },
       {
         "ordinal": 7,
@@ -46,7 +46,7 @@
     ],
     "parameters": {
       "Left": [
-        "UuidArray"
+        "Int8"
       ]
     },
     "nullable": [
@@ -55,10 +55,10 @@
       false,
       false,
       false,
-      true,
+      false,
       true,
       false
     ]
   },
-  "hash": "8c85a2d328c0a0fe5ccce4236187e8f2a4bf14d8e2ea79dbcc9100a20e1de428"
+  "hash": "2f3125cabf7db2e9fc7249190e923b2b47e46afabeaf83d87369e334b226b789"
 }

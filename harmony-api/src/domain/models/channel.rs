@@ -7,7 +7,19 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use super::ids::{CategoryId, ChannelId, ServerId};
+use super::ids::{CategoryId, ChannelId, ServerId, UserId};
+
+/// Minimal server-side context a channel + its server contribute to the
+/// image-moderation decision table (spec §b). Resolved once at scan time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelModerationContext {
+    /// `channels.is_nsfw` — the channel is flagged NSFW.
+    pub is_nsfw: bool,
+    /// `servers.is_dm` — the parent server is a DM.
+    pub is_dm: bool,
+    /// `servers.owner_id` — used to check `author == owner` (own-space allow).
+    pub owner_id: UserId,
+}
 
 /// Channel type (matches Postgres `channel_type` enum).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

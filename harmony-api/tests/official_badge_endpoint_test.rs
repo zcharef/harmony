@@ -118,6 +118,8 @@ async fn app_state(pool: PgPool, official_server_id: Option<ServerId>) -> AppSta
     let notification_settings_repo = Arc::new(PgNotificationSettingsRepository::new(pool.clone()));
     let user_preferences_repo = Arc::new(PgUserPreferencesRepository::new(pool.clone()));
     let moderation_retry_repo = Arc::new(PgModerationRetryRepository::new(pool.clone()));
+    let attachment_scan_retry_repo =
+        Arc::new(harmony_api::infra::postgres::PgAttachmentScanRetryRepository::new(pool.clone()));
     let plan_checker: Arc<dyn harmony_api::domain::ports::PlanLimitChecker> =
         Arc::new(AlwaysAllowedChecker);
 
@@ -242,8 +244,13 @@ async fn app_state(pool: PgPool, official_server_id: Option<ServerId>) -> AppSta
         message_repo,
         server_repo,
         moderation_retry_repo,
-        None, // voice_service
-        None, // voice_session_repository
+        std::sync::Arc::new(harmony_api::infra::NoopImageClassifier),
+        std::sync::Arc::new(harmony_api::infra::NoopCsamMatcher),
+        attachment_repo.clone(),
+        attachment_scan_retry_repo,
+        false, // attachments_require_csam_scan
+        None,  // voice_service
+        None,  // voice_session_repository
         official_server_id,
         analytics_recorder,
         Some("https://test.supabase.co".to_string()),

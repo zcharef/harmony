@@ -28,7 +28,7 @@ mod voice_session;
 
 pub use analytics::{AnalyticsEvent, AnalyticsEventName};
 pub use ban::ServerBan;
-pub use channel::{Channel, ChannelType};
+pub use channel::{Channel, ChannelModerationContext, ChannelType};
 pub use crypto::{ClaimedKey, DeviceKey, OneTimeKey, PreKeyBundle};
 pub use desktop_auth::DesktopAuthCode;
 pub use friendship::{
@@ -44,8 +44,8 @@ pub use invite::Invite;
 pub use megolm_session::MegolmSession;
 pub use member::ServerMember;
 pub use message::{
-    ALLOWED_ATTACHMENT_MIME, ATTACHMENT_PUBLIC_PATH_MARKER, Attachment, MentionedUser, Message,
-    MessageType, NewAttachment, ParentMessagePreview,
+    ALLOWED_ATTACHMENT_MIME, ATTACHMENT_PUBLIC_PATH_MARKER, Attachment, AttachmentModerationStatus,
+    MentionedUser, Message, MessageType, NewAttachment, ParentMessagePreview,
 };
 pub use message_with_author::MessageWithAuthor;
 pub use migration::{
@@ -53,7 +53,7 @@ pub use migration::{
     ALIVE_MIN_MESSAGES, ALIVE_MIN_NON_OWNER_ACTIVE, MemberCohortPage, MemberFollowThrough,
     MigrationProgress, NotYetActiveMember, RecommendedAction, ServerAliveSnapshot,
 };
-pub use moderation::{ModerationRetry, ServerModerationSettings};
+pub use moderation::{AttachmentScanRetry, ModerationRetry, ServerModerationSettings};
 pub use plan::{Plan, PlanLimits, ResourceKind};
 pub use profile::{Profile, UserStatus};
 pub use reaction::{EmojiVariety, ReactionSummary, Reactor};

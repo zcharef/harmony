@@ -377,6 +377,7 @@ mod tests {
             size: 8_388_608,
             width: Some(1920),
             height: Some(1080),
+            moderation_status: crate::domain::models::AttachmentModerationStatus::Approved,
         }
     }
 

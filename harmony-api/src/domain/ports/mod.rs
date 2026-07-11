@@ -4,13 +4,16 @@
 
 mod analytics_recorder;
 mod attachment_repository;
+mod attachment_scan_retry_repository;
 mod ban_repository;
 mod channel_repository;
 mod content_moderator;
+mod csam_matcher;
 mod desktop_auth_repository;
 pub mod dm_repository;
 mod event_bus;
 pub mod friendship_repository;
+mod image_classifier;
 mod invite_repository;
 mod key_repository;
 mod livekit;
@@ -30,13 +33,16 @@ mod voice_session_repository;
 
 pub use analytics_recorder::AnalyticsRecorder;
 pub use attachment_repository::AttachmentRepository;
+pub use attachment_scan_retry_repository::AttachmentScanRetryRepository;
 pub use ban_repository::BanRepository;
 pub use channel_repository::ChannelRepository;
 pub use content_moderator::{ContentModerator, ModerationResult};
+pub use csam_matcher::{CsamMatcher, CsamVerdict};
 pub use desktop_auth_repository::DesktopAuthRepository;
 pub use dm_repository::DmRepository;
 pub use event_bus::EventBus;
 pub use friendship_repository::FriendshipRepository;
+pub use image_classifier::{ImageClassifier, NsfwLabel, NsfwVerdict};
 pub use invite_repository::InviteRepository;
 pub use key_repository::KeyRepository;
 pub use livekit::{LiveKitTokenGenerator, VoiceGrants};

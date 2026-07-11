@@ -620,12 +620,14 @@ describe('MessageItem attachments (T1.3 part 1)', () => {
     size: 2048,
     width: 800,
     height: 600,
+    moderationStatus: 'approved' as const,
   }
   const PDF_ATTACHMENT = {
     id: 'att-2',
     url: 'https://xyz.supabase.co/storage/v1/object/public/attachments/u/report.pdf',
     mime: 'application/pdf',
     size: 123456,
+    moderationStatus: 'approved' as const,
   }
 
   it('renders an image attachment as a bounded inline <img> with intrinsic dims', () => {

@@ -11,7 +11,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Attachment, AttachmentId, MessageId};
+use crate::domain::models::{Attachment, AttachmentId, AttachmentModerationStatus, MessageId};
 use crate::domain::ports::AttachmentRepository;
 
 /// PostgreSQL-backed attachment repository (read side).
@@ -45,7 +45,8 @@ impl AttachmentRepository for PgAttachmentRepository {
         // insertion order; `id` is a deterministic tiebreak for equal timestamps.
         let rows = sqlx::query!(
             r#"
-            SELECT id, message_id, url, mime, size, width, height, created_at
+            SELECT id, message_id, url, mime, size, width, height,
+                   moderation_status::text AS "moderation_status!", created_at
             FROM message_attachments
             WHERE message_id = ANY($1::uuid[])
             ORDER BY created_at, id
@@ -67,11 +68,74 @@ impl AttachmentRepository for PgAttachmentRepository {
                 size: row.size,
                 width: row.width,
                 height: row.height,
+                moderation_status: AttachmentModerationStatus::from_db_str(&row.moderation_status),
                 created_at: row.created_at,
             };
             result.entry(msg_id).or_default().push(attachment);
         }
 
         Ok(result)
+    }
+
+    async fn list_pending_for_message(
+        &self,
+        message_id: &MessageId,
+    ) -> Result<Vec<Attachment>, DomainError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT id, message_id, url, mime, size, width, height,
+                   moderation_status::text AS "moderation_status!", created_at
+            FROM message_attachments
+            WHERE message_id = $1 AND moderation_status = 'pending'
+            ORDER BY created_at, id
+            "#,
+            message_id.0,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| Attachment {
+                id: AttachmentId::new(row.id),
+                message_id: MessageId::new(row.message_id),
+                url: row.url,
+                mime: row.mime,
+                size: row.size,
+                width: row.width,
+                height: row.height,
+                moderation_status: AttachmentModerationStatus::from_db_str(&row.moderation_status),
+                created_at: row.created_at,
+            })
+            .collect())
+    }
+
+    async fn update_moderation(
+        &self,
+        attachment_id: &AttachmentId,
+        status: AttachmentModerationStatus,
+        nsfw_score: Option<f32>,
+        reason: Option<&str>,
+    ) -> Result<(), DomainError> {
+        sqlx::query!(
+            r#"
+            UPDATE message_attachments
+            SET moderation_status = ($2::text)::attachment_moderation_status,
+                nsfw_score = $3,
+                moderation_reason = $4,
+                scanned_at = now()
+            WHERE id = $1
+            "#,
+            attachment_id.0,
+            status.as_db_str(),
+            nsfw_score,
+            reason,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(())
     }
 }

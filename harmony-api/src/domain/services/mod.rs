@@ -2,6 +2,7 @@
 //!
 //! Pure Rust, no infrastructure dependencies.
 
+pub mod attachment_moderation;
 mod channel_access;
 mod channel_service;
 pub mod content_filter;
@@ -29,6 +30,7 @@ pub(crate) use channel_access::{ensure_channel_access, resolve_channel_access};
 // WHY pub (not pub(crate)): the moderation-retry sweep in main.rs (the BIN
 // crate, separate from this lib) resolves channel access to scope its
 // MessageDeleted event — pub(crate) is invisible across the crate boundary.
+pub use attachment_moderation::{AttachmentContext, resolve_status};
 pub use channel_access::resolve_channel_access_by_id;
 pub use channel_service::ChannelService;
 pub use content_filter::ContentFilter;

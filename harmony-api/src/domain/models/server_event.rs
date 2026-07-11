@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::Attachment;
+use super::AttachmentModerationStatus;
 use super::Channel;
 use super::ChannelType;
 use super::MentionedUser;
@@ -41,6 +42,20 @@ pub struct AttachmentPayload {
     pub width: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<i32>,
+    /// Content-moderation verdict — drives the client render (blur/reveal/
+    /// removed). `nsfwScore` is deliberately NOT on the wire (server-side only).
+    ///
+    /// WHY `default`: rollout-safe (mirrors `mentions`/`attachments`) — an older
+    /// instance publishes this payload WITHOUT the key over `pg_notify`; the
+    /// `default` fails CLOSED to `Pending` (blurred) rather than dropping the
+    /// event or revealing an unscanned image.
+    #[serde(default = "default_pending_status")]
+    pub moderation_status: AttachmentModerationStatus,
+}
+
+/// Fail-closed default for the rollout-window `moderation_status` gap.
+fn default_pending_status() -> AttachmentModerationStatus {
+    AttachmentModerationStatus::Pending
 }
 
 impl From<Attachment> for AttachmentPayload {
@@ -52,6 +67,7 @@ impl From<Attachment> for AttachmentPayload {
             size: a.size,
             width: a.width,
             height: a.height,
+            moderation_status: a.moderation_status,
         }
     }
 }
@@ -1446,6 +1462,7 @@ mod tests {
             size: 1234,
             width: Some(800),
             height: Some(600),
+            moderation_status: AttachmentModerationStatus::Approved,
         };
         let event = ServerEvent::MessageCreated {
             sender_id: test_user_id(),

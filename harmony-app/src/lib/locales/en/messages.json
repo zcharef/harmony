@@ -41,5 +41,9 @@
   "unknownMention": "unknown-user",
   "attachmentUnavailable": "Image unavailable",
   "downloadAttachment": "Download {{filename}}",
-  "imageAttachment": "Image attachment"
+  "imageAttachment": "Image attachment",
+  "attachmentScanning": "Scanning…",
+  "attachmentRemoved": "Image removed — not permitted in this channel",
+  "attachmentNsfw": "Possibly sensitive content",
+  "attachmentReveal": "Show content"
 }

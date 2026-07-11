@@ -8,8 +8,9 @@ use tokio::sync::Semaphore;
 
 use crate::domain::models::ServerId;
 use crate::domain::ports::{
-    AnalyticsRecorder, BanRepository, ChannelRepository, ContentModerator, DesktopAuthRepository,
-    EventBus, MegolmSessionRepository, MemberRepository, MessageRepository,
+    AnalyticsRecorder, AttachmentRepository, AttachmentScanRetryRepository, BanRepository,
+    ChannelRepository, ContentModerator, CsamMatcher, DesktopAuthRepository, EventBus,
+    ImageClassifier, MegolmSessionRepository, MemberRepository, MessageRepository,
     ModerationRetryRepository, PlanLimitChecker, ServerRepository, VoiceSessionRepository,
 };
 use crate::domain::services::{
@@ -103,6 +104,18 @@ pub struct AppState {
     moderation_semaphore: Arc<Semaphore>,
     /// Dead-letter queue for failed AI moderation checks (Tier 1 safety).
     moderation_retry_repository: Arc<dyn ModerationRetryRepository>,
+    /// Adult-NSFW image classifier (Phase 1: Noop). Never `None` — the Noop is
+    /// always wired so the scan pipeline runs uniformly.
+    image_classifier: Arc<dyn ImageClassifier>,
+    /// CSAM hash matcher (Phase 1: Noop). Never `None`.
+    csam_matcher: Arc<dyn CsamMatcher>,
+    /// Attachment repository — the async scan task's moderation-status writer.
+    attachment_repository: Arc<dyn AttachmentRepository>,
+    /// Dead-letter queue for failed image scans (fail-closed retry).
+    attachment_scan_retry_repository: Arc<dyn AttachmentScanRetryRepository>,
+    /// Refuse image attachments when no real CSAM matcher is configured
+    /// (fail-closed hard gate). Default false while invite-only.
+    attachments_require_csam_scan: bool,
     /// Voice domain service. None = `LiveKit` not configured.
     voice_service: Option<Arc<VoiceService>>,
     /// Voice session repository for sweep background task. None = voice disabled.
@@ -162,6 +175,17 @@ impl std::fmt::Debug for AppState {
                 "moderation_retry_repository",
                 &self.moderation_retry_repository,
             )
+            .field("image_classifier", &self.image_classifier)
+            .field("csam_matcher", &self.csam_matcher)
+            .field("attachment_repository", &self.attachment_repository)
+            .field(
+                "attachment_scan_retry_repository",
+                &self.attachment_scan_retry_repository,
+            )
+            .field(
+                "attachments_require_csam_scan",
+                &self.attachments_require_csam_scan,
+            )
             .field("voice_service", &self.voice_service.is_some())
             .field(
                 "voice_session_repository",
@@ -215,6 +239,11 @@ impl AppState {
         message_repository_for_moderation: Arc<dyn MessageRepository>,
         server_repository_for_moderation: Arc<dyn ServerRepository>,
         moderation_retry_repository: Arc<dyn ModerationRetryRepository>,
+        image_classifier: Arc<dyn ImageClassifier>,
+        csam_matcher: Arc<dyn CsamMatcher>,
+        attachment_repository: Arc<dyn AttachmentRepository>,
+        attachment_scan_retry_repository: Arc<dyn AttachmentScanRetryRepository>,
+        attachments_require_csam_scan: bool,
         voice_service: Option<Arc<VoiceService>>,
         voice_session_repository: Option<Arc<dyn VoiceSessionRepository>>,
         official_server_id: Option<ServerId>,
@@ -266,6 +295,11 @@ impl AppState {
             server_repository: server_repository_for_moderation,
             moderation_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_MODERATIONS)),
             moderation_retry_repository,
+            image_classifier,
+            csam_matcher,
+            attachment_repository,
+            attachment_scan_retry_repository,
+            attachments_require_csam_scan,
             voice_service,
             voice_session_repository,
             official_server_id,
@@ -474,6 +508,44 @@ impl AppState {
     #[must_use]
     pub fn moderation_retry_repository(&self) -> &Arc<dyn ModerationRetryRepository> {
         &self.moderation_retry_repository
+    }
+
+    /// Access the adult-NSFW image classifier (Phase 1: Noop).
+    #[must_use]
+    pub fn image_classifier(&self) -> &Arc<dyn ImageClassifier> {
+        &self.image_classifier
+    }
+
+    /// Access the CSAM hash matcher (Phase 1: Noop).
+    #[must_use]
+    pub fn csam_matcher(&self) -> &Arc<dyn CsamMatcher> {
+        &self.csam_matcher
+    }
+
+    /// Access the attachment repository (moderation-status writer + reads).
+    #[must_use]
+    pub fn attachment_repository(&self) -> &Arc<dyn AttachmentRepository> {
+        &self.attachment_repository
+    }
+
+    /// Access the image-scan dead-letter queue.
+    #[must_use]
+    pub fn attachment_scan_retry_repository(&self) -> &Arc<dyn AttachmentScanRetryRepository> {
+        &self.attachment_scan_retry_repository
+    }
+
+    /// Whether image attachments must be refused when no real CSAM matcher is
+    /// configured (fail-closed hard gate). Default false while invite-only.
+    #[must_use]
+    pub fn attachments_require_csam_scan(&self) -> bool {
+        self.attachments_require_csam_scan
+    }
+
+    /// Access the message domain service as a cloneable `Arc` (for `tokio::spawn`
+    /// captures in the async attachment-moderation task).
+    #[must_use]
+    pub fn message_service_arc(&self) -> &Arc<MessageService> {
+        &self.message_service
     }
 
     /// Access the voice domain service. None = `LiveKit` not configured.

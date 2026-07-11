@@ -457,6 +457,14 @@ async fn build_app_state_with_voice(pool: PgPool) -> AppState {
         harmony_api::infra::postgres::PgAnalyticsRecorder::new(pool.clone()),
     );
 
+    let attachment_repo_for_scan: std::sync::Arc<
+        dyn harmony_api::domain::ports::AttachmentRepository,
+    > = std::sync::Arc::new(harmony_api::infra::postgres::PgAttachmentRepository::new(
+        pool.clone(),
+    ));
+    let attachment_scan_retry_repo = std::sync::Arc::new(
+        harmony_api::infra::postgres::PgAttachmentScanRetryRepository::new(pool.clone()),
+    );
     AppState::new(
         pool,
         SecretString::from(TEST_JWT_SECRET.to_string()),
@@ -490,6 +498,11 @@ async fn build_app_state_with_voice(pool: PgPool) -> AppState {
         message_repo,
         server_repo,
         moderation_retry_repo,
+        std::sync::Arc::new(harmony_api::infra::NoopImageClassifier),
+        std::sync::Arc::new(harmony_api::infra::NoopCsamMatcher),
+        attachment_repo_for_scan,
+        attachment_scan_retry_repo,
+        false, // attachments_require_csam_scan
         voice_service,
         Some(voice_repo),
         None, // official_server_id

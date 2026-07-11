@@ -373,6 +373,10 @@ async fn insert_attachments(
             size: row.size,
             width: row.width,
             height: row.height,
+            // Freshly inserted rows carry the DB `DEFAULT 'pending'` — the async
+            // scan flips them. The INSERT does not touch the column, so this
+            // mirrors the row state (scan-before-reveal, spec §c.1).
+            moderation_status: crate::domain::models::AttachmentModerationStatus::Pending,
             created_at: row.created_at,
         })
         .collect())
@@ -779,6 +783,80 @@ impl MessageRepository for PgMessageRepository {
                 created_at: r.created_at,
             }
             .into_message()
+        }))
+    }
+
+    async fn find_with_author(
+        &self,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageWithAuthor>, DomainError> {
+        let mid = message_id.0;
+
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                m.id as "id!",
+                m.channel_id as "channel_id!",
+                m.author_id as "author_id!",
+                m.content,
+                m.edited_at,
+                m.deleted_at,
+                m.deleted_by,
+                m.encrypted as "encrypted!",
+                m.sender_device_id,
+                m.message_type as "message_type!: String",
+                m.system_event_key,
+                m.parent_message_id,
+                m.moderated_at,
+                m.moderation_reason,
+                m.original_content,
+                m.mentioned_user_ids as "mentioned_user_ids!",
+                m.created_at as "created_at!",
+                p.username AS "author_username?",
+                p.display_name AS "author_display_name?",
+                p.avatar_url AS "author_avatar_url?",
+                parent_p.username AS "parent_author_username?",
+                LEFT(parent_m.content, 100) AS "parent_content_preview?",
+                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
+            FROM messages m
+            LEFT JOIN profiles p ON p.id = m.author_id
+            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id
+            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
+            WHERE m.id = $1 AND m.deleted_at IS NULL
+            "#,
+            mid,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|row| {
+            MessageWithAuthorRow {
+                id: row.id,
+                channel_id: row.channel_id,
+                author_id: row.author_id,
+                content: row.content,
+                edited_at: row.edited_at,
+                deleted_at: row.deleted_at,
+                deleted_by: row.deleted_by,
+                encrypted: row.encrypted,
+                sender_device_id: row.sender_device_id,
+                message_type: row.message_type,
+                system_event_key: row.system_event_key,
+                parent_message_id: row.parent_message_id,
+                moderated_at: row.moderated_at,
+                moderation_reason: row.moderation_reason,
+                original_content: row.original_content,
+                mentioned_user_ids: row.mentioned_user_ids,
+                created_at: row.created_at,
+                author_username: row.author_username,
+                author_display_name: row.author_display_name,
+                author_avatar_url: row.author_avatar_url,
+                parent_author_username: row.parent_author_username,
+                parent_content_preview: row.parent_content_preview,
+                parent_deleted: row.parent_deleted,
+            }
+            .into_message_with_author()
         }))
     }
 

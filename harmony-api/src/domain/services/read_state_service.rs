@@ -298,6 +298,12 @@ mod tests {
         async fn get_by_id(&self, _channel_id: &ChannelId) -> Result<Option<Channel>, DomainError> {
             Ok(Some(self.channel.clone()))
         }
+        async fn get_moderation_context(
+            &self,
+            _channel_id: &ChannelId,
+        ) -> Result<Option<crate::domain::models::ChannelModerationContext>, DomainError> {
+            Ok(None)
+        }
         async fn has_private_channel_access(
             &self,
             _channel_id: &ChannelId,
