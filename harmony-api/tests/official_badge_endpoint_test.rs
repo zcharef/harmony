@@ -91,10 +91,10 @@ async fn app_state(pool: PgPool, official_server_id: Option<ServerId>) -> AppSta
     use harmony_api::infra::plan_always_allowed::AlwaysAllowedChecker;
     use harmony_api::infra::postgres::{
         PgBanRepository, PgChannelRepository, PgDesktopAuthRepository, PgDmRepository,
-        PgInviteRepository, PgKeyRepository, PgMegolmSessionRepository, PgMemberRepository,
-        PgMessageRepository, PgModerationRetryRepository, PgNotificationSettingsRepository,
-        PgProfileRepository, PgReactionRepository, PgReadStateRepository, PgServerRepository,
-        PgUserPreferencesRepository,
+        PgFriendshipRepository, PgInviteRepository, PgKeyRepository, PgMegolmSessionRepository,
+        PgMemberRepository, PgMessageRepository, PgModerationRetryRepository,
+        PgNotificationSettingsRepository, PgProfileRepository, PgReactionRepository,
+        PgReadStateRepository, PgServerRepository, PgUserPreferencesRepository,
     };
 
     let profile_repo: Arc<dyn harmony_api::domain::ports::ProfileRepository> =
@@ -132,6 +132,7 @@ async fn app_state(pool: PgPool, official_server_id: Option<ServerId>) -> AppSta
         plan_checker.clone(),
         content_filter.clone(),
     ));
+    let friendship_repo = Arc::new(PgFriendshipRepository::new(pool.clone()));
     let message_service = Arc::new(harmony_api::domain::services::MessageService::new(
         message_repo.clone(),
         channel_repo.clone(),
@@ -141,6 +142,7 @@ async fn app_state(pool: PgPool, official_server_id: Option<ServerId>) -> AppSta
         attachment_repo.clone(),
         content_filter.clone(),
         spam_guard.clone(),
+        friendship_repo.clone(),
     ));
     let invite_service = Arc::new(harmony_api::domain::services::InviteService::new(
         invite_repo,
@@ -160,12 +162,18 @@ async fn app_state(pool: PgPool, official_server_id: Option<ServerId>) -> AppSta
         ban_repo.clone(),
         member_repo.clone(),
     ));
+    let friendship_service = Arc::new(harmony_api::domain::services::FriendshipService::new(
+        friendship_repo.clone(),
+        profile_repo.clone(),
+        spam_guard.clone(),
+    ));
     let dm_service = Arc::new(harmony_api::domain::services::DmService::new(
         dm_repo,
         profile_repo.clone(),
         server_repo.clone(),
         member_repo.clone(),
         plan_checker.clone(),
+        friendship_repo.clone(),
     ));
     let key_service = Arc::new(harmony_api::domain::services::KeyService::new(key_repo));
     let reaction_service = Arc::new(harmony_api::domain::services::ReactionService::new(
@@ -213,6 +221,7 @@ async fn app_state(pool: PgPool, official_server_id: Option<ServerId>) -> AppSta
         channel_service,
         moderation_service,
         dm_service,
+        friendship_service,
         key_service,
         reaction_service,
         read_state_service,

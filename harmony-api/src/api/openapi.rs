@@ -20,11 +20,10 @@ use super::dto::{
     MarkReadRequest, MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
     MentionedUserResponse, MessageListQuery, MessageListResponse, MessageResponse,
     MessageSearchQuery, MessageSearchResponse, NewAttachmentRequest, OfficialBadgeGrantRequest,
-    OfficialBadgesResponse, OneTimeKeyDto,
-    PreKeyBundleResponse, ProfileResponse, RedeemDesktopAuthRequest, RedeemDesktopAuthResponse,
-    RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
-    SetChannelRoleAccessRequest, TransferOwnershipRequest, UpdateChannelRequest,
-    UpdateProfileRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
+    OfficialBadgesResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
+    RedeemDesktopAuthRequest, RedeemDesktopAuthResponse, RegisterDeviceRequest, SendMessageRequest,
+    ServerListResponse, ServerResponse, SetChannelRoleAccessRequest, TransferOwnershipRequest,
+    UpdateChannelRequest, UpdateProfileRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};

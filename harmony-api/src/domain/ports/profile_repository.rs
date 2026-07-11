@@ -25,12 +25,6 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
     /// Get a profile by user ID. Returns `None` if not found.
     async fn get_by_id(&self, user_id: &UserId) -> Result<Option<Profile>, DomainError>;
 
-    /// Get a profile by (case-sensitive) username. Returns `None` if not found.
-    ///
-    /// Used by the owner-only badge-grant admin action to resolve a subject
-    /// passed by handle instead of UUID.
-    async fn get_by_username(&self, username: &str) -> Result<Option<Profile>, DomainError>;
-
     /// Check whether a username is already taken.
     async fn is_username_taken(&self, username: &str) -> Result<bool, DomainError>;
 
