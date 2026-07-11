@@ -53,7 +53,7 @@ import { useUnreadStore } from './stores/unread-store'
 // whole ChannelSidebar would require mocking five unrelated feature barrels.
 // Intentionally NOT in the feature barrel: not part of the public API.
 // The create CTA is gated on the SAME role check as the header's create-channel
-// affordance (canAccessSettings) — no new permission logic invented.
+// affordance (canManageChannels, admin+) — no new permission logic invented.
 export function ChannelEmptyState({
   canManageChannels,
   onCreateChannel,
@@ -202,7 +202,8 @@ export function ChannelButton({
 function ServerHeader({
   serverId,
   serverName,
-  canAccessSettings,
+  canOpenSettings,
+  canManageChannels,
   onInvite,
   onSettings,
   onCreateChannel,
@@ -210,7 +211,8 @@ function ServerHeader({
 }: {
   serverId: string | null
   serverName: string | null
-  canAccessSettings: boolean
+  canOpenSettings: boolean
+  canManageChannels: boolean
   onInvite: () => void
   onSettings: () => void
   onCreateChannel: () => void
@@ -246,8 +248,8 @@ function ServerHeader({
         className="w-56"
         onAction={(key) => {
           if (key === 'invite') onInvite()
-          if (key === 'settings' && canAccessSettings) onSettings()
-          if (key === 'create-channel' && canAccessSettings) onCreateChannel()
+          if (key === 'settings' && canOpenSettings) onSettings()
+          if (key === 'create-channel' && canManageChannels) onCreateChannel()
           if (key === 'leave') onLeave()
         }}
       >
@@ -264,14 +266,14 @@ function ServerHeader({
           </DropdownItem>
           <DropdownItem
             key="settings"
-            className={canAccessSettings ? '' : 'hidden'}
+            className={canOpenSettings ? '' : 'hidden'}
             data-test="server-menu-settings-item"
           >
             {t('serverSettings')}
           </DropdownItem>
           <DropdownItem
             key="create-channel"
-            className={canAccessSettings ? '' : 'hidden'}
+            className={canManageChannels ? '' : 'hidden'}
             data-test="server-menu-create-channel-item"
           >
             {t('createChannel')}
@@ -422,8 +424,14 @@ export function ChannelSidebar({
   const leaveServerMutation = useLeaveServer()
   const openServerSettings = useSettingsUiStore((s) => s.openServerSettings)
   const { role: callerRole } = useMyMemberRole(serverId)
-  /** WHY: Only admin+ can access server settings. */
-  const canAccessSettings = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
+  /** WHY: Channel management (create/edit/delete) stays admin+. */
+  const canManageChannels = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
+  /**
+   * WHY: The settings shell hosts the moderator+ reports queue (mod-dashboard
+   * §9 #1), so moderators must be able to open it. Admin-only tabs are gated
+   * inside ServerSettings itself.
+   */
+  const canOpenSettings = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.moderator
   const voiceChannelId = useVoiceConnectionStore((s) => s.currentChannelId)
   // WHY: server-wide search entry (§5.2) — opens the shared overlay with no
   // channel scope. The overlay is mounted once in MainLayout.
@@ -436,7 +444,8 @@ export function ChannelSidebar({
         <ServerHeader
           serverId={serverId}
           serverName={serverName}
-          canAccessSettings={canAccessSettings}
+          canOpenSettings={canOpenSettings}
+          canManageChannels={canManageChannels}
           onInvite={() => setIsInviteOpen(true)}
           onSettings={openServerSettings}
           onCreateChannel={() => setIsCreateChannelOpen(true)}
@@ -488,7 +497,7 @@ export function ChannelSidebar({
 
           {channels !== undefined && channels.length === 0 && (
             <ChannelEmptyState
-              canManageChannels={canAccessSettings}
+              canManageChannels={canManageChannels}
               onCreateChannel={() => setIsCreateChannelOpen(true)}
             />
           )}
@@ -504,7 +513,7 @@ export function ChannelSidebar({
                         ? voiceChannelId === channel.id
                         : channel.id === selectedChannelId
                     }
-                    canManageChannels={canAccessSettings}
+                    canManageChannels={canManageChannels}
                     onSelect={() => {
                       if (channel.channelType === 'voice' && serverId !== null) {
                         if (voiceChannelId !== channel.id) {
