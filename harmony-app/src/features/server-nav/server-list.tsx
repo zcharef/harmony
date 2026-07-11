@@ -1,5 +1,5 @@
 import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
-import { Compass, Info, LogOut, MessageSquare, Plus } from 'lucide-react'
+import { Compass, Info, LogOut, MessageSquare, Plus, Ticket } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChannels, useUnreadStore } from '@/features/channels'
@@ -7,6 +7,7 @@ import { useDms } from '@/features/dms'
 import { useFriendRequests } from '@/features/friends'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import type { ServerResponse } from '@/lib/api'
+import { useDiscoveryUiStore } from '@/lib/discovery-ui-store'
 import { supabase } from '@/lib/supabase'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
@@ -280,7 +281,29 @@ export function ServerList({
         </button>
       </Tooltip>
 
-      {/* Join server button */}
+      {/* Discovery button — opens the public server directory */}
+      <Tooltip content={t('discovery:title')} placement="right" offset={8}>
+        <button
+          type="button"
+          data-test="discovery-button"
+          onClick={() => useDiscoveryUiStore.getState().openDiscovery()}
+          aria-label={t('discovery:title')}
+          className="mt-2 flex items-center justify-center"
+        >
+          <Avatar
+            icon={<Compass className="h-5 w-5" />}
+            classNames={{
+              base: cn(
+                'h-12 w-12 cursor-pointer rounded-[24px] bg-default-100 text-default-foreground',
+                'transition-all duration-200 hover:rounded-2xl hover:bg-primary hover:text-primary-foreground',
+              ),
+              icon: 'text-current',
+            }}
+          />
+        </button>
+      </Tooltip>
+
+      {/* Join server (via invite code) button */}
       <Tooltip content={t('joinServer')} placement="right" offset={8}>
         <button
           type="button"
@@ -290,7 +313,7 @@ export function ServerList({
           className="mt-2 flex items-center justify-center"
         >
           <Avatar
-            icon={<Compass className="h-5 w-5" />}
+            icon={<Ticket className="h-5 w-5" />}
             classNames={{
               base: cn(
                 'h-12 w-12 cursor-pointer rounded-[24px] bg-default-100 text-default-foreground',

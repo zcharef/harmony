@@ -41,6 +41,10 @@ pub enum AnalyticsEventName {
     ReactionAdded,
     /// A user opened an SSE connection (traffic signal; NOT retention).
     SessionConnected,
+    /// A user opened the server directory (first page, discovery funnel).
+    DiscoveryViewed,
+    /// A user joined a server through the directory's one-click join.
+    DiscoveryJoin,
 }
 
 impl AnalyticsEventName {
@@ -57,6 +61,8 @@ impl AnalyticsEventName {
             Self::VoiceJoined => "voice_joined",
             Self::ReactionAdded => "reaction_added",
             Self::SessionConnected => "session_connected",
+            Self::DiscoveryViewed => "discovery_viewed",
+            Self::DiscoveryJoin => "discovery_join",
         }
     }
 }

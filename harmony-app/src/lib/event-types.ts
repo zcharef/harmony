@@ -177,6 +177,14 @@ const serverPayloadSchema = z.object({
   name: z.string(),
   iconUrl: z.string().nullable(),
   ownerId: z.string(),
+  // WHY optional WITHOUT default: rollout-safe — an older API instance
+  // publishes server.updated without the discovery keys; the event must still
+  // parse. No default: useFetchSSE dispatches the PARSED object, and consumers
+  // treat an absent key as "preserve cached value" — a materialized default
+  // would clobber it.
+  discoverable: z.boolean().optional(),
+  discoveryCategory: z.string().nullable().optional(),
+  discoveryDescription: z.string().nullable().optional(),
 })
 
 const dmPayloadSchema = z.object({

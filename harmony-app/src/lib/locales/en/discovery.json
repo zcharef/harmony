@@ -1,0 +1,29 @@
+{
+  "title": "Discovery",
+  "heading": "Find your community",
+  "subtitle": "Browse public servers and join one in a single click.",
+  "close": "Close discovery",
+  "searchPlaceholder": "Search servers by name...",
+  "memberCount": "{{count}} member",
+  "memberCount_other": "{{count}} members",
+  "join": "Join",
+  "open": "Open",
+  "joinFailed": "Could not join this server",
+  "loadFailed": "Could not load the server directory",
+  "loadMore": "Load more",
+  "emptyTitle": "No servers listed yet",
+  "emptyFilteredTitle": "No servers match your search",
+  "emptySubtitle": "Be the first: create a server and list it in discovery from its settings.",
+  "createYourOwn": "Create your own server",
+  "category": {
+    "all": "All",
+    "gaming": "Gaming",
+    "tech": "Tech",
+    "education": "Education",
+    "music": "Music",
+    "art": "Art",
+    "science": "Science",
+    "community": "Community",
+    "other": "Other"
+  }
+}

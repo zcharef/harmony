@@ -44,6 +44,7 @@ vi.mock('@/features/server-emojis', () => ({
 }))
 
 vi.mock('./overview-tab', () => ({ OverviewTab: () => <div data-test="stub-overview-tab" /> }))
+vi.mock('./discovery-tab', () => ({ DiscoveryTab: () => <div data-test="stub-discovery-tab" /> }))
 vi.mock('./roles-tab', () => ({ RolesTab: () => <div data-test="stub-roles-tab" /> }))
 vi.mock('./channels-tab', () => ({ ChannelsTab: () => <div data-test="stub-channels-tab" /> }))
 vi.mock('./moderation-tab', () => ({
@@ -61,6 +62,7 @@ import { ServerSettings } from './server-settings'
 
 const ADMIN_ONLY_TABS = [
   'settings-tab-overview',
+  'settings-tab-discovery',
   'settings-tab-roles',
   'settings-tab-channels',
   'settings-tab-emojis',

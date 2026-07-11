@@ -6,6 +6,7 @@ import channels from '@/lib/locales/en/channels.json'
 import chat from '@/lib/locales/en/chat.json'
 import common from '@/lib/locales/en/common.json'
 import crypto from '@/lib/locales/en/crypto.json'
+import discovery from '@/lib/locales/en/discovery.json'
 import dms from '@/lib/locales/en/dms.json'
 import friends from '@/lib/locales/en/friends.json'
 import invite from '@/lib/locales/en/invite.json'
@@ -31,6 +32,7 @@ const resources = {
     auth,
     chat,
     crypto,
+    discovery,
     dms,
     friends,
     invite,
@@ -58,6 +60,7 @@ i18n.use(initReactI18next).init({
     'auth',
     'chat',
     'crypto',
+    'discovery',
     'dms',
     'friends',
     'invite',

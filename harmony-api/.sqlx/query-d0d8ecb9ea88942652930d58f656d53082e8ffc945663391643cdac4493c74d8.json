@@ -1,0 +1,85 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE servers\n            SET discoverable = $2,\n                discovery_category = $3,\n                discovery_description = $4,\n                updated_at = now()\n            WHERE id = $1\n              AND is_dm = false\n            RETURNING\n                id,\n                name,\n                icon_url,\n                owner_id,\n                is_dm,\n                discoverable,\n                discovery_category,\n                discovery_description,\n                discovery_featured,\n                created_at,\n                updated_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "icon_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_dm",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "discoverable",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "discovery_category",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "discovery_description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "discovery_featured",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d0d8ecb9ea88942652930d58f656d53082e8ffc945663391643cdac4493c74d8"
+}

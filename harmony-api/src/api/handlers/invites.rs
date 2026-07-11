@@ -15,10 +15,7 @@ use crate::api::dto::invites::{
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::server_event::MemberPayload;
-use crate::domain::models::{
-    AnalyticsEvent, AnalyticsEventName, InviteCode, ServerEvent, ServerId,
-};
+use crate::domain::models::{AnalyticsEvent, AnalyticsEventName, InviteCode, ServerId};
 
 /// Maximum invite previews per client IP within [`INVITE_PREVIEW_RATE_WINDOW`].
 /// WHY 20/min: a human landing on an invite triggers ONE preview (crawlers are
@@ -298,49 +295,8 @@ pub async fn join_server(
     }
 
     // WHY: Emit MemberJoined so connected SSE clients update their member lists.
-    // Best-effort — the join already succeeded, so event emission failure is logged, not propagated.
-    match state
-        .member_repository()
-        .get_member(&server_id, &user_id)
-        .await
-    {
-        Ok(Some(member)) => {
-            let event = ServerEvent::MemberJoined {
-                sender_id: user_id.clone(),
-                server_id: server_id.clone(),
-                member: MemberPayload {
-                    user_id: member.user_id,
-                    username: member.username,
-                    avatar_url: member.avatar_url,
-                    nickname: member.nickname,
-                    role: member.role,
-                    is_founding: member.is_founding,
-                    joined_at: member.joined_at,
-                },
-            };
-            tracing::debug!(
-                server_id = %server_id,
-                user_id = %user_id,
-                "Emitting MemberJoined event"
-            );
-            state.event_bus().publish(event);
-        }
-        Ok(None) => {
-            tracing::warn!(
-                server_id = %server_id,
-                user_id = %user_id,
-                "Member not found after join — skipping MemberJoined event"
-            );
-        }
-        Err(e) => {
-            tracing::warn!(
-                server_id = %server_id,
-                user_id = %user_id,
-                error = ?e,
-                "Failed to fetch member for MemberJoined event"
-            );
-        }
-    }
+    // Best-effort — the join already succeeded (shared with the directory join).
+    super::emit_member_joined(&state, &server_id, &user_id).await;
 
     Ok(StatusCode::NO_CONTENT)
 }

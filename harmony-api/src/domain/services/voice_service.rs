@@ -679,6 +679,16 @@ mod tests {
             Ok(())
         }
 
+        async fn join_discoverable_server(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<(), DomainError> {
+            Err(DomainError::Internal(
+                "join_discoverable_server is not exercised by these tests".to_string(),
+            ))
+        }
+
         async fn remove_member(
             &self,
             _server_id: &ServerId,

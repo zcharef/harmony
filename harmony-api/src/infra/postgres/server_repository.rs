@@ -8,8 +8,18 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Role, Server, ServerId, UserId};
+use crate::domain::models::{DiscoveryCursor, DiscoveryServer, Role, Server, ServerId, UserId};
 use crate::domain::ports::ServerRepository;
+
+/// Escape LIKE/ILIKE wildcards in a user-supplied search substring.
+///
+/// WHY: `%` and `_` in raw input would act as pattern operators — a search
+/// for `%` would match every server instead of names containing a percent.
+fn escape_like(raw: &str) -> String {
+    raw.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
 
 /// PostgreSQL-backed server repository.
 #[derive(Debug, Clone)]
@@ -31,6 +41,10 @@ struct ServerRow {
     icon_url: Option<String>,
     owner_id: Uuid,
     is_dm: bool,
+    discoverable: bool,
+    discovery_category: Option<String>,
+    discovery_description: Option<String>,
+    discovery_featured: bool,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -43,6 +57,10 @@ impl ServerRow {
             icon_url: self.icon_url,
             owner_id: UserId::new(self.owner_id),
             is_dm: self.is_dm,
+            discoverable: self.discoverable,
+            discovery_category: self.discovery_category,
+            discovery_description: self.discovery_description,
+            discovery_featured: self.discovery_featured,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -72,6 +90,10 @@ impl ServerRepository for PgServerRepository {
                 icon_url,
                 owner_id,
                 is_dm,
+                discoverable,
+                discovery_category,
+                discovery_description,
+                discovery_featured,
                 created_at,
                 updated_at
             "#,
@@ -118,6 +140,10 @@ impl ServerRepository for PgServerRepository {
             icon_url: server_row.icon_url,
             owner_id: server_row.owner_id,
             is_dm: server_row.is_dm,
+            discoverable: server_row.discoverable,
+            discovery_category: server_row.discovery_category,
+            discovery_description: server_row.discovery_description,
+            discovery_featured: server_row.discovery_featured,
             created_at: server_row.created_at,
             updated_at: server_row.updated_at,
         };
@@ -136,6 +162,10 @@ impl ServerRepository for PgServerRepository {
                 s.icon_url,
                 s.owner_id,
                 s.is_dm,
+                s.discoverable,
+                s.discovery_category,
+                s.discovery_description,
+                s.discovery_featured,
                 s.created_at,
                 s.updated_at
             FROM servers s
@@ -159,6 +189,10 @@ impl ServerRepository for PgServerRepository {
                     icon_url: r.icon_url,
                     owner_id: r.owner_id,
                     is_dm: r.is_dm,
+                    discoverable: r.discoverable,
+                    discovery_category: r.discovery_category,
+                    discovery_description: r.discovery_description,
+                    discovery_featured: r.discovery_featured,
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                 }
@@ -237,6 +271,10 @@ impl ServerRepository for PgServerRepository {
                 icon_url,
                 owner_id,
                 is_dm,
+                discoverable,
+                discovery_category,
+                discovery_description,
+                discovery_featured,
                 created_at,
                 updated_at
             FROM servers
@@ -255,6 +293,10 @@ impl ServerRepository for PgServerRepository {
                 icon_url: r.icon_url,
                 owner_id: r.owner_id,
                 is_dm: r.is_dm,
+                discoverable: r.discoverable,
+                discovery_category: r.discovery_category,
+                discovery_description: r.discovery_description,
+                discovery_featured: r.discovery_featured,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             }
@@ -280,6 +322,10 @@ impl ServerRepository for PgServerRepository {
                 icon_url,
                 owner_id,
                 is_dm,
+                discoverable,
+                discovery_category,
+                discovery_description,
+                discovery_featured,
                 created_at,
                 updated_at
             "#,
@@ -297,6 +343,10 @@ impl ServerRepository for PgServerRepository {
                 icon_url: r.icon_url,
                 owner_id: r.owner_id,
                 is_dm: r.is_dm,
+                discoverable: r.discoverable,
+                discovery_category: r.discovery_category,
+                discovery_description: r.discovery_description,
+                discovery_featured: r.discovery_featured,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             }
@@ -388,5 +438,168 @@ impl ServerRepository for PgServerRepository {
         }
 
         Ok(())
+    }
+
+    async fn update_discovery(
+        &self,
+        server_id: &ServerId,
+        discoverable: bool,
+        category: Option<String>,
+        description: Option<String>,
+    ) -> Result<Option<Server>, DomainError> {
+        let sid = server_id.0;
+
+        // WHY `is_dm = false`: a DM "server" must never be listable, even if
+        // a crafted request reaches this layer.
+        let row = sqlx::query!(
+            r#"
+            UPDATE servers
+            SET discoverable = $2,
+                discovery_category = $3,
+                discovery_description = $4,
+                updated_at = now()
+            WHERE id = $1
+              AND is_dm = false
+            RETURNING
+                id,
+                name,
+                icon_url,
+                owner_id,
+                is_dm,
+                discoverable,
+                discovery_category,
+                discovery_description,
+                discovery_featured,
+                created_at,
+                updated_at
+            "#,
+            sid,
+            discoverable,
+            category,
+            description,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|r| {
+            ServerRow {
+                id: r.id,
+                name: r.name,
+                icon_url: r.icon_url,
+                owner_id: r.owner_id,
+                is_dm: r.is_dm,
+                discoverable: r.discoverable,
+                discovery_category: r.discovery_category,
+                discovery_description: r.discovery_description,
+                discovery_featured: r.discovery_featured,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            }
+            .into_server()
+        }))
+    }
+
+    async fn list_discoverable(
+        &self,
+        category: Option<&str>,
+        search: Option<&str>,
+        cursor: Option<DiscoveryCursor>,
+        limit: i64,
+    ) -> Result<Vec<DiscoveryServer>, DomainError> {
+        let pattern = search.map(|q| format!("%{}%", escape_like(q)));
+        let (cursor_featured, cursor_count, cursor_id) = match cursor {
+            Some(c) => (Some(c.featured), Some(c.member_count), Some(c.id)),
+            None => (None, None, None),
+        };
+
+        // WHY the subquery: the keyset predicate compares against the
+        // computed member_count, which is only nameable one level up.
+        // WHY `discoverable = true AND is_dm = false` INSIDE the inner query:
+        // this is the only listing path — a non-discoverable or DM server can
+        // never appear regardless of category/search/cursor combinations.
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                d.id AS "id!",
+                d.name AS "name!",
+                d.icon_url,
+                d.member_count AS "member_count!",
+                d.discovery_category,
+                d.discovery_description,
+                d.discovery_featured AS "discovery_featured!"
+            FROM (
+                SELECT
+                    s.id,
+                    s.name,
+                    s.icon_url,
+                    s.discovery_category,
+                    s.discovery_description,
+                    s.discovery_featured,
+                    (
+                        SELECT COALESCE(COUNT(*)::BIGINT, 0)
+                        FROM server_members sm
+                        WHERE sm.server_id = s.id
+                    ) AS member_count
+                FROM servers s
+                WHERE s.discoverable = true
+                  AND s.is_dm = false
+                  AND ($1::text IS NULL OR s.discovery_category = $1)
+                  AND ($2::text IS NULL OR s.name ILIKE $2)
+            ) d
+            WHERE $3::boolean IS NULL
+               OR (d.discovery_featured, d.member_count, d.id) < ($3, $4, $5)
+            ORDER BY d.discovery_featured DESC, d.member_count DESC, d.id DESC
+            LIMIT $6
+            "#,
+            category,
+            pattern.as_deref(),
+            cursor_featured,
+            cursor_count,
+            cursor_id,
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| DiscoveryServer {
+                id: ServerId::new(r.id),
+                name: r.name,
+                icon_url: r.icon_url,
+                member_count: r.member_count,
+                category: r.discovery_category,
+                description: r.discovery_description,
+                featured: r.discovery_featured,
+            })
+            .collect())
+    }
+
+    async fn count_discoverable(
+        &self,
+        category: Option<&str>,
+        search: Option<&str>,
+    ) -> Result<i64, DomainError> {
+        let pattern = search.map(|q| format!("%{}%", escape_like(q)));
+
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COALESCE(COUNT(*)::BIGINT, 0) AS "count!"
+            FROM servers s
+            WHERE s.discoverable = true
+              AND s.is_dm = false
+              AND ($1::text IS NULL OR s.discovery_category = $1)
+              AND ($2::text IS NULL OR s.name ILIKE $2)
+            "#,
+            category,
+            pattern.as_deref(),
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(count)
     }
 }

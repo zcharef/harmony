@@ -4,6 +4,7 @@ pub mod badges;
 pub mod bans;
 pub mod channels;
 pub mod desktop_auth;
+pub mod discovery;
 pub mod dms;
 pub mod events;
 pub mod friends;
@@ -34,7 +35,7 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::api::state::AppState;
-use crate::domain::models::server_event::{MessagePayload, ServerEvent};
+use crate::domain::models::server_event::{MemberPayload, MessagePayload, ServerEvent};
 use crate::domain::models::{AnalyticsEvent, ServerId, UserId};
 use crate::domain::services::resolve_channel_access;
 use crate::infra::postgres;
@@ -215,4 +216,57 @@ pub async fn post_system_message(
     );
 
     Ok(())
+}
+
+/// Emit the `member.joined` SSE event for a freshly created membership.
+///
+/// Shared by every join path (invite redemption, directory direct join) so
+/// connected clients update their member lists through ONE fan-out.
+///
+/// Best-effort: the join already succeeded, so a failed lookup/emission is
+/// logged, never propagated (ADR-027 requires the `else` branches below).
+#[tracing::instrument(skip(state))]
+pub async fn emit_member_joined(state: &AppState, server_id: &ServerId, user_id: &UserId) {
+    match state
+        .member_repository()
+        .get_member(server_id, user_id)
+        .await
+    {
+        Ok(Some(member)) => {
+            let event = ServerEvent::MemberJoined {
+                sender_id: user_id.clone(),
+                server_id: server_id.clone(),
+                member: MemberPayload {
+                    user_id: member.user_id,
+                    username: member.username,
+                    avatar_url: member.avatar_url,
+                    nickname: member.nickname,
+                    role: member.role,
+                    is_founding: member.is_founding,
+                    joined_at: member.joined_at,
+                },
+            };
+            tracing::debug!(
+                server_id = %server_id,
+                user_id = %user_id,
+                "Emitting MemberJoined event"
+            );
+            state.event_bus().publish(event);
+        }
+        Ok(None) => {
+            tracing::warn!(
+                server_id = %server_id,
+                user_id = %user_id,
+                "Member not found after join — skipping MemberJoined event"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                server_id = %server_id,
+                user_id = %user_id,
+                error = ?e,
+                "Failed to fetch member for MemberJoined event"
+            );
+        }
+    }
 }

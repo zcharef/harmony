@@ -106,4 +106,8 @@ export const queryKeys = {
     all: ['invites'] as const,
     preview: (code: string) => ['invites', 'preview', code] as const,
   },
+  discovery: {
+    all: ['discovery'] as const,
+    list: (q: string, category: string | null) => ['discovery', 'list', q, category] as const,
+  },
 } as const

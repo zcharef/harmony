@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT discoverable AS \"discoverable!\"\n            FROM servers\n            WHERE id = $1 AND is_dm = false\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "discoverable!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8bc42e1bf2a2690ad4929781cb7101f1741c06f30999eb5d098498b3b1bfe0ef"
+}

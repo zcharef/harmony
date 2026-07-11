@@ -2139,6 +2139,153 @@
         ]
       }
     },
+    "/v1/discovery/servers": {
+      "get": {
+        "tags": [
+          "Discovery"
+        ],
+        "summary": "List the public server directory (authenticated).",
+        "description": "Only servers that opted in (`discoverable = true`) are ever returned,\nfeatured entries first, then by member count.\n\n# Errors\nReturns `ApiError` on an unknown category, malformed cursor, or\nrepository error.",
+        "operationId": "list_discovery_servers",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "description": "Filter by directory category (allowlisted value).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Substring search on the server name (case-insensitive, max 100 chars).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque keyset cursor from a previous page's `nextCursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (1-50, default 20).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Directory page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoveryListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/discovery/servers/{id}/join": {
+      "post": {
+        "tags": [
+          "Discovery"
+        ],
+        "summary": "One-click join of a discoverable server.",
+        "description": "Re-checks `discoverable = true` at join time and respects existing bans\n(banned users get a clean 403). Joining a server the user is already a\nmember of is an idempotent no-op.\n\n# Errors\nReturns `ApiError` if the server is not discoverable, the user is\nbanned, a plan limit is reached, or on repository error.",
+        "operationId": "join_discovery_server",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Joined (or already a member)"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not discoverable or user banned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/dms": {
       "get": {
         "tags": [
@@ -4691,6 +4838,94 @@
         ]
       }
     },
+    "/v1/servers/{id}/discovery": {
+      "patch": {
+        "tags": [
+          "Discovery"
+        ],
+        "summary": "Update a server's directory settings. Requires admin+ role.",
+        "description": "The public description goes through the same hard content-moderation\ngate as server names.\n\n# Errors\nReturns `ApiError` on validation/moderation failure, insufficient role,\nor repository error.",
+        "operationId": "update_server_discovery",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateServerDiscoveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Discovery settings updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or moderation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/servers/{id}/emojis": {
       "get": {
         "tags": [
@@ -7210,6 +7445,108 @@
           }
         }
       },
+      "DiscoveryListQuery": {
+        "type": "object",
+        "description": "Query parameters for the directory listing.",
+        "properties": {
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Filter by directory category (allowlisted value)."
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque keyset cursor from a previous page's `nextCursor`."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Page size (1-50, default 20)."
+          },
+          "q": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Substring search on the server name (case-insensitive, max 100 chars)."
+          }
+        }
+      },
+      "DiscoveryListResponse": {
+        "type": "object",
+        "description": "Envelope for a directory page with keyset pagination (ADR-036).",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscoveryServerResponse"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor for the next page. `None` if this is the last page."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total count of directory entries matching the filters."
+          }
+        }
+      },
+      "DiscoveryServerResponse": {
+        "type": "object",
+        "description": "One server card in the public directory.",
+        "required": [
+          "id",
+          "name",
+          "memberCount"
+        ],
+        "properties": {
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "iconUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "memberCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "DmLastMessageResponse": {
         "type": "object",
         "description": "Last message preview embedded in DM list items.",
@@ -9611,6 +9948,7 @@
           "name",
           "ownerId",
           "isDm",
+          "discoverable",
           "createdAt",
           "updatedAt"
         ],
@@ -9618,6 +9956,24 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "discoverable": {
+            "type": "boolean",
+            "description": "Whether the server is listed in the public directory (opt-in)."
+          },
+          "discoveryCategory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Directory category (allowlisted value) when configured."
+          },
+          "discoveryDescription": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short public description shown on the directory card."
           },
           "iconUrl": {
             "type": [
@@ -9809,6 +10165,34 @@
               "null"
             ],
             "description": "Display name (1-32 characters). `null` clears it (falls back to username)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateServerDiscoveryRequest": {
+        "type": "object",
+        "description": "Request body for updating a server's directory settings.",
+        "required": [
+          "discoverable"
+        ],
+        "properties": {
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Directory category (required when `discoverable` is true).\nOne of: gaming, tech, education, music, art, science, community, other."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short public description shown on the directory card (max 300 chars)."
+          },
+          "discoverable": {
+            "type": "boolean",
+            "description": "Whether the server is listed in the public directory."
           }
         },
         "additionalProperties": false
@@ -10151,6 +10535,10 @@
     {
       "name": "Servers",
       "description": "Server (guild) management"
+    },
+    {
+      "name": "Discovery",
+      "description": "Opt-in public server directory"
     },
     {
       "name": "Channels",

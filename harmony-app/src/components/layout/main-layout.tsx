@@ -16,6 +16,7 @@ import {
   useUnreadSync,
 } from '@/features/channels'
 import { ChatArea } from '@/features/chat'
+import { DiscoveryPage } from '@/features/discovery'
 import { DmSidebar, useDms, useRealtimeDms } from '@/features/dms'
 import { FriendsPanel, useRealtimeFriends } from '@/features/friends'
 import {
@@ -35,12 +36,18 @@ import { OnboardingFlow, useOnboarding } from '@/features/onboarding'
 import { usePresence } from '@/features/presence'
 import { SearchOverlay } from '@/features/search'
 import { useRealtimeEmojis } from '@/features/server-emojis'
-import { ServerList, useServers } from '@/features/server-nav'
+import {
+  CreateServerDialog,
+  ServerList,
+  useRealtimeServers,
+  useServers,
+} from '@/features/server-nav'
 import { ServerSettings, UserSettingsModal, useSettingsUiStore } from '@/features/settings'
 import { useVoiceConnection } from '@/features/voice'
 import { useFetchSSE } from '@/hooks/use-fetch-sse'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import { type ConnectionStatus, useConnectionStatus } from '@/lib/connection-store'
+import { useDiscoveryUiStore } from '@/lib/discovery-ui-store'
 import { resolveDisplayName } from '@/lib/display-name'
 import { env } from '@/lib/env'
 import { logger } from '@/lib/logger'
@@ -298,6 +305,46 @@ function ServerSettingsView({
 }
 
 // WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
+// Mirrors ServerSettingsView: the directory replaces the entire content area.
+// It also owns the empty-state "create your own server" dialog so the
+// discovery feature does not need to import server-nav's rail internals.
+function DiscoveryView({
+  connectionStatus,
+  onNavigateServer,
+}: {
+  connectionStatus: ConnectionStatus
+  onNavigateServer: (serverId: string) => void
+}) {
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const closeDiscovery = useDiscoveryUiStore((s) => s.closeDiscovery)
+
+  const handleNavigate = useCallback(
+    (serverId: string) => {
+      closeDiscovery()
+      onNavigateServer(serverId)
+    },
+    [closeDiscovery, onNavigateServer],
+  )
+
+  return (
+    <div
+      data-test="main-layout"
+      data-test-sse-status={connectionStatus}
+      className="flex h-screen w-screen overflow-hidden"
+    >
+      <ConnectionBanner />
+      <DiscoveryPage onJoined={handleNavigate} onCreateServer={() => setIsCreateOpen(true)} />
+      <CreateServerDialog
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onCreated={handleNavigate}
+      />
+      <AlphaBadge />
+    </div>
+  )
+}
+
+// WHY: Extracted to reduce MainLayout cognitive complexity below Biome's limit of 15.
 function AboutPageView({ connectionStatus }: { connectionStatus: ConnectionStatus }) {
   return (
     <div
@@ -488,6 +535,10 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
   // torn down — events would be silently missed until the panel re-opens.
   useRealtimeChannels()
   useRealtimeMembers()
+  // WHY: Live server metadata (rename, icon, ownership, discovery settings)
+  // patches the rail + settings screens on server.updated. Mounted here so it
+  // survives view switches (§4.6).
+  useRealtimeServers()
   // WHY: Live custom-emoji resolution — appends/removes from every server's
   // emoji cache on emoji.created/deleted so `:name:` tokens resolve (or degrade
   // to text) without a refetch. Mounted here (not a sidebar) so it survives
@@ -618,6 +669,7 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
   const isDmView = view === 'dms'
   const showAboutPage = useAboutUiStore((s) => s.showAboutPage)
   const showServerSettings = useSettingsUiStore((s) => s.showServerSettings)
+  const showDiscovery = useDiscoveryUiStore((s) => s.showDiscovery)
 
   const officialServerId = resolveOfficialServerId(regularServers)
 
@@ -654,6 +706,15 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
   /** WHY: Server settings replaces the entire main content area (like Discord). */
   if (showServerSettings && selectedServerId !== null) {
     return <ServerSettingsView serverId={selectedServerId} connectionStatus={connectionStatus} />
+  }
+
+  /** WHY: The server directory replaces the entire main content area (like
+   *  server settings). Joining (or "Open" on an existing membership) closes
+   *  it and navigates into the server. */
+  if (showDiscovery) {
+    return (
+      <DiscoveryView connectionStatus={connectionStatus} onNavigateServer={handleSelectServer} />
+    )
   }
 
   /** WHY: One-time first-run flow takes precedence over the welcome empty state

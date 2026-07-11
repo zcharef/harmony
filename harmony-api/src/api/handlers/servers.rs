@@ -156,6 +156,9 @@ pub async fn update_server(
             name: server.name.clone(),
             icon_url: server.icon_url.clone(),
             owner_id: server.owner_id.clone(),
+            discoverable: server.discoverable,
+            discovery_category: server.discovery_category.clone(),
+            discovery_description: server.discovery_description.clone(),
         },
     });
     tracing::debug!(

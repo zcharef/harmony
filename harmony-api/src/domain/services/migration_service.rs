@@ -159,6 +159,10 @@ mod tests {
             icon_url: None,
             owner_id: owner.clone(),
             is_dm: false,
+            discoverable: false,
+            discovery_category: None,
+            discovery_description: None,
+            discovery_featured: false,
             created_at: now,
             updated_at: now,
         }
