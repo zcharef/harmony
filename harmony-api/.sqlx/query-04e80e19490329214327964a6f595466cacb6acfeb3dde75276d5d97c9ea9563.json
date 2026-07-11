@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM friendships\n               WHERE (requester_id = $1 AND addressee_id = $2)\n                  OR (requester_id = $2 AND addressee_id = $1)\n               RETURNING status",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "04e80e19490329214327964a6f595466cacb6acfeb3dde75276d5d97c9ea9563"
+}

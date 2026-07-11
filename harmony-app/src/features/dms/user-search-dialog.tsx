@@ -13,6 +13,7 @@ import { Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/features/auth'
+import { useFriends } from '@/features/friends'
 import { useServers } from '@/features/server-nav'
 import type { MemberResponse } from '@/lib/api'
 import { listMembers } from '@/lib/api'
@@ -63,6 +64,14 @@ function useKnownUsers(serverIds: string[]) {
   return { users, isPending, isError }
 }
 
+/** Unified display shape for a DM-able user (shared-server member or friend). */
+interface SearchUser {
+  userId: string
+  username: string
+  displayLabel: string
+  avatarUrl?: string | null
+}
+
 interface UserSearchDialogProps {
   isOpen: boolean
   onClose: () => void
@@ -82,16 +91,48 @@ export function UserSearchDialog({ isOpen, onClose, onDmCreated }: UserSearchDia
     [servers],
   )
   const { users, isPending, isError } = useKnownUsers(regularServerIds)
+  // WHY: friends without a shared server can be DM'd (§3.4) but the shared-server
+  // aggregation above cannot find them. Merge them in so they are findable too.
+  const friends = useFriends()
 
-  // WHY: Filter out current user and apply search query
+  // WHY: Filter out current user and apply search query, over a merged list of
+  // shared-server members + friends (deduped by id) mapped to one display shape.
   const filteredUsers = useMemo(() => {
-    const filtered = users.filter((u) => u.userId !== currentUserId)
+    const seen = new Set<string>()
+    const merged: SearchUser[] = []
+    for (const m of users) {
+      if (!seen.has(m.userId)) {
+        seen.add(m.userId)
+        merged.push({
+          userId: m.userId,
+          username: m.username,
+          displayLabel: resolveDisplayName(m),
+          avatarUrl: m.avatarUrl,
+        })
+      }
+    }
+    for (const f of friends.data ?? []) {
+      if (!seen.has(f.user.id)) {
+        seen.add(f.user.id)
+        merged.push({
+          userId: f.user.id,
+          username: f.user.username,
+          displayLabel: resolveDisplayName(f.user),
+          avatarUrl: f.user.avatarUrl,
+        })
+      }
+    }
+
+    const filtered = merged
+      .filter((u) => u.userId !== currentUserId)
+      .sort((a, b) => a.username.localeCompare(b.username))
     if (searchQuery.trim().length === 0) return filtered
     const query = searchQuery.toLowerCase()
     return filtered.filter(
-      (u) => u.username.toLowerCase().includes(query) || u.nickname?.toLowerCase().includes(query),
+      (u) =>
+        u.username.toLowerCase().includes(query) || u.displayLabel.toLowerCase().includes(query),
     )
-  }, [users, currentUserId, searchQuery])
+  }, [users, friends.data, currentUserId, searchQuery])
 
   function handleSelectUser(userId: string) {
     createDm.mutate(userId, {
@@ -136,37 +177,34 @@ export function UserSearchDialog({ isOpen, onClose, onDmCreated }: UserSearchDia
               <p className="px-2 py-4 text-center text-sm text-default-500">{t('noUsersFound')}</p>
             )}
 
-            {filteredUsers.map((user) => {
-              const displayName = resolveDisplayName(user)
-              return (
-                <Button
-                  key={user.userId}
-                  variant="light"
-                  className="w-full justify-start gap-2 px-2 py-1.5"
-                  isLoading={createDm.isPending && createDm.variables === user.userId}
-                  onPress={() => handleSelectUser(user.userId)}
-                  data-test="user-search-result"
-                  data-user-id={user.userId}
-                >
-                  <Avatar
-                    name={displayName}
-                    src={user.avatarUrl ?? undefined}
-                    size="sm"
-                    showFallback
-                    classNames={{ base: 'h-8 w-8', name: 'text-xs' }}
-                  />
-                  <div className="flex flex-col items-start overflow-hidden">
-                    <span className="truncate text-sm text-foreground">{displayName}</span>
-                    {/* WHY: Surface the immutable @username whenever the label
-                        shown differs from it, so searchers can still identify by
-                        username (matches Discord's nickname/username subtitle). */}
-                    {displayName !== user.username && (
-                      <span className="truncate text-xs text-default-500">{user.username}</span>
-                    )}
-                  </div>
-                </Button>
-              )
-            })}
+            {filteredUsers.map((user) => (
+              <Button
+                key={user.userId}
+                variant="light"
+                className="w-full justify-start gap-2 px-2 py-1.5"
+                isLoading={createDm.isPending && createDm.variables === user.userId}
+                onPress={() => handleSelectUser(user.userId)}
+                data-test="user-search-result"
+                data-user-id={user.userId}
+              >
+                <Avatar
+                  name={user.displayLabel}
+                  src={user.avatarUrl ?? undefined}
+                  size="sm"
+                  showFallback
+                  classNames={{ base: 'h-8 w-8', name: 'text-xs' }}
+                />
+                <div className="flex flex-col items-start overflow-hidden">
+                  <span className="truncate text-sm text-foreground">{user.displayLabel}</span>
+                  {/* WHY: Surface the immutable @username whenever the label
+                      shown differs from it, so searchers can still identify by
+                      username (matches Discord's nickname/username subtitle). */}
+                  {user.displayLabel !== user.username && (
+                    <span className="truncate text-xs text-default-500">{user.username}</span>
+                  )}
+                </div>
+              </Button>
+            ))}
           </div>
         </ModalBody>
       </ModalContent>

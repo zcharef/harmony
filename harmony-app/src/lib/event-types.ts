@@ -33,6 +33,12 @@ export const SSE_EVENT_NAMES = [
   'server.moderation_settings_updated',
   'server.updated',
   'dm.created',
+  'friend.request_created',
+  'friend.request_removed',
+  'friend.added',
+  'friend.removed',
+  'block.created',
+  'block.removed',
   'profile.updated',
   'typing.started',
   'presence.changed',
@@ -146,6 +152,28 @@ const dmPayloadSchema = z.object({
 
 const userStatusSchema = zUserStatus
 
+// WHY: friend-request payload carries the counterpart's profile + direction FROM
+// THE RECEIVER's perspective so the receiving tab can setQueryData with no refetch.
+export const friendRequestPayloadSchema = z.object({
+  userId: z.string(),
+  username: z.string(),
+  displayName: z.string().nullable().optional(),
+  avatarUrl: z.string().nullable().optional(),
+  direction: z.enum(['incoming', 'outgoing']),
+  createdAt: z.string(),
+})
+
+// WHY status: a freshly accepted friend must not render offline while online —
+// the payload carries the counterpart's live presence so the store is seeded.
+export const friendPayloadSchema = z.object({
+  userId: z.string(),
+  username: z.string(),
+  displayName: z.string().nullable().optional(),
+  avatarUrl: z.string().nullable().optional(),
+  status: userStatusSchema,
+  friendsSince: z.string(),
+})
+
 // ── Discriminated union schema ───────────────────────────────────────
 // WHY: The Rust enum serializes with `"type"` as the discriminator field.
 // z.discriminatedUnion validates the correct payload shape per event type.
@@ -251,6 +279,45 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     senderId: z.string(),
     targetUserId: z.string(),
     dm: dmPayloadSchema,
+  }),
+
+  // Friends (user-scoped, routed via targetUserId)
+  z.object({
+    type: z.literal('friendRequestCreated'),
+    senderId: z.string(),
+    targetUserId: z.string(),
+    request: friendRequestPayloadSchema,
+  }),
+  z.object({
+    type: z.literal('friendRequestRemoved'),
+    senderId: z.string(),
+    targetUserId: z.string(),
+    userId: z.string(),
+  }),
+  z.object({
+    type: z.literal('friendAdded'),
+    senderId: z.string(),
+    targetUserId: z.string(),
+    friend: friendPayloadSchema,
+  }),
+  z.object({
+    type: z.literal('friendRemoved'),
+    senderId: z.string(),
+    targetUserId: z.string(),
+    userId: z.string(),
+  }),
+  // Blocks (self-sync only, target = the blocker)
+  z.object({
+    type: z.literal('blockCreated'),
+    senderId: z.string(),
+    targetUserId: z.string(),
+    userId: z.string(),
+  }),
+  z.object({
+    type: z.literal('blockRemoved'),
+    senderId: z.string(),
+    targetUserId: z.string(),
+    userId: z.string(),
   }),
 
   // Profiles — live identity rehydration (display name / avatar / custom status
@@ -378,3 +445,5 @@ export type BanPayload = z.infer<typeof banPayloadSchema>
 export type ChannelPayload = z.infer<typeof channelPayloadSchema>
 export type ServerPayload = z.infer<typeof serverPayloadSchema>
 export type DmPayload = z.infer<typeof dmPayloadSchema>
+export type FriendRequestPayload = z.infer<typeof friendRequestPayloadSchema>
+export type FriendPayload = z.infer<typeof friendPayloadSchema>

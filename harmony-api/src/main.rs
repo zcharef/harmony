@@ -164,6 +164,7 @@ async fn init_app_state(config: &Config) -> AppInit {
     let member_repo = Arc::new(infra::postgres::PgMemberRepository::new(pool.clone()));
     let ban_repo = Arc::new(infra::postgres::PgBanRepository::new(pool.clone()));
     let dm_repo = Arc::new(infra::postgres::PgDmRepository::new(pool.clone()));
+    let friendship_repo = Arc::new(infra::postgres::PgFriendshipRepository::new(pool.clone()));
     let key_repo = Arc::new(infra::postgres::PgKeyRepository::new(pool.clone()));
     let reaction_repo = Arc::new(infra::postgres::PgReactionRepository::new(pool.clone()));
     let attachment_repo = Arc::new(infra::postgres::PgAttachmentRepository::new(pool.clone()));
@@ -288,6 +289,7 @@ async fn init_app_state(config: &Config) -> AppInit {
         attachment_repo,
         content_filter.clone(),
         spam_guard.clone(),
+        friendship_repo.clone(),
     ));
     let invite_service = Arc::new(domain::services::InviteService::new(
         invite_repo,
@@ -307,12 +309,18 @@ async fn init_app_state(config: &Config) -> AppInit {
         ban_repo.clone(),
         member_repo.clone(),
     ));
+    let friendship_service = Arc::new(domain::services::FriendshipService::new(
+        friendship_repo.clone(),
+        profile_repo.clone(),
+        spam_guard.clone(),
+    ));
     let dm_service = Arc::new(domain::services::DmService::new(
         dm_repo,
         profile_repo,
         server_repo,
         member_repo.clone(),
         plan_limit_checker.clone(),
+        friendship_repo,
     ));
     let key_service = Arc::new(domain::services::KeyService::new(key_repo));
     let reaction_service = Arc::new(domain::services::ReactionService::new(
@@ -452,6 +460,7 @@ async fn init_app_state(config: &Config) -> AppInit {
         channel_service,
         moderation_service,
         dm_service,
+        friendship_service,
         key_service,
         reaction_service,
         read_state_service,

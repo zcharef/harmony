@@ -104,6 +104,9 @@ async fn app_state(pool: PgPool, trusted_proxy_secret: Option<SecretString>) -> 
         plan_checker.clone(),
         content_filter.clone(),
     ));
+    let friendship_repo = Arc::new(harmony_api::infra::postgres::PgFriendshipRepository::new(
+        pool.clone(),
+    ));
     let message_service = Arc::new(harmony_api::domain::services::MessageService::new(
         message_repo.clone(),
         channel_repo.clone(),
@@ -113,6 +116,7 @@ async fn app_state(pool: PgPool, trusted_proxy_secret: Option<SecretString>) -> 
         attachment_repo.clone(),
         content_filter.clone(),
         spam_guard.clone(),
+        friendship_repo.clone(),
     ));
     let invite_service = Arc::new(harmony_api::domain::services::InviteService::new(
         invite_repo,
@@ -132,12 +136,18 @@ async fn app_state(pool: PgPool, trusted_proxy_secret: Option<SecretString>) -> 
         ban_repo.clone(),
         member_repo.clone(),
     ));
+    let friendship_service = Arc::new(harmony_api::domain::services::FriendshipService::new(
+        friendship_repo.clone(),
+        profile_repo.clone(),
+        spam_guard.clone(),
+    ));
     let dm_service = Arc::new(harmony_api::domain::services::DmService::new(
         dm_repo,
         profile_repo.clone(),
         server_repo.clone(),
         member_repo.clone(),
         plan_checker.clone(),
+        friendship_repo.clone(),
     ));
     let key_service = Arc::new(harmony_api::domain::services::KeyService::new(key_repo));
     let reaction_service = Arc::new(harmony_api::domain::services::ReactionService::new(
@@ -185,6 +195,7 @@ async fn app_state(pool: PgPool, trusted_proxy_secret: Option<SecretString>) -> 
         channel_service,
         moderation_service,
         dm_service,
+        friendship_service,
         key_service,
         reaction_service,
         read_state_service,

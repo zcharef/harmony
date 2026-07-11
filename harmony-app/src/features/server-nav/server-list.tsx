@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChannels, useUnreadStore } from '@/features/channels'
 import { useDms } from '@/features/dms'
+import { useFriendRequests } from '@/features/friends'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import type { ServerResponse } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
@@ -166,6 +167,11 @@ export function ServerList({
   const [isJoinOpen, setIsJoinOpen] = useState(false)
   const hasDmUnread = useDmsHaveUnread()
   const dmMentionCount = useDmsMentionCount()
+  // Incoming friend requests badge on the DM home button (§5.4). Warm cache via
+  // the eager mount in MainLayout — no new store.
+  const incomingRequests = useFriendRequests('incoming')
+  const pendingFriendCount = incomingRequests.data?.length ?? 0
+  const dmHomeBadgeCount = dmMentionCount + pendingFriendCount
 
   if (isPending) {
     return (
@@ -221,9 +227,10 @@ export function ServerList({
             }}
           />
 
-          {/* Mention count pill — every unread DM message is mention-equivalent (spec §1) */}
-          {dmMentionCount > 0 && !isDmView && (
-            <MentionCountBadge count={dmMentionCount} testId="dm-mention-badge" />
+          {/* Mention count pill — unread DM messages (mention-equivalent, spec §1)
+              plus incoming friend requests (§5.4). */}
+          {dmHomeBadgeCount > 0 && !isDmView && (
+            <MentionCountBadge count={dmHomeBadgeCount} testId="dm-mention-badge" />
           )}
 
           {/* Unread dot — shows when any DM has unread messages */}

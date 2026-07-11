@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                p.id AS \"user_id!\",\n                p.username AS \"username!\",\n                p.display_name,\n                p.avatar_url,\n                f.updated_at AS \"friends_since!\"\n               FROM friendships f\n               JOIN profiles p\n                 ON p.id = CASE WHEN f.requester_id = $1 THEN f.addressee_id ELSE f.requester_id END\n               WHERE f.status = 'accepted'\n                 AND (f.requester_id = $1 OR f.addressee_id = $1)\n               ORDER BY p.username ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "username!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "friends_since!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "d8c66875e2fcd9d7d6b9b00c9f24e950013abe341e85b70913ada48f7b71fb01"
+}

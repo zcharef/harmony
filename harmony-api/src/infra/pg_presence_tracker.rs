@@ -230,6 +230,23 @@ impl PgPresenceTracker {
             .collect()
     }
 
+    /// Return the current status for each of `ids` that has a presence entry.
+    ///
+    /// Batch wrapper over the local `DashMap` — the sibling of
+    /// [`Self::get_server_presence`] used to merge friend statuses into the
+    /// `presence.sync` snapshot (§4.3). Users with no entry (offline) are
+    /// omitted, so the caller's map treats absence as offline.
+    #[must_use]
+    pub fn get_users_presence(&self, ids: &[UserId]) -> Vec<(UserId, UserStatus)> {
+        ids.iter()
+            .filter_map(|id| {
+                self.local_cache
+                    .get(id)
+                    .map(|entry| (id.clone(), entry.status.clone()))
+            })
+            .collect()
+    }
+
     /// Refresh a user's heartbeat timestamp to now.
     ///
     /// No-op if the user has no presence entry.
@@ -897,6 +914,22 @@ mod tests {
         let second = t.disconnect(&user(1));
         assert!(second);
         assert_eq!(t.get_status(&user(1)), None);
+    }
+
+    #[tokio::test]
+    async fn get_users_presence_returns_only_present_users_with_status() {
+        let t = test_tracker();
+        t.connect(user(1), vec![server(10)]);
+        t.connect(user(2), vec![server(10)]);
+        t.set_status(&user(2), UserStatus::DoNotDisturb);
+        // user(3) never connects → offline → omitted.
+
+        let got = t.get_users_presence(&[user(1), user(2), user(3)]);
+        assert_eq!(got.len(), 2, "offline user(3) is omitted");
+        let map: std::collections::HashMap<UserId, UserStatus> = got.into_iter().collect();
+        assert_eq!(map.get(&user(1)), Some(&UserStatus::Online));
+        assert_eq!(map.get(&user(2)), Some(&UserStatus::DoNotDisturb));
+        assert!(!map.contains_key(&user(3)));
     }
 
     #[tokio::test]

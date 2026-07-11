@@ -788,6 +788,9 @@ mod tests {
         async fn is_username_taken(&self, _username: &str) -> Result<bool, DomainError> {
             Ok(false)
         }
+        async fn get_by_username(&self, _username: &str) -> Result<Option<Profile>, DomainError> {
+            Ok(None)
+        }
         async fn get_profiles_by_ids(&self, _ids: &[UserId]) -> Result<Vec<Profile>, DomainError> {
             Ok(vec![])
         }

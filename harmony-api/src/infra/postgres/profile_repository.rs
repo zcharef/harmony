@@ -203,6 +203,51 @@ impl ProfileRepository for PgProfileRepository {
         }))
     }
 
+    async fn get_by_username(&self, username: &str) -> Result<Option<Profile>, DomainError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                id,
+                username,
+                display_name,
+                avatar_url,
+                status,
+                custom_status,
+                bio,
+                banner_url,
+                EXISTS(
+                    SELECT 1 FROM user_badges ub
+                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'
+                ) AS "is_founding!",
+                created_at,
+                updated_at
+            FROM profiles
+            WHERE username = $1
+            "#,
+            username,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|r| {
+            ProfileRow {
+                id: r.id,
+                username: r.username,
+                display_name: r.display_name,
+                avatar_url: r.avatar_url,
+                status: r.status,
+                custom_status: r.custom_status,
+                bio: r.bio,
+                banner_url: r.banner_url,
+                is_founding: r.is_founding,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            }
+            .into_profile()
+        }))
+    }
+
     async fn get_profiles_by_ids(&self, ids: &[UserId]) -> Result<Vec<Profile>, DomainError> {
         // WHY: Empty array guard — skip DB call entirely.
         if ids.is_empty() {

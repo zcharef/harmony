@@ -4,6 +4,7 @@ pub mod bans;
 pub mod channels;
 pub mod desktop_auth;
 pub mod dms;
+pub mod friends;
 pub mod gifs;
 pub mod invites;
 pub mod keys;
@@ -33,6 +34,12 @@ pub use desktop_auth::{
 pub use dms::{
     CreateDmRequest, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,
     DmRecipientResponse, DmResponse,
+};
+pub use friends::{
+    BlockedListResponse, BlockedUserResponse, FriendAcceptedResponse, FriendListResponse,
+    FriendRequestListQuery, FriendRequestListResponse, FriendRequestResponse,
+    FriendRequestResultResponse, FriendRequestState, FriendResponse, FriendUserResponse,
+    SendFriendRequestRequest,
 };
 pub use gifs::{GifItem, GifListResponse, GifSearchQuery, GifTrendingQuery};
 pub use invites::{CreateInviteRequest, InvitePreviewResponse, InviteResponse, JoinServerRequest};

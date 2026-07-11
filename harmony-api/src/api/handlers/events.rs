@@ -97,6 +97,7 @@ fn presence_visible_to(
     subject_servers: &[ServerId],
     receiver: &UserId,
     receiver_servers: &HashMap<ServerId, Role>,
+    receiver_friends: &HashSet<UserId>,
 ) -> bool {
     if receiver == subject {
         return true;
@@ -104,9 +105,13 @@ fn presence_visible_to(
     if subject_servers.is_empty() {
         return true;
     }
-    subject_servers
-        .iter()
-        .any(|sid| receiver_servers.contains_key(sid))
+    // Friendship is symmetric: "is the subject my friend?" answered from the
+    // receiver's own friend set is exactly "am I in the subject's friend list?"
+    // (§4.3). No payload change — the friend set is receiver-local.
+    receiver_friends.contains(subject)
+        || subject_servers
+            .iter()
+            .any(|sid| receiver_servers.contains_key(sid))
 }
 
 /// Decides whether a `ProfileUpdated` for `subject` is visible to `receiver`.
@@ -232,6 +237,16 @@ pub async fn sse_events(
     // Key set for the connect-time presence wiring (unchanged behavior).
     let server_ids: HashSet<ServerId> = memberships.keys().cloned().collect();
 
+    // WHY: Load the receiver's friend set for RECEIVER-SIDE presence scoping
+    // (§4.3). Same `?` semantics as the memberships query — a failed connect is
+    // an ApiError the client retries, never a silently mis-scoped stream.
+    let friend_ids: HashSet<UserId> = state
+        .friendship_service()
+        .list_friend_ids(&user_id)
+        .await?
+        .into_iter()
+        .collect();
+
     // WHY: watch channel allows Stage 1 (intercept) to update server_ids
     // in-flight when the user joins/leaves a server or receives a DM. Stage 2
     // (filter) reads the latest value via borrow(). This eliminates the need
@@ -240,6 +255,11 @@ pub async fn sse_events(
     // Second receiver for the disconnect guard: the offline event must carry
     // the CURRENT membership set, not the connect-time snapshot.
     let guard_watch_rx = watch_rx.clone();
+
+    // Second watch channel: the receiver's friend set, kept current in-flight by
+    // Stage 1 on FriendAdded/FriendRemoved so presence stays correctly scoped
+    // without a reconnect (§4.3). Receiver-local — plays no role in publishing.
+    let (friends_tx, friends_rx) = watch::channel(friend_ids.clone());
 
     // ── Presence: register connection, broadcast effective status ──
     // WHY: connect() returns the EFFECTIVE status atomically — a brand-new
@@ -374,6 +394,29 @@ pub async fn sse_events(
                     }
                 });
             }
+            // WHY: keep this receiver's friend set current so friend-only presence
+            // stays scoped without a reconnect (§4.3). Block-induced removals also
+            // publish FriendRemoved, so they are covered by the same arm.
+            ServerEvent::FriendAdded {
+                target_user_id,
+                friend,
+                ..
+            } if *target_user_id == intercept_user_id => {
+                let fid = friend.user_id.clone();
+                friends_tx.send_modify(|set| {
+                    set.insert(fid);
+                });
+            }
+            ServerEvent::FriendRemoved {
+                target_user_id,
+                user_id,
+                ..
+            } if *target_user_id == intercept_user_id => {
+                let fid = user_id.clone();
+                friends_tx.send_modify(|set| {
+                    set.remove(&fid);
+                });
+            }
             _ => {}
         }
 
@@ -389,6 +432,8 @@ pub async fn sse_events(
         // may have just updated it for this very event (e.g. MemberJoined
         // adding a new server_id), so borrow() reflects the new state.
         let current_server_ids = watch_rx.borrow();
+        // Latest friend set for receiver-side presence scoping (§4.3).
+        let current_friends = friends_rx.borrow();
 
         // ── Filter: target_user_id BEFORE server scope ────────────
         // WHY: Events like ForceDisconnect and MemberBanned have BOTH
@@ -448,7 +493,13 @@ pub async fn sse_events(
             server_ids: subject_servers,
             ..
         } = &event
-            && !presence_visible_to(subject, subject_servers, &user_id, &current_server_ids)
+            && !presence_visible_to(
+                subject,
+                subject_servers,
+                &user_id,
+                &current_server_ids,
+                &current_friends,
+            )
         {
             return None;
         }
@@ -473,8 +524,9 @@ pub async fn sse_events(
             return None;
         }
 
-        // Explicitly drop the borrow before serialization to release the lock.
+        // Explicitly drop the borrows before serialization to release the locks.
         drop(current_server_ids);
+        drop(current_friends);
 
         // ── Redact routing metadata from the client payload ────────
         // WHY: `channel_access` (private-channel gate) and `server_ids`
@@ -545,6 +597,13 @@ pub async fn sse_events(
         for (uid, status) in state.presence_tracker().get_server_presence(sid) {
             presence_users.insert(uid.0.to_string(), status);
         }
+    }
+    // WHY: friends without a shared server would otherwise be absent from the
+    // snapshot and render offline until their next transition (§4.3.5). Merge
+    // their live status from the same connect-time friend set.
+    let friend_id_vec: Vec<UserId> = friend_ids.iter().cloned().collect();
+    for (uid, status) in state.presence_tracker().get_users_presence(&friend_id_vec) {
+        presence_users.insert(uid.0.to_string(), status);
     }
     let presence_data = serde_json::json!({
         "type": "presenceSynced",
@@ -641,15 +700,21 @@ mod tests {
         ids.iter().cloned().map(|s| (s, Role::Member)).collect()
     }
 
+    /// Empty friend set — the receiver befriends nobody.
+    fn no_friends() -> HashSet<UserId> {
+        HashSet::new()
+    }
+
     #[test]
     fn presence_hidden_from_users_with_no_shared_server() {
         let receiver_servers = member_map(&[sid(1), sid(2)]);
-        // Disjoint memberships — the stranger must not learn the status.
+        // Disjoint memberships AND not friends — the stranger must not learn it.
         assert!(!presence_visible_to(
             &uid(10),
             &[sid(3), sid(4)],
             &uid(20),
-            &receiver_servers
+            &receiver_servers,
+            &no_friends(),
         ));
     }
 
@@ -661,7 +726,40 @@ mod tests {
             &uid(10),
             &[sid(2), sid(9)],
             &uid(20),
-            &receiver_servers
+            &receiver_servers,
+            &no_friends(),
+        ));
+    }
+
+    /// §4.3: a friend sees the subject's presence with ZERO shared servers —
+    /// the receiver-side friend clause, not any server overlap, delivers it.
+    #[test]
+    fn presence_visible_to_friend_with_no_shared_server() {
+        let receiver_servers = member_map(&[sid(1), sid(2)]);
+        let friends: HashSet<UserId> = [uid(10)].into_iter().collect();
+        assert!(presence_visible_to(
+            &uid(10),
+            &[sid(3), sid(4)], // disjoint servers
+            &uid(20),
+            &receiver_servers,
+            &friends,
+        ));
+    }
+
+    /// §7.1: a STRANGER receives nothing from a subject with 500 friends — the
+    /// subject's friend count is irrelevant; only the RECEIVER's friend set is.
+    /// (Replaces the draft's cap test — there is no cap.)
+    #[test]
+    fn presence_hidden_from_stranger_regardless_of_subject_friend_count() {
+        let receiver_servers = member_map(&[sid(1)]);
+        // The receiver is friends with 500 OTHER users, but not the subject.
+        let friends: HashSet<UserId> = (100..600).map(uid).collect();
+        assert!(!presence_visible_to(
+            &uid(10),
+            &[sid(3)],
+            &uid(20),
+            &receiver_servers,
+            &friends,
         ));
     }
 
@@ -673,7 +771,8 @@ mod tests {
             &uid(10),
             &[],
             &uid(10),
-            &receiver_servers
+            &receiver_servers,
+            &no_friends(),
         ));
     }
 
@@ -686,7 +785,8 @@ mod tests {
             &uid(10),
             &[],
             &uid(20),
-            &receiver_servers
+            &receiver_servers,
+            &no_friends(),
         ));
     }
 

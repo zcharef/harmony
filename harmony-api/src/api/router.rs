@@ -251,6 +251,28 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             post(handlers::dms::create_dm).get(handlers::dms::list_dms),
         )
         .route("/v1/dms/{server_id}", delete(handlers::dms::close_dm))
+        // Friends
+        .route("/v1/friends", get(handlers::friends::list_friends))
+        .route(
+            "/v1/friends/requests",
+            get(handlers::friends::list_requests).post(handlers::friends::send_request),
+        )
+        .route(
+            "/v1/friends/requests/{user_id}/accept",
+            post(handlers::friends::accept_request),
+        )
+        .route(
+            "/v1/friends/requests/{user_id}",
+            delete(handlers::friends::remove_request),
+        )
+        .route("/v1/friends/{user_id}", delete(handlers::friends::unfriend))
+        // Blocks
+        .route("/v1/blocks", get(handlers::friends::list_blocks))
+        .route(
+            "/v1/blocks/{user_id}",
+            axum::routing::put(handlers::friends::block_user)
+                .delete(handlers::friends::unblock_user),
+        )
         // User Preferences
         .route(
             "/v1/preferences",

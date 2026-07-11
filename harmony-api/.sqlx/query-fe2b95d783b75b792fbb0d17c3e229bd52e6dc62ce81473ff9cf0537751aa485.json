@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    p.id AS \"user_id!\",\n                    p.username AS \"username!\",\n                    p.display_name,\n                    p.avatar_url,\n                    f.created_at AS \"created_at!\"\n                   FROM friendships f\n                   JOIN profiles p ON p.id = f.requester_id\n                   WHERE f.status = 'pending' AND f.addressee_id = $1\n                   ORDER BY f.created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "username!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "fe2b95d783b75b792fbb0d17c3e229bd52e6dc62ce81473ff9cf0537751aa485"
+}
