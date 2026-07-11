@@ -188,8 +188,14 @@ function MessageContent({
   // WHY: `:name:` tokens resolve against this server's emoji. Empty while the
   // query loads ⇒ tokens stay literal, then re-render on cache fill (§1).
   const emojiMap = useServerEmojiMap(serverId)
+  // WHY the () => wrapper (not remarkCustomEmoji(emojiMap) passed directly):
+  // unified treats each array item as an attacher it CALLS to obtain the
+  // transformer. Passing the already-called transformer makes unified invoke it
+  // with no tree and register its (undefined) return value — a silent no-op.
+  // Wrapping in an attacher (like remarkMentions, which unified calls to get its
+  // transformer) makes unified call remarkCustomEmoji(emojiMap) itself.
   const remarkPlugins = useMemo(
-    () => [remarkGfm, remarkMentions, remarkCustomEmoji(emojiMap)],
+    () => [remarkGfm, remarkMentions, () => remarkCustomEmoji(emojiMap)],
     [emojiMap],
   )
 
@@ -611,6 +617,7 @@ function MessageActions({
   canModerateMessages,
   isPinned,
   isPinPending,
+  serverId,
   onStartEdit,
   onDelete,
   onTogglePin,
@@ -619,6 +626,7 @@ function MessageActions({
 }: {
   isOwnMessage: boolean
   canModerateMessages: boolean
+  serverId: string | null
   isPinned: boolean
   isPinPending: boolean
   onStartEdit: () => void
@@ -644,6 +652,7 @@ function MessageActions({
           isOpen={isPickerOpen}
           onOpenChange={setIsPickerOpen}
           onEmojiSelect={onAddReaction}
+          serverId={serverId}
           placement="bottom-end"
         >
           <Button
@@ -987,6 +996,7 @@ export const MessageItem = memo(function MessageItem({
           canModerateMessages={canModerateMessages}
           isPinned={message.isPinned}
           isPinPending={isPinPending}
+          serverId={serverId}
           onStartEdit={onStartEdit}
           onDelete={onDelete}
           onTogglePin={onTogglePin}

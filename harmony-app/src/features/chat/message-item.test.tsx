@@ -304,6 +304,73 @@ describe('MessageItem mention rendering', () => {
   })
 })
 
+describe('MessageItem custom-emoji rendering', () => {
+  const BUCKET_URL =
+    'http://127.0.0.1:64321/storage/v1/object/public/server-emojis/server-1/party.png'
+
+  function seedEmoji(name: string, url: string) {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(queryKeys.servers.emojis(SERVER_ID), {
+      items: [
+        {
+          id: 'emoji-1',
+          name,
+          url,
+          moderationStatus: 'approved',
+          isAnimated: false,
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+    return queryClient
+  }
+
+  // WHY this test renders through the REAL react-markdown/unified pipeline
+  // (not by calling the remark transformer directly): the plugin is registered
+  // via the [plugin, options] tuple, and a prior regression passed the
+  // already-called transformer, which unified silently dropped as a no-op.
+  // Only a full-pipeline render catches that — unit-calling the transformer
+  // would pass either way.
+  it('renders a resolvable :name: token as an inline emoji image', () => {
+    const queryClient = seedEmoji('party', BUCKET_URL)
+
+    renderMessageItem(buildMessage({ content: 'gg :party: everyone' }), {
+      serverId: SERVER_ID,
+      queryClient,
+    })
+
+    const img = screen.getByTestId('inline-custom-emoji')
+    expect(img.getAttribute('src')).toBe(BUCKET_URL)
+    expect(img.getAttribute('alt')).toBe(':party:')
+    // The literal token must be gone from the visible text.
+    expect(screen.getByTestId('message-content').textContent).not.toContain(':party:')
+  })
+
+  it('leaves an unknown :name: token as literal text', () => {
+    const queryClient = seedEmoji('party', BUCKET_URL)
+
+    renderMessageItem(buildMessage({ content: 'what :missing: is this' }), {
+      serverId: SERVER_ID,
+      queryClient,
+    })
+
+    expect(screen.queryByTestId('inline-custom-emoji')).toBeNull()
+    expect(screen.getByTestId('message-content').textContent).toContain(':missing:')
+  })
+
+  it('leaves a token literal when the emoji URL is not a server-emojis bucket object', () => {
+    const queryClient = seedEmoji('party', 'https://evil.example.com/party.png')
+
+    renderMessageItem(buildMessage({ content: 'gg :party:' }), {
+      serverId: SERVER_ID,
+      queryClient,
+    })
+
+    expect(screen.queryByTestId('inline-custom-emoji')).toBeNull()
+    expect(screen.getByTestId('message-content').textContent).toContain(':party:')
+  })
+})
+
 describe('MessageItem reactions UX', () => {
   beforeEach(() => {
     vi.clearAllMocks()
