@@ -290,14 +290,10 @@ async fn init_app_state(config: &Config) -> AppInit {
         config.nsfw_classifier_enabled,
         config.nsfw_model_path.as_deref(),
     ) {
+        // On success the classifier logs the canonical "loaded ONNX model —
+        // detection ACTIVE" line (with the model byte size) from `load()`.
         (true, Some(model_path)) => match infra::OnnxNsfwClassifier::load(model_path) {
-            Ok(classifier) => {
-                tracing::info!(
-                    model_path,
-                    "Adult-NSFW image classifier: in-process ONNX ViT (enabled)"
-                );
-                Arc::new(classifier)
-            }
+            Ok(classifier) => Arc::new(classifier),
             // Fail-SAFE, not fail-open on the CSAM axis: a missing/invalid
             // NSFW model only means adult content is not auto-detected (it can
             // never quarantine — that is CSAM's job). error! so an operator is
@@ -306,7 +302,7 @@ async fn init_app_state(config: &Config) -> AppInit {
                 tracing::error!(
                     model_path,
                     error = %e,
-                    "failed to load ONNX NSFW model — falling back to Noop (adult images auto-approved)"
+                    "nsfw classifier: model load failed, using Noop — adult-NSFW detection DISABLED"
                 );
                 Arc::new(infra::NoopImageClassifier)
             }
