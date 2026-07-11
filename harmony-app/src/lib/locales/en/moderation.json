@@ -1,0 +1,53 @@
+{
+  "insufficientPermissions": "You do not have permission to view this section.",
+  "loadMore": "Load more",
+  "unknownActor": "Unknown",
+
+  "auditTitle": "Audit log",
+  "auditDescription": "A record of every moderation action taken in this server.",
+  "auditEmpty": "No moderation actions yet.",
+  "auditLoadError": "Couldn't load the audit log.",
+
+  "action": {
+    "member_ban": "Banned",
+    "member_kick": "Kicked",
+    "member_unban": "Unbanned",
+    "member_timeout": "Timed out",
+    "member_timeout_remove": "Removed timeout",
+    "message_delete": "Deleted message",
+    "message_bulk_delete": "Deleted messages"
+  },
+
+  "reportsTitle": "Reports",
+  "reportsDescription": "Messages flagged by members for review.",
+  "reportsEmpty": "No open reports. Nice and quiet.",
+  "reportsLoadError": "Couldn't load reports.",
+  "reportedBy": "Reported by {{username}}",
+  "reportedAuthor": "Message by {{username}}",
+  "messageDeleted": "[message deleted]",
+  "messageEncrypted": "[encrypted]",
+  "deleteMessage": "Delete",
+  "deleteMessageConfirm": "Delete this message? This cannot be undone.",
+  "resolve": "Resolve",
+  "dismiss": "Dismiss",
+  "actionFailed": "Something went wrong. Please try again.",
+  "deleteMessageFailed": "Couldn't delete the message.",
+  "resolveFailed": "Couldn't update the report.",
+
+  "reportMessage": "Report message",
+  "reportReasonLabel": "Why are you reporting this?",
+  "reportDetailLabel": "Details",
+  "reportDetailPlaceholder": "Add context (optional)",
+  "reportDetailRequired": "Please describe what's wrong",
+  "reportSubmit": "Submit report",
+  "reportSubmitted": "Report submitted. Thanks — moderators will review it.",
+  "reportFailed": "Couldn't submit the report.",
+
+  "reason": {
+    "spam": "Spam",
+    "harassment": "Harassment",
+    "nsfw": "NSFW / explicit",
+    "violence": "Violence",
+    "other": "Other"
+  }
+}

@@ -1,9 +1,10 @@
 import { Button, Spinner } from '@heroui/react'
-import { Ban, Hash, Info, Shield, ShieldCheck, Smile, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Ban, Flag, Hash, Info, ScrollText, Shield, ShieldCheck, Smile, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/features/auth'
 import { ROLE_HIERARCHY, useMyMemberRole } from '@/features/members'
+import { AuditLogTab, ReportsTab, useReports } from '@/features/moderation'
 import { EmojiSettingsTab } from '@/features/server-emojis'
 import { useServers } from '@/features/server-nav'
 import { cn } from '@/lib/utils'
@@ -14,15 +15,28 @@ import { OverviewTab } from './overview-tab'
 import { RolesTab } from './roles-tab'
 import { useSettingsUiStore } from './stores/settings-ui-store'
 
-type SettingsTab = 'overview' | 'roles' | 'channels' | 'emojis' | 'moderation' | 'bans'
+type SettingsTab =
+  | 'overview'
+  | 'roles'
+  | 'channels'
+  | 'emojis'
+  | 'moderation'
+  | 'reports'
+  | 'audit'
+  | 'bans'
 
-const TABS: Array<{ key: SettingsTab; icon: typeof Info; labelKey: string }> = [
-  { key: 'overview', icon: Info, labelKey: 'tabOverview' },
-  { key: 'roles', icon: Shield, labelKey: 'tabRoles' },
-  { key: 'channels', icon: Hash, labelKey: 'tabChannels' },
-  { key: 'emojis', icon: Smile, labelKey: 'tabEmojis' },
-  { key: 'moderation', icon: ShieldCheck, labelKey: 'tabModeration' },
-  { key: 'bans', icon: Ban, labelKey: 'tabBans' },
+// WHY `adminOnly`: mod-dashboard §9 #1 locks the reports queue to moderator+
+// while every other server-settings surface stays admin+. A plain moderator
+// therefore reaches the shell but sees only the Reports tab.
+const TABS: Array<{ key: SettingsTab; icon: typeof Info; labelKey: string; adminOnly: boolean }> = [
+  { key: 'overview', icon: Info, labelKey: 'tabOverview', adminOnly: true },
+  { key: 'roles', icon: Shield, labelKey: 'tabRoles', adminOnly: true },
+  { key: 'channels', icon: Hash, labelKey: 'tabChannels', adminOnly: true },
+  { key: 'emojis', icon: Smile, labelKey: 'tabEmojis', adminOnly: true },
+  { key: 'moderation', icon: ShieldCheck, labelKey: 'tabModeration', adminOnly: true },
+  { key: 'reports', icon: Flag, labelKey: 'tabReports', adminOnly: false },
+  { key: 'audit', icon: ScrollText, labelKey: 'tabAudit', adminOnly: true },
+  { key: 'bans', icon: Ban, labelKey: 'tabBans', adminOnly: true },
 ]
 
 interface ServerSettingsProps {
@@ -38,16 +52,39 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
   const currentUserId = useAuthStore((s) => s.user?.id ?? '')
   const isOwner = server?.ownerId === currentUserId
   const [activeTab, setActiveTab] = useState<SettingsTab>('overview')
+  // WHY here (not only inside ReportsTab): the badge count must render on the
+  // sidebar tab regardless of which tab is open. Moderator+ gate mirrors the API.
+  const canModerate = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.moderator
+  const { data: reportsData } = useReports(serverId, canModerate)
+  const openReports = reportsData?.openCount ?? 0
 
-  /** WHY: Non-admin users must not access server settings. Auto-close if they lack permission. */
+  // WHY: The shell is moderator+ because it hosts the moderator+ reports queue
+  // (mod-dashboard §9 #1). Admin-only tabs stay gated on isAdmin below.
   const isAdmin = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
+  const visibleTabs = useMemo(
+    () => TABS.filter((tab) => isAdmin || tab.adminOnly === false),
+    [isAdmin],
+  )
+
+  /** WHY: Members (below moderator) have no settings surface — auto-close. */
   useEffect(() => {
-    if (isAdmin === false) {
+    if (canModerate === false) {
       closeServerSettings()
     }
-  }, [isAdmin, closeServerSettings])
+  }, [canModerate, closeServerSettings])
 
-  if (server === undefined || isAdmin === false) {
+  // WHY: A moderator opening settings would land on the admin-only Overview tab
+  // (the default) — redirect to the first tab they can actually see (Reports).
+  useEffect(() => {
+    if (visibleTabs.some((tab) => tab.key === activeTab) === false) {
+      const fallback = visibleTabs[0]?.key
+      if (fallback !== undefined) {
+        setActiveTab(fallback)
+      }
+    }
+  }, [visibleTabs, activeTab])
+
+  if (server === undefined || canModerate === false) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <Spinner size="lg" />
@@ -67,7 +104,7 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
           <span className="truncate text-sm font-semibold text-foreground">{server.name}</span>
         </div>
         <nav className="flex-1 overflow-y-auto p-2" aria-label={t('settingsTabs')}>
-          {TABS.map(({ key, icon: Icon, labelKey }) => (
+          {visibleTabs.map(({ key, icon: Icon, labelKey }) => (
             <button
               key={key}
               type="button"
@@ -81,7 +118,15 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
               data-test={`settings-tab-${key}`}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              <span>{t(labelKey)}</span>
+              <span className="flex-1 text-left">{t(labelKey)}</span>
+              {key === 'reports' && openReports > 0 && (
+                <span
+                  className="rounded-full bg-danger px-1.5 text-xs font-semibold text-danger-foreground tabular-nums"
+                  data-test="reports-tab-badge"
+                >
+                  {openReports}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -105,20 +150,34 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto p-6">
-          {activeTab === 'overview' && (
+          {/* WHY isAdmin guards: these tabs are admin+ (mod-dashboard §9 #1).
+              The nav already hides them from moderators; the guard is
+              defense-in-depth so an admin-only surface never renders for a
+              moderator, even for a single render before the tab redirect. */}
+          {isAdmin && activeTab === 'overview' && (
             <OverviewTab
               server={server}
               callerRole={callerRole}
               onServerDeleted={handleServerDeleted}
             />
           )}
-          {activeTab === 'roles' && <RolesTab serverId={serverId} callerRole={callerRole} />}
-          {activeTab === 'channels' && (
+          {isAdmin && activeTab === 'roles' && (
+            <RolesTab serverId={serverId} callerRole={callerRole} />
+          )}
+          {isAdmin && activeTab === 'channels' && (
             <ChannelsTab serverId={serverId} callerRole={callerRole} isOwner={isOwner} />
           )}
-          {activeTab === 'emojis' && <EmojiSettingsTab serverId={serverId} />}
-          {activeTab === 'moderation' && <ModerationTab serverId={serverId} isOwner={isOwner} />}
-          {activeTab === 'bans' && <BansTab serverId={serverId} callerRole={callerRole} />}
+          {isAdmin && activeTab === 'emojis' && <EmojiSettingsTab serverId={serverId} />}
+          {isAdmin && activeTab === 'moderation' && (
+            <ModerationTab serverId={serverId} isOwner={isOwner} />
+          )}
+          {activeTab === 'reports' && <ReportsTab serverId={serverId} callerRole={callerRole} />}
+          {isAdmin && activeTab === 'audit' && (
+            <AuditLogTab serverId={serverId} callerRole={callerRole} />
+          )}
+          {isAdmin && activeTab === 'bans' && (
+            <BansTab serverId={serverId} callerRole={callerRole} />
+          )}
         </div>
       </div>
     </div>

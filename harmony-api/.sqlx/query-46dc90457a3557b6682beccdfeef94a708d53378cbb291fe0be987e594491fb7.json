@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE message_reports\n            SET status      = ($3::text)::report_status,\n                resolved_by = $4,\n                resolved_at = now()\n            WHERE id = $2 AND server_id = $1 AND status = 'open'\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "46dc90457a3557b6682beccdfeef94a708d53378cbb291fe0be987e594491fb7"
+}

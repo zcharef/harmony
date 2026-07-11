@@ -35,6 +35,8 @@ export const queryKeys = {
     bans: (serverId: string) => ['servers', serverId, 'bans'] as const,
     emojis: (serverId: string) => ['servers', serverId, 'emojis'] as const,
     moderation: (serverId: string) => ['servers', serverId, 'moderation'] as const,
+    moderationLog: (serverId: string) => ['servers', serverId, 'moderationLog'] as const,
+    reports: (serverId: string) => ['servers', serverId, 'reports'] as const,
     migrationProgress: (serverId: string) =>
       ['servers', serverId, 'migration', 'progress'] as const,
     migrationCohort: (serverId: string) => ['servers', serverId, 'migration', 'cohort'] as const,

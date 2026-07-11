@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT ml.id,\n                   ml.server_id,\n                   ml.action::text                     AS \"action!\",\n                   ml.actor_id,\n                   COALESCE(actor.username, '')        AS \"actor_username!\",\n                   actor.avatar_url                    AS actor_avatar_url,\n                   ml.target_user_id,\n                   target.username                     AS \"target_username?\",\n                   ml.target_message_id,\n                   ml.reason,\n                   ml.metadata                         AS \"metadata!\",\n                   ml.created_at\n            FROM moderation_log ml\n            LEFT JOIN profiles actor  ON actor.id  = ml.actor_id\n            LEFT JOIN profiles target ON target.id = ml.target_user_id\n            WHERE ml.server_id = $1\n              AND ($2::timestamptz IS NULL OR ml.created_at < $2)\n            ORDER BY ml.created_at DESC, ml.id DESC\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "action!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "actor_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "actor_username!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "actor_avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "target_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "target_username?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "target_message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "metadata!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false,
+      null,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b1541e6a3945e6de1c3b6afa087f54e5e232b073c5e7fc155b94dd7f281bd040"
+}

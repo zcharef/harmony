@@ -135,6 +135,13 @@ async fn app_state(pool: PgPool, trusted_proxy_secret: Option<SecretString>) -> 
         server_repo.clone(),
         ban_repo.clone(),
         member_repo.clone(),
+        channel_repo.clone(),
+        message_repo.clone(),
+        Arc::new(harmony_api::infra::postgres::PgModerationLogRepository::new(pool.clone())),
+        Arc::new(harmony_api::infra::postgres::PgReportRepository::new(
+            pool.clone(),
+        )),
+        spam_guard.clone(),
     ));
     let friendship_service = Arc::new(harmony_api::domain::services::FriendshipService::new(
         friendship_repo.clone(),

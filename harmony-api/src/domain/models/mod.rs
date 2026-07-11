@@ -13,9 +13,11 @@ mod invite;
 mod megolm_session;
 mod member;
 mod message;
+mod message_report;
 mod message_with_author;
 mod migration;
 mod moderation;
+mod moderation_log;
 mod plan;
 mod profile;
 mod reaction;
@@ -38,8 +40,8 @@ pub use friendship::{
 };
 pub use ids::{
     AttachmentId, CategoryId, ChannelId, DeviceId, DeviceKeyId, EmojiId, InviteCode,
-    MegolmSessionId, MessageId, ModerationRetryId, OneTimeKeyId, RoleId, SYSTEM_MODERATOR_ID,
-    ServerId, UserId, VoiceSessionId,
+    MegolmSessionId, MessageId, ModerationLogId, ModerationRetryId, OneTimeKeyId, ReportId, RoleId,
+    SYSTEM_MODERATOR_ID, ServerId, UserId, VoiceSessionId,
 };
 pub use invite::Invite;
 pub use megolm_session::MegolmSession;
@@ -48,6 +50,9 @@ pub use message::{
     ALLOWED_ATTACHMENT_MIME, ATTACHMENT_PUBLIC_PATH_MARKER, Attachment, AttachmentModerationStatus,
     MentionedUser, Message, MessageType, NewAttachment, ParentMessagePreview,
 };
+pub use message_report::{
+    MessageReport, NewMessageReport, ReportReason, ReportStatus, ReportedMessageSnapshot,
+};
 pub use message_with_author::MessageWithAuthor;
 pub use migration::{
     ALIVE_MIN_ACTIVE_DAYS, ALIVE_MIN_DISTINCT_SENDERS, ALIVE_MIN_MEMBERS_JOINED,
@@ -55,6 +60,7 @@ pub use migration::{
     MigrationProgress, NotYetActiveMember, RecommendedAction, ServerAliveSnapshot,
 };
 pub use moderation::{AttachmentScanRetry, ModerationRetry, ServerModerationSettings};
+pub use moderation_log::{ModerationAction, ModerationLogEntry, NewModerationLogEntry};
 pub use plan::{Plan, PlanLimits, ResourceKind};
 pub use profile::{Profile, UserStatus};
 pub use reaction::{EmojiVariety, ReactionSummary, Reactor};

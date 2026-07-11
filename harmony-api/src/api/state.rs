@@ -11,7 +11,8 @@ use crate::domain::ports::{
     AnalyticsRecorder, AttachmentRepository, AttachmentScanRetryRepository, BanRepository,
     ChannelRepository, ContentModerator, CsamMatcher, DesktopAuthRepository, EventBus,
     ImageClassifier, MegolmSessionRepository, MemberRepository, MessageRepository,
-    ModerationRetryRepository, PlanLimitChecker, ServerRepository, VoiceSessionRepository,
+    ModerationLogRepository, ModerationRetryRepository, PlanLimitChecker, ServerRepository,
+    VoiceSessionRepository,
 };
 use crate::domain::services::{
     ChannelService, DmService, FriendshipService, InviteService, KeyService, MessageService,
@@ -21,7 +22,7 @@ use crate::domain::services::{
 };
 use crate::infra::PgPresenceTracker;
 use crate::infra::klipy::KlipyClient;
-use crate::infra::postgres::PgMigrationDashboardRepository;
+use crate::infra::postgres::{PgMigrationDashboardRepository, PgModerationLogRepository};
 use crate::infra::safe_browsing::SafeBrowsingClient;
 
 /// Maximum concurrent async moderation tasks (`OpenAI` + Safe Browsing).
@@ -106,6 +107,9 @@ pub struct AppState {
     moderation_semaphore: Arc<Semaphore>,
     /// Dead-letter queue for failed AI moderation checks (Tier 1 safety).
     moderation_retry_repository: Arc<dyn ModerationRetryRepository>,
+    /// Audit-log writer used by the async automod delete path (§3.2). The
+    /// moderation service holds its own handle for member/message actions.
+    moderation_log_repository: Arc<dyn ModerationLogRepository>,
     /// Adult-NSFW image classifier (Phase 1: Noop). Never `None` — the Noop is
     /// always wired so the scan pipeline runs uniformly.
     image_classifier: Arc<dyn ImageClassifier>,
@@ -178,6 +182,7 @@ impl std::fmt::Debug for AppState {
                 "moderation_retry_repository",
                 &self.moderation_retry_repository,
             )
+            .field("moderation_log_repository", &self.moderation_log_repository)
             .field("image_classifier", &self.image_classifier)
             .field("csam_matcher", &self.csam_matcher)
             .field("attachment_repository", &self.attachment_repository)
@@ -275,6 +280,13 @@ impl AppState {
             attachment_url_origin.clone(),
         ));
 
+        // WHY constructed here (not a positional param): only the async automod
+        // delete path needs a bare handle — a Postgres repo over the same pool.
+        // Keeps the already-large constructor signature (and its test call
+        // sites) stable, mirroring migration_service/server_emoji_service.
+        let moderation_log_repository: Arc<dyn ModerationLogRepository> =
+            Arc::new(PgModerationLogRepository::new(pool.clone()));
+
         Self {
             pool,
             jwt_secret,
@@ -311,6 +323,7 @@ impl AppState {
             server_repository: server_repository_for_moderation,
             moderation_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_MODERATIONS)),
             moderation_retry_repository,
+            moderation_log_repository,
             image_classifier,
             csam_matcher,
             attachment_repository,
@@ -530,6 +543,12 @@ impl AppState {
     #[must_use]
     pub fn moderation_retry_repository(&self) -> &Arc<dyn ModerationRetryRepository> {
         &self.moderation_retry_repository
+    }
+
+    /// Access the moderation audit-log repository (async automod delete path).
+    #[must_use]
+    pub fn moderation_log_repository(&self) -> &Arc<dyn ModerationLogRepository> {
+        &self.moderation_log_repository
     }
 
     /// Access the adult-NSFW image classifier (Phase 1: Noop).

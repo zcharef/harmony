@@ -554,10 +554,19 @@ pub async fn delete_message(
     // must not learn a message existed or was removed.
     let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
 
-    state
+    let was_moderator_delete = state
         .message_service()
         .delete_message(&path.message_id, &user_id)
         .await?;
+
+    // WHY: Only a moderator deleting another member's message is a moderation
+    // action worth auditing; a self-delete is not. Best-effort (§3.2).
+    if was_moderator_delete {
+        state
+            .moderation_service()
+            .log_message_delete(&channel.server_id, &user_id, &path.message_id, None)
+            .await;
+    }
 
     let event = ServerEvent::MessageDeleted {
         sender_id: user_id.clone(),
@@ -781,6 +790,9 @@ fn spawn_async_moderation(
         .unwrap_or(message.message.created_at);
     let repo = state.message_repository_for_moderation().clone();
     let server_repo = state.server_repository_for_moderation().clone();
+    // WHY: append an audit-log row for the system delete (actor = system
+    // sentinel). Best-effort — a log failure never blocks the moderation delete.
+    let mod_log_repo = state.moderation_log_repository().clone();
     // WHY: Needed to resolve the private-channel access scope for the delete
     // event (the moderation path holds only IDs, not the `Channel`).
     let channel_repo = state.channel_repository_arc().clone();
@@ -976,6 +988,28 @@ fn spawn_async_moderation(
                 );
             }
             return;
+        }
+
+        // WHY: Append an audit-log row for the system delete (actor = system
+        // sentinel). Best-effort with error! on failure (§3.2) — the delete
+        // already committed; a lost audit row must never re-raise here.
+        if let Err(e) = mod_log_repo
+            .record(crate::domain::models::NewModerationLogEntry::new(
+                server_id.clone(),
+                crate::domain::models::ModerationAction::MessageDelete,
+                SYSTEM_MODERATOR_ID,
+                None,
+                Some(msg_id.0),
+                Some(reason.clone()),
+            ))
+            .await
+        {
+            tracing::error!(
+                message_id = %msg_id,
+                server_id = %server_id,
+                error = ?e,
+                "moderation_log write failed for automod delete — action succeeded, audit lost"
+            );
         }
 
         // WHY: Resolve the channel-access scope so a moderation delete in a

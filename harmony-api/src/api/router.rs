@@ -196,6 +196,23 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             get(handlers::moderation_settings::get_moderation_settings)
                 .patch(handlers::moderation_settings::update_moderation_settings),
         )
+        // Moderation Dashboard v2 (T3.3): audit log + reports queue
+        .route(
+            "/v1/servers/{id}/moderation-log",
+            get(handlers::moderation::list_moderation_log),
+        )
+        .route(
+            "/v1/servers/{id}/reports",
+            get(handlers::moderation::list_reports),
+        )
+        .route(
+            "/v1/servers/{id}/reports/{report_id}",
+            patch(handlers::moderation::resolve_report),
+        )
+        .route(
+            "/v1/channels/{channel_id}/messages/{message_id}/report",
+            post(handlers::moderation::report_message),
+        )
         // Megolm sessions (E2EE channel encryption)
         .route(
             "/v1/channels/{id}/megolm-sessions",

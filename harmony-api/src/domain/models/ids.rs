@@ -436,6 +436,56 @@ impl From<Uuid> for VoiceSessionId {
     }
 }
 
+/// Unique identifier for a moderation log entry (audit trail).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "330e8400-e29b-41d4-a716-44665544000d")]
+#[serde(transparent)]
+pub struct ModerationLogId(pub Uuid);
+
+impl ModerationLogId {
+    #[must_use]
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for ModerationLogId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for ModerationLogId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+/// Unique identifier for a user-filed message report.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "440e8400-e29b-41d4-a716-44665544000e")]
+#[serde(transparent)]
+pub struct ReportId(pub Uuid);
+
+impl ReportId {
+    #[must_use]
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for ReportId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for ReportId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
 /// Well-known UUID for system-initiated moderation deletions.
 /// WHY: Distinguishes "user deleted their message" from "system moderated"
 /// in the `deleted_by` column. Required for legal audit (CSAM reporting).
