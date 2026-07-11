@@ -119,6 +119,21 @@ pub struct MessagePayload {
     /// [`ServerEvent::shed_attachments`]) rather than dropping the event.
     #[serde(default)]
     pub attachments: Vec<AttachmentPayload>,
+    /// Whether this message is pinned in its channel. Rides `message.created`/
+    /// `updated`/`pinned`/`unpinned` so every client's cache keeps `isPinned`
+    /// convergent without a refetch.
+    ///
+    /// WHY `default`: rollout-safe (mirrors `mentions`/`attachments`) — an older
+    /// instance publishes this payload WITHOUT the key over `pg_notify`; a new
+    /// instance deserializes it as `false` rather than dropping the event.
+    #[serde(default)]
+    pub is_pinned: bool,
+    /// Who pinned it (moderator+). Present only when `is_pinned = true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_by: Option<UserId>,
+    /// When it was pinned. Present only when `is_pinned = true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -149,6 +164,9 @@ impl From<MessageWithAuthor> for MessagePayload {
             moderation_reason: m.moderation_reason,
             mentions,
             attachments,
+            is_pinned: m.is_pinned,
+            pinned_by: m.pinned_by,
+            pinned_at: m.pinned_at,
             created_at: m.created_at,
         }
     }
@@ -329,6 +347,26 @@ pub enum ServerEvent {
         /// Who performed the deletion: the author's `UserId` for user-initiated,
         /// `SYSTEM_MODERATOR_ID` for automod deletions.
         deleted_by: UserId,
+        /// Private-channel access scope (routing metadata). See `MessageCreated`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
+    },
+    MessagePinned {
+        sender_id: UserId,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        /// Full message so the pinned panel renders without a refetch.
+        message: MessagePayload,
+        pinned_by: UserId,
+        /// Private-channel access scope (routing metadata). See `MessageCreated`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_access: Option<ChannelAccessScope>,
+    },
+    MessageUnpinned {
+        sender_id: UserId,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        message_id: MessageId,
         /// Private-channel access scope (routing metadata). See `MessageCreated`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channel_access: Option<ChannelAccessScope>,
@@ -613,6 +651,8 @@ impl ServerEvent {
             Self::MessageCreated { .. } => "message.created",
             Self::MessageUpdated { .. } => "message.updated",
             Self::MessageDeleted { .. } => "message.deleted",
+            Self::MessagePinned { .. } => "message.pinned",
+            Self::MessageUnpinned { .. } => "message.unpinned",
             Self::MemberJoined { .. } => "member.joined",
             Self::MemberRemoved { .. } => "member.removed",
             Self::MemberBanned { .. } => "member.banned",
@@ -649,6 +689,8 @@ impl ServerEvent {
             Self::MessageCreated { sender_id, .. }
             | Self::MessageUpdated { sender_id, .. }
             | Self::MessageDeleted { sender_id, .. }
+            | Self::MessagePinned { sender_id, .. }
+            | Self::MessageUnpinned { sender_id, .. }
             | Self::MemberJoined { sender_id, .. }
             | Self::MemberRemoved { sender_id, .. }
             | Self::MemberBanned { sender_id, .. }
@@ -685,6 +727,8 @@ impl ServerEvent {
             Self::MessageCreated { server_id, .. }
             | Self::MessageUpdated { server_id, .. }
             | Self::MessageDeleted { server_id, .. }
+            | Self::MessagePinned { server_id, .. }
+            | Self::MessageUnpinned { server_id, .. }
             | Self::MemberJoined { server_id, .. }
             | Self::MemberRemoved { server_id, .. }
             | Self::MemberBanned { server_id, .. }
@@ -731,6 +775,8 @@ impl ServerEvent {
             Self::MessageCreated { .. }
             | Self::MessageUpdated { .. }
             | Self::MessageDeleted { .. }
+            | Self::MessagePinned { .. }
+            | Self::MessageUnpinned { .. }
             | Self::MemberJoined { .. }
             | Self::MemberRemoved { .. }
             | Self::MemberRoleUpdated { .. }
@@ -762,6 +808,8 @@ impl ServerEvent {
             Self::MessageCreated { channel_access, .. }
             | Self::MessageUpdated { channel_access, .. }
             | Self::MessageDeleted { channel_access, .. }
+            | Self::MessagePinned { channel_access, .. }
+            | Self::MessageUnpinned { channel_access, .. }
             | Self::TypingStarted { channel_access, .. }
             | Self::ReactionAdded { channel_access, .. }
             | Self::ReactionRemoved { channel_access, .. }
@@ -805,6 +853,8 @@ impl ServerEvent {
             Self::MessageCreated { channel_access, .. }
             | Self::MessageUpdated { channel_access, .. }
             | Self::MessageDeleted { channel_access, .. }
+            | Self::MessagePinned { channel_access, .. }
+            | Self::MessageUnpinned { channel_access, .. }
             | Self::TypingStarted { channel_access, .. }
             | Self::ReactionAdded { channel_access, .. }
             | Self::ReactionRemoved { channel_access, .. }
@@ -907,6 +957,9 @@ mod tests {
                         moderation_reason: None,
                         mentions: vec![],
                         attachments: vec![],
+                        is_pinned: false,
+                        pinned_by: None,
+                        pinned_at: None,
                         created_at: Utc::now(),
                     },
                     channel_access: None,
@@ -1035,6 +1088,9 @@ mod tests {
                 moderation_reason: None,
                 mentions: vec![],
                 attachments: vec![],
+                is_pinned: false,
+                pinned_by: None,
+                pinned_at: None,
                 created_at: Utc::now(),
             },
             channel_access: None,
@@ -1486,6 +1542,9 @@ mod tests {
                 moderation_reason: None,
                 mentions: vec![],
                 attachments: vec![attachment.clone()],
+                is_pinned: false,
+                pinned_by: None,
+                pinned_at: None,
                 created_at: Utc::now(),
             },
             channel_access: None,
@@ -1664,6 +1723,83 @@ mod tests {
             }
             _ => panic!("expected FriendAdded"),
         }
+    }
+
+    fn pinned_message_payload() -> MessagePayload {
+        MessagePayload {
+            id: MessageId::new(Uuid::new_v4()),
+            channel_id: test_channel_id(),
+            content: "pinned".to_string(),
+            author_id: test_user_id(),
+            author_username: "alice".to_string(),
+            author_display_name: None,
+            author_avatar_url: None,
+            encrypted: false,
+            sender_device_id: None,
+            edited_at: None,
+            parent_message_id: None,
+            message_type: crate::domain::models::MessageType::Default,
+            system_event_key: None,
+            moderated_at: None,
+            moderation_reason: None,
+            mentions: vec![],
+            attachments: vec![],
+            is_pinned: true,
+            pinned_by: Some(test_user_id()),
+            pinned_at: Some(Utc::now()),
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Both pin variants name correctly, stay server-scoped (the SSE gate needs
+    /// `server_id` to look up the receiver's role), are NOT user-targeted, and
+    /// carry the private-channel access scope so Stage-2 gating applies.
+    #[test]
+    fn pin_events_naming_and_routing() {
+        let scope = ChannelAccessScope {
+            authorized_roles: vec![Role::Moderator, Role::Member],
+        };
+        let pinned = ServerEvent::MessagePinned {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message: pinned_message_payload(),
+            pinned_by: test_user_id(),
+            channel_access: Some(scope.clone()),
+        };
+        let unpinned = ServerEvent::MessageUnpinned {
+            sender_id: test_user_id(),
+            server_id: test_server_id(),
+            channel_id: test_channel_id(),
+            message_id: MessageId::new(Uuid::new_v4()),
+            channel_access: Some(scope.clone()),
+        };
+
+        assert_eq!(pinned.event_name(), "message.pinned");
+        assert_eq!(unpinned.event_name(), "message.unpinned");
+        for event in [&pinned, &unpinned] {
+            assert!(event.server_id().is_some(), "pin events stay server-scoped");
+            assert!(event.target_user_id().is_none(), "pin events broadcast");
+            assert_eq!(event.channel_access(), Some(&scope));
+        }
+
+        // Redaction strips the routing scope from both before client serialize,
+        // but keeps the client-facing pinned message payload intact.
+        let mut redacted = pinned;
+        redacted.redact_routing_metadata();
+        assert!(redacted.channel_access().is_none());
+        let json = serde_json::to_value(&redacted).unwrap();
+        assert_eq!(json["type"], "messagePinned");
+        assert_eq!(json["message"]["isPinned"], true);
+        assert!(json["message"]["pinnedBy"].is_string());
+        assert!(json.get("channelAccess").is_none());
+
+        let mut redacted_unpin = unpinned;
+        redacted_unpin.redact_routing_metadata();
+        assert!(redacted_unpin.channel_access().is_none());
+        let json = serde_json::to_value(&redacted_unpin).unwrap();
+        assert_eq!(json["type"], "messageUnpinned");
+        assert!(json["messageId"].is_string());
     }
 
     /// `TypingStarted.display_name` carries the resolved name in camelCase when

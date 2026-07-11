@@ -138,6 +138,15 @@ pub struct MessageResponse {
     pub mentions: Vec<MentionedUserResponse>,
     /// Files attached to this message, in insertion order.
     pub attachments: Vec<AttachmentResponse>,
+    /// Whether this message is pinned in its channel. Always present (defaults
+    /// `false`) so the client always knows the state.
+    pub is_pinned: bool,
+    /// Who pinned it (moderator+). Present only when `is_pinned = true`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_by: Option<UserId>,
+    /// When it was pinned. Present only when `is_pinned = true`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -237,8 +246,31 @@ impl From<MessageWithAuthor> for MessageResponse {
             moderation_reason: m.moderation_reason,
             mentions,
             attachments,
+            is_pinned: m.is_pinned,
+            pinned_by: m.pinned_by,
+            pinned_at: m.pinned_at,
             created_at: m.created_at,
         }
+    }
+}
+
+/// Pinned messages for a channel (bounded, no pagination — capped at `MAX_PINS`).
+///
+/// WHY no cursor (ADR-036 deviation): the pinned set is hard-capped per channel,
+/// so the whole list fits one bounded response — pagination would be dead weight.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PinnedMessagesResponse {
+    pub items: Vec<MessageResponse>,
+    pub total: i64,
+}
+
+impl PinnedMessagesResponse {
+    #[must_use]
+    pub fn from_messages(messages: Vec<MessageWithAuthor>) -> Self {
+        let items: Vec<MessageResponse> = messages.into_iter().map(MessageResponse::from).collect();
+        let total = i64::try_from(items.len()).unwrap_or(i64::MAX);
+        Self { items, total }
     }
 }
 
@@ -353,6 +385,9 @@ mod tests {
                 moderation_reason: None,
                 original_content: None,
                 mentioned_user_ids: vec![],
+                is_pinned: false,
+                pinned_by: None,
+                pinned_at: None,
                 created_at: Utc::now(),
             },
             author_username: "alice".to_string(),

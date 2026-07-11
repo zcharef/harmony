@@ -1,6 +1,16 @@
 import { Avatar, Button, Textarea, Tooltip } from '@heroui/react'
 import type { TFunction } from 'i18next'
-import { ArrowRight, Lock, LockOpen, MessageSquare, Pencil, SmilePlus, Trash2 } from 'lucide-react'
+import {
+  ArrowRight,
+  Lock,
+  LockOpen,
+  MessageSquare,
+  Pencil,
+  Pin,
+  PinOff,
+  SmilePlus,
+  Trash2,
+} from 'lucide-react'
 import { type ComponentPropsWithoutRef, memo, useCallback, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
@@ -47,6 +57,10 @@ interface MessageItemProps {
   onSaveEdit: (content: string) => void
   onCancelEdit: () => void
   onDelete: () => void
+  /** WHY: Toggle pin state (moderator+). Absent = pin affordance hidden. */
+  onTogglePin?: () => void
+  /** WHY: Disables the pin button + shows a spinner while the mutation is in flight. */
+  isPinPending?: boolean
   /** WHY: Callback to add a reaction to this message (toggle on). */
   onAddReaction?: (emoji: string) => void
   /** WHY: Callback to remove a reaction from this message (toggle off). */
@@ -528,15 +542,21 @@ function ReactionBar({
 function MessageActions({
   isOwnMessage,
   canModerateMessages,
+  isPinned,
+  isPinPending,
   onStartEdit,
   onDelete,
+  onTogglePin,
   onAddReaction,
   onReply,
 }: {
   isOwnMessage: boolean
   canModerateMessages: boolean
+  isPinned: boolean
+  isPinPending: boolean
   onStartEdit: () => void
   onDelete: () => void
+  onTogglePin?: () => void
   onAddReaction?: (emoji: string) => void
   onReply?: () => void
 }) {
@@ -592,6 +612,27 @@ function MessageActions({
           <Pencil className="h-4 w-4 text-default-500" />
         </Button>
       )}
+      {/* WHY between edit and delete: Discord action order (react · reply · edit
+          · pin · delete). Moderator+ only; the server is the authoritative gate. */}
+      {canModerateMessages && onTogglePin !== undefined && (
+        <Button
+          variant="light"
+          isIconOnly
+          size="sm"
+          isDisabled={isPinPending}
+          isLoading={isPinPending}
+          onPress={onTogglePin}
+          aria-label={isPinned ? t('unpinMessage') : t('pinMessage')}
+          aria-pressed={isPinned}
+          data-test="message-pin-button"
+        >
+          {isPinned ? (
+            <PinOff className="h-4 w-4 text-default-500" />
+          ) : (
+            <Pin className="h-4 w-4 text-default-500" />
+          )}
+        </Button>
+      )}
       {(isOwnMessage || canModerateMessages) && (
         <Button
           variant="light"
@@ -623,6 +664,7 @@ function MessageHeader({
 }) {
   const { t } = useTranslation('messages')
   const { t: tCrypto } = useTranslation('crypto')
+  const { t: tChat } = useTranslation('chat')
   // WHY the shared set (not a per-message flag): the badge renders next to every
   // author, so author-id membership is checked against one cached set rather
   // than bloating each message payload (see use-official-badges).
@@ -647,6 +689,17 @@ function MessageHeader({
       <span data-test="message-timestamp" className="text-xs text-default-500">
         {isPending ? t('sending') : formatTimestamp(message.createdAt, t)}
       </span>
+      {/* WHY derived from the cache (ADR-045), no useState shadow: mirrors the
+          `edited` tag treatment. A small muted glyph, quiet like metadata. */}
+      {message.isPinned && (
+        <span
+          data-test="message-pinned-tag"
+          className="inline-flex items-center gap-1 text-xs text-default-400"
+        >
+          <Pin className="h-3 w-3" />
+          {tChat('pinnedTag')}
+        </span>
+      )}
       {isDm && (
         <Tooltip
           content={
@@ -719,6 +772,8 @@ export const MessageItem = memo(function MessageItem({
   onSaveEdit,
   onCancelEdit,
   onDelete,
+  onTogglePin,
+  isPinPending = false,
   onAddReaction,
   onRemoveReaction,
   onReply,
@@ -846,8 +901,11 @@ export const MessageItem = memo(function MessageItem({
         <MessageActions
           isOwnMessage={isOwnMessage}
           canModerateMessages={canModerateMessages}
+          isPinned={message.isPinned}
+          isPinPending={isPinPending}
           onStartEdit={onStartEdit}
           onDelete={onDelete}
+          onTogglePin={onTogglePin}
           onAddReaction={onAddReaction}
           onReply={onReply}
         />

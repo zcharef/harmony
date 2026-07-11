@@ -56,7 +56,7 @@ pub use members::{
 pub use messages::{
     AttachmentResponse, EditMessageRequest, MentionedUserResponse, MessageListQuery,
     MessageListResponse, MessageResponse, MessageSearchQuery, MessageSearchResponse,
-    NewAttachmentRequest, SendMessageRequest,
+    NewAttachmentRequest, PinnedMessagesResponse, SendMessageRequest,
 };
 pub use moderation_settings::{ModerationSettingsResponse, UpdateModerationSettingsRequest};
 pub use pagination::PaginatedResponse;

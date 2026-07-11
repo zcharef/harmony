@@ -61,6 +61,14 @@ pub struct Message {
     /// sidecar (deliberate metadata leak — see spec §6). Drives targeted
     /// `mention.received` events and the computed mention badge counts.
     pub mentioned_user_ids: Vec<UserId>,
+    /// Whether this message is pinned in its channel. The `is_pinned` flag and
+    /// its provenance (`pinned_by`/`pinned_at`) are written atomically by the
+    /// single pin write path (`MessageService::set_pinned`).
+    pub is_pinned: bool,
+    /// WHO pinned this message (moderator+). `Some` iff `is_pinned = true`.
+    pub pinned_by: Option<UserId>,
+    /// WHEN this message was pinned. `Some` iff `is_pinned = true`.
+    pub pinned_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 

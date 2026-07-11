@@ -186,6 +186,40 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         limit: i64,
     ) -> Result<Vec<MessageWithAuthor>, DomainError>;
 
+    /// Pin or unpin a message, writing the `is_pinned` flag and its provenance
+    /// atomically in one `UPDATE`.
+    ///
+    /// Pin (`pinned = true`) sets `is_pinned = true, pinned_by = $pinned_by,
+    /// pinned_at = now()`; unpin (`pinned = false`) clears all three
+    /// (`is_pinned = false, pinned_by = NULL, pinned_at = NULL`). Scoped to
+    /// non-deleted rows (`deleted_at IS NULL`). This single write path is the
+    /// `SSoT` for the `is_pinned ⟺ pinned_at IS NOT NULL AND pinned_by IS NOT NULL`
+    /// invariant (no CHECK constraint — spec §2).
+    ///
+    /// Returns the updated message WITH author/parent joins so the handler can
+    /// build the SSE payload without a refetch. Returns `NotFound` if the
+    /// message does not exist or is soft-deleted.
+    async fn set_pinned(
+        &self,
+        message_id: &MessageId,
+        pinned_by: &UserId,
+        pinned: bool,
+    ) -> Result<MessageWithAuthor, DomainError>;
+
+    /// Count currently-pinned (non-deleted) messages in a channel. Drives the
+    /// per-channel pin cap.
+    async fn count_pinned(&self, channel_id: &ChannelId) -> Result<i64, DomainError>;
+
+    /// List the channel's pinned (non-deleted) messages, most-recently-pinned
+    /// first (`pinned_at DESC`), capped at `limit`. Same author/parent joins as
+    /// [`list_for_channel`](Self::list_for_channel); the service enriches
+    /// reactions/mentions/attachments identically.
+    async fn list_pinned(
+        &self,
+        channel_id: &ChannelId,
+        limit: i64,
+    ) -> Result<Vec<MessageWithAuthor>, DomainError>;
+
     /// Create a system message (e.g. join announcement).
     ///
     /// `author_id` is the subject of the event (the user who joined, left, etc.)

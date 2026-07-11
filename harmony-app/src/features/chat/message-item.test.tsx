@@ -58,13 +58,19 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     messageType: 'default',
     mentions: [],
     attachments: [],
+    isPinned: false,
     ...overrides,
   }
 }
 
 function renderMessageItem(
   message: MessageResponse,
-  options: { serverId?: string | null; queryClient?: QueryClient } = {},
+  options: {
+    serverId?: string | null
+    queryClient?: QueryClient
+    canModerateMessages?: boolean
+    onTogglePin?: () => void
+  } = {},
 ) {
   const onAddReaction = vi.fn()
   const onRemoveReaction = vi.fn()
@@ -85,12 +91,13 @@ function renderMessageItem(
         message={message}
         currentUserId={CURRENT_USER_ID}
         serverId={options.serverId ?? null}
-        canModerateMessages={false}
+        canModerateMessages={options.canModerateMessages ?? false}
         isEditing={false}
         onStartEdit={vi.fn()}
         onSaveEdit={vi.fn()}
         onCancelEdit={vi.fn()}
         onDelete={vi.fn()}
+        onTogglePin={options.onTogglePin}
         onAddReaction={onAddReaction}
         onRemoveReaction={onRemoveReaction}
         onReply={vi.fn()}
@@ -724,5 +731,38 @@ describe('MessageItem official badge', () => {
     renderMessageItem(buildMessage({ authorId: 'user-42' }), { queryClient })
 
     expect(screen.queryByTestId('official-badge')).toBeNull()
+  })
+})
+
+describe('MessageItem pin action (T2.3)', () => {
+  it('hides the pin button when the user cannot moderate', () => {
+    renderMessageItem(buildMessage({ authorId: 'user-42' }), {
+      canModerateMessages: false,
+      onTogglePin: vi.fn(),
+    })
+    expect(screen.queryByTestId('message-pin-button')).toBeNull()
+  })
+
+  it('shows the pin button for a moderator and calls onTogglePin on press', () => {
+    const onTogglePin = vi.fn()
+    renderMessageItem(buildMessage({ authorId: 'user-42', isPinned: false }), {
+      canModerateMessages: true,
+      onTogglePin,
+    })
+    const button = screen.getByTestId('message-pin-button')
+    expect(button.getAttribute('aria-label')).toBe('Pin message')
+    fireEvent.click(button)
+    expect(onTogglePin).toHaveBeenCalledTimes(1)
+  })
+
+  it('reflects the pinned state: unpin label + inline pinned tag', () => {
+    renderMessageItem(buildMessage({ authorId: 'user-42', isPinned: true }), {
+      canModerateMessages: true,
+      onTogglePin: vi.fn(),
+    })
+    expect(screen.getByTestId('message-pin-button').getAttribute('aria-label')).toBe(
+      'Unpin message',
+    )
+    expect(screen.queryByTestId('message-pinned-tag')).not.toBeNull()
   })
 })

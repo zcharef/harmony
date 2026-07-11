@@ -70,18 +70,22 @@ import { useJumpToMessage } from './hooks/use-jump-to-message'
 import type { UseMentionAutocompleteResult } from './hooks/use-mention-autocomplete'
 import { useMentionAutocomplete } from './hooks/use-mention-autocomplete'
 import { useMessages } from './hooks/use-messages'
+import { usePinMessage } from './hooks/use-pin-message'
 import { useRealtimeMessages } from './hooks/use-realtime-messages'
+import { useRealtimePins } from './hooks/use-realtime-pins'
 import { useRealtimeReactions } from './hooks/use-realtime-reactions'
 import { useRemoveReaction } from './hooks/use-remove-reaction'
 import type { SendMessageEncryption } from './hooks/use-send-message'
 import { OPTIMISTIC_ID_PREFIX, useSendMessage } from './hooks/use-send-message'
 import { useSlowMode } from './hooks/use-slow-mode'
 import { useTypingIndicator } from './hooks/use-typing-indicator'
+import { useUnpinMessage } from './hooks/use-unpin-message'
 import { useUpdateNotificationSettings } from './hooks/use-update-notification-settings'
 import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE } from './lib/attachment-file'
 import { buildVirtualItems } from './lib/build-virtual-items'
 import { applyMentionMap } from './lib/mention-tokens'
 import { MessageItem } from './message-item'
+import { PinnedPanel } from './pinned-panel'
 import { useDividerStore } from './stores/divider-store'
 import { TypingIndicator } from './typing-indicator'
 
@@ -368,17 +372,24 @@ function ChatToolbar({
   dmRecipient,
   channelName,
   channelId,
+  serverId,
+  canModerate,
   isChannelEncrypted,
+  onJumpToMessage,
   onOpenVerify,
 }: {
   isDm: boolean
   dmRecipient: DmRecipientResponse | null
   channelName: string | null
   channelId: string | null
+  serverId: string | null
+  canModerate: boolean
   isChannelEncrypted: boolean
+  onJumpToMessage: (messageId: string) => void
   onOpenVerify: () => void
 }) {
   const { t } = useTranslation('chat')
+  const [isPinsOpen, setIsPinsOpen] = useState(false)
   const notifLevel = useChannelNotificationLevel(channelId)
   const updateNotif = useUpdateNotificationSettings(channelId ?? '')
   // WHY: the toolbar Search affordance opens the shared overlay pre-scoped to
@@ -430,9 +441,33 @@ function ChatToolbar({
             </div>
           </PopoverContent>
         </Popover>
-        <Button variant="light" isIconOnly size="sm" aria-label={t('pinnedMessages')}>
-          <Pin className="h-5 w-5 text-default-500" />
-        </Button>
+        {/* WHY hidden in DMs: pins are a server-channel feature (no moderator
+            role in a DM), spec §10. */}
+        {!isDm && channelId !== null && (
+          <Popover placement="bottom-end" isOpen={isPinsOpen} onOpenChange={setIsPinsOpen}>
+            <PopoverTrigger>
+              <Button
+                variant="light"
+                isIconOnly
+                size="sm"
+                aria-label={t('pinnedMessages')}
+                data-test="chat-toolbar-pins"
+              >
+                <Pin className="h-5 w-5 text-default-500" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="p-0">
+              <PinnedPanel
+                channelId={channelId}
+                serverId={serverId}
+                canModerate={canModerate}
+                isOpen={isPinsOpen}
+                onJumpToMessage={onJumpToMessage}
+                onClose={() => setIsPinsOpen(false)}
+              />
+            </PopoverContent>
+          </Popover>
+        )}
         {!isDm && (
           <Button variant="light" isIconOnly size="sm" aria-label={t('memberList')}>
             <Users className="h-5 w-5 text-default-500" />
@@ -1313,9 +1348,12 @@ export function ChatArea({
 
   useRealtimeMessages(channelId ?? '')
   useRealtimeReactions(channelId, currentUser.id)
+  useRealtimePins(channelId ?? '')
 
   const addReactionMutation = useAddReaction(channelId ?? '')
   const removeReactionMutation = useRemoveReaction(channelId ?? '')
+  const pinMutation = usePinMessage(channelId ?? '')
+  const unpinMutation = useUnpinMessage(channelId ?? '')
 
   const { typingUsers, sendTyping } = useTypingIndicator(channelId ?? '', currentUser.id)
 
@@ -1564,7 +1602,10 @@ export function ChatArea({
         dmRecipient={dmRecipient}
         channelName={channelName}
         channelId={channelId}
+        serverId={serverId}
+        canModerate={ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.moderator}
         isChannelEncrypted={isChannelEncrypted}
+        onJumpToMessage={(messageId) => void jumpToMessage(messageId)}
         onOpenVerify={() => setIsVerifyOpen(true)}
       />
 
@@ -1678,6 +1719,21 @@ export function ChatArea({
                       onSaveEdit={(content) => handleSaveEdit(item.msg.id, content)}
                       onCancelEdit={handleCancelEdit}
                       onDelete={() => handleDelete(item.msg.id)}
+                      onTogglePin={
+                        isDm
+                          ? undefined
+                          : () => {
+                              if (item.msg.isPinned) {
+                                unpinMutation.mutate(item.msg.id)
+                              } else {
+                                pinMutation.mutate(item.msg.id)
+                              }
+                            }
+                      }
+                      isPinPending={
+                        (pinMutation.isPending && pinMutation.variables === item.msg.id) ||
+                        (unpinMutation.isPending && unpinMutation.variables === item.msg.id)
+                      }
                       onReply={() => setReplyingTo(item.msg)}
                       onAddReaction={(emoji) =>
                         addReactionMutation.mutate({ messageId: item.msg.id, emoji })

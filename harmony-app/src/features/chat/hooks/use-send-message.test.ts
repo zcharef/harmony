@@ -61,6 +61,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     messageType: 'default',
     mentions: [],
     attachments: [],
+    isPinned: false,
     ...overrides,
   }
 }

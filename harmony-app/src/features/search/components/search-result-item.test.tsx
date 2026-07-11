@@ -20,6 +20,7 @@ function message(over: Partial<MessageResponse> = {}): MessageResponse {
     mentions: [],
     attachments: [],
     reactions: [],
+    isPinned: false,
     createdAt: '2026-01-05T15:04:00.000Z',
     ...over,
   }

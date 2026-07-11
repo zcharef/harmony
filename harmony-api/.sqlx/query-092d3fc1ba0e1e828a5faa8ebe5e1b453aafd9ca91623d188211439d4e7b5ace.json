@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*)::BIGINT as \"count!\"\n            FROM messages\n            WHERE channel_id = $1 AND is_pinned = true AND deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "092d3fc1ba0e1e828a5faa8ebe5e1b453aafd9ca91623d188211439d4e7b5ace"
+}

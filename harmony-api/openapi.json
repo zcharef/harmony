@@ -766,6 +766,154 @@
         ]
       }
     },
+    "/v1/channels/{channel_id}/messages/{message_id}/pin": {
+      "put": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Pin a message (moderator+). Idempotent: pinning an already-pinned message is\na 204 no-op (Discord parity).",
+        "description": "# Errors\nReturns `ApiError`: 403 (not a moderator / no channel access), 404 (message\nor channel not found), 409 (channel pin cap reached), or a repository error.",
+        "operationId": "pin_message",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MessageId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Message pinned"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a moderator or channel forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message or channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Channel pin limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Unpin a message (moderator+). Idempotent: unpinning a non-pinned message is a\n204 no-op (Discord parity).",
+        "description": "# Errors\nReturns `ApiError`: 403 (not a moderator / no channel access), 404 (message\nor channel not found), or a repository error.",
+        "operationId": "unpin_message",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MessageId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Message unpinned"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a moderator or channel forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message or channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/channels/{channel_id}/messages/{message_id}/reactions": {
       "post": {
         "tags": [
@@ -909,6 +1057,74 @@
           },
           "403": {
             "description": "Not a server member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/channels/{channel_id}/pins": {
+      "get": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "List a channel's pinned messages, most-recently-pinned first. Any member with\nchannel access may read; the bounded list is not paginated (capped at the\nper-channel pin cap).",
+        "description": "# Errors\nReturns `ApiError`: 403 (no channel access), 404 (channel not found), or a\nrepository error.",
+        "operationId": "list_pins",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pinned messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinnedMessagesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No channel access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -7172,6 +7388,7 @@
           "messageType",
           "mentions",
           "attachments",
+          "isPinned",
           "createdAt"
         ],
         "properties": {
@@ -7238,6 +7455,10 @@
           "id": {
             "$ref": "#/components/schemas/MessageId"
           },
+          "isPinned": {
+            "type": "boolean",
+            "description": "Whether this message is pinned in its channel. Always present (defaults\n`false`) so the client always knows the state."
+          },
           "mentions": {
             "type": "array",
             "items": {
@@ -7283,6 +7504,25 @@
               {
                 "$ref": "#/components/schemas/MessageId",
                 "description": "Parent message ID when this is a reply."
+              }
+            ]
+          },
+          "pinnedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it was pinned. Present only when `is_pinned = true`."
+          },
+          "pinnedBy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "Who pinned it (moderator+). Present only when `is_pinned = true`."
               }
             ]
           },
@@ -7660,6 +7900,26 @@
           },
           "id": {
             "$ref": "#/components/schemas/MessageId"
+          }
+        }
+      },
+      "PinnedMessagesResponse": {
+        "type": "object",
+        "description": "Pinned messages for a channel (bounded, no pagination — capped at `MAX_PINS`).\n\nWHY no cursor (ADR-036 deviation): the pinned set is hard-capped per channel,\nso the whole list fits one bounded response — pagination would be dead weight.",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },

@@ -20,10 +20,11 @@ use super::dto::{
     MarkReadRequest, MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
     MentionedUserResponse, MessageListQuery, MessageListResponse, MessageResponse,
     MessageSearchQuery, MessageSearchResponse, NewAttachmentRequest, OfficialBadgeGrantRequest,
-    OfficialBadgesResponse, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
-    RedeemDesktopAuthRequest, RedeemDesktopAuthResponse, RegisterDeviceRequest, SendMessageRequest,
-    ServerListResponse, ServerResponse, SetChannelRoleAccessRequest, TransferOwnershipRequest,
-    UpdateChannelRequest, UpdateProfileRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
+    OfficialBadgesResponse, OneTimeKeyDto, PinnedMessagesResponse, PreKeyBundleResponse,
+    ProfileResponse, RedeemDesktopAuthRequest, RedeemDesktopAuthResponse, RegisterDeviceRequest,
+    SendMessageRequest, ServerListResponse, ServerResponse, SetChannelRoleAccessRequest,
+    TransferOwnershipRequest, UpdateChannelRequest, UpdateProfileRequest, UpdateServerRequest,
+    UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
@@ -101,6 +102,9 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         handlers::messages::search_messages,
         handlers::messages::edit_message,
         handlers::messages::delete_message,
+        handlers::messages::pin_message,
+        handlers::messages::unpin_message,
+        handlers::messages::list_pins,
         // Reactions
         handlers::reactions::add_reaction,
         handlers::reactions::remove_reaction,
@@ -233,6 +237,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             MessageListQuery,
             MessageSearchResponse,
             MessageSearchQuery,
+            PinnedMessagesResponse,
             MentionedUserResponse,
             NewAttachmentRequest,
             AttachmentResponse,
