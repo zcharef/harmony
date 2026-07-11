@@ -13,7 +13,8 @@ import {
 } from '@heroui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { TFunction } from 'i18next'
-import { type ChangeEvent, useRef } from 'react'
+import { Check, Copy } from 'lucide-react'
+import { type ChangeEvent, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
@@ -125,6 +126,47 @@ export function UserSettingsModal() {
         </ModalBody>
       </ModalContent>
     </Modal>
+  )
+}
+
+/**
+ * Read-only @username with copy-to-clipboard. Usernames are immutable for now,
+ * so this renders subdued (no form registration) with helper text saying so.
+ * Copy confirmation follows the invite-code pattern: the icon swaps to a check
+ * for 2s (create-invite-dialog.tsx).
+ */
+function UsernameField({ username }: { username: string }) {
+  const { t } = useTranslation('settings')
+  const [copied, setCopied] = useState(false)
+
+  function handleCopy() {
+    // WHY copy with the @: the pasted handle is directly usable as a mention.
+    navigator.clipboard.writeText(`@${username}`)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <Input
+      label={t('usernameLabel')}
+      value={`@${username}`}
+      isReadOnly
+      description={t('usernameHelp')}
+      classNames={{ input: 'text-default-500' }}
+      endContent={
+        <Button
+          isIconOnly
+          size="sm"
+          variant="light"
+          onPress={handleCopy}
+          aria-label={copied ? t('usernameCopied') : t('copyUsername')}
+          data-test="profile-username-copy-button"
+        >
+          {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+        </Button>
+      }
+      data-test="profile-username-input"
+    />
   )
 }
 
@@ -347,6 +389,7 @@ function ProfileSettingsForm({
         </p>
       )}
 
+      <UsernameField username={profile.username} />
       <Input
         label={t('displayNameLabel')}
         placeholder={t('displayNamePlaceholder')}
