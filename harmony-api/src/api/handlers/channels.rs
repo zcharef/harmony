@@ -182,6 +182,29 @@ pub async fn update_channel(
         .require_role(&params.id, &user_id, required_role)
         .await?;
 
+    // WHY snapshot pre-update privacy: a public→private flip gates the
+    // channel.updated below to the granted set, so ungranted members never
+    // hear about it — the flip must ALSO fan out channel.access_updated
+    // (server-scoped) so their sidebars evict the channel live. Fail open to
+    // `None` (unknown) on lookup error: the flip then still emits the
+    // idempotent access_updated event rather than silently skipping it.
+    let was_private = match state
+        .channel_repository()
+        .get_by_id(&params.channel_id)
+        .await
+    {
+        Ok(pre) => pre.map(|c| c.is_private),
+        Err(e) => {
+            tracing::warn!(
+                server_id = %params.id,
+                channel_id = %params.channel_id,
+                error = %e,
+                "Failed to read pre-update channel state — treating privacy transition as unknown"
+            );
+            None
+        }
+    };
+
     let channel = state
         .channel_service()
         .update_channel(
@@ -211,6 +234,38 @@ pub async fn update_channel(
             );
             None
         });
+
+    // WHY emit access_updated on the public→private flip (and ONLY that
+    // direction): channel.updated above now reaches granted roles + admins
+    // only, so ungranted members would keep a phantom sidebar entry forever.
+    // channel.access_updated is deliberately server-scoped with bounded
+    // metadata (channel id + grant set, never name/topic) — every member
+    // re-evaluates visibility live, mirroring set_channel_role_access. The
+    // private→public direction must NOT emit it: clients treat a role missing
+    // from the grant set as "evict", which would wrongly hide a now-public
+    // channel; that direction is already covered by the ungated
+    // channel.updated.
+    if channel.is_private && was_private != Some(true) {
+        let authorized_roles = channel_access
+            .as_ref()
+            .map(|scope| scope.authorized_roles.clone())
+            .unwrap_or_default();
+        let receivers = state
+            .event_bus()
+            .publish(ServerEvent::ChannelAccessUpdated {
+                sender_id: user_id.clone(),
+                server_id: params.id.clone(),
+                channel_id: channel.id.clone(),
+                authorized_roles,
+            });
+        tracing::debug!(
+            server_id = %params.id,
+            channel_id = %channel.id,
+            receivers,
+            "emitted channel.access_updated (channel made private)"
+        );
+    }
+
     let receivers = state.event_bus().publish(ServerEvent::ChannelUpdated {
         sender_id: user_id,
         server_id: params.id.clone(),

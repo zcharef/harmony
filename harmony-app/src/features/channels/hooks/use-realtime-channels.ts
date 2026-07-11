@@ -55,6 +55,16 @@ const channelAccessUpdatedSchema = z.object({
 })
 
 /**
+ * WHY subset (serverId + member.userId only): this hook only needs to know
+ * WHOSE role changed to re-evaluate channel visibility — the members feature
+ * owns the full member cache update.
+ */
+const memberRoleUpdatedSchema = z.object({
+  serverId: z.string(),
+  member: z.object({ userId: z.string() }),
+})
+
+/**
  * WHY: The useChannels hook stores `data.items` (ChannelResponse[]) directly,
  * not the full ChannelListResponse envelope. The queryFn returns `data.items`.
  * See use-channels.ts:L20.
@@ -147,6 +157,22 @@ export function useRealtimeChannels() {
         queryKeys.channels.byServer(eventServerId),
         (old) => {
           if (!old) return undefined
+          // WHY upsert (not map-only): a private→public toggle delivers
+          // channel.updated to members who never had the channel in their
+          // cache (it was hidden while private) — the now-public channel must
+          // APPEAR in their sidebar, not be silently dropped.
+          // WHY the isPrivate gate: the backend fails OPEN on access-resolver
+          // errors (channels.rs publishes channel.updated ungated with
+          // channel_access unset), so an event for a PRIVATE channel can reach
+          // ungranted members. Appending it here would materialize a hidden
+          // channel (name + topic) in their sidebar. Granted members missing a
+          // private channel from cache are covered by channel.access_updated's
+          // invalidate path, so only public channels may be appended cold.
+          const exists = old.some((c) => c.id === channel.id)
+          if (!exists) {
+            if (channel.isPrivate === true) return old
+            return [...old, channel]
+          }
           return old.map((c) => (c.id === channel.id ? channel : c))
         },
       )
@@ -236,8 +262,36 @@ export function useRealtimeChannels() {
     [queryClient, currentUserId],
   )
 
+  const handleMemberRoleUpdated = useCallback(
+    (payload: unknown) => {
+      const parsed = memberRoleUpdatedSchema.safeParse(payload)
+      if (!parsed.success) {
+        logger.warn('Malformed member.role_updated SSE payload (channels)', {
+          error: parsed.error.message,
+        })
+        return
+      }
+
+      // WHY only MY role change: another member's promotion never changes
+      // which channels I can see.
+      if (parsed.data.member.userId !== currentUserId) return
+
+      // WHY invalidate (not setQueryData): the client does not hold per-channel
+      // grant sets, so it cannot decide locally which private channels the new
+      // role reveals or hides. The access-gated list_channels refetch is the
+      // authority — same posture as the cold-cache branch of
+      // channel.access_updated above. Both directions are covered: a promotion
+      // pulls newly visible channels in, a demotion drops revoked ones.
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.channels.byServer(parsed.data.serverId),
+      })
+    },
+    [queryClient, currentUserId],
+  )
+
   useServerEvent('channel.created', handleChannelCreated)
   useServerEvent('channel.updated', handleChannelUpdated)
   useServerEvent('channel.deleted', handleChannelDeleted)
   useServerEvent('channel.access_updated', handleChannelAccessUpdated)
+  useServerEvent('member.role_updated', handleMemberRoleUpdated)
 }

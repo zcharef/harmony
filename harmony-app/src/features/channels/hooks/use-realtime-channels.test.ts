@@ -124,3 +124,88 @@ describe('useRealtimeChannels — channel.access_updated', () => {
     expect(logger.warn).toHaveBeenCalledOnce()
   })
 })
+
+describe('useRealtimeChannels — channel.updated', () => {
+  it('appends a channel missing from the cache (private→public becomes visible)', () => {
+    const queryClient = setup('member', [])
+
+    fireSse('channel.updated', {
+      serverId: SERVER_ID,
+      channel: { ...privateChannel(), isPrivate: false },
+    })
+
+    const list = queryClient.getQueryData<ChannelResponse[]>(queryKeys.channels.byServer(SERVER_ID))
+    expect(list?.map((c) => c.id)).toEqual([CHANNEL_ID])
+  })
+
+  it('replaces an existing channel in place without duplicating it', () => {
+    const queryClient = setup('member', [privateChannel()])
+
+    fireSse('channel.updated', {
+      serverId: SERVER_ID,
+      channel: { ...privateChannel(), name: 'ops-renamed' },
+    })
+
+    const list = queryClient.getQueryData<ChannelResponse[]>(queryKeys.channels.byServer(SERVER_ID))
+    expect(list).toHaveLength(1)
+    expect(list?.[0]?.name).toBe('ops-renamed')
+  })
+
+  it('never appends a PRIVATE channel missing from the cache (backend fail-open must not leak it)', () => {
+    const queryClient = setup('member', [])
+
+    fireSse('channel.updated', {
+      serverId: SERVER_ID,
+      channel: { ...privateChannel(), isPrivate: true },
+    })
+
+    const list = queryClient.getQueryData<ChannelResponse[]>(queryKeys.channels.byServer(SERVER_ID))
+    expect(list).toEqual([])
+  })
+})
+
+describe('useRealtimeChannels — member.role_updated', () => {
+  it('invalidates the channel list when MY role changes (revoke/grant via role)', () => {
+    const queryClient = setup('member', [privateChannel()])
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    fireSse('member.role_updated', {
+      serverId: SERVER_ID,
+      member: {
+        userId: ME,
+        username: 'me',
+        role: 'moderator',
+        joinedAt: '2026-03-16T00:00:00.000Z',
+      },
+    })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.channels.byServer(SERVER_ID),
+    })
+  })
+
+  it("ignores another member's role change", () => {
+    const queryClient = setup('member', [privateChannel()])
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    fireSse('member.role_updated', {
+      serverId: SERVER_ID,
+      member: {
+        userId: 'someone-else',
+        username: 'other',
+        role: 'moderator',
+        joinedAt: '2026-03-16T00:00:00.000Z',
+      },
+    })
+
+    expect(invalidateSpy).not.toHaveBeenCalled()
+  })
+
+  it('warns and skips on a malformed member.role_updated payload', () => {
+    setup('member', [privateChannel()])
+
+    fireSse('member.role_updated', { serverId: SERVER_ID })
+
+    expect(logger.warn).toHaveBeenCalledOnce()
+  })
+})
