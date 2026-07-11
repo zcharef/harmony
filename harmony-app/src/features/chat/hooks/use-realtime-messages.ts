@@ -154,10 +154,15 @@ export function useRealtimeMessages(channelId: string) {
               ...page,
               items: page.items.map((m) => {
                 if (m.id !== message.id) return m
-                // WHY: Preserve the existing parentMessage from the cache entry.
-                // The SSE update payload doesn't carry it, so re-use what was
-                // already resolved (from REST or from a prior buildParentPreview).
-                return { ...message, parentMessage: m.parentMessage }
+                // WHY: Preserve parentMessage AND reactions from the cache entry.
+                // The SSE update payload carries neither: parentMessage is resolved
+                // separately (REST / buildParentPreview) and reactions are maintained
+                // locally by use-realtime-reactions / use-add-reaction / use-remove-reaction
+                // in this same byChannel cache. toMessageResponse hardcodes reactions
+                // to [], so without this re-use a message.updated (e.g. a moderation
+                // status flip) would wipe the message's reactions for all viewers
+                // until the next REST refetch.
+                return { ...message, parentMessage: m.parentMessage, reactions: m.reactions }
               }),
             })),
           }

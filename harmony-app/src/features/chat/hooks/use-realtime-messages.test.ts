@@ -387,6 +387,44 @@ describe('useRealtimeMessages', () => {
     })
   })
 
+  // -- message.updated: preserves reactions from cache ------------------------
+  // WHY: reactions are maintained locally in this same byChannel cache
+  // (use-realtime-reactions / use-add-reaction / use-remove-reaction). The
+  // SSE update payload never carries them and toMessageResponse hardcodes
+  // reactions to []. A message.updated (e.g. a moderation status flip) must
+  // NOT wipe an already-reacted message's reactions.
+
+  it('preserves existing reactions on message.updated', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const reactedMsg = buildMessage({
+      id: 'msg-react',
+      content: 'original',
+      reactions: [{ emoji: '👍', count: 3, reactedByMe: true, reactors: [] }],
+    })
+    queryClient.setQueryData(messageKey, buildCacheData([reactedMsg]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent(
+        'message.updated',
+        buildMessageEvent({
+          id: 'msg-react',
+          content: 'edited content',
+          editedAt: '2026-03-16T02:00:00.000Z',
+        }),
+      )
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const updated = cacheData?.pages[0]?.items[0]
+    expect(updated?.content).toBe('edited content')
+    expect(updated?.reactions).toEqual([{ emoji: '👍', count: 3, reactedByMe: true, reactors: [] }])
+  })
+
   // -- message.updated: malformed payload logs error --------------------------
 
   it('logs error and does not update cache when message.updated payload is malformed', () => {
