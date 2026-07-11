@@ -256,6 +256,9 @@ mod tests {
             moderation_reason: None,
             original_content: None,
             mentioned_user_ids: vec![],
+            is_pinned: false,
+            pinned_by: None,
+            pinned_at: None,
             created_at: Utc::now(),
         }
     }
@@ -513,6 +516,25 @@ mod tests {
             _message_id: &MessageId,
         ) -> Result<Option<crate::domain::models::MessageWithAuthor>, DomainError> {
             Ok(None)
+        }
+
+        async fn set_pinned(
+            &self,
+            _message_id: &MessageId,
+            _pinned_by: &UserId,
+            _pinned: bool,
+        ) -> Result<MessageWithAuthor, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn count_pinned(&self, _channel_id: &ChannelId) -> Result<i64, DomainError> {
+            Ok(0)
+        }
+        async fn list_pinned(
+            &self,
+            _channel_id: &ChannelId,
+            _limit: i64,
+        ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+            Ok(vec![])
         }
 
         // -- unused by add/remove_reaction --

@@ -22,6 +22,8 @@ export const SSE_EVENT_NAMES = [
   'message.created',
   'message.updated',
   'message.deleted',
+  'message.pinned',
+  'message.unpinned',
   'member.joined',
   'member.removed',
   'member.banned',
@@ -105,6 +107,12 @@ export const messagePayloadSchema = z.object({
       }),
     )
     .optional(),
+  // WHY optional: older API instances omit the field during rollout (pins T2.3 —
+  // same rollout contract as `mentions`/`attachments`). Defaults to `false` so
+  // the main-list cache keeps `isPinned` convergent when a message arrives.
+  isPinned: z.boolean().optional(),
+  pinnedBy: z.string().optional().nullable(),
+  pinnedAt: z.string().optional().nullable(),
   createdAt: z.string(),
 })
 
@@ -207,6 +215,23 @@ export const serverEventSchema = z.discriminatedUnion('type', [
     channelId: z.string(),
     messageId: z.string(),
     deletedBy: z.string().optional(),
+  }),
+  // WHY channelAccess is absent: the server redacts the private-channel routing
+  // scope before serializing to clients (server_event.rs redaction).
+  z.object({
+    type: z.literal('messagePinned'),
+    senderId: z.string(),
+    serverId: z.string(),
+    channelId: z.string(),
+    message: messagePayloadSchema,
+    pinnedBy: z.string(),
+  }),
+  z.object({
+    type: z.literal('messageUnpinned'),
+    senderId: z.string(),
+    serverId: z.string(),
+    channelId: z.string(),
+    messageId: z.string(),
   }),
 
   // Members

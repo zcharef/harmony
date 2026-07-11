@@ -51,6 +51,10 @@ export const queryKeys = {
       ['messages', 'channel', channelId, 'around', messageId] as const,
     detail: (messageId: string) => ['messages', 'detail', messageId] as const,
   },
+  pins: {
+    all: ['pins'] as const,
+    byChannel: (channelId: string) => ['pins', 'channel', channelId] as const,
+  },
   readState: {
     all: ['readState'] as const,
     byChannel: (channelId: string) => ['readState', 'channel', channelId] as const,

@@ -985,6 +985,105 @@ impl MessageService {
         self.repo.soft_delete(message_id, user_id, None).await
     }
 
+    /// Per-channel pin cap (Discord parity). Soft cap — a concurrent 49→50→51
+    /// race is harmless (spec §6); the list endpoint's `LIMIT MAX_PINS` bounds
+    /// what renders regardless.
+    const MAX_PINS: i64 = 50;
+
+    /// Pin or unpin a message. Requires **moderator+** in the channel's server —
+    /// NO author exception (Discord "Manage Messages"; unlike `delete_message`,
+    /// pinning your own message still needs the role). The handler enforces
+    /// channel access (private-channel gate) on top.
+    ///
+    /// Returns `Some(updated)` when the flag actually changed (the caller emits
+    /// the SSE event), or `None` on an idempotent no-op (already in the target
+    /// state — no write, no event, still a 204 to the client, matching Discord).
+    ///
+    /// # Errors
+    /// - `NotFound` if the message doesn't exist, is soft-deleted, or does not
+    ///   belong to `channel` (path/message mismatch — prevents fanning the event
+    ///   out under an attacker-chosen channel scope, mirroring `edit_message`).
+    /// - `Forbidden` if the caller is not a server member or below moderator.
+    /// - `Conflict` (→ 409) if pinning would exceed [`Self::MAX_PINS`].
+    pub async fn set_pinned(
+        &self,
+        message_id: &MessageId,
+        user_id: &UserId,
+        channel: &Channel,
+        pinned: bool,
+    ) -> Result<Option<MessageWithAuthor>, DomainError> {
+        let message =
+            self.repo
+                .find_by_id(message_id)
+                .await?
+                .ok_or_else(|| DomainError::NotFound {
+                    resource_type: "Message",
+                    id: message_id.to_string(),
+                })?;
+
+        // WHY bind to the path channel: a moderator must not pin a message that
+        // lives in a different channel via this channel's path — the event would
+        // fan out with the wrong channel/scope. 404 (not 403) so we never reveal
+        // that the id exists elsewhere.
+        if message.channel_id != channel.id {
+            return Err(DomainError::NotFound {
+                resource_type: "Message",
+                id: message_id.to_string(),
+            });
+        }
+
+        // Moderator+ gate — no author exception (Discord "Manage Messages").
+        let role = self
+            .member_repo
+            .get_member_role(&channel.server_id, user_id)
+            .await?
+            .ok_or_else(|| {
+                DomainError::Forbidden("You must be a moderator to pin messages".to_string())
+            })?;
+        if role.level() < Role::Moderator.level() {
+            return Err(DomainError::Forbidden(
+                "You must be a moderator to pin messages".to_string(),
+            ));
+        }
+
+        // Idempotent no-op: already in the target state → no write, no event.
+        if message.is_pinned == pinned {
+            return Ok(None);
+        }
+
+        // Pin path only: enforce the per-channel cap.
+        if pinned {
+            let count = self.repo.count_pinned(&channel.id).await?;
+            if count >= Self::MAX_PINS {
+                return Err(DomainError::Conflict(format!(
+                    "Channel pin limit ({}) reached",
+                    Self::MAX_PINS
+                )));
+            }
+        }
+
+        let updated = self.repo.set_pinned(message_id, user_id, pinned).await?;
+        Ok(Some(updated))
+    }
+
+    /// List a channel's pinned messages, most-recently-pinned first, capped at
+    /// [`Self::MAX_PINS`]. Any member with channel access may read pins.
+    ///
+    /// # Errors
+    /// Returns `Forbidden`/`NotFound` when the caller may not access the channel.
+    pub async fn list_pinned(
+        &self,
+        channel_id: &ChannelId,
+        user_id: &UserId,
+    ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+        let channel = self.verify_channel_membership(channel_id, user_id).await?;
+
+        let messages = self.repo.list_pinned(channel_id, Self::MAX_PINS).await?;
+
+        self.enrich_page(&channel.server_id, user_id, messages)
+            .await
+    }
+
     /// Post a system message (e.g. join announcement).
     ///
     /// Bypasses rate limits, content validation, and read-only checks — none
@@ -1215,6 +1314,9 @@ mod tests {
             moderation_reason: None,
             original_content: None,
             mentioned_user_ids: vec![],
+            is_pinned: false,
+            pinned_by: None,
+            pinned_at: None,
             created_at: Utc::now(),
         };
 

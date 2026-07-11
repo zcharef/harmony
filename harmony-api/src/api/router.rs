@@ -6,7 +6,7 @@ use axum::{
     Router,
     http::{HeaderValue, Method, header},
     middleware,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
 };
 use sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
 use tower_http::{
@@ -209,6 +209,15 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
         .route(
             "/v1/servers/{id}/messages/search",
             get(handlers::messages::search_messages),
+        )
+        // Pins
+        .route(
+            "/v1/channels/{channel_id}/messages/{message_id}/pin",
+            put(handlers::messages::pin_message).delete(handlers::messages::unpin_message),
+        )
+        .route(
+            "/v1/channels/{channel_id}/pins",
+            get(handlers::messages::list_pins),
         )
         // Reactions
         .route(

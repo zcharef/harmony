@@ -61,6 +61,9 @@ struct MessageRow {
     moderation_reason: Option<String>,
     original_content: Option<String>,
     mentioned_user_ids: Vec<Uuid>,
+    is_pinned: bool,
+    pinned_by: Option<Uuid>,
+    pinned_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
 }
 
@@ -87,6 +90,9 @@ impl MessageRow {
                 .into_iter()
                 .map(UserId::new)
                 .collect(),
+            is_pinned: self.is_pinned,
+            pinned_by: self.pinned_by.map(UserId::new),
+            pinned_at: self.pinned_at,
             created_at: self.created_at,
         }
     }
@@ -113,6 +119,9 @@ struct MessageWithAuthorRow {
     moderation_reason: Option<String>,
     original_content: Option<String>,
     mentioned_user_ids: Vec<Uuid>,
+    is_pinned: bool,
+    pinned_by: Option<Uuid>,
+    pinned_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
     // Author profile fields from JOIN.
     author_username: Option<String>,
@@ -172,6 +181,9 @@ impl MessageWithAuthorRow {
                 .into_iter()
                 .map(UserId::new)
                 .collect(),
+            is_pinned: self.is_pinned,
+            pinned_by: self.pinned_by.map(UserId::new),
+            pinned_at: self.pinned_at,
             created_at: self.created_at,
         };
 
@@ -241,6 +253,9 @@ async fn insert_message_row(
                 moderation_reason,
                 original_content,
                 mentioned_user_ids,
+                is_pinned,
+                pinned_by,
+                pinned_at,
                 created_at
         )
         SELECT
@@ -260,6 +275,9 @@ async fn insert_message_row(
             i.moderation_reason,
             i.original_content,
             i.mentioned_user_ids as "mentioned_user_ids!",
+            i.is_pinned as "is_pinned!",
+            i.pinned_by as "pinned_by?",
+            i.pinned_at as "pinned_at?",
             i.created_at as "created_at!",
             p.username AS "author_username?",
             p.display_name AS "author_display_name?",
@@ -304,6 +322,9 @@ async fn insert_message_row(
         moderation_reason: row.moderation_reason,
         original_content: row.original_content,
         mentioned_user_ids: row.mentioned_user_ids,
+        is_pinned: row.is_pinned,
+        pinned_by: row.pinned_by,
+        pinned_at: row.pinned_at,
         created_at: row.created_at,
         author_username: row.author_username,
         author_display_name: row.author_display_name,
@@ -539,6 +560,9 @@ impl MessageRepository for PgMessageRepository {
                 m.moderation_reason,
                 m.original_content,
                 m.mentioned_user_ids as "mentioned_user_ids!",
+                m.is_pinned,
+                m.pinned_by,
+                m.pinned_at,
                 m.created_at,
                 p.username AS "author_username?",
                 p.display_name AS "author_display_name?",
@@ -584,6 +608,238 @@ impl MessageRepository for PgMessageRepository {
                     moderation_reason: r.moderation_reason,
                     original_content: r.original_content,
                     mentioned_user_ids: r.mentioned_user_ids,
+                    is_pinned: r.is_pinned,
+                    pinned_by: r.pinned_by,
+                    pinned_at: r.pinned_at,
+                    created_at: r.created_at,
+                    author_username: r.author_username,
+                    author_display_name: r.author_display_name,
+                    author_avatar_url: r.author_avatar_url,
+                    parent_author_username: r.parent_author_username,
+                    parent_content_preview: r.parent_content_preview,
+                    parent_deleted: r.parent_deleted,
+                }
+                .into_message_with_author()
+            })
+            .collect();
+
+        Ok(messages)
+    }
+
+    async fn set_pinned(
+        &self,
+        message_id: &MessageId,
+        pinned_by: &UserId,
+        pinned: bool,
+    ) -> Result<MessageWithAuthor, DomainError> {
+        let mid = message_id.0;
+        let pby = pinned_by.0;
+
+        // Single atomic write: flip is_pinned and set/clear provenance together.
+        // The CASE branches keep the `is_pinned ⟺ pinned_at/pinned_by NOT NULL`
+        // invariant true without a CHECK constraint (spec §2). Re-project the
+        // author/parent joins so the SSE payload renders with zero refetch.
+        let row = sqlx::query!(
+            r#"
+            WITH updated AS (
+                UPDATE messages
+                SET is_pinned = $2,
+                    pinned_by = CASE WHEN $2 THEN $3::uuid ELSE NULL END,
+                    pinned_at = CASE WHEN $2 THEN now() ELSE NULL END
+                WHERE id = $1 AND deleted_at IS NULL
+                RETURNING
+                    id,
+                    channel_id,
+                    author_id,
+                    content,
+                    edited_at,
+                    deleted_at,
+                    deleted_by,
+                    encrypted,
+                    sender_device_id,
+                    message_type,
+                    system_event_key,
+                    parent_message_id,
+                    moderated_at,
+                    moderation_reason,
+                    original_content,
+                    mentioned_user_ids,
+                    is_pinned,
+                    pinned_by,
+                    pinned_at,
+                    created_at
+            )
+            SELECT
+                u.id as "id!",
+                u.channel_id as "channel_id!",
+                u.author_id as "author_id!",
+                u.content,
+                u.edited_at,
+                u.deleted_at,
+                u.deleted_by,
+                u.encrypted as "encrypted!",
+                u.sender_device_id,
+                u.message_type as "message_type!: String",
+                u.system_event_key,
+                u.parent_message_id,
+                u.moderated_at,
+                u.moderation_reason,
+                u.original_content,
+                u.mentioned_user_ids as "mentioned_user_ids!",
+                u.is_pinned as "is_pinned!",
+                u.pinned_by as "pinned_by?",
+                u.pinned_at as "pinned_at?",
+                u.created_at as "created_at!",
+                p.username AS "author_username?",
+                p.display_name AS "author_display_name?",
+                p.avatar_url AS "author_avatar_url?",
+                parent_p.username AS "parent_author_username?",
+                LEFT(parent_m.content, 100) AS "parent_content_preview?",
+                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
+            FROM updated u
+            LEFT JOIN profiles p ON p.id = u.author_id
+            LEFT JOIN messages parent_m ON parent_m.id = u.parent_message_id
+            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
+            "#,
+            mid,
+            pinned,
+            pby,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?
+        .ok_or_else(|| DomainError::NotFound {
+            resource_type: "Message",
+            id: message_id.to_string(),
+        })?;
+
+        let msg = MessageWithAuthorRow {
+            id: row.id,
+            channel_id: row.channel_id,
+            author_id: row.author_id,
+            content: row.content,
+            edited_at: row.edited_at,
+            deleted_at: row.deleted_at,
+            deleted_by: row.deleted_by,
+            encrypted: row.encrypted,
+            sender_device_id: row.sender_device_id,
+            message_type: row.message_type,
+            system_event_key: row.system_event_key,
+            parent_message_id: row.parent_message_id,
+            moderated_at: row.moderated_at,
+            moderation_reason: row.moderation_reason,
+            original_content: row.original_content,
+            mentioned_user_ids: row.mentioned_user_ids,
+            is_pinned: row.is_pinned,
+            pinned_by: row.pinned_by,
+            pinned_at: row.pinned_at,
+            created_at: row.created_at,
+            author_username: row.author_username,
+            author_display_name: row.author_display_name,
+            author_avatar_url: row.author_avatar_url,
+            parent_author_username: row.parent_author_username,
+            parent_content_preview: row.parent_content_preview,
+            parent_deleted: row.parent_deleted,
+        };
+
+        Ok(msg.into_message_with_author())
+    }
+
+    async fn count_pinned(&self, channel_id: &ChannelId) -> Result<i64, DomainError> {
+        let cid = channel_id.0;
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*)::BIGINT as "count!"
+            FROM messages
+            WHERE channel_id = $1 AND is_pinned = true AND deleted_at IS NULL
+            "#,
+            cid,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(count)
+    }
+
+    async fn list_pinned(
+        &self,
+        channel_id: &ChannelId,
+        limit: i64,
+    ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+        let cid = channel_id.0;
+
+        // Same author/parent projection as list_for_channel, filtered to the
+        // pinned set and ordered most-recently-pinned first (panel order).
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                m.id,
+                m.channel_id,
+                m.author_id,
+                m.content,
+                m.edited_at,
+                m.deleted_at,
+                m.deleted_by,
+                m.encrypted,
+                m.sender_device_id,
+                m.message_type as "message_type!: String",
+                m.system_event_key,
+                m.parent_message_id,
+                m.moderated_at,
+                m.moderation_reason,
+                m.original_content,
+                m.mentioned_user_ids as "mentioned_user_ids!",
+                m.is_pinned,
+                m.pinned_by,
+                m.pinned_at,
+                m.created_at,
+                p.username AS "author_username?",
+                p.display_name AS "author_display_name?",
+                p.avatar_url AS "author_avatar_url?",
+                parent_p.username AS "parent_author_username?",
+                LEFT(parent_m.content, 100) AS "parent_content_preview?",
+                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
+            FROM messages m
+            LEFT JOIN profiles p ON p.id = m.author_id
+            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id
+            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
+            WHERE m.channel_id = $1
+              AND m.is_pinned = true
+              AND m.deleted_at IS NULL
+            ORDER BY m.pinned_at DESC
+            LIMIT $2
+            "#,
+            cid,
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        let messages = rows
+            .into_iter()
+            .map(|r| {
+                MessageWithAuthorRow {
+                    id: r.id,
+                    channel_id: r.channel_id,
+                    author_id: r.author_id,
+                    content: r.content,
+                    edited_at: r.edited_at,
+                    deleted_at: r.deleted_at,
+                    deleted_by: r.deleted_by,
+                    encrypted: r.encrypted,
+                    sender_device_id: r.sender_device_id,
+                    message_type: r.message_type,
+                    system_event_key: r.system_event_key,
+                    parent_message_id: r.parent_message_id,
+                    moderated_at: r.moderated_at,
+                    moderation_reason: r.moderation_reason,
+                    original_content: r.original_content,
+                    mentioned_user_ids: r.mentioned_user_ids,
+                    is_pinned: r.is_pinned,
+                    pinned_by: r.pinned_by,
+                    pinned_at: r.pinned_at,
                     created_at: r.created_at,
                     author_username: r.author_username,
                     author_display_name: r.author_display_name,
@@ -638,6 +894,9 @@ impl MessageRepository for PgMessageRepository {
                 m.moderation_reason,
                 m.original_content,
                 m.mentioned_user_ids as "mentioned_user_ids!",
+                m.is_pinned,
+                m.pinned_by,
+                m.pinned_at,
                 m.created_at,
                 p.username AS "author_username?",
                 p.display_name AS "author_display_name?",
@@ -715,6 +974,9 @@ impl MessageRepository for PgMessageRepository {
                     moderation_reason: r.moderation_reason,
                     original_content: r.original_content,
                     mentioned_user_ids: r.mentioned_user_ids,
+                    is_pinned: r.is_pinned,
+                    pinned_by: r.pinned_by,
+                    pinned_at: r.pinned_at,
                     created_at: r.created_at,
                     author_username: r.author_username,
                     author_display_name: r.author_display_name,
@@ -752,6 +1014,9 @@ impl MessageRepository for PgMessageRepository {
                 moderation_reason,
                 original_content,
                 mentioned_user_ids,
+                is_pinned,
+                pinned_by,
+                pinned_at,
                 created_at
             FROM messages
             WHERE id = $1 AND deleted_at IS NULL
@@ -780,6 +1045,9 @@ impl MessageRepository for PgMessageRepository {
                 moderation_reason: r.moderation_reason,
                 original_content: r.original_content,
                 mentioned_user_ids: r.mentioned_user_ids,
+                is_pinned: r.is_pinned,
+                pinned_by: r.pinned_by,
+                pinned_at: r.pinned_at,
                 created_at: r.created_at,
             }
             .into_message()
@@ -811,6 +1079,9 @@ impl MessageRepository for PgMessageRepository {
                 m.moderation_reason,
                 m.original_content,
                 m.mentioned_user_ids as "mentioned_user_ids!",
+                m.is_pinned as "is_pinned!",
+                m.pinned_by,
+                m.pinned_at,
                 m.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.display_name AS "author_display_name?",
@@ -848,6 +1119,9 @@ impl MessageRepository for PgMessageRepository {
                 moderation_reason: row.moderation_reason,
                 original_content: row.original_content,
                 mentioned_user_ids: row.mentioned_user_ids,
+                is_pinned: row.is_pinned,
+                pinned_by: row.pinned_by,
+                pinned_at: row.pinned_at,
                 created_at: row.created_at,
                 author_username: row.author_username,
                 author_display_name: row.author_display_name,
@@ -923,6 +1197,9 @@ impl MessageRepository for PgMessageRepository {
                 m.moderation_reason,
                 m.original_content,
                 m.mentioned_user_ids as "mentioned_user_ids!",
+                m.is_pinned,
+                m.pinned_by,
+                m.pinned_at,
                 m.created_at,
                 p.username AS "author_username?",
                 p.display_name AS "author_display_name?",
@@ -968,6 +1245,9 @@ impl MessageRepository for PgMessageRepository {
                     moderation_reason: r.moderation_reason,
                     original_content: r.original_content,
                     mentioned_user_ids: r.mentioned_user_ids,
+                    is_pinned: r.is_pinned,
+                    pinned_by: r.pinned_by,
+                    pinned_at: r.pinned_at,
                     created_at: r.created_at,
                     author_username: r.author_username,
                     author_display_name: r.author_display_name,
@@ -1041,6 +1321,9 @@ impl MessageRepository for PgMessageRepository {
                     moderation_reason,
                     original_content,
                     mentioned_user_ids,
+                    is_pinned,
+                    pinned_by,
+                    pinned_at,
                     created_at
             )
             SELECT
@@ -1060,6 +1343,9 @@ impl MessageRepository for PgMessageRepository {
                 u.moderation_reason,
                 u.original_content,
                 u.mentioned_user_ids as "mentioned_user_ids!",
+                u.is_pinned as "is_pinned!",
+                u.pinned_by as "pinned_by?",
+                u.pinned_at as "pinned_at?",
                 u.created_at as "created_at!",
                 p.username AS "author_username?",
                 p.display_name AS "author_display_name?",
@@ -1104,6 +1390,9 @@ impl MessageRepository for PgMessageRepository {
             moderation_reason: row.moderation_reason,
             original_content: row.original_content,
             mentioned_user_ids: row.mentioned_user_ids,
+            is_pinned: row.is_pinned,
+            pinned_by: row.pinned_by,
+            pinned_at: row.pinned_at,
             created_at: row.created_at,
             author_username: row.author_username,
             author_display_name: row.author_display_name,
@@ -1316,6 +1605,11 @@ impl MessageRepository for PgMessageRepository {
             // WHY: System messages never mention anyone; the create_system query
             // does not select the column, so default to empty.
             mentioned_user_ids: Vec::new(),
+            // WHY: System messages are never pinnable — the create_system query
+            // does not select the pin columns, so default to unpinned.
+            is_pinned: false,
+            pinned_by: None,
+            pinned_at: None,
             created_at: row.created_at,
             author_username: row.author_username,
             author_display_name: row.author_display_name,

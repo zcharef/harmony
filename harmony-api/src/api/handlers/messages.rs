@@ -9,7 +9,7 @@ use tokio::time::{Duration, timeout};
 
 use crate::api::dto::{
     EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, MessageSearchQuery,
-    MessageSearchResponse, SendMessageRequest,
+    MessageSearchResponse, PinnedMessagesResponse, SendMessageRequest,
 };
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
@@ -18,13 +18,15 @@ use crate::domain::errors::DomainError;
 use crate::domain::models::server_event::MessagePayload;
 use crate::domain::models::{
     AnalyticsEvent, AnalyticsEventName, ChannelId, MessageId, MessageWithAuthor, NewAttachment,
-    SYSTEM_MODERATOR_ID, ServerEvent, ServerId,
+    SYSTEM_MODERATOR_ID, ServerEvent, ServerId, UserId,
 };
 use crate::domain::ports::MessageSearchFilters;
 use crate::domain::services::content_moderation::{
     ModerationDecision, SCORE_THRESHOLD, evaluate_moderation,
 };
-use crate::domain::services::{resolve_channel_access, resolve_channel_access_by_id};
+use crate::domain::services::{
+    ensure_channel_access, resolve_channel_access, resolve_channel_access_by_id,
+};
 
 /// Maximum time to wait for a moderation semaphore permit before dead-lettering.
 const SEMAPHORE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -574,6 +576,171 @@ pub async fn delete_message(
     );
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Pin a message (moderator+). Idempotent: pinning an already-pinned message is
+/// a 204 no-op (Discord parity).
+///
+/// # Errors
+/// Returns `ApiError`: 403 (not a moderator / no channel access), 404 (message
+/// or channel not found), 409 (channel pin cap reached), or a repository error.
+#[utoipa::path(
+    put,
+    path = "/v1/channels/{channel_id}/messages/{message_id}/pin",
+    tag = "Messages",
+    security(("bearer_auth" = [])),
+    params(
+        ("channel_id" = ChannelId, Path, description = "Channel ID"),
+        ("message_id" = MessageId, Path, description = "Message ID"),
+    ),
+    responses(
+        (status = 204, description = "Message pinned"),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Not a moderator or channel forbidden", body = ProblemDetails),
+        (status = 404, description = "Message or channel not found", body = ProblemDetails),
+        (status = 409, description = "Channel pin limit reached", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn pin_message(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(path): ApiPath<MessagePath>,
+) -> Result<impl IntoResponse, ApiError> {
+    set_message_pin(state, user_id, path, true).await
+}
+
+/// Unpin a message (moderator+). Idempotent: unpinning a non-pinned message is a
+/// 204 no-op (Discord parity).
+///
+/// # Errors
+/// Returns `ApiError`: 403 (not a moderator / no channel access), 404 (message
+/// or channel not found), or a repository error.
+#[utoipa::path(
+    delete,
+    path = "/v1/channels/{channel_id}/messages/{message_id}/pin",
+    tag = "Messages",
+    security(("bearer_auth" = [])),
+    params(
+        ("channel_id" = ChannelId, Path, description = "Channel ID"),
+        ("message_id" = MessageId, Path, description = "Message ID"),
+    ),
+    responses(
+        (status = 204, description = "Message unpinned"),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Not a moderator or channel forbidden", body = ProblemDetails),
+        (status = 404, description = "Message or channel not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn unpin_message(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(path): ApiPath<MessagePath>,
+) -> Result<impl IntoResponse, ApiError> {
+    set_message_pin(state, user_id, path, false).await
+}
+
+/// Shared pin/unpin body: gate channel access, flip the flag (moderator+), and
+/// emit the channel-access-scoped SSE event. Skips the event on an idempotent
+/// no-op to avoid redundant traffic (spec decision D8).
+async fn set_message_pin(
+    state: AppState,
+    user_id: UserId,
+    path: MessagePath,
+    pinned: bool,
+) -> Result<StatusCode, ApiError> {
+    // Fetch the channel first (server_id for the event, scope for routing).
+    let channel = state.channel_service().get_by_id(&path.channel_id).await?;
+
+    // Resolve the private-channel routing scope BEFORE the mutation (see
+    // `send_message`); the SSE layer gates delivery on it and redacts it.
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
+
+    // Membership + private-channel grant gate BEFORE the role check — a member
+    // without access must not learn the message exists (matches read/delete).
+    ensure_channel_access(
+        state.channel_repository(),
+        state.member_repository(),
+        &channel,
+        &user_id,
+    )
+    .await?;
+
+    let Some(message) = state
+        .message_service()
+        .set_pinned(&path.message_id, &user_id, &channel, pinned)
+        .await?
+    else {
+        // Idempotent no-op — already in the target state. No event, still 204.
+        return Ok(StatusCode::NO_CONTENT);
+    };
+
+    let event = if pinned {
+        ServerEvent::MessagePinned {
+            sender_id: user_id.clone(),
+            server_id: channel.server_id.clone(),
+            channel_id: path.channel_id.clone(),
+            message: MessagePayload::from(message),
+            pinned_by: user_id,
+            channel_access,
+        }
+    } else {
+        ServerEvent::MessageUnpinned {
+            sender_id: user_id.clone(),
+            server_id: channel.server_id.clone(),
+            channel_id: path.channel_id.clone(),
+            message_id: path.message_id.clone(),
+            channel_access,
+        }
+    };
+    let receivers = state.event_bus().publish(event);
+    tracing::debug!(
+        channel_id = %path.channel_id,
+        message_id = %path.message_id,
+        pinned,
+        receivers,
+        "emitted pin event"
+    );
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// List a channel's pinned messages, most-recently-pinned first. Any member with
+/// channel access may read; the bounded list is not paginated (capped at the
+/// per-channel pin cap).
+///
+/// # Errors
+/// Returns `ApiError`: 403 (no channel access), 404 (channel not found), or a
+/// repository error.
+#[utoipa::path(
+    get,
+    path = "/v1/channels/{channel_id}/pins",
+    tag = "Messages",
+    security(("bearer_auth" = [])),
+    params(("channel_id" = ChannelId, Path, description = "Channel ID")),
+    responses(
+        (status = 200, description = "Pinned messages", body = PinnedMessagesResponse),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "No channel access", body = ProblemDetails),
+        (status = 404, description = "Channel not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn list_pins(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(channel_id): ApiPath<ChannelId>,
+) -> Result<impl IntoResponse, ApiError> {
+    let messages = state
+        .message_service()
+        .list_pinned(&channel_id, &user_id)
+        .await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(PinnedMessagesResponse::from_messages(messages)),
+    ))
 }
 
 /// Spawn an async background task for AI content moderation (B4) and URL scanning (B3).

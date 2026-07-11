@@ -26,8 +26,9 @@ const messageDeletedSchema = z.object({
 
 /**
  * WHY: Maps SSE MessagePayload to the REST MessageResponse shape for cache insertion.
+ * Exported so the pins realtime handler can reuse the exact same mapping.
  */
-function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): MessageResponse {
+export function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): MessageResponse {
   return {
     id: payload.id,
     channelId: payload.channelId,
@@ -58,6 +59,12 @@ function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): Messa
       ...a,
       moderationStatus: a.moderationStatus ?? 'pending',
     })),
+    // WHY: pin state rides the payload so the main-list cache keeps `isPinned`
+    // convergent when a message arrives/updates. Defaults to false for older
+    // instances that omit the field during rollout (spec §5.1).
+    isPinned: payload.isPinned ?? false,
+    pinnedBy: payload.pinnedBy ?? undefined,
+    pinnedAt: payload.pinnedAt ?? undefined,
   }
 }
 
