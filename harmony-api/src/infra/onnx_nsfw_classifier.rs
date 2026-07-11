@@ -108,10 +108,12 @@ impl OnnxNsfwClassifier {
         // model already loaded (`commit_from_file` above), so a metadata failure
         // here is cosmetic — but warn! so a logged `0` is never mistaken for the
         // 0-byte placeholder operators watch for (ADR-027: no silent failures).
-        let model_bytes = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or_else(|e| {
-            tracing::warn!(model_path, error = %e, "nsfw model loaded but size unreadable");
-            0
-        });
+        let model_bytes = std::fs::metadata(model_path)
+            .map(|m| m.len())
+            .unwrap_or_else(|e| {
+                tracing::warn!(model_path, error = %e, "nsfw model loaded but size unreadable");
+                0
+            });
 
         tracing::info!(
             model_path,
