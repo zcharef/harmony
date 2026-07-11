@@ -13,6 +13,7 @@ mod invite;
 mod megolm_session;
 mod member;
 mod message;
+mod message_embed;
 mod message_report;
 mod message_with_author;
 mod migration;
@@ -39,7 +40,7 @@ pub use friendship::{
     RequestDirection, RequestOutcome,
 };
 pub use ids::{
-    AttachmentId, CategoryId, ChannelId, DeviceId, DeviceKeyId, EmojiId, InviteCode,
+    AttachmentId, CategoryId, ChannelId, DeviceId, DeviceKeyId, EmbedId, EmojiId, InviteCode,
     MegolmSessionId, MessageId, ModerationLogId, ModerationRetryId, OneTimeKeyId, ReportId, RoleId,
     SYSTEM_MODERATOR_ID, ServerId, UserId, VoiceSessionId,
 };
@@ -50,6 +51,7 @@ pub use message::{
     ALLOWED_ATTACHMENT_MIME, ATTACHMENT_PUBLIC_PATH_MARKER, Attachment, AttachmentModerationStatus,
     MentionedUser, Message, MessageType, NewAttachment, ParentMessagePreview,
 };
+pub use message_embed::{MessageEmbed, NewEmbed, UnfurledPage};
 pub use message_report::{
     MessageReport, NewMessageReport, ReportReason, ReportStatus, ReportedMessageSnapshot,
 };

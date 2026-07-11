@@ -70,6 +70,8 @@
     "rateLimited": "Too many searches — slow down a moment.",
     "poweredBy": "Powered by KLIPY"
   },
+  "removePreview": "Remove preview",
+  "removePreviewFailed": "Couldn't remove the preview.",
   "newMessages": "New messages",
   "jumpToNewMessages": "New messages",
   "jumpToPresent": "Jump to present",

@@ -22,8 +22,8 @@ use harmony_api::domain::models::{ChannelId, MessageId, NewAttachment, UserId};
 use harmony_api::domain::ports::{AttachmentRepository, MessageRepository};
 use harmony_api::domain::services::{ContentFilter, MessageService, SpamGuard};
 use harmony_api::infra::postgres::{
-    PgAttachmentRepository, PgChannelRepository, PgFriendshipRepository, PgMemberRepository,
-    PgMessageRepository, PgPlanLimitChecker, PgReactionRepository,
+    PgAttachmentRepository, PgChannelRepository, PgEmbedRepository, PgFriendshipRepository,
+    PgMemberRepository, PgMessageRepository, PgPlanLimitChecker, PgReactionRepository,
 };
 
 /// Origin every fixture URL lives on — passed to `try_new` as the pinned
@@ -154,6 +154,7 @@ fn build_service(pool: &PgPool) -> MessageService {
         Arc::new(PgPlanLimitChecker::new(pool.clone())),
         Arc::new(PgReactionRepository::new(pool.clone())),
         Arc::new(PgAttachmentRepository::new(pool.clone())),
+        Arc::new(PgEmbedRepository::new(pool.clone())),
         Arc::new(ContentFilter::new()),
         // WHY disabled: these tests exercise plan caps, not anti-abuse
         // heuristics — mirrors SPAM_GUARD_ENABLED=false in the E2E env.

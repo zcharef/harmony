@@ -34,6 +34,7 @@ import { maskProfanity } from '@/lib/profanity-filter'
 import { MentionPill } from './components/mention-pill'
 import { MentionText } from './components/mention-text'
 import { EmbeddedImage, MessageAttachments } from './components/message-attachments'
+import { MessageEmbeds } from './components/message-embeds'
 import { EmojiPickerPopover } from './emoji-picker-popover'
 import { useEditBuffer } from './hooks/use-edit-buffer'
 import { isEmbeddableImageUrl } from './lib/attachment-file'
@@ -953,6 +954,18 @@ export const MessageItem = memo(function MessageItem({
             their attachment block (storage objects are retained server-side). */}
         {isDeleted === false && (message.attachments ?? []).length > 0 && (
           <MessageAttachments attachments={message.attachments ?? []} />
+        )}
+
+        {/* WHY hidden while pending: optimistic messages carry a temp id the
+            removal endpoint would reject; previews only ever arrive on the
+            real message via message.updated anyway. */}
+        {isDeleted === false && isPending === false && (message.embeds ?? []).length > 0 && (
+          <MessageEmbeds
+            messageId={message.id}
+            channelId={message.channelId}
+            embeds={message.embeds ?? []}
+            canRemove={isOwnMessage || canModerateMessages}
+          />
         )}
 
         <ReactionBar

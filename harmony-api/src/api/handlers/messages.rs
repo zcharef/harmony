@@ -17,8 +17,8 @@ use crate::api::state::AppState;
 use crate::domain::errors::DomainError;
 use crate::domain::models::server_event::MessagePayload;
 use crate::domain::models::{
-    AnalyticsEvent, AnalyticsEventName, ChannelId, MessageId, MessageWithAuthor, NewAttachment,
-    SYSTEM_MODERATOR_ID, ServerEvent, ServerId, UserId,
+    AnalyticsEvent, AnalyticsEventName, ChannelId, EmbedId, MessageId, MessageWithAuthor,
+    NewAttachment, SYSTEM_MODERATOR_ID, ServerEvent, ServerId, UserId,
 };
 use crate::domain::ports::MessageSearchFilters;
 use crate::domain::services::content_moderation::{
@@ -182,6 +182,14 @@ pub async fn send_message(
     // MessageUpdated. Scan-before-reveal — never blocks the send.
     if !message.attachments.is_empty() {
         spawn_attachment_moderation(&state, &message, &channel_id, &channel.server_id);
+    }
+
+    // Link previews: unfurl http(s) URLs asynchronously and fan out a
+    // MessageUpdated when embeds resolve. Plaintext only (ciphertext is
+    // opaque); the cheap `contains` pre-check skips the spawn for the vast
+    // majority of messages.
+    if !encrypted && message.message.content.contains("http") {
+        spawn_link_unfurl(&state, &message, &channel_id, &channel.server_id);
     }
 
     // §10 activation funnel: first message ever (fire-and-forget). The DB
@@ -750,6 +758,124 @@ pub async fn list_pins(
         StatusCode::OK,
         Json(PinnedMessagesResponse::from_messages(messages)),
     ))
+}
+
+/// Path parameters for embed-specific operations.
+#[derive(Debug, Deserialize)]
+pub struct EmbedPath {
+    pub channel_id: ChannelId,
+    pub message_id: MessageId,
+    pub embed_id: EmbedId,
+}
+
+/// Remove (suppress) a link preview from a message. Allowed for the message
+/// author or a moderator+. The suppression is persisted — the URL never
+/// re-unfurls for this message — and a `message.updated` carrying the full
+/// message fans out so the card disappears live for everyone.
+///
+/// # Errors
+/// Returns `ApiError`: 403 (neither author nor moderator), 404 (channel,
+/// message, or embed not found / already removed), or a repository error.
+#[utoipa::path(
+    delete,
+    path = "/v1/channels/{channel_id}/messages/{message_id}/embeds/{embed_id}",
+    tag = "Messages",
+    security(("bearer_auth" = [])),
+    params(
+        ("channel_id" = ChannelId, Path, description = "Channel ID"),
+        ("message_id" = MessageId, Path, description = "Message ID"),
+        ("embed_id" = EmbedId, Path, description = "Embed ID"),
+    ),
+    responses(
+        (status = 204, description = "Preview removed"),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Not the author or a moderator", body = ProblemDetails),
+        (status = 404, description = "Channel, message, or embed not found", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state))]
+pub async fn remove_message_embed(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(path): ApiPath<EmbedPath>,
+) -> Result<impl IntoResponse, ApiError> {
+    // WHY: Fetch channel before mutation to capture server_id for the SSE
+    // event (same pattern as send/edit/delete).
+    let channel = state.channel_service().get_by_id(&path.channel_id).await?;
+
+    // WHY: Resolve private-channel scope before mutation (see `send_message`).
+    let channel_access = resolve_channel_access(state.channel_repository(), &channel).await?;
+
+    let Some(message) = state
+        .message_service()
+        .suppress_embed(&path.channel_id, &path.message_id, &path.embed_id, &user_id)
+        .await?
+    else {
+        // Message vanished (soft-deleted) between the write and the reload —
+        // the suppression persisted; nothing to fan out.
+        return Ok(StatusCode::NO_CONTENT);
+    };
+
+    // WHY the FULL message payload: a partial fan-out on message.updated once
+    // wiped reactions client-side — the payload is always the complete shape.
+    let event = ServerEvent::MessageUpdated {
+        sender_id: user_id,
+        server_id: channel.server_id,
+        channel_id: path.channel_id.clone(),
+        message: MessagePayload::from(message),
+        channel_access,
+    };
+    let receivers = state.event_bus().publish(event);
+    tracing::debug!(
+        channel_id = %path.channel_id,
+        message_id = %path.message_id,
+        receivers,
+        "emitted embed-removal message.updated"
+    );
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Spawn the async link-unfurl task for a freshly-sent plaintext message.
+/// Bounded by the shared moderation semaphore (same pool as the AI/image
+/// scans) so a message flood cannot fan out unbounded outbound fetches.
+fn spawn_link_unfurl(
+    state: &AppState,
+    message: &MessageWithAuthor,
+    channel_id: &ChannelId,
+    server_id: &ServerId,
+) {
+    let deps = crate::api::link_unfurl::LinkUnfurlDeps::from_state(state);
+    let message_id = message.message.id.clone();
+    let content = message.message.content.clone();
+    let channel_id = channel_id.clone();
+    let server_id = server_id.clone();
+    let semaphore = state.moderation_semaphore().clone();
+
+    tokio::spawn(async move {
+        let _permit = match timeout(SEMAPHORE_TIMEOUT, semaphore.acquire_owned()).await {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_closed)) => {
+                tracing::warn!(message_id = %message_id, "link unfurl: semaphore closed — skipping");
+                return;
+            }
+            Err(_elapsed) => {
+                // Previews are best-effort — no dead-letter queue; the message
+                // simply renders without a card.
+                tracing::warn!(message_id = %message_id, "link unfurl: semaphore timeout — skipping");
+                return;
+            }
+        };
+
+        crate::api::link_unfurl::unfurl_message_links(
+            &deps,
+            &message_id,
+            &channel_id,
+            &server_id,
+            &content,
+        )
+        .await;
+    });
 }
 
 /// Spawn an async background task for AI content moderation (B4) and URL scanning (B3).

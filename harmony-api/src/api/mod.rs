@@ -7,6 +7,7 @@ pub mod extractors;
 pub mod handlers;
 pub mod identity_image_scan;
 pub mod image_scan;
+pub mod link_unfurl;
 pub mod middleware;
 pub mod openapi;
 pub mod router;

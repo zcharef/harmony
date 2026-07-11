@@ -31,6 +31,7 @@ function buildMessage(overrides: Partial<MessageResponse> = {}): MessageResponse
     messageType: 'default',
     mentions: [],
     attachments: [],
+    embeds: [],
     isPinned: false,
     ...overrides,
   }
@@ -710,5 +711,96 @@ describe('useRealtimeMessages attachments', () => {
     const updated = cacheData?.pages[0]?.items[0]
     expect(updated?.content).toBe('edited caption')
     expect(updated?.attachments).toEqual([SSE_ATTACHMENT])
+  })
+})
+
+describe('useRealtimeMessages embeds (link previews)', () => {
+  const SSE_EMBED = {
+    id: 'emb-1',
+    url: 'https://example.com/article',
+    title: 'Example Article',
+    description: 'A description.',
+    siteName: 'Example Site',
+    imageUrl: 'https://cdn.example.com/hero.png',
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  /** The unfurl worker's message.updated carries the resolved embeds — they
+   * must land in the cache (cards appear live, no refetch) AND the locally
+   * maintained reactions must survive the full-message replacement (the past
+   * partial-fan-out bug wiped reactions on message.updated). */
+  it('patches embeds from message.updated and preserves cached reactions', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    const reactions = [{ emoji: '👍', count: 2, reactedByMe: true, reactors: [] }]
+    queryClient.setQueryData(
+      messageKey,
+      buildCacheData([buildMessage({ id: 'msg-link', reactions })]),
+    )
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('message.updated', buildMessageEvent({ id: 'msg-link', embeds: [SSE_EMBED] }))
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const updated = cacheData?.pages[0]?.items[0]
+    expect(updated?.embeds).toEqual([SSE_EMBED])
+    expect(updated?.reactions).toEqual(reactions)
+    expect(logger.error).not.toHaveBeenCalled()
+  })
+
+  /** Rollout safety: an older API instance omits the field — default to []. */
+  it('defaults embeds to [] when the SSE payload omits the field', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    queryClient.setQueryData(messageKey, buildCacheData([]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent('message.created', buildMessageEvent({ id: 'msg-no-embeds' }))
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    expect(cacheData?.pages[0]?.items[0]?.embeds).toEqual([])
+    expect(logger.error).not.toHaveBeenCalled()
+  })
+
+  /** Optional metadata keys are omitted on the wire — they map to undefined,
+   * never null, so the card render checks stay uniform. */
+  it('maps absent optional embed fields to undefined', () => {
+    const queryClient = createTestQueryClient()
+    const messageKey = queryKeys.messages.byChannel(CHANNEL_ID)
+    queryClient.setQueryData(messageKey, buildCacheData([]))
+
+    renderHook(() => useRealtimeMessages(CHANNEL_ID), {
+      wrapper: createQueryWrapper(queryClient),
+    })
+
+    act(() => {
+      fireSSEEvent(
+        'message.created',
+        buildMessageEvent({
+          id: 'msg-min-embed',
+          embeds: [{ id: 'emb-min', url: 'https://example.com/', title: 'T' }],
+        }),
+      )
+    })
+
+    const cacheData = queryClient.getQueryData<InfiniteData<MessageListResponse>>(messageKey)
+    const embed = cacheData?.pages[0]?.items[0]?.embeds[0]
+    expect(embed?.title).toBe('T')
+    expect(embed?.description).toBeUndefined()
+    expect(embed?.siteName).toBeUndefined()
+    expect(embed?.imageUrl).toBeUndefined()
   })
 })

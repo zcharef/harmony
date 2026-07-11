@@ -24,21 +24,21 @@ use super::dto::{
     EmojiResponse, GifItem, GifListResponse, GifSearchQuery, GifTrendingQuery,
     InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse, MarkReadRequest,
     MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
-    MentionedUserResponse, MessageListQuery, MessageListResponse, MessageResponse,
-    MessageSearchQuery, MessageSearchResponse, NewAttachmentRequest, OfficialBadgeGrantRequest,
-    OfficialBadgesResponse, OneTimeKeyDto, PinnedMessagesResponse, PreKeyBundleResponse,
-    ProfileResponse, RedeemDesktopAuthRequest, RedeemDesktopAuthResponse, RegisterDeviceRequest,
-    SendMessageRequest, ServerListResponse, ServerResponse, SetChannelRoleAccessRequest,
-    TransferOwnershipRequest, UpdateChannelRequest, UpdateProfileRequest, UpdateServerRequest,
-    UploadOneTimeKeysRequest,
+    MentionedUserResponse, MessageEmbedResponse, MessageListQuery, MessageListResponse,
+    MessageResponse, MessageSearchQuery, MessageSearchResponse, NewAttachmentRequest,
+    OfficialBadgeGrantRequest, OfficialBadgesResponse, OneTimeKeyDto, PinnedMessagesResponse,
+    PreKeyBundleResponse, ProfileResponse, RedeemDesktopAuthRequest, RedeemDesktopAuthResponse,
+    RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
+    SetChannelRoleAccessRequest, TransferOwnershipRequest, UpdateChannelRequest,
+    UpdateProfileRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
 use crate::domain::models::{
     AttachmentId, AttachmentModerationStatus, CategoryId, ChannelId, ChannelType, DeviceId,
-    DeviceKeyId, EmojiId, InviteCode, MegolmSessionId, MessageId, MessageType, ModerationAction,
-    ModerationLogId, OneTimeKeyId, ReportId, ReportReason, ReportStatus, ServerId, UserId,
-    UserStatus, VoiceAction,
+    DeviceKeyId, EmbedId, EmojiId, InviteCode, MegolmSessionId, MessageId, MessageType,
+    ModerationAction, ModerationLogId, OneTimeKeyId, ReportId, ReportReason, ReportStatus,
+    ServerId, UserId, UserStatus, VoiceAction,
 };
 use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
 
@@ -121,6 +121,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         handlers::messages::pin_message,
         handlers::messages::unpin_message,
         handlers::messages::list_pins,
+        handlers::messages::remove_message_embed,
         // Reactions
         handlers::reactions::add_reaction,
         handlers::reactions::remove_reaction,
@@ -188,6 +189,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             ChannelId,
             MessageId,
             AttachmentId,
+            EmbedId,
             CategoryId,
             InviteCode,
             DeviceKeyId,
@@ -274,6 +276,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             NewAttachmentRequest,
             AttachmentResponse,
             AttachmentModerationStatus,
+            MessageEmbedResponse,
             // Reaction DTOs
             super::handlers::reactions::AddReactionRequest,
             ReactionSummary,

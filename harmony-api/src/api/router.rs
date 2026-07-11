@@ -237,6 +237,11 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             "/v1/servers/{id}/messages/search",
             get(handlers::messages::search_messages),
         )
+        // Link-preview embeds
+        .route(
+            "/v1/channels/{channel_id}/messages/{message_id}/embeds/{embed_id}",
+            delete(handlers::messages::remove_message_embed),
+        )
         // Pins
         .route(
             "/v1/channels/{channel_id}/messages/{message_id}/pin",

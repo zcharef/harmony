@@ -30,6 +30,7 @@ function buildMessage(reactions: Array<ReactionSummary>): MessageResponse {
     messageType: 'default',
     mentions: [],
     attachments: [],
+    embeds: [],
     isPinned: false,
     reactions,
   }

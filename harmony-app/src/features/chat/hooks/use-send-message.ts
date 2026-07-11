@@ -206,6 +206,9 @@ export function useSendMessage(
         // instantly (temp AttachmentIds); the server echo swaps in the real
         // rows on success (REACTIVITY — no refresh, spec §5.2).
         attachments: (input.attachments ?? []).map(toOptimisticAttachment),
+        // WHY empty: link previews unfurl asynchronously server-side; they
+        // arrive via message.updated after the echo (never optimistic).
+        embeds: [],
         // WHY false: a freshly-sent message is never pinned. The flag keeps the
         // optimistic entry shape-compatible with the server echo.
         isPinned: false,

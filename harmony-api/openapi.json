@@ -766,6 +766,85 @@
         ]
       }
     },
+    "/v1/channels/{channel_id}/messages/{message_id}/embeds/{embed_id}": {
+      "delete": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Remove (suppress) a link preview from a message. Allowed for the message\nauthor or a moderator+. The suppression is persisted — the URL never\nre-unfurls for this message — and a `message.updated` carrying the full\nmessage fans out so the card disappears live for everyone.",
+        "description": "# Errors\nReturns `ApiError`: 403 (neither author nor moderator), 404 (channel,\nmessage, or embed not found / already removed), or a repository error.",
+        "operationId": "remove_message_embed",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "description": "Channel ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MessageId"
+            }
+          },
+          {
+            "name": "embed_id",
+            "in": "path",
+            "description": "Embed ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EmbedId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Preview removed"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the author or a moderator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel, message, or embed not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/channels/{channel_id}/messages/{message_id}/pin": {
       "put": {
         "tags": [
@@ -7288,6 +7367,12 @@
         },
         "additionalProperties": false
       },
+      "EmbedId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique identifier for a message link-preview embed.",
+        "example": "330e8400-e29b-41d4-a716-44665544000d"
+      },
       "EmojiId": {
         "type": "string",
         "format": "uuid",
@@ -8052,6 +8137,51 @@
           }
         }
       },
+      "MessageEmbedResponse": {
+        "type": "object",
+        "description": "A link preview attached to a message (unfurled Open Graph metadata).\n\nAll metadata fields are plain TEXT — the client must render them as text\nnodes, never as HTML.",
+        "required": [
+          "id",
+          "url"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Page description, if any."
+          },
+          "id": {
+            "$ref": "#/components/schemas/EmbedId"
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Thumbnail URL (absolute http(s)), if any."
+          },
+          "siteName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Site name (`og:site_name`); the client falls back to the URL host."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Page title. Always present in practice (an embed without a title is\nnever persisted), optional for schema honesty."
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL that was unfurled (the card's link target)."
+          }
+        }
+      },
       "MessageId": {
         "type": "string",
         "format": "uuid",
@@ -8125,6 +8255,7 @@
           "messageType",
           "mentions",
           "attachments",
+          "embeds",
           "isPinned",
           "createdAt"
         ],
@@ -8184,6 +8315,13 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "embeds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageEmbedResponse"
+            },
+            "description": "Link previews unfurled from URLs in the content, in insertion order.\nEmpty right after send (unfurl is async — previews arrive via\n`message.updated`). Suppressed previews are never included."
           },
           "encrypted": {
             "type": "boolean",
