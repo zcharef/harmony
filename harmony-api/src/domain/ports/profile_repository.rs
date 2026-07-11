@@ -76,4 +76,15 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
     ///
     /// Writes to the service-role-only `user_badges` table (ADR-040 RLS).
     async fn grant_badge(&self, user_id: &UserId, badge: &str) -> Result<(), DomainError>;
+
+    /// Revoke `badge` from `user_id` (no-op if the user never held it).
+    ///
+    /// Writes to the service-role-only `user_badges` table (ADR-040 RLS).
+    async fn revoke_badge(&self, user_id: &UserId, badge: &str) -> Result<(), DomainError>;
+
+    /// List every user currently holding `badge` (e.g. `"official"`).
+    ///
+    /// Powers the lightweight official-set read the SPA caches to decorate
+    /// message authors without bloating every message payload.
+    async fn list_badge_holders(&self, badge: &str) -> Result<Vec<UserId>, DomainError>;
 }

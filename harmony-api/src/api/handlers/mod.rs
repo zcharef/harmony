@@ -1,5 +1,6 @@
 //! HTTP handlers for API endpoints.
 
+pub mod badges;
 pub mod bans;
 pub mod channels;
 pub mod desktop_auth;

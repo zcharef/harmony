@@ -10,7 +10,7 @@ import { ExternalLinkWarning } from '@/components/shared/external-link-warning'
 import type { DecryptResult } from '@/features/crypto'
 import { EncryptedMessageContent } from '@/features/crypto'
 import { usePreferences } from '@/features/preferences'
-import { ProfilePopover } from '@/features/profiles'
+import { OfficialBadge, ProfilePopover, useOfficialBadges } from '@/features/profiles'
 import type { MessageResponse } from '@/lib/api'
 import { resolveDisplayName } from '@/lib/display-name'
 import { isTauri } from '@/lib/platform'
@@ -623,6 +623,10 @@ function MessageHeader({
 }) {
   const { t } = useTranslation('messages')
   const { t: tCrypto } = useTranslation('crypto')
+  // WHY the shared set (not a per-message flag): the badge renders next to every
+  // author, so author-id membership is checked against one cached set rather
+  // than bloating each message payload (see use-official-badges).
+  const officialUserIds = useOfficialBadges()
 
   return (
     <div className="flex items-baseline gap-2">
@@ -639,6 +643,7 @@ function MessageHeader({
           {authorLabel}
         </span>
       </ProfilePopover>
+      <OfficialBadge isOfficial={officialUserIds.has(message.authorId)} />
       <span data-test="message-timestamp" className="text-xs text-default-500">
         {isPending ? t('sending') : formatTimestamp(message.createdAt, t)}
       </span>

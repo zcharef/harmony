@@ -98,6 +98,19 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             "/v1/profiles/{id}",
             get(handlers::profiles::get_profile_by_id),
         )
+        // Badges (official verified badge: public set read + owner-only grant/revoke)
+        .route(
+            "/v1/badges/official",
+            get(handlers::badges::list_official_badges),
+        )
+        .route(
+            "/v1/admin/badges/official/grant",
+            post(handlers::badges::grant_official_badge),
+        )
+        .route(
+            "/v1/admin/badges/official/revoke",
+            post(handlers::badges::revoke_official_badge),
+        )
         // Servers
         .route(
             "/v1/servers",

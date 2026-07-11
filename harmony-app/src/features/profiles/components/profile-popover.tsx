@@ -12,8 +12,10 @@ import type { MemberListResponse, MemberResponse, UserStatus } from '@/lib/api'
 import { isProblemDetails } from '@/lib/api-error'
 import { resolveDisplayName } from '@/lib/display-name'
 import { queryKeys } from '@/lib/query-keys'
+import { useOfficialBadges } from '../hooks/use-official-badges'
 import { useProfile } from '../hooks/use-profile'
 import { FoundingBadge } from './founding-badge'
+import { OfficialBadge } from './official-badge'
 import { ProfileBio } from './profile-bio'
 
 // WHY a local role badge (not the members feature's RoleBadge): importing from
@@ -99,6 +101,7 @@ function ProfileCard({
   const openUserSettings = useSettingsUiStore((s) => s.openUserSettings)
 
   const memberContext = readMemberContext(queryClient, serverId, userId)
+  const officialUserIds = useOfficialBadges()
   // Card is mounted only while open, so the query fires exactly once per open.
   const profileQuery = useProfile(userId)
   const profile = profileQuery.data
@@ -180,6 +183,7 @@ function ProfileCard({
               {label}
             </span>
             {memberContext !== null && <CardRoleBadge role={memberContext.role} />}
+            <OfficialBadge isOfficial={officialUserIds.has(userId)} />
             <FoundingBadge
               isFounding={profile?.isFounding === true || memberContext?.isFounding === true}
             />

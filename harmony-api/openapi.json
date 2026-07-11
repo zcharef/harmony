@@ -68,6 +68,146 @@
         }
       }
     },
+    "/v1/admin/badges/official/grant": {
+      "post": {
+        "tags": [
+          "Badges"
+        ],
+        "summary": "Grant the `official` verified badge to a user. Platform-owner only.",
+        "description": "Identify the subject by exactly one of `userId` or `username`. Idempotent —\nre-granting is a no-op.\n\n# Errors\nReturns `ApiError` 403 if the caller is not the platform owner, 400 if the\nsubject is under- or over-specified, 404 if the subject does not exist.",
+        "operationId": "grant_official_badge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfficialBadgeGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Badge granted"
+          },
+          "400": {
+            "description": "Subject under- or over-specified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the platform owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Subject not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/badges/official/revoke": {
+      "post": {
+        "tags": [
+          "Badges"
+        ],
+        "summary": "Revoke the `official` verified badge from a user. Platform-owner only.",
+        "description": "Identify the subject by exactly one of `userId` or `username`. Idempotent —\nrevoking a badge the user never held is a no-op.\n\n# Errors\nReturns `ApiError` 403 if the caller is not the platform owner, 400 if the\nsubject is under- or over-specified, 404 if the subject does not exist.",
+        "operationId": "revoke_official_badge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfficialBadgeGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Badge revoked"
+          },
+          "400": {
+            "description": "Subject under- or over-specified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the platform owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Subject not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/auth/check-username": {
       "get": {
         "tags": [
@@ -251,6 +391,43 @@
           },
           "409": {
             "description": "Username reserved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/badges/official": {
+      "get": {
+        "tags": [
+          "Badges"
+        ],
+        "summary": "List the user IDs holding the `official` verified badge.",
+        "description": "Authenticated (badges are as public as the profiles they decorate). Returns\nthe whole set in one small payload; the SPA caches it and checks author-id\nmembership per message rather than stamping a flag on every message.\n\n# Errors\nReturns `ApiError` on a repository failure.",
+        "operationId": "list_official_badges",
+        "responses": {
+          "200": {
+            "description": "Official badge holders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfficialBadgesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -7370,6 +7547,47 @@
           },
           "level": {
             "$ref": "#/components/schemas/NotificationLevel"
+          }
+        }
+      },
+      "OfficialBadgeGrantRequest": {
+        "type": "object",
+        "description": "Request body for the owner-only grant/revoke of the `official` badge.\n\nExactly one of `userId` / `username` identifies the subject. The handler\nrejects the request when neither (or both) is provided.",
+        "properties": {
+          "userId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "The subject's user ID. Mutually exclusive with `username`."
+              }
+            ]
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The subject's username. Mutually exclusive with `userId`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OfficialBadgesResponse": {
+        "type": "object",
+        "description": "The set of user IDs currently holding the `official` verified badge.\n\nWHY a flat ID list (not per-user objects): the SPA fetches this once, caches\nit, and checks author-id membership per message — keeping the payload tiny\navoids bloating every message with an `isOfficial` flag.",
+        "required": [
+          "userIds"
+        ],
+        "properties": {
+          "userIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserId"
+            },
+            "description": "User IDs that hold the `official` badge, ordered by grant time."
           }
         }
       },

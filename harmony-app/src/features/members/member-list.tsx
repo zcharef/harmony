@@ -5,7 +5,12 @@ import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
 import { StatusIndicator, usePresenceStore } from '@/features/presence'
-import { FoundingBadge, ProfilePopover } from '@/features/profiles'
+import {
+  FoundingBadge,
+  OfficialBadge,
+  ProfilePopover,
+  useOfficialBadges,
+} from '@/features/profiles'
 import type { MemberResponse, UserStatus } from '@/lib/api'
 import { resolveDisplayName } from '@/lib/display-name'
 import { cn } from '@/lib/utils'
@@ -222,6 +227,7 @@ function MemberRow({
 }) {
   const displayName = resolveDisplayName(member)
   const isSelf = member.userId === currentUserId
+  const officialUserIds = useOfficialBadges()
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false)
 
   function handleContextMenu(e: React.MouseEvent) {
@@ -266,6 +272,7 @@ function MemberRow({
             {displayName}
           </span>
           <RoleBadge role={role} />
+          <OfficialBadge isOfficial={officialUserIds.has(member.userId)} />
           <FoundingBadge isFounding={member.isFounding} />
         </button>
       </ProfilePopover>
