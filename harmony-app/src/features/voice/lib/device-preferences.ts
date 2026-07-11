@@ -4,11 +4,11 @@
  *
  * WHY localStorage (not the preferences API): device IDs are hardware-specific
  * to this machine/browser — syncing them across devices via the server would
- * restore IDs that do not exist elsewhere. Follows the same direct-localStorage
- * pattern as crypto-store.ts (device ID persistence).
+ * restore IDs that do not exist elsewhere. Storage access goes through the
+ * shared safe helpers in @/lib/storage (one pattern per concern).
  */
 
-import { logger } from '@/lib/logger'
+import { readStorage, writeStorage } from '@/lib/storage'
 
 const STORAGE_KEYS = {
   audioinput: 'voice_preferred_audio_input',
@@ -18,37 +18,15 @@ const STORAGE_KEYS = {
 export type AudioDeviceKind = keyof typeof STORAGE_KEYS
 
 export function loadPreferredDeviceId(kind: AudioDeviceKind): string | null {
-  try {
-    return localStorage.getItem(STORAGE_KEYS[kind])
-  } catch (err: unknown) {
-    // WHY: localStorage can throw (private mode, storage disabled). A missing
-    // preference is not an error — fall back to system default silently.
-    logger.warn('voice_device_preference_load_failed', {
-      kind,
-      error: err instanceof Error ? err.message : String(err),
-    })
-    return null
-  }
+  // WHY: readStorage returns null on storage failure (private mode, storage
+  // disabled) — a missing preference is not an error, fall back to defaults.
+  return readStorage(STORAGE_KEYS[kind])
 }
 
 export function savePreferredDeviceId(kind: AudioDeviceKind, deviceId: string): void {
-  try {
-    localStorage.setItem(STORAGE_KEYS[kind], deviceId)
-  } catch (err: unknown) {
-    logger.warn('voice_device_preference_save_failed', {
-      kind,
-      error: err instanceof Error ? err.message : String(err),
-    })
-  }
+  writeStorage(STORAGE_KEYS[kind], deviceId)
 }
 
 export function clearPreferredDeviceId(kind: AudioDeviceKind): void {
-  try {
-    localStorage.removeItem(STORAGE_KEYS[kind])
-  } catch (err: unknown) {
-    logger.warn('voice_device_preference_clear_failed', {
-      kind,
-      error: err instanceof Error ? err.message : String(err),
-    })
-  }
+  writeStorage(STORAGE_KEYS[kind], null)
 }

@@ -51,22 +51,19 @@ describe('device-preferences', () => {
     expect(loadPreferredDeviceId('audioinput')).toBe('mic-new')
   })
 
-  it('returns null and logs when localStorage.getItem throws', async () => {
-    const { logger } = await import('@/lib/logger')
+  it('returns null when localStorage.getItem throws', () => {
+    // WHY: readStorage swallows storage failures — a missing preference is
+    // not an error, the caller falls back to system defaults.
     const spy = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
       throw new Error('storage disabled')
     })
 
     expect(loadPreferredDeviceId('audioinput')).toBeNull()
-    expect(logger.warn).toHaveBeenCalledWith(
-      'voice_device_preference_load_failed',
-      expect.objectContaining({ kind: 'audioinput' }),
-    )
 
     spy.mockRestore()
   })
 
-  it('logs when localStorage.setItem throws', async () => {
+  it('does not throw and logs when localStorage.setItem throws', async () => {
     const { logger } = await import('@/lib/logger')
     const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
       throw new Error('quota exceeded')
@@ -74,8 +71,8 @@ describe('device-preferences', () => {
 
     expect(() => savePreferredDeviceId('audiooutput', 'speaker-1')).not.toThrow()
     expect(logger.warn).toHaveBeenCalledWith(
-      'voice_device_preference_save_failed',
-      expect.objectContaining({ kind: 'audiooutput' }),
+      'write_storage_failed',
+      expect.objectContaining({ key: 'voice_preferred_audio_output' }),
     )
 
     spy.mockRestore()

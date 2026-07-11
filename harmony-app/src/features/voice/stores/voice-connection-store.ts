@@ -245,11 +245,40 @@ function updateSpeaker(identity: string, speaking: boolean, get: GetState, set: 
   }
 }
 
+/** WHY: Shared by the mid-call unplug path and connect-time restore. Drops the
+ * stored preference (the hardware is gone) and records the kind so the
+ * connection bar shows an inline notice — the user must never end up with a
+ * silently dead mic or speaker. Returns false when the current preference no
+ * longer matches: rapid MediaDevicesChanged bursts (docking/undocking) spawn
+ * concurrent invocations; only the one still matching proceeds, preventing
+ * duplicate fallback switches. */
+function applyDeviceGoneFallback(
+  kind: AudioDeviceKind,
+  preferredId: string,
+  get: GetState,
+  set: SetState,
+): boolean {
+  const current = get()
+  const currentId =
+    kind === 'audioinput' ? current.preferredAudioInputId : current.preferredAudioOutputId
+  if (currentId !== preferredId) return false
+
+  logger.warn('voice_preferred_device_unplugged', { kind, deviceId: preferredId })
+  clearPreferredDeviceId(kind)
+  const fallbacks = current.deviceFallbacks
+  const nextFallbacks = fallbacks.includes(kind) ? fallbacks : [...fallbacks, kind]
+  if (kind === 'audioinput') {
+    set({ preferredAudioInputId: null, deviceFallbacks: nextFallbacks })
+  } else {
+    set({ preferredAudioOutputId: null, deviceFallbacks: nextFallbacks })
+  }
+  return true
+}
+
 /** WHY: Extracted so both audio kinds share one code path. When the user's
- * preferred device disappears (unplugged), switch the live session to the
- * system default, drop the stored preference (the hardware is gone), and set
- * deviceFallback so the connection bar shows an inline notice — the user must
- * never end up with a silently dead mic or speaker. */
+ * preferred device disappears (unplugged mid-call), switch the live session to
+ * the system default, drop the stored preference, and record the fallback so
+ * the connection bar shows an inline notice. */
 async function fallBackIfDeviceGone(
   room: Room,
   kind: AudioDeviceKind,
@@ -269,23 +298,9 @@ async function fallBackIfDeviceGone(
   }
   if (devices.some((d) => d.deviceId === preferredId)) return
 
-  // WHY: Re-read after the await — rapid MediaDevicesChanged bursts (docking/
-  // undocking) spawn concurrent invocations; only the one still matching the
-  // current preference proceeds, preventing duplicate fallback switches.
-  const current = get()
-  const currentId =
-    kind === 'audioinput' ? current.preferredAudioInputId : current.preferredAudioOutputId
-  if (currentId !== preferredId) return
-
-  logger.warn('voice_preferred_device_unplugged', { kind, deviceId: preferredId })
-  clearPreferredDeviceId(kind)
-  const fallbacks = current.deviceFallbacks
-  const nextFallbacks = fallbacks.includes(kind) ? fallbacks : [...fallbacks, kind]
-  if (kind === 'audioinput') {
-    set({ preferredAudioInputId: null, deviceFallbacks: nextFallbacks })
-  } else {
-    set({ preferredAudioOutputId: null, deviceFallbacks: nextFallbacks })
-  }
+  // WHY: applyDeviceGoneFallback re-reads state after the await above and
+  // bails if a concurrent invocation already handled this preference.
+  if (!applyDeviceGoneFallback(kind, preferredId, get, set)) return
 
   // WHY: Chromium exposes a synthetic 'default' device; prefer it, otherwise
   // the first available device (Firefox/Safari have no 'default' entry).
@@ -549,26 +564,55 @@ async function enableMic(room: Room, channelId: string): Promise<boolean> {
   }
 }
 
-/** WHY: Extracted to reduce connect() cognitive complexity. Restores the user's
- * preferred audio devices after room recreation (e.g., token refresh creates a
- * new Room that defaults to system devices, losing the user's selection). */
-function restorePreferredDevices(room: Room, get: GetState): void {
-  const { preferredAudioInputId, preferredAudioOutputId } = get()
-  if (preferredAudioInputId !== null) {
-    room.switchActiveDevice('audioinput', preferredAudioInputId).catch((err: unknown) => {
-      logger.warn('voice_restore_preferred_input_failed', {
-        error: err instanceof Error ? err.message : String(err),
-        deviceId: preferredAudioInputId,
-      })
+/** WHY: A device unplugged BETWEEN sessions never fires MediaDevicesChanged,
+ * so connect-time restore must verify the persisted ID still exists before
+ * switching. If gone: same clear + inline-notice treatment as a mid-call
+ * unplug — no device switch needed, the system default is already active
+ * from enableMic. */
+async function restorePreferredDevice(
+  room: Room,
+  kind: AudioDeviceKind,
+  preferredId: string,
+  get: GetState,
+  set: SetState,
+): Promise<void> {
+  try {
+    const devices = await Room.getLocalDevices(kind)
+    if (!devices.some((d) => d.deviceId === preferredId)) {
+      applyDeviceGoneFallback(kind, preferredId, get, set)
+      return
+    }
+  } catch (err: unknown) {
+    // WHY: Enumeration failure is not proof the device is gone — keep the
+    // preference and attempt the switch; a truly stale ID surfaces below
+    // as a switch failure.
+    logger.warn('voice_device_enumeration_failed', {
+      kind,
+      error: err instanceof Error ? err.message : String(err),
     })
   }
-  if (preferredAudioOutputId !== null) {
-    room.switchActiveDevice('audiooutput', preferredAudioOutputId).catch((err: unknown) => {
-      logger.warn('voice_restore_preferred_output_failed', {
-        error: err instanceof Error ? err.message : String(err),
-        deviceId: preferredAudioOutputId,
-      })
+  try {
+    await room.switchActiveDevice(kind, preferredId)
+  } catch (err: unknown) {
+    logger.warn('voice_restore_preferred_device_failed', {
+      kind,
+      deviceId: preferredId,
+      error: err instanceof Error ? err.message : String(err),
     })
+  }
+}
+
+/** WHY: Extracted to reduce connect() cognitive complexity. Restores the user's
+ * preferred audio devices after room creation (token refresh recreates a Room
+ * mid-call; a fresh session hydrates persisted preferences). Fire-and-forget
+ * per kind — restore failures must not block the connect flow. */
+function restorePreferredDevices(room: Room, get: GetState, set: SetState): void {
+  const { preferredAudioInputId, preferredAudioOutputId } = get()
+  if (preferredAudioInputId !== null) {
+    void restorePreferredDevice(room, 'audioinput', preferredAudioInputId, get, set)
+  }
+  if (preferredAudioOutputId !== null) {
+    void restorePreferredDevice(room, 'audiooutput', preferredAudioOutputId, get, set)
   }
 }
 
@@ -644,7 +688,7 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       isDeafened: false,
     })
 
-    restorePreferredDevices(room, get)
+    restorePreferredDevices(room, get, set)
   },
 
   disconnect: async () => {
