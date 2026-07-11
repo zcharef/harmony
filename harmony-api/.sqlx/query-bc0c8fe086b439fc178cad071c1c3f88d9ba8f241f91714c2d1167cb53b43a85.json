@@ -1,0 +1,63 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                d.id AS \"id!\",\n                d.name AS \"name!\",\n                d.icon_url,\n                d.member_count AS \"member_count!\",\n                d.discovery_category,\n                d.discovery_description,\n                d.discovery_featured AS \"discovery_featured!\"\n            FROM (\n                SELECT\n                    s.id,\n                    s.name,\n                    s.icon_url,\n                    s.discovery_category,\n                    s.discovery_description,\n                    s.discovery_featured,\n                    (\n                        SELECT COALESCE(COUNT(*)::BIGINT, 0)\n                        FROM server_members sm\n                        WHERE sm.server_id = s.id\n                    ) AS member_count\n                FROM servers s\n                WHERE s.discoverable = true\n                  AND s.is_dm = false\n                  AND ($1::text IS NULL OR s.discovery_category = $1)\n                  AND ($2::text IS NULL OR s.name ILIKE $2)\n            ) d\n            WHERE $3::boolean IS NULL\n               OR (d.discovery_featured, d.member_count, d.id) < ($3, $4, $5)\n            ORDER BY d.discovery_featured DESC, d.member_count DESC, d.id DESC\n            LIMIT $6\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "icon_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "member_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "discovery_category",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "discovery_description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "discovery_featured!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bool",
+        "Int8",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "bc0c8fe086b439fc178cad071c1c3f88d9ba8f241f91714c2d1167cb53b43a85"
+}

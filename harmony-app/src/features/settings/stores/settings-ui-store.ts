@@ -29,6 +29,9 @@ export const useSettingsUiStore = create<SettingsUiState>()((set) => ({
     import('@/lib/about-ui-store').then(({ useAboutUiStore }) => {
       useAboutUiStore.getState().closeAboutPage()
     })
+    import('@/lib/discovery-ui-store').then(({ useDiscoveryUiStore }) => {
+      useDiscoveryUiStore.getState().closeDiscovery()
+    })
     set({ showServerSettings: true, showUserSettings: false })
   },
   closeServerSettings: () => set({ showServerSettings: false }),

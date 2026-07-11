@@ -7,6 +7,7 @@ mod channel_access;
 mod channel_service;
 pub mod content_filter;
 pub mod content_moderation;
+mod discovery_service;
 pub mod dm_service;
 pub mod friendship_service;
 mod invite_service;
@@ -37,6 +38,9 @@ pub use channel_service::ChannelService;
 pub use content_filter::ContentFilter;
 pub use content_moderation::{
     ModerationDecision, SCORE_THRESHOLD, TIER1_CATEGORIES, TIER2_CATEGORIES, evaluate_moderation,
+};
+pub use discovery_service::{
+    DISCOVERY_CATEGORIES, DiscoveryJoinOutcome, DiscoveryPage, DiscoveryService,
 };
 pub use dm_service::DmService;
 pub use friendship_service::FriendshipService;

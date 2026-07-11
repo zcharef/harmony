@@ -302,6 +302,94 @@ impl MemberRepository for PgMemberRepository {
         Ok(())
     }
 
+    async fn join_discoverable_server(
+        &self,
+        server_id: &ServerId,
+        user_id: &UserId,
+    ) -> Result<(), DomainError> {
+        let sid = server_id.0;
+        let uid = user_id.0;
+
+        // WHY: Same serialization strategy as add_member/complete_join — the
+        // per-(server, user) advisory lock ban_user takes, with the ban
+        // re-checked inside it, so a ban committing after the service's
+        // fast-path check can never leave a banned user as a member.
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
+
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            format!("member_ban:{sid}:{uid}")
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        // WHY re-check discoverable INSIDE the transaction: the directory is
+        // opt-in and revocable — an owner switching discovery off must close
+        // the direct-join door immediately, including against requests that
+        // passed the service's earlier check.
+        let discoverable = sqlx::query_scalar!(
+            r#"
+            SELECT discoverable AS "discoverable!"
+            FROM servers
+            WHERE id = $1 AND is_dm = false
+            "#,
+            sid,
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        if discoverable != Some(true) {
+            return Err(DomainError::Forbidden(
+                "This server is not open for discovery".to_string(),
+            ));
+        }
+
+        let banned = sqlx::query!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM server_bans
+                WHERE server_id = $1 AND user_id = $2
+            ) AS "exists!"
+            "#,
+            sid,
+            uid,
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        if banned.exists {
+            return Err(DomainError::Forbidden(
+                "You are banned from this server".to_string(),
+            ));
+        }
+
+        sqlx::query!(
+            r#"
+            INSERT INTO server_members (server_id, user_id, role)
+            VALUES ($1, $2, $3)
+            "#,
+            sid,
+            uid,
+            Role::Member.as_str(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::Database(ref db_err) if db_err.is_unique_violation() => {
+                DomainError::Conflict("User is already a member of this server".to_string())
+            }
+            other => super::db_err(other),
+        })?;
+
+        tx.commit().await.map_err(super::db_err)?;
+
+        Ok(())
+    }
+
     async fn remove_member(
         &self,
         server_id: &ServerId,

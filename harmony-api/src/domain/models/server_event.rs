@@ -291,6 +291,23 @@ pub struct ServerPayload {
     pub name: String,
     pub icon_url: Option<String>,
     pub owner_id: UserId,
+    /// Directory opt-in state — rides `server.updated` so admin settings
+    /// screens update live when discovery settings change.
+    ///
+    /// WHY `default`: rollout-safe — an older instance publishes this payload
+    /// WITHOUT these keys over `pg_notify`; `default` (false/None) lets a new
+    /// instance deserialize it instead of dropping the event.
+    ///
+    /// WHY no `skip_serializing_if` on the options: a cleared category must
+    /// arrive as an explicit `null` — clients treat an ABSENT key as "old
+    /// instance, preserve cached value", so omission would make clearing
+    /// impossible to propagate.
+    #[serde(default)]
+    pub discoverable: bool,
+    #[serde(default)]
+    pub discovery_category: Option<String>,
+    #[serde(default)]
+    pub discovery_description: Option<String>,
 }
 
 /// DM payload embedded in `DmCreated`.

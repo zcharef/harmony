@@ -4,6 +4,7 @@ pub mod badges;
 pub mod bans;
 pub mod channels;
 pub mod desktop_auth;
+pub mod discovery;
 pub mod dms;
 pub mod friends;
 pub mod gifs;
@@ -34,6 +35,10 @@ pub use channels::{
 pub use desktop_auth::{
     CreateDesktopAuthRequest, CreateDesktopAuthResponse, RedeemDesktopAuthRequest,
     RedeemDesktopAuthResponse,
+};
+pub use discovery::{
+    DiscoveryListQuery, DiscoveryListResponse, DiscoveryServerResponse,
+    UpdateServerDiscoveryRequest,
 };
 pub use dms::{
     CreateDmRequest, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,

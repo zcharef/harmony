@@ -16,10 +16,10 @@ use crate::domain::ports::{
     VoiceSessionRepository,
 };
 use crate::domain::services::{
-    ChannelService, DmService, FriendshipService, InviteService, KeyService, MessageService,
-    MigrationService, ModerationService, NotificationSettingsService, ProfileService,
-    ReactionService, ReadStateService, ServerEmojiService, ServerService, SpamGuard,
-    UserPreferencesService, VoiceService,
+    ChannelService, DiscoveryService, DmService, FriendshipService, InviteService, KeyService,
+    MessageService, MigrationService, ModerationService, NotificationSettingsService,
+    ProfileService, ReactionService, ReadStateService, ServerEmojiService, ServerService,
+    SpamGuard, UserPreferencesService, VoiceService,
 };
 use crate::infra::PgPresenceTracker;
 use crate::infra::klipy::KlipyClient;
@@ -80,6 +80,8 @@ pub struct AppState {
     user_preferences_service: Arc<UserPreferencesService>,
     /// Member-migration command-center service (owner dashboard, §14.1).
     migration_service: Arc<MigrationService>,
+    /// Server-directory service (opt-in discovery listing + direct join).
+    discovery_service: Arc<DiscoveryService>,
     /// Member repository (accessed directly for simple queries; invite logic lives in `InviteService`).
     member_repository: Arc<dyn MemberRepository>,
     /// Channel repository (accessed directly by handlers that call the shared
@@ -181,6 +183,7 @@ impl std::fmt::Debug for AppState {
             )
             .field("user_preferences_service", &self.user_preferences_service)
             .field("migration_service", &self.migration_service)
+            .field("discovery_service", &self.discovery_service)
             .field("member_repository", &self.member_repository)
             .field("channel_repository", &self.channel_repository)
             .field("ban_repository", &self.ban_repository)
@@ -318,6 +321,21 @@ impl AppState {
         let moderation_log_repository: Arc<dyn ModerationLogRepository> =
             Arc::new(PgModerationLogRepository::new(pool.clone()));
 
+        // WHY constructed here (not a positional param): every dependency is
+        // already wired (server/member/ban repos, plan checker, the shared
+        // content filter) — keeps the large constructor signature (and its
+        // many test call sites) stable, mirroring server_emoji_service above.
+        let discovery_service = Arc::new(DiscoveryService::new(
+            server_repository_for_moderation.clone(),
+            member_repository.clone(),
+            ban_repository.clone(),
+            plan_limit_checker.clone(),
+            // Reuse the server service's config-driven filter so the public
+            // directory description is moderated by the same policy as
+            // server/channel/profile names.
+            server_service.content_filter().clone(),
+        ));
+
         // WHY constructed here (not a positional param): the identity-image scan
         // dead-letter queue needs only a Postgres repo over the same pool, and
         // deletion of flagged objects is a best-effort Noop until a service-role
@@ -359,6 +377,7 @@ impl AppState {
             notification_settings_service,
             user_preferences_service,
             migration_service,
+            discovery_service,
             member_repository,
             channel_repository,
             ban_repository,
@@ -528,6 +547,12 @@ impl AppState {
     #[must_use]
     pub fn migration_service(&self) -> &MigrationService {
         &self.migration_service
+    }
+
+    /// Access the server-directory service (opt-in discovery).
+    #[must_use]
+    pub fn discovery_service(&self) -> &DiscoveryService {
+        &self.discovery_service
     }
 
     /// Access the member repository directly (simple queries; invite logic in `InviteService`).

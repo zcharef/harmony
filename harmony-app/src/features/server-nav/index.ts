@@ -1,5 +1,6 @@
 export { CreateInviteDialog } from './create-invite-dialog'
 export { CreateServerDialog } from './create-server-dialog'
+export { useRealtimeServers } from './hooks/use-realtime-servers'
 export { useServers } from './hooks/use-servers'
 export { JoinServerDialog } from './join-server-dialog'
 export { ServerList } from './server-list'

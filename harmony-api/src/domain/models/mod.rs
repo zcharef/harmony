@@ -71,7 +71,7 @@ pub use profile::{IdentityImageKind, IdentityImageModerationStatus, Profile, Use
 pub use reaction::{EmojiVariety, ReactionSummary, Reactor};
 pub use read_state::ChannelReadState;
 pub use role::Role;
-pub use server::Server;
+pub use server::{DiscoveryCursor, DiscoveryServer, Server};
 pub use server_emoji::{EmojiName, ServerEmoji};
 pub use server_event::{ChannelAccessScope, ServerEvent};
 pub use user_preferences::UserPreferences;

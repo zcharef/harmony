@@ -1,5 +1,16 @@
 import { Button, Spinner } from '@heroui/react'
-import { Ban, Flag, Hash, Info, ScrollText, Shield, ShieldCheck, Smile, X } from 'lucide-react'
+import {
+  Ban,
+  Compass,
+  Flag,
+  Hash,
+  Info,
+  ScrollText,
+  Shield,
+  ShieldCheck,
+  Smile,
+  X,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/features/auth'
@@ -10,6 +21,7 @@ import { useServers } from '@/features/server-nav'
 import { cn } from '@/lib/utils'
 import { BansTab } from './bans-tab'
 import { ChannelsTab } from './channels-tab'
+import { DiscoveryTab } from './discovery-tab'
 import { ModerationTab } from './moderation-tab'
 import { OverviewTab } from './overview-tab'
 import { RolesTab } from './roles-tab'
@@ -17,6 +29,7 @@ import { useSettingsUiStore } from './stores/settings-ui-store'
 
 type SettingsTab =
   | 'overview'
+  | 'discovery'
   | 'roles'
   | 'channels'
   | 'emojis'
@@ -30,6 +43,7 @@ type SettingsTab =
 // therefore reaches the shell but sees only the Reports tab.
 const TABS: Array<{ key: SettingsTab; icon: typeof Info; labelKey: string; adminOnly: boolean }> = [
   { key: 'overview', icon: Info, labelKey: 'tabOverview', adminOnly: true },
+  { key: 'discovery', icon: Compass, labelKey: 'tabDiscovery', adminOnly: true },
   { key: 'roles', icon: Shield, labelKey: 'tabRoles', adminOnly: true },
   { key: 'channels', icon: Hash, labelKey: 'tabChannels', adminOnly: true },
   { key: 'emojis', icon: Smile, labelKey: 'tabEmojis', adminOnly: true },
@@ -161,6 +175,7 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
               onServerDeleted={handleServerDeleted}
             />
           )}
+          {isAdmin && activeTab === 'discovery' && <DiscoveryTab server={server} />}
           {isAdmin && activeTab === 'roles' && (
             <RolesTab serverId={serverId} callerRole={callerRole} />
           )}

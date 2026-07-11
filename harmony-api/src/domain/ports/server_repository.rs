@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Role, Server, ServerId, UserId};
+use crate::domain::models::{DiscoveryCursor, DiscoveryServer, Role, Server, ServerId, UserId};
 
 /// Intent-based repository for servers (guilds).
 #[async_trait]
@@ -72,4 +72,36 @@ pub trait ServerRepository: Send + Sync + std::fmt::Debug {
         server_id: &ServerId,
         categories: HashMap<String, bool>,
     ) -> Result<(), DomainError>;
+
+    /// Replace the server's directory settings (opt-in flag, category,
+    /// description). Returns the updated server, or `None` if the server does
+    /// not exist or is a DM (DMs can never be listed).
+    async fn update_discovery(
+        &self,
+        server_id: &ServerId,
+        discoverable: bool,
+        category: Option<String>,
+        description: Option<String>,
+    ) -> Result<Option<Server>, DomainError>;
+
+    /// List directory entries: ONLY servers with `discoverable = true` and
+    /// `is_dm = false`, ordered by `(featured DESC, member_count DESC, id
+    /// DESC)` with keyset pagination (ADR-036).
+    ///
+    /// `search` is a raw substring — the adapter escapes LIKE wildcards.
+    async fn list_discoverable(
+        &self,
+        category: Option<&str>,
+        search: Option<&str>,
+        cursor: Option<DiscoveryCursor>,
+        limit: i64,
+    ) -> Result<Vec<DiscoveryServer>, DomainError>;
+
+    /// Count directory entries matching the same filters as
+    /// [`Self::list_discoverable`] (for the pagination envelope's `total`).
+    async fn count_discoverable(
+        &self,
+        category: Option<&str>,
+        search: Option<&str>,
+    ) -> Result<i64, DomainError>;
 }

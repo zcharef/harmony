@@ -14,6 +14,9 @@ export const useAboutUiStore = create<AboutUiState>()((set) => ({
     import('@/features/settings').then(({ useSettingsUiStore }) => {
       useSettingsUiStore.getState().closeServerSettings()
     })
+    import('@/lib/discovery-ui-store').then(({ useDiscoveryUiStore }) => {
+      useDiscoveryUiStore.getState().closeDiscovery()
+    })
     set({ showAboutPage: true })
   },
   closeAboutPage: () => set({ showAboutPage: false }),

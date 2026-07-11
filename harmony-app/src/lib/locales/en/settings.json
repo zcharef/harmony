@@ -8,6 +8,7 @@
   "tabReports": "Reports",
   "tabAudit": "Audit Log",
   "tabBans": "Bans",
+  "tabDiscovery": "Discovery",
   "closeSettings": "Close settings",
 
   "serverOverview": "Server Overview",
@@ -130,5 +131,17 @@
   "notifBannerEnable": "Enable",
   "notifBannerDismiss": "Not now",
   "notifLoadError": "Could not load notification settings.",
-  "notifRetry": "Retry"
+  "notifRetry": "Retry",
+  "discoveryTitle": "Server Discovery",
+  "discoveryDescription": "List this server in the public directory so anyone can find and join it.",
+  "discoveryToggleLabel": "List this server in discovery",
+  "discoveryToggleHelp": "Anyone can find and join this server without an invite.",
+  "discoveryCategoryLabel": "Category",
+  "discoveryCategoryRequired": "Pick a category to list this server",
+  "discoveryDescriptionLabel": "Public description",
+  "discoveryDescriptionPlaceholder": "Tell people what this server is about",
+  "discoveryDescriptionCounter": "{{count}}/{{max}} characters",
+  "discoveryDescriptionMaxLength": "Description must be 300 characters or less",
+  "discoverySaved": "Discovery settings saved",
+  "discoverySaveFailed": "Could not save discovery settings"
 }

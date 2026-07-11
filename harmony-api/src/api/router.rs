@@ -145,6 +145,19 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             "/v1/servers/{id}/emojis/{emoji_id}",
             delete(handlers::server_emojis::delete_server_emoji),
         )
+        // Server directory (opt-in discovery)
+        .route(
+            "/v1/servers/{id}/discovery",
+            patch(handlers::discovery::update_server_discovery),
+        )
+        .route(
+            "/v1/discovery/servers",
+            get(handlers::discovery::list_discovery_servers),
+        )
+        .route(
+            "/v1/discovery/servers/{id}/join",
+            post(handlers::discovery::join_discovery_server),
+        )
         // Invites
         .route(
             "/v1/servers/{id}/invites",

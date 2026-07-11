@@ -24,6 +24,14 @@ pub struct ServerResponse {
     pub icon_url: Option<String>,
     pub owner_id: UserId,
     pub is_dm: bool,
+    /// Whether the server is listed in the public directory (opt-in).
+    pub discoverable: bool,
+    /// Directory category (allowlisted value) when configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovery_category: Option<String>,
+    /// Short public description shown on the directory card.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovery_description: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -36,6 +44,9 @@ impl From<Server> for ServerResponse {
             icon_url: s.icon_url,
             owner_id: s.owner_id,
             is_dm: s.is_dm,
+            discoverable: s.discoverable,
+            discovery_category: s.discovery_category,
+            discovery_description: s.discovery_description,
             created_at: s.created_at,
             updated_at: s.updated_at,
         }

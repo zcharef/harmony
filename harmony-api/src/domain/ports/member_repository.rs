@@ -29,6 +29,22 @@ pub trait MemberRepository: Send + Sync + std::fmt::Debug {
     /// Add a user as a member of a server (with default 'member' role).
     async fn add_member(&self, server_id: &ServerId, user_id: &UserId) -> Result<(), DomainError>;
 
+    /// Race-safe direct join for the server directory.
+    ///
+    /// Takes the same per-(server, user) advisory lock as `ban_user` /
+    /// `complete_join`, then re-checks INSIDE the lock that the server is
+    /// still `discoverable` (a concurrent opt-out must not admit the user)
+    /// and that the user is not banned, before inserting the membership.
+    ///
+    /// Returns `DomainError::Forbidden` if banned or no longer discoverable,
+    /// `DomainError::Conflict` if already a member (callers treat as
+    /// idempotent success).
+    async fn join_discoverable_server(
+        &self,
+        server_id: &ServerId,
+        user_id: &UserId,
+    ) -> Result<(), DomainError>;
+
     /// Remove a user from a server.
     ///
     /// Returns `DomainError::NotFound` if the user was not a member.
