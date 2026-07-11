@@ -39,6 +39,13 @@ vi.mock('@/features/auth', () => ({
   useAuthStore: (selector: (s: { session: unknown }) => unknown) => useAuthStoreMock(selector),
 }))
 
+// WHY mockable: the "open in desktop app" link is web-only — one test flips
+// this to assert it disappears inside Tauri.
+const { isTauriMock } = vi.hoisted(() => ({ isTauriMock: vi.fn(() => false) }))
+vi.mock('@/lib/platform', () => ({
+  isTauri: () => isTauriMock(),
+}))
+
 const CODE = 'abc123XY'
 const SERVER_ID = 'srv-1'
 
@@ -84,6 +91,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   sessionStorage.clear()
   setSession(null)
+  isTauriMock.mockReturnValue(false)
   // Default: an authed visitor is NOT yet a member of the previewed server.
   useServersMock.mockReturnValue({ data: [], isPending: false })
 })
@@ -295,5 +303,43 @@ describe('InviteLandingPage — already a member', () => {
     await waitFor(() => {
       expect(screen.getByTestId('invite-accept-button')).toBeTruthy()
     })
+  })
+})
+
+describe('InviteLandingPage — open in desktop app link', () => {
+  it('renders the harmony:// deep link on the web for a valid invite', async () => {
+    previewInviteMock.mockResolvedValue({ data: validPreview })
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('invite-open-in-app')).toBeTruthy()
+    })
+    expect(screen.getByTestId('invite-open-in-app').getAttribute('href')).toBe(
+      `harmony://invite/${CODE}`,
+    )
+  })
+
+  it('is hidden inside the Tauri desktop app', async () => {
+    isTauriMock.mockReturnValue(true)
+    previewInviteMock.mockResolvedValue({ data: validPreview })
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('invite-accept-button')).toBeTruthy()
+    })
+    expect(screen.queryByTestId('invite-open-in-app')).toBeNull()
+  })
+
+  it('is hidden for an invalid invite (nothing to open)', async () => {
+    previewInviteMock.mockRejectedValue(notFoundError())
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('invite-invalid')).toBeTruthy()
+    })
+    expect(screen.queryByTestId('invite-open-in-app')).toBeNull()
   })
 })

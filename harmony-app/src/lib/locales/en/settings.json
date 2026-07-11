@@ -143,5 +143,14 @@
   "discoveryDescriptionCounter": "{{count}}/{{max}} characters",
   "discoveryDescriptionMaxLength": "Description must be 300 characters or less",
   "discoverySaved": "Discovery settings saved",
-  "discoverySaveFailed": "Could not save discovery settings"
+  "discoverySaveFailed": "Could not save discovery settings",
+
+  "tabDesktop": "Desktop",
+  "desktopCloseToTrayLabel": "Keep running in background",
+  "desktopCloseToTrayHelp": "Closing the window hides Harmony in the system tray instead of quitting",
+  "desktopAutostartLabel": "Launch Harmony at login",
+  "desktopAutostartHelp": "Start Harmony automatically when you sign in to your computer",
+  "desktopAutostartError": "Could not update the launch-at-login setting",
+  "trayShowHide": "Show/Hide Harmony",
+  "trayQuit": "Quit Harmony"
 }

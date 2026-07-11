@@ -24,5 +24,6 @@
   "audioDevicesUnplugged": "Audio devices disconnected — switched to the defaults",
   "participantCount_one": "{{count}} participant in voice",
   "participantCount_other": "{{count}} participants in voice",
-  "unknownParticipant": "Unknown user"
+  "unknownParticipant": "Unknown user",
+  "pttShortcutFailed": "Push-to-talk key “{{shortcut}}” could not be registered — another app may be using it"
 }

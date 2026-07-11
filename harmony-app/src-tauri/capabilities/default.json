@@ -10,10 +10,26 @@
     "sentry:default",
     "updater:default",
     "process:allow-restart",
+    "process:allow-exit",
     "deep-link:default",
     "core:window:allow-set-badge-count",
+    "core:window:allow-set-overlay-icon",
     "core:window:allow-set-focus",
     "core:window:allow-unminimize",
-    "notification:default"
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-is-visible",
+    "core:window:allow-destroy",
+    "core:tray:default",
+    "core:menu:default",
+    "core:image:default",
+    "core:app:allow-default-window-icon",
+    "notification:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "window-state:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

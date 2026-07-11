@@ -1,5 +1,6 @@
 import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
+import type { NewAttachmentRequest } from '@/lib/api'
 // WHY: Side-effect import initializes the real i18n instance so the composer
 // placeholder and the mention popup rows resolve to actual translations.
 import '@/lib/i18n'
@@ -76,6 +77,20 @@ vi.mock('./hooks/use-slow-mode', () => ({
 
 vi.mock('./hooks/use-typing-indicator', () => ({
   useTypingIndicator: () => ({ typingUsers: [], sendTyping: vi.fn() }),
+}))
+
+// WHY mocked: the drop-wiring test pushes a real file through the REAL
+// useComposerAttachments — only the network upload behind it is stubbed.
+// WHY satisfies: the stub must stay shaped like the real hook's return type
+// (UploadedAttachment = NewAttachmentRequest) — vi.mock factories are not
+// checked against the mocked module, so this pins the contract instead.
+vi.mock('./hooks/use-upload-attachment', () => ({
+  useUploadAttachment: () => async () =>
+    ({
+      url: 'https://storage.example.test/storage/v1/object/public/attachments/user-me/notes.txt',
+      mime: 'text/plain',
+      size: 5,
+    }) satisfies NewAttachmentRequest,
 }))
 
 vi.mock('./hooks/use-realtime-messages', () => ({ useRealtimeMessages: () => undefined }))
@@ -236,5 +251,44 @@ describe('ChatArea mention wiring', () => {
     expect(arg).toMatchObject({ content: 'hello @stranger' })
     // Spec §3.1: the key is OMITTED when empty — never [] or null.
     expect(arg).not.toHaveProperty('mentions')
+  })
+})
+
+/**
+ * HTML5 drop wiring (attachments §6.3). This is the path Tauri's native
+ * drag-drop interception used to swallow on desktop — dragDropEnabled is now
+ * false in tauri.conf.json so the SAME React onDrop runs on web and desktop.
+ * These tests pin that handler chain: onDragOver overlay → onDrop →
+ * enqueueFiles → tray tile.
+ */
+describe('ChatArea attachment drop wiring', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function dropFile(target: HTMLElement, file: File) {
+    fireEvent.drop(target, { dataTransfer: { files: [file], types: ['Files'] } })
+  }
+
+  it('drag-over shows the dropzone overlay and drop enqueues the file into the tray', async () => {
+    const { input } = renderChatArea()
+
+    fireEvent.dragOver(input, { dataTransfer: { types: ['Files'] } })
+    expect(screen.getByTestId('attachment-dropzone')).toBeTruthy()
+
+    dropFile(input, new File(['hello'], 'notes.txt', { type: 'text/plain' }))
+
+    const tile = await screen.findByTestId('attachment-tile')
+    expect(tile.textContent).toContain('notes.txt')
+    // The drop also clears the overlay.
+    expect(screen.queryByTestId('attachment-dropzone')).toBeNull()
+  })
+
+  it('drop with no files enqueues nothing', async () => {
+    const { input } = renderChatArea()
+
+    fireEvent.drop(input, { dataTransfer: { files: [], types: [] } })
+
+    expect(screen.queryAllByTestId('attachment-tile')).toHaveLength(0)
   })
 })

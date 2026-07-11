@@ -58,6 +58,7 @@ export function usePushToTalk(shortcut: string | null) {
       })
 
       logger.info('ptt_shortcut_registered', { shortcut: key })
+      useVoiceConnectionStore.getState().setPttRegisterError(null)
 
       // WHY: Capture the unregister function so cleanup can remove this exact shortcut.
       unregisterRef.current = async () => {
@@ -69,6 +70,10 @@ export function usePushToTalk(shortcut: string | null) {
         error: err instanceof Error ? err.message : String(err),
         shortcut: key,
       })
+      // WHY: Enabling PTT is user-initiated — a hotkey that failed to bind
+      // (taken by another app, plugin missing) must surface inline in the
+      // voice bar instead of leaving the user muted with no explanation.
+      useVoiceConnectionStore.getState().setPttRegisterError(key)
     }
   }, [])
 
@@ -87,7 +92,12 @@ export function usePushToTalk(shortcut: string | null) {
   }, [])
 
   useEffect(() => {
-    if (shortcut === null || !isTauri()) return
+    if (shortcut === null || !isTauri()) {
+      // WHY: PTT was turned off (or we're on web) — a leftover register
+      // error must not keep warning about a shortcut that is no longer wanted.
+      useVoiceConnectionStore.getState().setPttRegisterError(null)
+      return
+    }
 
     void registerShortcut(shortcut)
 
