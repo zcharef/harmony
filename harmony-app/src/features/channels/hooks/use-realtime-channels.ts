@@ -161,8 +161,18 @@ export function useRealtimeChannels() {
           // channel.updated to members who never had the channel in their
           // cache (it was hidden while private) — the now-public channel must
           // APPEAR in their sidebar, not be silently dropped.
+          // WHY the isPrivate gate: the backend fails OPEN on access-resolver
+          // errors (channels.rs publishes channel.updated ungated with
+          // channel_access unset), so an event for a PRIVATE channel can reach
+          // ungranted members. Appending it here would materialize a hidden
+          // channel (name + topic) in their sidebar. Granted members missing a
+          // private channel from cache are covered by channel.access_updated's
+          // invalidate path, so only public channels may be appended cold.
           const exists = old.some((c) => c.id === channel.id)
-          if (!exists) return [...old, channel]
+          if (!exists) {
+            if (channel.isPrivate === true) return old
+            return [...old, channel]
+          }
           return old.map((c) => (c.id === channel.id ? channel : c))
         },
       )

@@ -150,6 +150,18 @@ describe('useRealtimeChannels — channel.updated', () => {
     expect(list).toHaveLength(1)
     expect(list?.[0]?.name).toBe('ops-renamed')
   })
+
+  it('never appends a PRIVATE channel missing from the cache (backend fail-open must not leak it)', () => {
+    const queryClient = setup('member', [])
+
+    fireSse('channel.updated', {
+      serverId: SERVER_ID,
+      channel: { ...privateChannel(), isPrivate: true },
+    })
+
+    const list = queryClient.getQueryData<ChannelResponse[]>(queryKeys.channels.byServer(SERVER_ID))
+    expect(list).toEqual([])
+  })
 })
 
 describe('useRealtimeChannels — member.role_updated', () => {
