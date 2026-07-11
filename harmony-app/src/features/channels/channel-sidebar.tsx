@@ -18,6 +18,7 @@ import {
   Megaphone,
   Mic,
   MicOff,
+  Search,
   Settings,
   UserPlus,
   Volume2,
@@ -30,6 +31,7 @@ import { EncryptedChannelBadge } from '@/features/crypto'
 import { ROLE_HIERARCHY, useLeaveServer, useMyMemberRole } from '@/features/members'
 import { StatusPicker } from '@/features/preferences'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
+import { useSearchStore } from '@/features/search'
 import { CreateInviteDialog } from '@/features/server-nav'
 import { useSettingsUiStore } from '@/features/settings'
 import {
@@ -423,6 +425,9 @@ export function ChannelSidebar({
   /** WHY: Only admin+ can access server settings. */
   const canAccessSettings = ROLE_HIERARCHY[callerRole] >= ROLE_HIERARCHY.admin
   const voiceChannelId = useVoiceConnectionStore((s) => s.currentChannelId)
+  // WHY: server-wide search entry (§5.2) — opens the shared overlay with no
+  // channel scope. The overlay is mounted once in MainLayout.
+  const openServerWide = useSearchStore((s) => s.openServerWide)
 
   return (
     <div data-test="channel-sidebar" className="flex h-full flex-col bg-default-100">
@@ -447,6 +452,18 @@ export function ChannelSidebar({
       {/* Channel list */}
       <div data-test="channel-list" className="flex-1 overflow-y-auto px-2">
         <div className="py-3">
+          {serverId !== null && (
+            <Button
+              data-test="server-search-button"
+              variant="light"
+              size="sm"
+              className="mb-1 w-full justify-start gap-1.5 px-2 text-default-500"
+              onPress={() => openServerWide()}
+              startContent={<Search className="h-4 w-4 text-default-500" />}
+            >
+              {t('common:search')}
+            </Button>
+          )}
           {isPending && serverId !== null && (
             <div className="flex justify-center py-4">
               <Spinner size="sm" />

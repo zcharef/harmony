@@ -42,7 +42,7 @@ pub use key_repository::KeyRepository;
 pub use livekit::{LiveKitTokenGenerator, VoiceGrants};
 pub use megolm_session_repository::MegolmSessionRepository;
 pub use member_repository::MemberRepository;
-pub use message_repository::{AroundWindow, MessageRepository};
+pub use message_repository::{AroundWindow, MessageRepository, MessageSearchFilters};
 pub use migration_dashboard_repository::MigrationDashboardRepository;
 pub use moderation_retry_repository::ModerationRetryRepository;
 pub use notification_settings_repository::{NotificationLevel, NotificationSettingsRepository};

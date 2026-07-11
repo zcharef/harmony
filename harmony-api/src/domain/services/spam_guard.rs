@@ -1332,6 +1332,41 @@ mod tests {
         assert!(matches!(err, DomainError::RateLimited(_)), "got {err:?}");
     }
 
+    /// WHY (search §7.1): the `"search"` action key is a distinct bucket — a
+    /// user who exhausted their typing/presence budget must still be able to
+    /// search, and vice-versa. Proves the limiter keys on (user, action).
+    #[test]
+    fn action_limiter_isolates_search_from_other_actions() {
+        let guard = SpamGuard::new();
+        let u = user(1);
+        let window = Duration::from_secs(60);
+
+        // Exhaust the "typing" bucket entirely.
+        for _ in 0..5 {
+            guard
+                .check_and_record_action(&u, "typing", 5, window)
+                .unwrap();
+        }
+        assert!(
+            guard
+                .check_and_record_action(&u, "typing", 5, window)
+                .is_err(),
+            "typing bucket must be exhausted"
+        );
+
+        // "search" is an independent bucket — still fully available.
+        for _ in 0..30 {
+            guard
+                .check_and_record_action(&u, "search", 30, window)
+                .unwrap();
+        }
+        // The 31st search is rejected on its OWN limit, not typing's.
+        let err = guard
+            .check_and_record_action(&u, "search", 30, window)
+            .unwrap_err();
+        assert!(matches!(err, DomainError::RateLimited(_)), "got {err:?}");
+    }
+
     #[test]
     fn action_limiter_window_expiry_restores_budget() {
         let guard = SpamGuard::new();

@@ -53,6 +53,25 @@ describe('queryKeys', () => {
     })
   })
 
+  describe('search: .all prefixes every specific key', () => {
+    it('enables bulk invalidation via queryKeys.search.all', () => {
+      // The search key carries a non-string params object, so compare the
+      // leading string segments directly rather than via the string-typed helper.
+      const key = queryKeys.search.messages('s', { q: 'hi' })
+      expect(key[0]).toBe(queryKeys.search.all[0])
+      expect(key.slice(0, 2)).toEqual(['search', 'messages'])
+    })
+
+    it('keys results by serverId + params', () => {
+      expect(queryKeys.search.messages('s1', { q: 'a' })).not.toEqual(
+        queryKeys.search.messages('s2', { q: 'a' }),
+      )
+      expect(queryKeys.search.messages('s1', { q: 'a' })).not.toEqual(
+        queryKeys.search.messages('s1', { q: 'b' }),
+      )
+    })
+  })
+
   describe('gifs: .all is a prefix of every specific key', () => {
     it('enables bulk invalidation via queryKeys.gifs.all', () => {
       const { all } = queryKeys.gifs

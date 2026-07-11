@@ -277,6 +277,50 @@ pub struct MessageListQuery {
     pub limit: Option<i64>,
 }
 
+/// Query parameters for full-text message search.
+// WHY no deny_unknown_fields: Axum query deserializer passes every URL param
+// (cache-busters etc.) — same reason as MessageListQuery.
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct MessageSearchQuery {
+    /// Full-text query. Required, 1..=200 chars after trim. Parsed by Postgres
+    /// `websearch_to_tsquery` ("quoted phrases", OR, -negation supported).
+    pub q: Option<String>,
+    /// `in:` filter — restrict to a single channel of this server.
+    pub channel_id: Option<ChannelId>,
+    /// `from:` filter — restrict to a single author.
+    pub author_id: Option<UserId>,
+    /// `has:` filter. Accepts `link` or `image`. Any other value is ignored.
+    /// (Repeatable via comma, e.g. `has=link,image`.)
+    pub has: Option<String>,
+    /// ISO 8601 keyset cursor — messages created before this time.
+    pub before: Option<String>,
+    /// Max results (1..=50, default 25).
+    pub limit: Option<i64>,
+}
+
+/// Search results envelope. Same shape as `MessageListResponse` but a distinct
+/// type so future search-only fields (snippets, rank) don't leak into the list
+/// endpoint.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageSearchResponse {
+    pub items: Vec<MessageResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+impl MessageSearchResponse {
+    #[must_use]
+    pub fn from_messages(messages: Vec<MessageWithAuthor>, next_cursor: Option<String>) -> Self {
+        Self {
+            items: messages.into_iter().map(MessageResponse::from).collect(),
+            next_cursor,
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

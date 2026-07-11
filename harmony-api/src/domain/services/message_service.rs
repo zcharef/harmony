@@ -13,7 +13,7 @@ use crate::domain::models::{
 };
 use crate::domain::ports::{
     AroundWindow, AttachmentRepository, ChannelRepository, FriendshipRepository, MemberRepository,
-    MessageRepository, PlanLimitChecker, ReactionRepository,
+    MessageRepository, MessageSearchFilters, PlanLimitChecker, ReactionRepository,
 };
 use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
@@ -553,19 +553,19 @@ impl MessageService {
 
     /// Enrich a raw message page with reactions, attachments, and resolved
     /// mention display data (single batched query each). Shared by
-    /// `list_for_channel` and `list_around` so both pages render identically.
+    /// `list_for_channel`, `list_around`, and `search_messages` so every page
+    /// renders identically.
     async fn enrich_page(
         &self,
         server_id: &ServerId,
         user_id: &UserId,
         mut messages: Vec<MessageWithAuthor>,
     ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+        let ids: Vec<MessageId> = messages.iter().map(|m| m.message.id.clone()).collect();
+
         // WHY: Batch-fetch reactions for all messages in a single query,
         // then zip into each MessageWithAuthor. Avoids N+1 queries.
-        let ids: Vec<crate::domain::models::MessageId> =
-            messages.iter().map(|m| m.message.id.clone()).collect();
         let mut reactions_map = self.reaction_repo.batch_for_messages(&ids, user_id).await?;
-
         for msg in &mut messages {
             if let Some(reactions) = reactions_map.remove(&msg.message.id) {
                 msg.reactions = reactions;
@@ -608,6 +608,64 @@ impl MessageService {
         }
 
         Ok(messages)
+    }
+
+    /// Full-text search messages in a server, gated by the same per-channel
+    /// access predicate as the rest of the app (§2.4).
+    ///
+    /// # Errors
+    /// Returns `DomainError::Forbidden` if the caller is not a server member, or
+    /// (when an explicit `channel_id` filter is set) if they cannot access that
+    /// channel / it does not belong to this server. Repository errors propagate.
+    pub async fn search_messages(
+        &self,
+        server_id: &ServerId,
+        user_id: &UserId,
+        query_text: &str,
+        filters: MessageSearchFilters,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+        // 1. Membership gate — a non-member never searches this server.
+        if !self.member_repo.is_member(server_id, user_id).await? {
+            return Err(DomainError::Forbidden(
+                "You must be a server member to search this server".to_string(),
+            ));
+        }
+
+        // 2. Explicit-channel gate: an explicit `in:#channel` the caller cannot
+        // access becomes a clean 403 (not empty results), AND this validates the
+        // channel belongs to this server (rejects cross-server channelId). Server-
+        // wide search skips this — the SQL access predicate handles it (no oracle).
+        if let Some(channel_id) = filters.channel_id.as_ref() {
+            // WHY Forbidden for BOTH "does not exist" and "belongs to another
+            // server": a probing client must not be able to distinguish the two
+            // (404 vs 403 would be an existence oracle across servers). The
+            // explicit `in:` filter only ever carries a channel the caller
+            // resolved from their own visible list, so a legit request never hits
+            // this — only an injected id does.
+            let channel = self
+                .channel_repo
+                .get_by_id(channel_id)
+                .await?
+                .ok_or_else(|| {
+                    DomainError::Forbidden("You do not have access to that channel".to_string())
+                })?;
+            if channel.server_id != *server_id {
+                return Err(DomainError::Forbidden(
+                    "You do not have access to that channel".to_string(),
+                ));
+            }
+            ensure_channel_access(&*self.channel_repo, &*self.member_repo, &channel, user_id)
+                .await?;
+        }
+
+        let messages = self
+            .repo
+            .search_in_server(server_id, user_id, query_text, &filters, cursor, limit)
+            .await?;
+
+        self.enrich_page(server_id, user_id, messages).await
     }
 
     /// Edit a message's content. Only the author can edit.

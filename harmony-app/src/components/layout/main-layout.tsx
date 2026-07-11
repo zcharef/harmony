@@ -33,6 +33,7 @@ import {
 } from '@/features/notifications'
 import { OnboardingFlow, useOnboarding } from '@/features/onboarding'
 import { usePresence } from '@/features/presence'
+import { SearchOverlay } from '@/features/search'
 import { ServerList, useServers } from '@/features/server-nav'
 import { ServerSettings, UserSettingsModal, useSettingsUiStore } from '@/features/settings'
 import { useVoiceConnection } from '@/features/voice'
@@ -785,6 +786,14 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
           )}
         </Group>
       </div>
+      {/* WHY here: mounted once so the search overlay survives DM/server view
+          switches and both the channel toolbar (in-channel) and the server
+          sidebar (server-wide) can open it via the shared store (§5.2). */}
+      <SearchOverlay
+        serverId={selectedServerId}
+        serverName={serverName}
+        channels={channels ?? []}
+      />
       {/* WHY here: mounted in MainLayout so the modal survives DM/server view
           switches — both sidebars' gear buttons open it (CLAUDE.md 4.6). */}
       <UserSettingsModal />
