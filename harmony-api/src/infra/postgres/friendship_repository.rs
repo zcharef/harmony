@@ -414,6 +414,21 @@ impl FriendshipRepository for PgFriendshipRepository {
 
         let mut tx = self.pool.begin().await.map_err(super::db_err)?;
 
+        // Serialize on the canonical pair — same lock `create_request` takes.
+        // Without it a concurrent `create_request` can slip a pending row past
+        // the block teardown: it reads "no block" under the lock, and this
+        // uncontended block commits its INSERT + DELETE (finding nothing yet)
+        // before that request INSERTs, leaving a pending row between a blocked
+        // pair. Holding the lock forces the request's block-check to see the
+        // block (→ 403) or this DELETE to remove the just-inserted row.
+        sqlx::query!(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            pair_key(b1, b2)
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
         let inserted = sqlx::query!(
             r#"INSERT INTO user_blocks (blocker_id, blocked_id)
                VALUES ($1, $2)
