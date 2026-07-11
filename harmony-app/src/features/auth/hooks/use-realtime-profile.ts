@@ -1,5 +1,6 @@
 import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import { useCallback } from 'react'
 import { z } from 'zod'
 import { useServerEvent } from '@/hooks/use-server-event'
@@ -168,13 +169,13 @@ function notifyRejectedImages(
   bannerStatus: 'pending' | 'approved' | 'rejected' | undefined,
 ) {
   if (avatarStatus === 'rejected') {
-    toast.error('Your new avatar was rejected', {
-      description: 'It did not pass our content review. Your previous avatar was kept.',
+    toast.error(i18n.t('profiles:avatarRejectedTitle'), {
+      description: i18n.t('profiles:avatarRejectedBody'),
     })
   }
   if (bannerStatus === 'rejected') {
-    toast.error('Your new banner was rejected', {
-      description: 'It did not pass our content review. Your previous banner was kept.',
+    toast.error(i18n.t('profiles:bannerRejectedTitle'), {
+      description: i18n.t('profiles:bannerRejectedBody'),
     })
   }
 }

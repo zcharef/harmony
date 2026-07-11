@@ -1,8 +1,11 @@
 import type { InfiniteData } from '@tanstack/react-query'
 import { renderHook } from '@testing-library/react'
+import i18n from 'i18next'
 import { act } from 'react'
 import { vi } from 'vitest'
 import { SSE_EVENT_PREFIX } from '@/hooks/use-server-event'
+// Side-effect import: initializes i18n so translated toast titles resolve.
+import '@/lib/i18n'
 import type {
   DmListItem,
   MemberListResponse,
@@ -251,8 +254,8 @@ describe('useRealtimeProfile', () => {
     })
 
     expect(toast.error).toHaveBeenCalledWith(
-      'Your new avatar was rejected',
-      expect.objectContaining({ description: expect.any(String) }),
+      i18n.t('profiles:avatarRejectedTitle'),
+      expect.objectContaining({ description: i18n.t('profiles:avatarRejectedBody') }),
     )
   })
 
