@@ -1,5 +1,6 @@
 import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
+import type { NewAttachmentRequest } from '@/lib/api'
 // WHY: Side-effect import initializes the real i18n instance so the composer
 // placeholder and the mention popup rows resolve to actual translations.
 import '@/lib/i18n'
@@ -80,13 +81,16 @@ vi.mock('./hooks/use-typing-indicator', () => ({
 
 // WHY mocked: the drop-wiring test pushes a real file through the REAL
 // useComposerAttachments — only the network upload behind it is stubbed.
+// WHY satisfies: the stub must stay shaped like the real hook's return type
+// (UploadedAttachment = NewAttachmentRequest) — vi.mock factories are not
+// checked against the mocked module, so this pins the contract instead.
 vi.mock('./hooks/use-upload-attachment', () => ({
-  useUploadAttachment: () => async () => ({
-    fileName: 'notes.txt',
-    filePath: 'attachments/notes.txt',
-    mimeType: 'text/plain',
-    sizeBytes: 5,
-  }),
+  useUploadAttachment: () => async () =>
+    ({
+      url: 'https://storage.example.test/storage/v1/object/public/attachments/user-me/notes.txt',
+      mime: 'text/plain',
+      size: 5,
+    }) satisfies NewAttachmentRequest,
 }))
 
 vi.mock('./hooks/use-realtime-messages', () => ({ useRealtimeMessages: () => undefined }))

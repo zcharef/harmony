@@ -33,7 +33,7 @@ pub fn run() {
     #[cfg(not(target_os = "ios"))]
     let _guard = tauri_plugin_sentry::minidump::init(&client);
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // WHY: On Windows/Linux, deep links spawn a new process.
             // The single-instance plugin with "deep-link" feature forwards
@@ -91,9 +91,9 @@ pub fn run() {
         ])
         .setup(|app| {
             // WHY in setup (desktop-gated) instead of .plugin() on the builder:
-            // these plugins are desktop-only (Cargo desktop target section) —
-            // registering them here keeps the builder chain compiling for all
-            // targets without per-plugin cfg noise.
+            // these plugins are desktop-only (Cargo desktop target section) and
+            // only invoked later via JS IPC — registering them here keeps the
+            // builder chain compiling for all targets without cfg noise.
             #[cfg(desktop)]
             {
                 // WHY no with_handler: shortcuts are registered from the
@@ -102,10 +102,6 @@ pub fn run() {
                 // default dispatch.
                 app.handle()
                     .plugin(tauri_plugin_global_shortcut::Builder::new().build())?;
-                // WHY: restores window size/position/maximized across launches.
-                // tauri.conf.json values remain the first-launch defaults.
-                app.handle()
-                    .plugin(tauri_plugin_window_state::Builder::default().build())?;
                 // WHY LaunchAgent: standard macOS login-item mechanism; no
                 // launch args needed. Enable/disable is driven by the user
                 // setting in the frontend (default OFF — never auto-enabled).
@@ -122,9 +118,33 @@ pub fn run() {
                 let _ = window.set_focus();
             }
             Ok(())
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        });
+
+    // WHY on the builder, NOT in setup: window-state restores geometry from its
+    // on_window_ready hook, which only fires for windows created AFTER the
+    // plugin is registered. Tauri creates the config windows before the setup
+    // hook runs, so a setup-time registration saves state on exit but never
+    // restores it on launch. tauri.conf.json values remain first-launch defaults.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+
+    builder
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, _event| {
+            // WHY: close-to-tray hides the window via orderOut, and AppKit does
+            // not bring orderOut-hidden windows back on a dock-icon click — it
+            // surfaces the click as Reopen instead. Restore the window the same
+            // way the single-instance and deep-link paths do.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                if let Some(window) = _app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

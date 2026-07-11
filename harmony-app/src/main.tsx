@@ -5,11 +5,13 @@ import '@/lib/api-interceptors'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { env } from '@/lib/env'
+import { installFileDropGuard } from '@/lib/file-drop-guard'
 import { initSentry } from '@/lib/sentry'
 import App from './App'
 import './App.css'
 
 initSentry(env.VITE_SENTRY_DSN)
+installFileDropGuard()
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
