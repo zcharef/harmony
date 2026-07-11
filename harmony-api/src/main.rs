@@ -173,12 +173,21 @@ async fn init_app_state(config: &Config) -> AppInit {
     let attachment_repo = Arc::new(infra::postgres::PgAttachmentRepository::new(pool.clone()));
     let read_state_repo = Arc::new(infra::postgres::PgReadStateRepository::new(pool.clone()));
 
+    // Analytics recorder (growth-plan §10 funnel events, fire-and-forget).
+    // WHY constructed here: the plan limit checker emits `plan_limit_hit`
+    // through the same recorder that handlers use for funnel events.
+    let analytics_recorder: Arc<dyn domain::ports::AnalyticsRecorder> =
+        Arc::new(infra::postgres::PgAnalyticsRecorder::new(pool.clone()));
+
     // WHY: Self-hosted deployments have no plan restrictions (AlwaysAllowedChecker).
     // SaaS deployments enforce Free/Pro limits via Postgres queries (PgPlanLimitChecker).
     let plan_limit_checker: Arc<dyn crate::domain::ports::PlanLimitChecker> =
         if config.plan_enforcement_enabled {
             tracing::info!("Plan limit enforcement ENABLED (SaaS mode)");
-            Arc::new(infra::postgres::PgPlanLimitChecker::new(pool.clone()))
+            Arc::new(infra::postgres::PgPlanLimitChecker::new(
+                pool.clone(),
+                analytics_recorder.clone(),
+            ))
         } else {
             tracing::info!("Plan limit enforcement DISABLED (self-hosted mode)");
             Arc::new(infra::AlwaysAllowedChecker)
@@ -472,10 +481,6 @@ async fn init_app_state(config: &Config) -> AppInit {
         tracing::info!("Voice channels DISABLED (LiveKit not configured)");
         (None, None)
     };
-
-    // Analytics recorder (growth-plan §10 funnel events, fire-and-forget).
-    let analytics_recorder: Arc<dyn domain::ports::AnalyticsRecorder> =
-        Arc::new(infra::postgres::PgAnalyticsRecorder::new(pool.clone()));
 
     tracing::info!("Domain services initialized");
 

@@ -45,6 +45,17 @@ pub enum AnalyticsEventName {
     DiscoveryViewed,
     /// A user joined a server through the directory's one-click join.
     DiscoveryJoin,
+    /// The API rejected an action on a plan gate (monetization funnel top).
+    /// Emitted server-side at the rejection site — counts every hit even
+    /// when no client ever renders the paywall.
+    PlanLimitHit,
+    /// The upgrade paywall was shown to a user (client-emitted).
+    PaywallViewed,
+    /// The paywall's upgrade CTA was clicked (client-emitted) — the
+    /// Stripe-readiness signal.
+    PaywallCtaClicked,
+    /// The paywall was dismissed without upgrading (client-emitted).
+    PaywallDismissed,
 }
 
 impl AnalyticsEventName {
@@ -63,6 +74,10 @@ impl AnalyticsEventName {
             Self::SessionConnected => "session_connected",
             Self::DiscoveryViewed => "discovery_viewed",
             Self::DiscoveryJoin => "discovery_join",
+            Self::PlanLimitHit => "plan_limit_hit",
+            Self::PaywallViewed => "paywall_viewed",
+            Self::PaywallCtaClicked => "paywall_cta_clicked",
+            Self::PaywallDismissed => "paywall_dismissed",
         }
     }
 }

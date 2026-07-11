@@ -15,10 +15,11 @@ vi.mock('@/lib/logger', () => ({
 
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+  toastApiError: vi.fn(),
 }))
 
 const { setChannelRoleAccess } = await import('@/lib/api')
-const { toast } = await import('@/lib/toast')
+const { toastApiError } = await import('@/lib/toast')
 
 const SERVER_ID = 'srv-1'
 const CHANNEL_ID = 'ch-1'
@@ -100,6 +101,6 @@ describe('useSetChannelRoleAccess', () => {
       ([key, value]) => JSON.stringify(key) === JSON.stringify(roleAccessKey) && value === previous,
     )
     expect(rollback).toBeDefined()
-    expect(toast.error).toHaveBeenCalledOnce()
+    expect(toastApiError).toHaveBeenCalledOnce()
   })
 })

@@ -1,10 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import { unfriend } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 /**
  * Remove a friend (idempotent). The realtime removal is driven by the
@@ -25,7 +24,7 @@ export function useUnfriend() {
       logger.error('unfriend_failed', {
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('friends:unfriendFailed')))
+      toastApiError(error, i18n.t('friends:unfriendFailed'))
     },
   })
 }

@@ -20,6 +20,7 @@ import search from '@/lib/locales/en/search.json'
 import serverEmojis from '@/lib/locales/en/server-emojis.json'
 import servers from '@/lib/locales/en/servers.json'
 import settings from '@/lib/locales/en/settings.json'
+import upgrade from '@/lib/locales/en/upgrade.json'
 import voice from '@/lib/locales/en/voice.json'
 import { logger } from '@/lib/logger'
 
@@ -44,6 +45,7 @@ const resources = {
     migration,
     moderation,
     settings,
+    upgrade,
     voice,
     profiles,
     search,
@@ -72,6 +74,7 @@ i18n.use(initReactI18next).init({
     'migration',
     'moderation',
     'settings',
+    'upgrade',
     'voice',
     'profiles',
     'search',

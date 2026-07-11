@@ -1,10 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import { type BanUserRequest, banMember } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 export function useBanMember(serverId: string) {
   const queryClient = useQueryClient()
@@ -27,7 +26,7 @@ export function useBanMember(serverId: string) {
         serverId,
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('members:banFailed')))
+      toastApiError(error, i18n.t('members:banFailed'))
     },
   })
 }

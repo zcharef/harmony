@@ -134,6 +134,16 @@ impl AnalyticsRecorder for FailingAnalyticsRecorder {
 // ── App state builder (mirrors mentions_polish_test.rs + voice) ─────────
 
 async fn build_app_state(pool: PgPool, analytics_recorder: Arc<dyn AnalyticsRecorder>) -> AppState {
+    // WHY AlwaysAllowedChecker: the funnel tests exercise happy paths and
+    // must never trip plan gates while seeding.
+    build_app_state_with_checker(pool, analytics_recorder, Arc::new(AlwaysAllowedChecker)).await
+}
+
+async fn build_app_state_with_checker(
+    pool: PgPool,
+    analytics_recorder: Arc<dyn AnalyticsRecorder>,
+    plan_checker: Arc<dyn harmony_api::domain::ports::PlanLimitChecker>,
+) -> AppState {
     let profile_repo: Arc<dyn harmony_api::domain::ports::ProfileRepository> =
         Arc::new(PgProfileRepository::new(pool.clone()));
     let server_repo = Arc::new(PgServerRepository::new(pool.clone()));
@@ -155,8 +165,6 @@ async fn build_app_state(pool: PgPool, analytics_recorder: Arc<dyn AnalyticsReco
     let notification_settings_repo = Arc::new(PgNotificationSettingsRepository::new(pool.clone()));
     let user_preferences_repo = Arc::new(PgUserPreferencesRepository::new(pool.clone()));
     let moderation_retry_repo = Arc::new(PgModerationRetryRepository::new(pool.clone()));
-    let plan_checker: Arc<dyn harmony_api::domain::ports::PlanLimitChecker> =
-        Arc::new(AlwaysAllowedChecker);
 
     let content_filter = Arc::new(ContentFilter::new());
     let profile_service = Arc::new(harmony_api::domain::services::ProfileService::new(
@@ -322,6 +330,10 @@ async fn build_app_state(pool: PgPool, analytics_recorder: Arc<dyn AnalyticsReco
 fn test_router(state: AppState) -> Router {
     let authenticated = Router::new()
         .route("/v1/servers", post(servers::create_server))
+        .route(
+            "/v1/analytics/events",
+            post(harmony_api::api::handlers::analytics::record_event),
+        )
         .route("/v1/servers/{id}/invites", post(invites::create_invite))
         .route("/v1/servers/{id}/members", post(invites::join_server))
         .route("/v1/channels/{id}/messages", post(messages::send_message))
@@ -865,5 +877,236 @@ async fn failing_recorder_never_fails_the_user_action() {
     assert_eq!(
         count, 1,
         "only the signup trigger event should exist for this user"
+    );
+}
+
+// ── Plan gating: plan_limit_hit + structured error (monetization §1/§3) ──
+
+/// A Free user's 4th server is rejected with the structured plan-gate
+/// error (`PLAN_LIMIT_REACHED` + `plan_gate` details) AND a `plan_limit_hit`
+/// row lands in `analytics_events` — emitted at the rejection site, so hits
+/// are counted even when no client renders the paywall.
+#[tokio::test]
+#[ignore = "requires local Postgres (Supabase) with Harmony schema"]
+async fn plan_limit_rejection_emits_plan_limit_hit_and_structured_error() {
+    let pool = test_pool().await;
+    let recorder: Arc<dyn AnalyticsRecorder> = Arc::new(PgAnalyticsRecorder::new(pool.clone()));
+    let plan_checker: Arc<dyn harmony_api::domain::ports::PlanLimitChecker> = Arc::new(
+        harmony_api::infra::postgres::PgPlanLimitChecker::new(pool.clone(), recorder.clone()),
+    );
+    let state = build_app_state_with_checker(pool.clone(), recorder, plan_checker).await;
+    let router = test_router(state);
+
+    let owner = seed_user(&pool).await;
+    let owner_jwt = sign_test_jwt(owner);
+
+    // Fill to the Free limit (3 owned servers) — sequential to avoid the
+    // COUNT-before-POST TOCTOU race.
+    for i in 1..=3 {
+        let response = router
+            .clone()
+            .oneshot(authed_post(
+                "/v1/servers",
+                &owner_jwt,
+                &serde_json::json!({ "name": format!("Gate Fill {i}") }),
+            ))
+            .await
+            .expect("create server");
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    // The 4th server trips the gate.
+    let response = router
+        .clone()
+        .oneshot(authed_post(
+            "/v1/servers",
+            &owner_jwt,
+            &serde_json::json!({ "name": "Gate Overflow" }),
+        ))
+        .await
+        .expect("create server over limit");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let body = body_json(response).await;
+    assert_eq!(body["code"], "PLAN_LIMIT_REACHED");
+    assert_eq!(body["plan_gate"]["resource"], "owned_servers");
+    assert_eq!(body["plan_gate"]["current_plan"], "free");
+    assert_eq!(body["plan_gate"]["limit"], 3);
+    assert_eq!(body["plan_gate"]["required_plan"], "supporter");
+
+    // The rejection itself is a funnel event.
+    assert_eq!(
+        wait_for_event_count(&pool, "plan_limit_hit", owner, 1).await,
+        1,
+        "plan_limit_hit event should be recorded at the rejection site"
+    );
+    let properties = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT properties FROM analytics_events
+         WHERE name = 'plan_limit_hit' AND user_id = $1
+         ORDER BY occurred_at DESC LIMIT 1",
+    )
+    .bind(owner)
+    .fetch_one(&pool)
+    .await
+    .expect("fetch plan_limit_hit row");
+    assert_eq!(properties["resource"], "owned_servers");
+    assert_eq!(properties["code"], "PLAN_LIMIT_REACHED");
+    assert_eq!(properties["plan"], "free");
+}
+
+/// A zero-limit gate (custom emoji on Free) is a `FEATURE_NOT_IN_PLAN`
+/// rejection and its `plan_limit_hit` row carries that code — exercised
+/// directly against the checker (the emoji HTTP route needs storage
+/// scaffolding this suite doesn't carry).
+#[tokio::test]
+#[ignore = "requires local Postgres (Supabase) with Harmony schema"]
+async fn zero_limit_gate_emits_feature_not_in_plan_hit() {
+    use harmony_api::domain::models::{Plan, ResourceKind, ServerId};
+    use harmony_api::domain::ports::PlanLimitChecker;
+
+    let pool = test_pool().await;
+    let recorder: Arc<dyn AnalyticsRecorder> = Arc::new(PgAnalyticsRecorder::new(pool.clone()));
+    let checker =
+        harmony_api::infra::postgres::PgPlanLimitChecker::new(pool.clone(), recorder.clone());
+    let state = build_app_state(pool.clone(), recorder).await;
+    let router = test_router(state);
+
+    let owner = seed_user(&pool).await;
+    let owner_jwt = sign_test_jwt(owner);
+    let response = router
+        .clone()
+        .oneshot(authed_post(
+            "/v1/servers",
+            &owner_jwt,
+            &serde_json::json!({ "name": "Emoji Gate Server" }),
+        ))
+        .await
+        .expect("create server");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let server = body_json(response).await;
+    let server_uuid = Uuid::parse_str(server["id"].as_str().expect("server id")).expect("uuid");
+
+    // Servers are created on the Free plan — its emoji cap is 0 (RED LINE),
+    // so the very first check must reject with the zero-limit semantics.
+    let err = checker
+        .check_emoji_limit(&ServerId(server_uuid))
+        .await
+        .expect_err("Free plan emoji check must reject");
+    match err {
+        harmony_api::domain::errors::DomainError::LimitExceeded {
+            resource,
+            plan,
+            limit,
+        } => {
+            assert_eq!(resource, ResourceKind::CustomEmoji);
+            assert_eq!(plan, Some(Plan::Free));
+            assert_eq!(limit, 0, "Free emoji cap must be zero");
+        }
+        other => panic!("Expected LimitExceeded, got {other:?}"),
+    }
+
+    assert_eq!(
+        wait_for_server_event_count(&pool, "plan_limit_hit", server_uuid, 1).await,
+        1,
+        "plan_limit_hit event should be recorded for the emoji gate"
+    );
+    let properties = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT properties FROM analytics_events
+         WHERE name = 'plan_limit_hit' AND server_id = $1
+         ORDER BY occurred_at DESC LIMIT 1",
+    )
+    .bind(server_uuid)
+    .fetch_one(&pool)
+    .await
+    .expect("fetch plan_limit_hit row");
+    assert_eq!(properties["resource"], "custom_emoji");
+    assert_eq!(properties["code"], "FEATURE_NOT_IN_PLAN");
+    assert_eq!(properties["plan"], "free");
+}
+
+// ── Client-emitted paywall events (POST /v1/analytics/events) ───────────
+
+/// The paywall trio (viewed / `cta_clicked` / dismissed) lands in
+/// `analytics_events` with the caller's user id and typed properties;
+/// non-whitelisted names are rejected (clients must not forge
+/// server-owned funnel events).
+#[tokio::test]
+#[ignore = "requires local Postgres (Supabase) with Harmony schema"]
+async fn client_paywall_events_are_recorded_and_whitelisted() {
+    let pool = test_pool().await;
+    let recorder: Arc<dyn AnalyticsRecorder> = Arc::new(PgAnalyticsRecorder::new(pool.clone()));
+    let state = build_app_state(pool.clone(), recorder).await;
+    let router = test_router(state);
+
+    let viewer = seed_user(&pool).await;
+    let viewer_jwt = sign_test_jwt(viewer);
+
+    for (name, extra) in [
+        (
+            "paywall_viewed",
+            serde_json::json!({ "recommendedPlan": "supporter" }),
+        ),
+        (
+            "paywall_cta_clicked",
+            serde_json::json!({ "targetPlan": "supporter" }),
+        ),
+        ("paywall_dismissed", serde_json::json!({})),
+    ] {
+        let mut body = serde_json::json!({
+            "name": name,
+            "resource": "custom_emoji",
+            "code": "FEATURE_NOT_IN_PLAN",
+            "currentPlan": "free",
+        });
+        for (k, v) in extra.as_object().expect("extra props") {
+            body[k] = v.clone();
+        }
+        let response = router
+            .clone()
+            .oneshot(authed_post("/v1/analytics/events", &viewer_jwt, &body))
+            .await
+            .expect("record event");
+        assert_eq!(
+            response.status(),
+            StatusCode::NO_CONTENT,
+            "recording {name} should return 204"
+        );
+        assert_eq!(
+            wait_for_event_count(&pool, name, viewer, 1).await,
+            1,
+            "{name} event should be recorded"
+        );
+    }
+
+    // Properties are persisted in snake_case with the typed values.
+    let properties = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT properties FROM analytics_events
+         WHERE name = 'paywall_cta_clicked' AND user_id = $1
+         ORDER BY occurred_at DESC LIMIT 1",
+    )
+    .bind(viewer)
+    .fetch_one(&pool)
+    .await
+    .expect("fetch paywall_cta_clicked row");
+    assert_eq!(properties["resource"], "custom_emoji");
+    assert_eq!(properties["current_plan"], "free");
+    assert_eq!(properties["target_plan"], "supporter");
+
+    // Server-owned funnel names must be rejected at deserialization.
+    let response = router
+        .clone()
+        .oneshot(authed_post(
+            "/v1/analytics/events",
+            &viewer_jwt,
+            &serde_json::json!({ "name": "server_created" }),
+        ))
+        .await
+        .expect("attempt forged event");
+    // WHY 422: ApiJson rejects unknown enum values at deserialization with
+    // Unprocessable Entity (Axum's JSON rejection), before the handler runs.
+    assert_eq!(
+        response.status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "non-whitelisted event names must be rejected"
     );
 }

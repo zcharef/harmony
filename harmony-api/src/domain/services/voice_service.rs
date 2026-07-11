@@ -135,6 +135,9 @@ impl VoiceService {
         //    check and bitrate/duration grants, eliminating the previous
         //    duplicate get_server_limits query from check_voice_concurrent).
         let limits = self.plan_checker.get_server_plan_limits(server_id).await?;
+        // WHY: the tier (None on self-hosted) rides along so a concurrent-limit
+        // rejection carries upgrade context for the client paywall.
+        let plan = self.plan_checker.get_server_plan(server_id).await?;
 
         // 5. Build display name: nickname (per-server) → display_name → username.
         let display_name = member
@@ -176,14 +179,7 @@ impl VoiceService {
         };
         let (_session, previous) = self
             .voice_repo
-            .upsert_with_limit(
-                &new_session,
-                max_concurrent,
-                // WHY: PlanLimits doesn't carry the plan name; the error
-                // message uses this for display only. Self-hosted has a
-                // 10,000 limit so this path won't trigger in practice.
-                "server".to_string(),
-            )
+            .upsert_with_limit(&new_session, max_concurrent, plan)
             .await?;
 
         // WHY: A same-channel rejoin (double-click, token refresh) returns the
@@ -798,7 +794,7 @@ mod tests {
             &self,
             session: &NewVoiceSession,
             max_concurrent: u64,
-            plan_name: String,
+            plan: Option<crate::domain::models::Plan>,
         ) -> Result<(VoiceSession, Option<VoiceSession>), DomainError> {
             let sessions = self.sessions.lock().await;
             #[allow(clippy::cast_possible_wrap)]
@@ -808,8 +804,8 @@ mod tests {
                 .count() as u64;
             if count >= max_concurrent {
                 return Err(DomainError::LimitExceeded {
-                    resource: "concurrent voice participants",
-                    plan: plan_name,
+                    resource: crate::domain::models::ResourceKind::VoiceConcurrent,
+                    plan,
                     limit: max_concurrent,
                 });
             }
@@ -967,8 +963,8 @@ mod tests {
         fn limit_exceeded() -> Self {
             Self {
                 voice_error: Some(DomainError::LimitExceeded {
-                    resource: "concurrent voice participants",
-                    plan: "free".to_string(),
+                    resource: crate::domain::models::ResourceKind::VoiceConcurrent,
+                    plan: Some(crate::domain::models::Plan::Free),
                     limit: 5,
                 }),
             }
@@ -1006,21 +1002,16 @@ mod tests {
 
         async fn check_voice_concurrent(&self, _server_id: &ServerId) -> Result<(), DomainError> {
             match &self.voice_error {
-                Some(err) => Err(DomainError::LimitExceeded {
-                    resource: match err {
-                        DomainError::LimitExceeded { resource, .. } => resource,
-                        _ => "voice",
-                    },
-                    plan: match err {
-                        DomainError::LimitExceeded { plan, .. } => plan.clone(),
-                        _ => "free".to_string(),
-                    },
-                    limit: match err {
-                        DomainError::LimitExceeded { limit, .. } => *limit,
-                        _ => 0,
-                    },
+                Some(DomainError::LimitExceeded {
+                    resource,
+                    plan,
+                    limit,
+                }) => Err(DomainError::LimitExceeded {
+                    resource: *resource,
+                    plan: *plan,
+                    limit: *limit,
                 }),
-                None => Ok(()),
+                Some(_) | None => Ok(()),
             }
         }
 
@@ -1297,7 +1288,10 @@ mod tests {
             DomainError::LimitExceeded {
                 resource, limit, ..
             } => {
-                assert_eq!(resource, "concurrent voice participants");
+                assert_eq!(
+                    resource,
+                    crate::domain::models::ResourceKind::VoiceConcurrent
+                );
                 assert_eq!(limit, 5);
             }
             other => panic!("Expected LimitExceeded, got {:?}", other),

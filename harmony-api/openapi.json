@@ -208,6 +208,56 @@
         ]
       }
     },
+    "/v1/analytics/events": {
+      "post": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Record a client-side analytics event (paywall funnel).",
+        "description": "Fire-and-forget on the server side: the insert is spawned and the\nendpoint always returns 204 on valid input — analytics must never\nblock or fail a client flow.\n\n# Errors\nReturns `ApiError` when a property exceeds the length cap or the event\nname is not client-emittable (rejected by deserialization).",
+        "operationId": "record_event",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordAnalyticsEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Event recorded"
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/auth/check-username": {
       "get": {
         "tags": [
@@ -7184,6 +7234,15 @@
           }
         }
       },
+      "ClientAnalyticsEventName": {
+        "type": "string",
+        "description": "Client-emittable analytics event names.\n\nWHY a closed enum instead of a free string: the analytics log feeds\nfunnel dashboards — letting clients write arbitrary names would let a\nhostile client forge server-owned funnel events (`server_created`, …)\nor fragment the data with typos. Only paywall UI events, which the\nserver cannot observe itself, are accepted from clients.",
+        "enum": [
+          "paywall_viewed",
+          "paywall_cta_clicked",
+          "paywall_dismissed"
+        ]
+      },
       "CohortQuery": {
         "type": "object",
         "description": "Query parameters for the not-yet-active cohort list.",
@@ -9266,6 +9325,51 @@
           }
         }
       },
+      "Plan": {
+        "type": "string",
+        "description": "Plan tier for a server (`SaaS` only — self-hosted ignores this).",
+        "enum": [
+          "free",
+          "supporter",
+          "creator"
+        ]
+      },
+      "PlanGate": {
+        "type": "object",
+        "description": "Structured plan-gate details (RFC 9457 extension member, like `upgrade_url`).\n\nWHY: The client paywall needs machine-usable facts — parsing them out of\nthe human-readable `detail` string would break on every copy change.\nField names are `snake_case` to match the established `upgrade_url`\nextension member on `ProblemDetails`.",
+        "required": [
+          "resource",
+          "current_plan",
+          "limit"
+        ],
+        "properties": {
+          "current_plan": {
+            "$ref": "#/components/schemas/Plan",
+            "description": "The plan the rejected caller is currently on."
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The current plan's limit for the resource (0 = feature not included).",
+            "minimum": 0
+          },
+          "required_plan": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Plan",
+                "description": "Lowest tier that unlocks or raises the resource. Absent when no tier\ndoes (already at the top tier's ceiling)."
+              }
+            ]
+          },
+          "resource": {
+            "type": "string",
+            "description": "Stable resource key (e.g. `custom_emoji`, `owned_servers`)."
+          }
+        }
+      },
       "PreKeyBundleResponse": {
         "type": "object",
         "description": "Pre-key bundle response for Olm session establishment.",
@@ -9320,6 +9424,13 @@
           "detail"
         ],
         "properties": {
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Machine-readable error code (`FEATURE_NOT_IN_PLAN` / `PLAN_LIMIT_REACHED`).\nOnly present on plan-gate rejections."
+          },
           "detail": {
             "type": "string"
           },
@@ -9327,6 +9438,17 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "plan_gate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlanGate",
+                "description": "Structured plan-gate details for the client paywall.\nOnly present on plan-gate rejections with a known tier."
+              }
             ]
           },
           "status": {
@@ -9495,6 +9617,54 @@
           "nudge_inactive",
           "share_progress"
         ]
+      },
+      "RecordAnalyticsEventRequest": {
+        "type": "object",
+        "description": "Request body for recording a client-side analytics event.\n\nProperties are explicit typed fields (not a free JSON bag) so no PII can\nride along — the privacy contract of `analytics_events` (IDs and small\nflags only) is enforced by the shape itself.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plan-gate code that triggered the paywall."
+          },
+          "currentPlan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The viewer's plan when the paywall fired."
+          },
+          "name": {
+            "$ref": "#/components/schemas/ClientAnalyticsEventName"
+          },
+          "recommendedPlan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The tier the paywall recommended."
+          },
+          "resource": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable resource key the paywall was shown for (e.g. `custom_emoji`)."
+          },
+          "targetPlan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The tier the CTA targets (for `paywall_cta_clicked`)."
+          }
+        },
+        "additionalProperties": false
       },
       "RedeemDesktopAuthRequest": {
         "type": "object",

@@ -3,10 +3,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import type { MessageListResponse, ReactionSummary } from '@/lib/api'
 import { addReaction } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 /**
  * WHY: Mutation hook for adding a reaction to a message.
@@ -68,7 +67,7 @@ export function useAddReaction(channelId: string) {
         channelId,
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('chat:addReactionFailed')))
+      toastApiError(error, i18n.t('chat:addReactionFailed'))
       if (context?.previousData) {
         queryClient.setQueryData(messageQueryKey, context.previousData)
       }

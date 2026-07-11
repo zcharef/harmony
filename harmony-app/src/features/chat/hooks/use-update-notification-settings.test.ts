@@ -15,6 +15,7 @@ vi.mock('@/lib/logger', () => ({
 
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
+  toastApiError: vi.fn(),
 }))
 
 vi.mock('i18next', () => ({
@@ -22,7 +23,7 @@ vi.mock('i18next', () => ({
 }))
 
 const { listNotificationSettings, updateNotificationSettings } = await import('@/lib/api')
-const { toast } = await import('@/lib/toast')
+const { toastApiError } = await import('@/lib/toast')
 const { useNotificationSettingsMap } = await import('@/features/notifications')
 const { useUpdateNotificationSettings } = await import('./use-update-notification-settings')
 
@@ -123,6 +124,6 @@ describe('useUpdateNotificationSettings', () => {
     await waitFor(() => expect(result.current.update.isError).toBe(true))
 
     await waitFor(() => expect(result.current.map.data?.[CHANNEL_ID]).toBe('all'))
-    expect(toast.error).toHaveBeenCalledOnce()
+    expect(toastApiError).toHaveBeenCalledOnce()
   })
 })

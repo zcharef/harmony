@@ -1,10 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import { deleteMessage, type ReportListResponse } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 interface DeleteReportedMessageInput {
   reportId: string
@@ -50,7 +49,7 @@ export function useDeleteReportedMessage(serverId: string) {
         serverId,
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('moderation:deleteMessageFailed')))
+      toastApiError(error, i18n.t('moderation:deleteMessageFailed'))
     },
   })
 }

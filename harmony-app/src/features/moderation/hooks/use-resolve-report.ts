@@ -1,10 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import { type ReportListResponse, type ReportStatus, resolveReport } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 interface ResolveReportInput {
   reportId: string
@@ -49,7 +48,7 @@ export function useResolveReport(serverId: string) {
         serverId,
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('moderation:resolveFailed')))
+      toastApiError(error, i18n.t('moderation:resolveFailed'))
     },
   })
 }

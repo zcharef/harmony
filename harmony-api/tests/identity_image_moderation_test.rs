@@ -159,7 +159,12 @@ fn build_deps(
 ) -> IdentityImageScanDeps {
     let server_service = Arc::new(ServerService::new(
         Arc::new(PgServerRepository::new(pool.clone())),
-        Arc::new(PgPlanLimitChecker::new(pool.clone())),
+        Arc::new(PgPlanLimitChecker::new(
+            pool.clone(),
+            std::sync::Arc::new(harmony_api::infra::postgres::PgAnalyticsRecorder::new(
+                pool.clone(),
+            )),
+        )),
         Arc::new(ContentFilter::noop()),
     ));
     let (event_bus_inner, _rx) = PgNotifyEventBus::new(Uuid::new_v4());

@@ -24,6 +24,7 @@ vi.mock('@/lib/platform', () => ({
 
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
+  toastApiError: vi.fn(),
 }))
 
 const { getPreferences, updatePreferences } = await import('@/lib/api')

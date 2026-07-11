@@ -62,6 +62,8 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         // Auth
         handlers::profiles::sync_profile,
         handlers::profiles::check_username,
+        // Analytics (client-emitted funnel events)
+        handlers::analytics::record_event,
         // Profiles
         handlers::profiles::get_my_profile,
         handlers::profiles::update_my_profile,

@@ -17,6 +17,7 @@ vi.mock('@/lib/logger', () => ({
 
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+  toastApiError: vi.fn(),
 }))
 
 vi.mock('i18next', () => ({
@@ -24,7 +25,7 @@ vi.mock('i18next', () => ({
 }))
 
 const { getPreferences, updatePreferences } = await import('@/lib/api')
-const { toast } = await import('@/lib/toast')
+const { toastApiError } = await import('@/lib/toast')
 
 function buildPreferences(
   overrides: Partial<UserPreferencesResponse> = {},
@@ -160,7 +161,7 @@ describe('useUpdatePreferences', () => {
     await waitFor(() => expect(result.current.update.isError).toBe(true))
 
     await waitFor(() => expect(result.current.preferences.data?.dndEnabled).toBe(false))
-    expect(toast.error).toHaveBeenCalledOnce()
+    expect(toastApiError).toHaveBeenCalledOnce()
   })
 
   // WHY: silent marks background (non-user-initiated) updates — a transient
@@ -177,7 +178,7 @@ describe('useUpdatePreferences', () => {
     await waitFor(() => expect(result.current.update.isError).toBe(true))
 
     await waitFor(() => expect(result.current.preferences.data?.onboardingCompleted).toBe(false))
-    expect(toast.error).not.toHaveBeenCalled()
+    expect(toastApiError).not.toHaveBeenCalled()
   })
 
   it('strips silent from the request body', async () => {

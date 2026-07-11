@@ -4,6 +4,7 @@ import { type ChangeEvent, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
+import { isPlanGateError } from '@/lib/plan-gate'
 import { useCreateEmoji } from './hooks/use-create-emoji'
 import { useDeleteEmoji } from './hooks/use-delete-emoji'
 import { useServerEmojis } from './hooks/use-server-emojis'
@@ -87,6 +88,12 @@ export function EmojiSettingsTab({ serverId }: EmojiSettingsTabProps) {
         limits: { maxBytes: EMOJI_MAX_BYTES, animatedAllowed: true },
       })
     } catch (error) {
+      // WHY: plan-gate rejections (FEATURE_NOT_IN_PLAN / PLAN_LIMIT_REACHED)
+      // open the UpgradeModal centrally — an inline error on top of it would
+      // be duplicate feedback. Everything else stays inline (ADR-045).
+      if (isPlanGateError(error)) {
+        return
+      }
       setErrorKey(errorKeyFor(error))
     }
   }

@@ -13,6 +13,7 @@ vi.mock('@/lib/logger', () => ({
 
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+  toastApiError: vi.fn(),
 }))
 
 const { banMember } = await import('@/lib/api')

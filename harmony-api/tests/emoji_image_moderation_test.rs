@@ -194,7 +194,12 @@ async fn cleanup(pool: &PgPool, user_id: &UserId, server_id: &ServerId) {
 fn emoji_service(pool: &PgPool) -> Arc<ServerEmojiService> {
     Arc::new(ServerEmojiService::new(
         Arc::new(PgServerEmojiRepository::new(pool.clone())),
-        Arc::new(PgPlanLimitChecker::new(pool.clone())),
+        Arc::new(PgPlanLimitChecker::new(
+            pool.clone(),
+            std::sync::Arc::new(harmony_api::infra::postgres::PgAnalyticsRecorder::new(
+                pool.clone(),
+            )),
+        )),
         Some("https://cdn.example.com".to_string()),
         Arc::new(ContentFilter::noop()),
     ))

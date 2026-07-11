@@ -3,12 +3,16 @@
 //! WHY: Hosted deployments enforce server-level resource limits.
 //! Reads the `servers.plan` column and counts existing resources.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use sqlx::PgPool;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Plan, PlanLimits, ResourceKind, ServerId, UserId};
-use crate::domain::ports::PlanLimitChecker;
+use crate::domain::models::{
+    AnalyticsEvent, AnalyticsEventName, Plan, PlanLimits, ResourceKind, ServerId, UserId,
+};
+use crate::domain::ports::{AnalyticsRecorder, PlanLimitChecker};
 
 use super::db_err;
 
@@ -16,12 +20,68 @@ use super::db_err;
 #[derive(Debug)]
 pub struct PgPlanLimitChecker {
     pool: PgPool,
+    /// WHY: `plan_limit_hit` is the monetization funnel's top — every gate
+    /// rejection is recorded HERE (the single place all checks converge),
+    /// so hits are counted even when no client renders the paywall.
+    analytics: Arc<dyn AnalyticsRecorder>,
 }
 
 impl PgPlanLimitChecker {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, analytics: Arc<dyn AnalyticsRecorder>) -> Self {
+        Self { pool, analytics }
+    }
+
+    /// Build the rejection error and emit `plan_limit_hit` (fire-and-forget).
+    fn reject(
+        &self,
+        resource: ResourceKind,
+        plan: Plan,
+        limit: u64,
+        server_id: Option<&ServerId>,
+        user_id: Option<&UserId>,
+    ) -> DomainError {
+        // WHY limit == 0: the plan does not include the feature at all —
+        // a different funnel signal than an exhausted nonzero allowance.
+        let code = if limit == 0 {
+            "FEATURE_NOT_IN_PLAN"
+        } else {
+            "PLAN_LIMIT_REACHED"
+        };
+
+        let mut event =
+            AnalyticsEvent::new(AnalyticsEventName::PlanLimitHit).properties(serde_json::json!({
+                "resource": resource.key(),
+                "code": code,
+                "plan": plan.as_str(),
+                "limit": limit,
+            }));
+        if let Some(server_id) = server_id {
+            event = event.server(server_id.clone());
+        }
+        if let Some(user_id) = user_id {
+            event = event.user(user_id.clone());
+        }
+
+        // WHY spawn: analytics must never fail or slow down the rejection
+        // path (ADR-027) — same contract as the API-layer `track` helper.
+        let recorder = Arc::clone(&self.analytics);
+        tokio::spawn(async move {
+            let name = event.name;
+            if let Err(error) = recorder.record(event).await {
+                tracing::warn!(
+                    event = %name,
+                    error = %error,
+                    "analytics event insert failed — event dropped"
+                );
+            }
+        });
+
+        DomainError::LimitExceeded {
+            resource,
+            plan: Some(plan),
+            limit,
+        }
     }
 
     /// Read the server's plan from the DB and return its limits.
@@ -59,11 +119,7 @@ impl PgPlanLimitChecker {
         let max = limits.limit_for(resource);
 
         if current_count >= max {
-            return Err(DomainError::LimitExceeded {
-                resource: resource.display_name(),
-                plan: plan.to_string(),
-                limit: max,
-            });
+            return Err(self.reject(resource, plan, max, Some(server_id), None));
         }
 
         Ok(())
@@ -101,11 +157,7 @@ impl PgPlanLimitChecker {
         let max = limits.limit_for(resource);
 
         if current_count >= max {
-            return Err(DomainError::LimitExceeded {
-                resource: resource.display_name(),
-                plan: plan.to_string(),
-                limit: max,
-            });
+            return Err(self.reject(resource, plan, max, None, Some(user_id)));
         }
 
         Ok(())
@@ -153,6 +205,11 @@ impl PlanLimitChecker for PgPlanLimitChecker {
     ) -> Result<PlanLimits, DomainError> {
         let (_plan, limits) = self.get_server_limits(server_id).await?;
         Ok(limits)
+    }
+
+    async fn get_server_plan(&self, server_id: &ServerId) -> Result<Option<Plan>, DomainError> {
+        let (plan, _limits) = self.get_server_limits(server_id).await?;
+        Ok(Some(plan))
     }
 
     async fn check_owned_server_limit(&self, user_id: &UserId) -> Result<(), DomainError> {
@@ -265,11 +322,13 @@ impl PlanLimitChecker for PgPlanLimitChecker {
         let (plan, limits) = self.get_server_limits(server_id).await?;
         let max = limits.max_attachments_per_message;
         if count > max {
-            return Err(DomainError::LimitExceeded {
-                resource: crate::domain::models::ResourceKind::AttachmentsPerMessage.display_name(),
-                plan: plan.to_string(),
-                limit: max,
-            });
+            return Err(self.reject(
+                ResourceKind::AttachmentsPerMessage,
+                plan,
+                max,
+                Some(server_id),
+                None,
+            ));
         }
         Ok(())
     }
@@ -282,11 +341,13 @@ impl PlanLimitChecker for PgPlanLimitChecker {
         let (plan, limits) = self.get_server_limits(server_id).await?;
         let max = limits.max_attachment_size_bytes;
         if size_bytes > max {
-            return Err(DomainError::LimitExceeded {
-                resource: "attachment bytes",
-                plan: plan.to_string(),
-                limit: max,
-            });
+            return Err(self.reject(
+                ResourceKind::AttachmentSize,
+                plan,
+                max,
+                Some(server_id),
+                None,
+            ));
         }
         Ok(())
     }

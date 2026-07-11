@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{ChannelId, NewVoiceSession, ServerId, UserId, VoiceSession};
+use crate::domain::models::{ChannelId, NewVoiceSession, Plan, ServerId, UserId, VoiceSession};
 
 /// Repository for ephemeral voice sessions (one per user, upsert semantics).
 #[async_trait]
@@ -29,11 +29,14 @@ pub trait VoiceSessionRepository: Send + Sync + std::fmt::Debug {
     ///
     /// WHY: Prevents TOCTOU race where two concurrent joins could both pass
     /// the count check before either inserts, bypassing the plan limit.
+    ///
+    /// `plan` carries the server's `SaaS` tier when known (`None` for
+    /// self-hosted) so the rejection includes upgrade context.
     async fn upsert_with_limit(
         &self,
         session: &NewVoiceSession,
         max_concurrent: u64,
-        plan_name: String,
+        plan: Option<Plan>,
     ) -> Result<(VoiceSession, Option<VoiceSession>), DomainError>;
 
     /// Find a user's active voice session (if any). One session per user (UNIQUE constraint).

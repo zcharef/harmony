@@ -2,10 +2,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import type { UserId } from '@/lib/api'
 import { createDm } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 /**
  * WHY: Wraps createDm SDK in a mutation with automatic cache invalidation
@@ -36,7 +35,7 @@ export function useCreateDm() {
       logger.error('Failed to create DM', {
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('dms:createDmFailed')))
+      toastApiError(error, i18n.t('dms:createDmFailed'))
     },
   })
 }

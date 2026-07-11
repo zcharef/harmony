@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::domain::models::{Plan, ResourceKind};
+
 /// Domain-level errors.
 ///
 /// These errors represent business logic failures, not infrastructure failures.
@@ -31,10 +33,15 @@ pub enum DomainError {
     #[error("Rate limited: {0}")]
     RateLimited(String),
 
-    #[error("Plan limit exceeded: {resource} limit of {limit} reached on {plan} plan")]
+    /// A plan-gated resource was rejected.
+    ///
+    /// `plan: None` means the rejection is not tied to a `SaaS` tier
+    /// (self-hosted deployments) — the API layer then renders a generic
+    /// limit message without upgrade details.
+    #[error("Plan limit exceeded: {} limit of {limit} reached", resource.display_name())]
     LimitExceeded {
-        resource: &'static str,
-        plan: String,
+        resource: ResourceKind,
+        plan: Option<Plan>,
         limit: u64,
     },
 }

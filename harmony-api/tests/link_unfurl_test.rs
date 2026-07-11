@@ -115,7 +115,12 @@ fn build_service(pool: &PgPool) -> Arc<MessageService> {
         Arc::new(PgMessageRepository::new(pool.clone())),
         Arc::new(PgChannelRepository::new(pool.clone())),
         Arc::new(PgMemberRepository::new(pool.clone())),
-        Arc::new(PgPlanLimitChecker::new(pool.clone())),
+        Arc::new(PgPlanLimitChecker::new(
+            pool.clone(),
+            std::sync::Arc::new(harmony_api::infra::postgres::PgAnalyticsRecorder::new(
+                pool.clone(),
+            )),
+        )),
         Arc::new(PgReactionRepository::new(pool.clone())),
         Arc::new(PgAttachmentRepository::new(pool.clone())),
         Arc::new(PgEmbedRepository::new(pool.clone())),

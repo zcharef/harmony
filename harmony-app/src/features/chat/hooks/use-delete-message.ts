@@ -3,10 +3,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import type { MessageListResponse } from '@/lib/api'
 import { deleteMessage } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 /**
  * WHY setQueryData instead of invalidateQueries: The API filters soft-deleted
@@ -59,7 +58,7 @@ export function useDeleteMessage(channelId: string, currentUserId: string) {
         channelId,
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('chat:deleteMessageFailed')))
+      toastApiError(error, i18n.t('chat:deleteMessageFailed'))
     },
   })
 }
