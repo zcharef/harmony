@@ -33,7 +33,8 @@ use harmony_api::domain::services::{ContentFilter, MessageService, SpamGuard};
 use harmony_api::infra::pg_notify_event_bus::PgNotifyEventBus;
 use harmony_api::infra::postgres::{
     PgAttachmentRepository, PgAttachmentScanRetryRepository, PgChannelRepository,
-    PgMemberRepository, PgMessageRepository, PgPlanLimitChecker, PgReactionRepository,
+    PgFriendshipRepository, PgMemberRepository, PgMessageRepository, PgPlanLimitChecker,
+    PgReactionRepository,
 };
 use harmony_api::infra::{NoopCsamMatcher, NoopImageClassifier};
 
@@ -169,6 +170,7 @@ fn build_service(pool: &PgPool) -> Arc<MessageService> {
         Arc::new(PgAttachmentRepository::new(pool.clone())),
         Arc::new(ContentFilter::new()),
         Arc::new(SpamGuard::with_enabled(false)),
+        Arc::new(PgFriendshipRepository::new(pool.clone())),
     ))
 }
 

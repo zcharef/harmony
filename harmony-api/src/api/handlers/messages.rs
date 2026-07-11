@@ -842,6 +842,50 @@ fn spawn_async_moderation(
     });
 }
 
+/// Spawn the async image content-moderation scan for a freshly-sent message
+/// (spec §c.1). The attachments were delivered `pending` (blurred); the task
+/// scans each, writes the verdict, and emits `MessageUpdated` so every reader's
+/// tile flips. Scan-before-reveal, fail-closed — an unscanned image is never
+/// revealed.
+fn spawn_attachment_moderation(
+    state: &AppState,
+    message: &MessageWithAuthor,
+    channel_id: &ChannelId,
+    server_id: &ServerId,
+) {
+    let deps = crate::api::attachment_scan::AttachmentScanDeps::from_state(state);
+    let message_id = message.message.id.clone();
+    let author_id = message.message.author_id.clone();
+    let channel_id = channel_id.clone();
+    let server_id = server_id.clone();
+    let semaphore = state.moderation_semaphore().clone();
+
+    tokio::spawn(async move {
+        // Bound concurrent scans on the shared moderation permit pool.
+        let _permit = match timeout(SEMAPHORE_TIMEOUT, semaphore.acquire_owned()).await {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_closed)) => {
+                tracing::warn!(message_id = %message_id, "attachment scan: semaphore closed — skipping");
+                return;
+            }
+            Err(_elapsed) => {
+                // Leave attachments pending; the retry sweep re-scans stragglers.
+                tracing::warn!(message_id = %message_id, "attachment scan: semaphore timeout — leaving pending for sweep");
+                return;
+            }
+        };
+
+        crate::api::attachment_scan::scan_message_attachments(
+            &deps,
+            &message_id,
+            &author_id,
+            &channel_id,
+            &server_id,
+        )
+        .await;
+    });
+}
+
 #[cfg(test)]
 mod search_param_tests {
     use super::{clamp_search_limit, parse_has_filters, validate_search_query};
@@ -929,48 +973,4 @@ mod search_param_tests {
         assert_eq!(clamp_search_limit(Some(50)), 50);
         assert_eq!(clamp_search_limit(Some(999)), 50);
     }
-}
-
-/// Spawn the async image content-moderation scan for a freshly-sent message
-/// (spec §c.1). The attachments were delivered `pending` (blurred); the task
-/// scans each, writes the verdict, and emits `MessageUpdated` so every reader's
-/// tile flips. Scan-before-reveal, fail-closed — an unscanned image is never
-/// revealed.
-fn spawn_attachment_moderation(
-    state: &AppState,
-    message: &MessageWithAuthor,
-    channel_id: &ChannelId,
-    server_id: &ServerId,
-) {
-    let deps = crate::api::attachment_scan::AttachmentScanDeps::from_state(state);
-    let message_id = message.message.id.clone();
-    let author_id = message.message.author_id.clone();
-    let channel_id = channel_id.clone();
-    let server_id = server_id.clone();
-    let semaphore = state.moderation_semaphore().clone();
-
-    tokio::spawn(async move {
-        // Bound concurrent scans on the shared moderation permit pool.
-        let _permit = match timeout(SEMAPHORE_TIMEOUT, semaphore.acquire_owned()).await {
-            Ok(Ok(permit)) => permit,
-            Ok(Err(_closed)) => {
-                tracing::warn!(message_id = %message_id, "attachment scan: semaphore closed — skipping");
-                return;
-            }
-            Err(_elapsed) => {
-                // Leave attachments pending; the retry sweep re-scans stragglers.
-                tracing::warn!(message_id = %message_id, "attachment scan: semaphore timeout — leaving pending for sweep");
-                return;
-            }
-        };
-
-        crate::api::attachment_scan::scan_message_attachments(
-            &deps,
-            &message_id,
-            &author_id,
-            &channel_id,
-            &server_id,
-        )
-        .await;
-    });
 }
