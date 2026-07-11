@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM identity_image_scan_retry\n            WHERE user_id = $1 AND image_kind = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b81903933409e04b2cd508d47b62b378624b55b74845a779ef4424fb8369574c"
+}

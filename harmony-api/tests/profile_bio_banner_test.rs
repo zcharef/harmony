@@ -16,7 +16,7 @@ use std::sync::Arc;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use harmony_api::domain::models::UserId;
+use harmony_api::domain::models::{IdentityImageModerationStatus, UserId};
 use harmony_api::domain::services::{ContentFilter, ProfileService};
 use harmony_api::infra::postgres::PgProfileRepository;
 
@@ -98,19 +98,31 @@ async fn bio_and_banner_persist_and_round_trip() {
         updated.bio.as_deref(),
         Some("Building [Harmony](https://example.com).")
     );
+    // Scan-before-reveal: a newly-set banner is staged PENDING — it is NOT the
+    // live image until an async scan clears it, so `banner_url` (the displayed
+    // field) stays cleared and the candidate lives in `pending_banner_url`.
     assert_eq!(
-        updated.banner_url.as_deref(),
+        updated.banner_url, None,
+        "new banner must not be revealed before its scan clears"
+    );
+    assert_eq!(
+        updated.pending_banner_url.as_deref(),
         Some("https://cdn.example.com/banner.png")
     );
+    assert_eq!(
+        updated.banner_moderation_status,
+        IdentityImageModerationStatus::Pending
+    );
 
-    // Re-read via get_by_id (the GET /v1/profiles/{id} path).
+    // Re-read via get_by_id (the GET /v1/profiles/{id} path): still pending.
     let fetched = svc.get_by_id(&user_id).await.expect("re-read profile");
     assert_eq!(
         fetched.bio.as_deref(),
         Some("Building [Harmony](https://example.com).")
     );
+    assert_eq!(fetched.banner_url, None);
     assert_eq!(
-        fetched.banner_url.as_deref(),
+        fetched.pending_banner_url.as_deref(),
         Some("https://cdn.example.com/banner.png")
     );
 }
@@ -134,7 +146,8 @@ async fn explicit_null_clears_bio_but_omitting_banner_preserves_it() {
     .await
     .expect("seed bio + banner");
 
-    // Clear bio (Some(None)), omit banner (None) → banner must survive.
+    // Clear bio (Some(None)), omit banner (None) → the pending banner candidate
+    // must survive (double-option patch: omitted = unchanged).
     let after = svc
         .update_profile(&user_id, None, None, None, Some(None), None)
         .await
@@ -142,9 +155,13 @@ async fn explicit_null_clears_bio_but_omitting_banner_preserves_it() {
 
     assert_eq!(after.bio, None, "explicit null must clear bio");
     assert_eq!(
-        after.banner_url.as_deref(),
+        after.pending_banner_url.as_deref(),
         Some("https://cdn.example.com/b.png"),
-        "omitted banner must be unchanged (double-option patch)"
+        "omitted banner candidate must be unchanged (double-option patch)"
+    );
+    assert_eq!(
+        after.banner_moderation_status,
+        IdentityImageModerationStatus::Pending
     );
 }
 

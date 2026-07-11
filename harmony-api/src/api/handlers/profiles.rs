@@ -13,7 +13,9 @@ use crate::api::extractors::{ApiJson, AuthUser};
 use crate::api::state::AppState;
 use crate::domain::errors::DomainError;
 use crate::domain::models::server_event::{MemberPayload, ServerEvent};
-use crate::domain::models::{AnalyticsEvent, AnalyticsEventName, UserId};
+use crate::domain::models::{
+    AnalyticsEvent, AnalyticsEventName, IdentityImageModerationStatus, UserId,
+};
 use crate::domain::services::ProfileService;
 use crate::infra::auth::AuthenticatedUser;
 
@@ -293,7 +295,7 @@ pub async fn get_my_profile(
 ) -> Result<impl IntoResponse, ApiError> {
     let profile = state.profile_service().get_by_id(&user_id).await?;
 
-    Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
+    Ok((StatusCode::OK, Json(ProfileResponse::from_self(profile))))
 }
 
 /// Update the authenticated user's profile fields (avatar, display name, custom status).
@@ -355,19 +357,34 @@ pub async fn update_my_profile(
     };
 
     // WHY: The event carries the NEW current values (a full snapshot) so every
-    // observer rehydrates the subject's identity everywhere it is cached.
+    // observer rehydrates the subject's identity everywhere it is cached. The
+    // `avatar_url`/`banner_url` here are the APPROVED (live) images — a newly-set
+    // image is NOT revealed yet (its status is `pending`); the async scan below
+    // promotes and re-emits on a clean verdict.
     state.event_bus().publish(ServerEvent::ProfileUpdated {
         sender_id: user_id.clone(),
-        user_id,
+        user_id: user_id.clone(),
         display_name: profile.display_name.clone(),
         avatar_url: profile.avatar_url.clone(),
         custom_status: profile.custom_status.clone(),
         bio: profile.bio.clone(),
         banner_url: profile.banner_url.clone(),
+        avatar_moderation_status: profile.avatar_moderation_status,
+        banner_moderation_status: profile.banner_moderation_status,
         server_ids,
     });
 
-    Ok((StatusCode::OK, Json(ProfileResponse::from(profile))))
+    // Scan-before-reveal: if this update staged a new avatar/banner as pending,
+    // kick off the async scan. It promotes (reveals) on a clean verdict or
+    // rejects (deletes + keeps the previous image) on a flag, then re-emits a
+    // ProfileUpdated so the subject's own client learns the outcome live.
+    if profile.avatar_moderation_status == IdentityImageModerationStatus::Pending
+        || profile.banner_moderation_status == IdentityImageModerationStatus::Pending
+    {
+        crate::api::identity_image_scan::spawn_identity_image_scan(&state, &user_id);
+    }
+
+    Ok((StatusCode::OK, Json(ProfileResponse::from_self(profile))))
 }
 
 /// Get any user's public profile by ID (for the profile hover card).

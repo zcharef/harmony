@@ -4,6 +4,8 @@ pub mod dto;
 pub mod errors;
 pub mod extractors;
 pub mod handlers;
+pub mod identity_image_scan;
+pub mod image_scan;
 pub mod middleware;
 pub mod openapi;
 pub mod router;

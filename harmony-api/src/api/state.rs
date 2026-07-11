@@ -10,9 +10,9 @@ use crate::domain::models::ServerId;
 use crate::domain::ports::{
     AnalyticsRecorder, AttachmentRepository, AttachmentScanRetryRepository, BanRepository,
     ChannelRepository, ContentModerator, CsamMatcher, DesktopAuthRepository, EventBus,
-    ImageClassifier, MegolmSessionRepository, MemberRepository, MessageRepository,
-    ModerationLogRepository, ModerationRetryRepository, PlanLimitChecker, ServerRepository,
-    VoiceSessionRepository,
+    IdentityImageScanRetryRepository, ImageClassifier, MegolmSessionRepository, MemberRepository,
+    MessageRepository, ModerationLogRepository, ModerationRetryRepository, PlanLimitChecker,
+    ServerRepository, StorageObjectRemover, VoiceSessionRepository,
 };
 use crate::domain::services::{
     ChannelService, DmService, FriendshipService, InviteService, KeyService, MessageService,
@@ -22,7 +22,10 @@ use crate::domain::services::{
 };
 use crate::infra::PgPresenceTracker;
 use crate::infra::klipy::KlipyClient;
-use crate::infra::postgres::{PgMigrationDashboardRepository, PgModerationLogRepository};
+use crate::infra::noop_storage_object_remover::NoopStorageObjectRemover;
+use crate::infra::postgres::{
+    PgIdentityImageScanRetryRepository, PgMigrationDashboardRepository, PgModerationLogRepository,
+};
 use crate::infra::safe_browsing::SafeBrowsingClient;
 
 /// Maximum concurrent async moderation tasks (`OpenAI` + Safe Browsing).
@@ -119,6 +122,11 @@ pub struct AppState {
     attachment_repository: Arc<dyn AttachmentRepository>,
     /// Dead-letter queue for failed image scans (fail-closed retry).
     attachment_scan_retry_repository: Arc<dyn AttachmentScanRetryRepository>,
+    /// Dead-letter queue for failed identity-image (avatar/banner) scans.
+    identity_image_scan_retry_repository: Arc<dyn IdentityImageScanRetryRepository>,
+    /// Deletes a flagged identity-image object from its bucket on rejection
+    /// (best-effort; Noop until a service-role adapter lands).
+    storage_object_remover: Arc<dyn StorageObjectRemover>,
     /// Refuse image attachments when no real CSAM matcher is configured
     /// (fail-closed hard gate). Default false while invite-only.
     attachments_require_csam_scan: bool,
@@ -190,6 +198,11 @@ impl std::fmt::Debug for AppState {
                 "attachment_scan_retry_repository",
                 &self.attachment_scan_retry_repository,
             )
+            .field(
+                "identity_image_scan_retry_repository",
+                &self.identity_image_scan_retry_repository,
+            )
+            .field("storage_object_remover", &self.storage_object_remover)
             .field(
                 "attachments_require_csam_scan",
                 &self.attachments_require_csam_scan,
@@ -287,6 +300,16 @@ impl AppState {
         let moderation_log_repository: Arc<dyn ModerationLogRepository> =
             Arc::new(PgModerationLogRepository::new(pool.clone()));
 
+        // WHY constructed here (not a positional param): the identity-image scan
+        // dead-letter queue needs only a Postgres repo over the same pool, and
+        // deletion of flagged objects is a best-effort Noop until a service-role
+        // Storage adapter lands. Keeps the large constructor signature (and its
+        // test call sites) stable, mirroring server_emoji_service above.
+        let identity_image_scan_retry_repository: Arc<dyn IdentityImageScanRetryRepository> =
+            Arc::new(PgIdentityImageScanRetryRepository::new(pool.clone()));
+        let storage_object_remover: Arc<dyn StorageObjectRemover> =
+            Arc::new(NoopStorageObjectRemover);
+
         Self {
             pool,
             jwt_secret,
@@ -328,6 +351,8 @@ impl AppState {
             csam_matcher,
             attachment_repository,
             attachment_scan_retry_repository,
+            identity_image_scan_retry_repository,
+            storage_object_remover,
             attachments_require_csam_scan,
             voice_service,
             voice_session_repository,
@@ -349,6 +374,32 @@ impl AppState {
     #[must_use]
     pub fn profile_service(&self) -> &ProfileService {
         &self.profile_service
+    }
+
+    /// Cloneable handle to the profile service (for `tokio::spawn` scan tasks).
+    #[must_use]
+    pub fn profile_service_arc(&self) -> &Arc<ProfileService> {
+        &self.profile_service
+    }
+
+    /// Cloneable handle to the server service (for `tokio::spawn` scan tasks).
+    #[must_use]
+    pub fn server_service_arc(&self) -> &Arc<ServerService> {
+        &self.server_service
+    }
+
+    /// Identity-image scan dead-letter queue (fail-closed retry).
+    #[must_use]
+    pub fn identity_image_scan_retry_repository(
+        &self,
+    ) -> &Arc<dyn IdentityImageScanRetryRepository> {
+        &self.identity_image_scan_retry_repository
+    }
+
+    /// Best-effort remover of flagged identity-image objects.
+    #[must_use]
+    pub fn storage_object_remover(&self) -> &Arc<dyn StorageObjectRemover> {
+        &self.storage_object_remover
     }
 
     /// Access the server domain service.

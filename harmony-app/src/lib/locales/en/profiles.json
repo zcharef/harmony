@@ -13,5 +13,9 @@
   "foundingTooltip": "Founding member — here since the beginning",
   "foundingLabel": "Founding member",
   "officialTooltip": "Harmony Official — verified account",
-  "officialLabel": "Harmony Official"
+  "officialLabel": "Harmony Official",
+  "avatarRejectedTitle": "Your new avatar was rejected",
+  "avatarRejectedBody": "It did not pass our content review. Your previous avatar was kept.",
+  "bannerRejectedTitle": "Your new banner was rejected",
+  "bannerRejectedBody": "It did not pass our content review. Your previous banner was kept."
 }

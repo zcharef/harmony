@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Profile, UserId};
+use crate::domain::models::{IdentityImageKind, Profile, UserId};
 
 /// Intent-based repository for user profiles.
 #[async_trait]
@@ -54,6 +54,59 @@ pub trait ProfileRepository: Send + Sync + std::fmt::Debug {
         bio: Option<Option<String>>,
         banner_url: Option<Option<String>>,
     ) -> Result<Profile, DomainError>;
+
+    /// Stage a newly-set identity image as PENDING scan (scan-before-reveal).
+    ///
+    /// Writes `pending_{kind}_url = url` and `{kind}_moderation_status =
+    /// 'pending'`, leaving the live approved `{kind}_url` UNCHANGED so other
+    /// users keep seeing the current image until the async scan clears the
+    /// candidate. Returns the updated profile.
+    async fn set_pending_image(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+        url: &str,
+    ) -> Result<Profile, DomainError>;
+
+    /// Clear an identity image outright (explicit `null` from the client).
+    ///
+    /// Clearing is always safe (there is no image to scan): sets the live
+    /// `{kind}_url = NULL`, drops any `pending_{kind}_url`, and resets
+    /// `{kind}_moderation_status = 'approved'`. Returns the updated profile.
+    async fn clear_image(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+    ) -> Result<Profile, DomainError>;
+
+    /// Promote a cleared candidate to the live image (scan verdict = clean).
+    ///
+    /// Guarded by `pending_{kind}_url = url`: if a NEWER candidate replaced this
+    /// one meanwhile, the promotion is a no-op (returns `None`) so a stale scan
+    /// never reveals a superseded image. On match: `{kind}_url = url`,
+    /// `pending_{kind}_url = NULL`, status `'approved'`, records the score.
+    async fn promote_image(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+        url: &str,
+        nsfw_score: Option<f32>,
+    ) -> Result<Option<Profile>, DomainError>;
+
+    /// Reject a cleared candidate (scan verdict = flagged).
+    ///
+    /// Guarded by `pending_{kind}_url = url` (see `promote_image`). On match:
+    /// drops `pending_{kind}_url`, status `'rejected'`, records the score. The
+    /// live `{kind}_url` is UNCHANGED — the previous approved image stays.
+    /// Returns the updated profile, or `None` if superseded. The rejection
+    /// reason is carried in structured logs/analytics, not a profile column.
+    async fn reject_image(
+        &self,
+        user_id: &UserId,
+        kind: IdentityImageKind,
+        url: &str,
+        nsfw_score: Option<f32>,
+    ) -> Result<Option<Profile>, DomainError>;
 
     /// Overwrite a user's username with a server-chosen safe value.
     ///

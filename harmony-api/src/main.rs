@@ -66,6 +66,7 @@ async fn main() {
     spawn_spam_guard_sweep(state.spam_guard().clone());
     spawn_moderation_retry_sweep(state.clone());
     spawn_attachment_scan_sweep(state.clone());
+    spawn_identity_image_scan_sweep(state.clone());
     spawn_voice_session_sweep(state.clone());
 
     // Background tasks: PG LISTEN/NOTIFY workers for cross-instance SSE + presence
@@ -719,6 +720,56 @@ fn spawn_attachment_scan_sweep(state: api::AppState) {
                 // rescan_attachment writes + clears + emits on success; on a
                 // repeat failure the dead-letter UPSERT bumps the retry count.
                 rescan_attachment(&deps, &attachment, &author_id, &retry.channel_id).await;
+            }
+        }
+    });
+}
+
+/// Spawn a background task that retries failed identity-image (avatar/banner)
+/// scans every 60s (fail-closed). Mirrors `spawn_attachment_scan_sweep`: a
+/// dead-lettered candidate stays `pending` (never revealed) until a retry
+/// resolves it. `scan_pending_identity_images` re-reads status, so a candidate
+/// already resolved out-of-band is a cheap no-op.
+fn spawn_identity_image_scan_sweep(state: api::AppState) {
+    use crate::api::identity_image_scan::{IdentityImageScanDeps, scan_pending_identity_images};
+
+    const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+    /// Maximum records to process per sweep cycle.
+    const BATCH_LIMIT: i64 = 20;
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(SWEEP_INTERVAL);
+        loop {
+            interval.tick().await;
+
+            let retry_repo = state.identity_image_scan_retry_repository();
+
+            // Saturation signal: how deep is the unmoderated backlog?
+            if let Ok(depth) = retry_repo.count_pending().await
+                && depth > 0
+            {
+                tracing::info!(
+                    dead_letter_depth = depth,
+                    "identity image scan retry backlog"
+                );
+            }
+
+            let pending = match retry_repo.list_pending(BATCH_LIMIT).await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    tracing::warn!(error = %e, "identity image scan sweep: failed to fetch pending retries");
+                    continue;
+                }
+            };
+            if pending.is_empty() {
+                continue;
+            }
+
+            let deps = IdentityImageScanDeps::from_state(&state);
+            for retry in pending {
+                // Re-scan every pending image for this user. Idempotent: a
+                // candidate no longer pending (resolved or superseded) is skipped.
+                scan_pending_identity_images(&deps, &retry.user_id).await;
             }
         }
     });

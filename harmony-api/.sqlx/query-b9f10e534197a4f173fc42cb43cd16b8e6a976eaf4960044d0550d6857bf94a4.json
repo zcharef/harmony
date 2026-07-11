@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                username,\n                display_name,\n                avatar_url,\n                status,\n                custom_status,\n                bio,\n                banner_url,\n                pending_avatar_url,\n                avatar_moderation_status::text AS \"avatar_moderation_status!\",\n                pending_banner_url,\n                banner_moderation_status::text AS \"banner_moderation_status!\",\n                EXISTS(\n                    SELECT 1 FROM user_badges ub\n                    WHERE ub.user_id = profiles.id AND ub.badge = 'founding'\n                ) AS \"is_founding!\",\n                created_at,\n                updated_at\n            FROM profiles\n            WHERE username = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "custom_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "bio",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "banner_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "pending_avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "avatar_moderation_status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "pending_banner_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "banner_moderation_status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "is_founding!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      null,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "b9f10e534197a4f173fc42cb43cd16b8e6a976eaf4960044d0550d6857bf94a4"
+}
