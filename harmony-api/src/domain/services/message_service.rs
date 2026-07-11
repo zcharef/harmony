@@ -8,12 +8,13 @@ use std::collections::{HashMap, HashSet};
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{
-    Channel, ChannelId, MentionedUser, MessageId, MessageWithAuthor, NewAttachment, Role, ServerId,
-    UserId,
+    Channel, ChannelId, EmbedId, MentionedUser, MessageId, MessageWithAuthor, NewAttachment, Role,
+    ServerId, UserId,
 };
 use crate::domain::ports::{
-    AroundWindow, AttachmentRepository, ChannelRepository, FriendshipRepository, MemberRepository,
-    MessageRepository, MessageSearchFilters, PlanLimitChecker, ReactionRepository,
+    AroundWindow, AttachmentRepository, ChannelRepository, EmbedRepository, FriendshipRepository,
+    MemberRepository, MessageRepository, MessageSearchFilters, PlanLimitChecker,
+    ReactionRepository,
 };
 use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
@@ -45,6 +46,7 @@ pub struct MessageService {
     plan_checker: Arc<dyn PlanLimitChecker>,
     reaction_repo: Arc<dyn ReactionRepository>,
     attachment_repo: Arc<dyn AttachmentRepository>,
+    embed_repo: Arc<dyn EmbedRepository>,
     content_filter: Arc<ContentFilter>,
     spam_guard: Arc<SpamGuard>,
     friendship_repo: Arc<dyn FriendshipRepository>,
@@ -74,6 +76,7 @@ impl MessageService {
         plan_checker: Arc<dyn PlanLimitChecker>,
         reaction_repo: Arc<dyn ReactionRepository>,
         attachment_repo: Arc<dyn AttachmentRepository>,
+        embed_repo: Arc<dyn EmbedRepository>,
         content_filter: Arc<ContentFilter>,
         spam_guard: Arc<SpamGuard>,
         friendship_repo: Arc<dyn FriendshipRepository>,
@@ -85,6 +88,7 @@ impl MessageService {
             plan_checker,
             reaction_repo,
             attachment_repo,
+            embed_repo,
             content_filter,
             spam_guard,
             friendship_repo,
@@ -581,6 +585,15 @@ impl MessageService {
             }
         }
 
+        // WHY: Batch-fetch link-preview embeds identically (suppressed rows
+        // are excluded by the repository query).
+        let mut embeds_map = self.embed_repo.batch_for_messages(&ids).await?;
+        for msg in &mut messages {
+            if let Some(embeds) = embeds_map.remove(&msg.message.id) {
+                msg.embeds = embeds;
+            }
+        }
+
         // WHY: Resolve mention display data for the whole page in a single
         // server-scoped query so history pills render without a members-cache
         // dependency (§2.3). Skipped entirely when no message mentions anyone.
@@ -691,6 +704,17 @@ impl MessageService {
             .await?;
         if let Some(attachments) = attachments_map.remove(message_id) {
             message.attachments = attachments;
+        }
+
+        // Embeds ride the same reload — the unfurl worker's MessageUpdated
+        // (and any later attachment-scan flip) must carry the full set so a
+        // partial payload never wipes previews client-side.
+        let mut embeds_map = self
+            .embed_repo
+            .batch_for_messages(std::slice::from_ref(message_id))
+            .await?;
+        if let Some(embeds) = embeds_map.remove(message_id) {
+            message.embeds = embeds;
         }
 
         // Resolve mentions so pills render identically to the create/edit paths.
@@ -927,7 +951,99 @@ impl MessageService {
         if let Some(attachments) = attachments_map.remove(message_id) {
             updated.attachments = attachments;
         }
+
+        // WHY: Same full-payload rule for embeds — an edit's MessageUpdated
+        // must not wipe existing link previews from every reader's cache.
+        let mut embeds_map = self
+            .embed_repo
+            .batch_for_messages(std::slice::from_ref(message_id))
+            .await?;
+        if let Some(embeds) = embeds_map.remove(message_id) {
+            updated.embeds = embeds;
+        }
         Ok(updated)
+    }
+
+    /// Suppress (remove) one link preview from a message. Allowed for the
+    /// message AUTHOR or a member holding the manage-messages permission
+    /// (moderator+, matching `delete_message`). The embed row is kept as
+    /// `suppressed` so the URL never re-unfurls for this message.
+    ///
+    /// Returns the reloaded full message for the `MessageUpdated` fan-out, or
+    /// `None` when the message vanished (soft-deleted) between the write and
+    /// the reload — the caller then skips the event.
+    ///
+    /// # Errors
+    /// - `NotFound` when the message doesn't exist, is deleted, does not
+    ///   belong to `channel_id` (path-scope binding, mirrors `edit_message`),
+    ///   or the embed doesn't exist / is already suppressed.
+    /// - `Forbidden` when the caller is neither the author nor moderator+.
+    pub async fn suppress_embed(
+        &self,
+        channel_id: &ChannelId,
+        message_id: &MessageId,
+        embed_id: &EmbedId,
+        user_id: &UserId,
+    ) -> Result<Option<MessageWithAuthor>, DomainError> {
+        let message =
+            self.repo
+                .find_by_id(message_id)
+                .await?
+                .ok_or_else(|| DomainError::NotFound {
+                    resource_type: "Message",
+                    id: message_id.to_string(),
+                })?;
+
+        // WHY 404 on channel mismatch: the path must bind to the message so
+        // the SSE event below can never fan out under an attacker-chosen
+        // channel/server scope (mirrors `edit_message`).
+        if message.channel_id != *channel_id {
+            return Err(DomainError::NotFound {
+                resource_type: "Message",
+                id: message_id.to_string(),
+            });
+        }
+
+        if message.author_id != *user_id {
+            // Non-authors need the manage-messages permission (moderator+,
+            // same gate as moderator delete).
+            let channel = self
+                .channel_repo
+                .get_by_id(channel_id)
+                .await?
+                .ok_or_else(|| DomainError::NotFound {
+                    resource_type: "Channel",
+                    id: channel_id.to_string(),
+                })?;
+            let caller_role = self
+                .member_repo
+                .get_member_role(&channel.server_id, user_id)
+                .await?
+                .ok_or_else(|| {
+                    DomainError::Forbidden(
+                        "Only the message author or a moderator can remove this preview"
+                            .to_string(),
+                    )
+                })?;
+            if caller_role.level() < Role::Moderator.level() {
+                return Err(DomainError::Forbidden(
+                    "Only the message author or a moderator can remove this preview".to_string(),
+                ));
+            }
+        }
+
+        let suppressed = self.embed_repo.suppress(message_id, embed_id).await?;
+        if !suppressed {
+            return Err(DomainError::NotFound {
+                resource_type: "Embed",
+                id: embed_id.to_string(),
+            });
+        }
+
+        // Reload the FULL message (attachments + mentions + remaining embeds)
+        // for the fan-out — a partial payload would wipe reactions/attachments
+        // in every reader's cache (the past partial-fan-out bug).
+        self.reload_for_moderation_event(message_id).await
     }
 
     /// Soft-delete a message. The author or moderator+ can delete (ADR-038).
@@ -1407,7 +1523,8 @@ mod tests {
     };
     use crate::domain::models::{
         Attachment, AttachmentId, AttachmentModerationStatus, ChannelType, EmojiVariety, Message,
-        MessageType, PlanLimits, ReactionSummary, ServerMember,
+        MessageEmbed, MessageType, NewEmbed, PlanLimits, ReactionSummary, ServerMember,
+        UnfurledPage,
     };
 
     fn pin_user_id(n: u128) -> UserId {
@@ -1510,6 +1627,7 @@ mod tests {
                 parent_message: None,
                 mentions: vec![],
                 attachments: vec![],
+                embeds: vec![],
             })
         }
 
@@ -1720,15 +1838,18 @@ mod tests {
         }
     }
 
-    /// `ChannelRepository` fake — unused by `set_pinned` (the channel is passed
-    /// in directly), so every method returns a benign default.
+    /// `ChannelRepository` fake — `set_pinned` never reads it (the channel is
+    /// passed in directly); `suppress_embed`'s moderator path reads
+    /// `get_by_id`, so the returned channel is configurable.
     #[derive(Debug)]
-    struct PinFakeChannelRepo;
+    struct PinFakeChannelRepo {
+        channel: Option<Channel>,
+    }
 
     #[async_trait]
     impl ChannelRepository for PinFakeChannelRepo {
         async fn get_by_id(&self, _channel_id: &ChannelId) -> Result<Option<Channel>, DomainError> {
-            Ok(None)
+            Ok(self.channel.clone())
         }
         async fn get_moderation_context(
             &self,
@@ -1914,6 +2035,53 @@ mod tests {
         }
     }
 
+    /// `EmbedRepository` fake — `suppress` records calls and returns the
+    /// configured outcome; the rest are inert.
+    #[derive(Debug)]
+    struct FakeEmbedRepo {
+        suppress_result: bool,
+        suppress_calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl EmbedRepository for FakeEmbedRepo {
+        async fn batch_for_messages(
+            &self,
+            _message_ids: &[MessageId],
+        ) -> Result<HashMap<MessageId, Vec<MessageEmbed>>, DomainError> {
+            Ok(HashMap::new())
+        }
+        async fn insert_embeds(
+            &self,
+            _message_id: &MessageId,
+            _embeds: &[NewEmbed],
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn suppress(
+            &self,
+            _message_id: &MessageId,
+            _embed_id: &EmbedId,
+        ) -> Result<bool, DomainError> {
+            self.suppress_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.suppress_result)
+        }
+        async fn get_cached(
+            &self,
+            _normalized_url: &str,
+            _ttl_secs: i64,
+        ) -> Result<Option<UnfurledPage>, DomainError> {
+            Ok(None)
+        }
+        async fn upsert_cache(
+            &self,
+            _normalized_url: &str,
+            _page: &UnfurledPage,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+    }
+
     /// `FriendshipRepository` fake — unused by `set_pinned`.
     #[derive(Debug)]
     struct PinFakeFriendshipRepo;
@@ -2015,15 +2183,212 @@ mod tests {
                 pinned_count,
                 set_pinned_calls,
             }),
-            Arc::new(PinFakeChannelRepo),
+            Arc::new(PinFakeChannelRepo { channel: None }),
             Arc::new(PinFakeMemberRepo { role }),
             Arc::new(PinFakePlanChecker),
             Arc::new(PinFakeReactionRepo),
             Arc::new(PinFakeAttachmentRepo),
+            Arc::new(FakeEmbedRepo {
+                suppress_result: true,
+                suppress_calls: Arc::new(AtomicUsize::new(0)),
+            }),
             Arc::new(ContentFilter::noop()),
             Arc::new(SpamGuard::new()),
             Arc::new(PinFakeFriendshipRepo),
         )
+    }
+
+    /// Build a `MessageService` wired for `suppress_embed` tests: configurable
+    /// message, caller role, channel lookup, and suppression outcome.
+    fn suppress_service(
+        message: Option<Message>,
+        role: Option<Role>,
+        channel: Option<Channel>,
+        suppress_result: bool,
+        suppress_calls: Arc<AtomicUsize>,
+    ) -> MessageService {
+        MessageService::new(
+            Arc::new(PinFakeMessageRepo {
+                message,
+                pinned_count: 0,
+                set_pinned_calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            Arc::new(PinFakeChannelRepo { channel }),
+            Arc::new(PinFakeMemberRepo { role }),
+            Arc::new(PinFakePlanChecker),
+            Arc::new(PinFakeReactionRepo),
+            Arc::new(PinFakeAttachmentRepo),
+            Arc::new(FakeEmbedRepo {
+                suppress_result,
+                suppress_calls,
+            }),
+            Arc::new(ContentFilter::noop()),
+            Arc::new(SpamGuard::new()),
+            Arc::new(PinFakeFriendshipRepo),
+        )
+    }
+
+    fn embed_id(n: u128) -> EmbedId {
+        EmbedId::new(Uuid::from_u128(n))
+    }
+
+    // ── suppress_embed business rules (authz, path binding, outcome) ──
+
+    /// The message AUTHOR may remove a preview — no role lookup needed.
+    /// (The fake reload returns `None`, so `Ok(None)` proves the suppression
+    /// write happened and the caller skips the event gracefully.)
+    #[tokio::test]
+    async fn suppress_embed_author_can_remove() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let message = pin_message(channel.id.clone(), false);
+        let author = message.author_id.clone();
+        let svc = suppress_service(Some(message), None, None, true, calls.clone());
+
+        let result = svc
+            .suppress_embed(&channel.id, &pin_message_id(7), &embed_id(1), &author)
+            .await
+            .unwrap();
+
+        assert!(result.is_none(), "fake reload yields None");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "suppression was written");
+    }
+
+    /// A moderator (manage-messages) may remove another member's preview.
+    #[tokio::test]
+    async fn suppress_embed_moderator_can_remove() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let message = pin_message(channel.id.clone(), false);
+        let svc = suppress_service(
+            Some(message),
+            Some(Role::Moderator),
+            Some(channel.clone()),
+            true,
+            calls.clone(),
+        );
+
+        svc.suppress_embed(
+            &channel.id,
+            &pin_message_id(7),
+            &embed_id(1),
+            &pin_user_id(9),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// A plain member who is NOT the author is `Forbidden` — no write.
+    #[tokio::test]
+    async fn suppress_embed_plain_member_is_forbidden() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let message = pin_message(channel.id.clone(), false);
+        let svc = suppress_service(
+            Some(message),
+            Some(Role::Member),
+            Some(channel.clone()),
+            true,
+            calls.clone(),
+        );
+
+        let err = svc
+            .suppress_embed(
+                &channel.id,
+                &pin_message_id(7),
+                &embed_id(1),
+                &pin_user_id(9),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, DomainError::Forbidden(_)), "got {err:?}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no write on rejection");
+    }
+
+    /// A non-member (no role row) is `Forbidden` too.
+    #[tokio::test]
+    async fn suppress_embed_non_member_is_forbidden() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let message = pin_message(channel.id.clone(), false);
+        let svc = suppress_service(
+            Some(message),
+            None,
+            Some(channel.clone()),
+            true,
+            calls.clone(),
+        );
+
+        let err = svc
+            .suppress_embed(
+                &channel.id,
+                &pin_message_id(7),
+                &embed_id(1),
+                &pin_user_id(9),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, DomainError::Forbidden(_)), "got {err:?}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// Path binding: a message living in another channel is `NotFound` before
+    /// any authz or write (mirrors `edit_message`/`set_pinned`).
+    #[tokio::test]
+    async fn suppress_embed_wrong_channel_is_not_found() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let message = pin_message(pin_channel_id(999), false);
+        let author = message.author_id.clone();
+        let svc = suppress_service(Some(message), None, None, true, calls.clone());
+
+        let err = svc
+            .suppress_embed(&channel.id, &pin_message_id(7), &embed_id(1), &author)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                DomainError::NotFound {
+                    resource_type: "Message",
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// Unknown / already-suppressed embed (repo returns `false`) is `NotFound`.
+    #[tokio::test]
+    async fn suppress_embed_unknown_embed_is_not_found() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let message = pin_message(channel.id.clone(), false);
+        let author = message.author_id.clone();
+        let svc = suppress_service(Some(message), None, None, false, calls.clone());
+
+        let err = svc
+            .suppress_embed(&channel.id, &pin_message_id(7), &embed_id(1), &author)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                DomainError::NotFound {
+                    resource_type: "Embed",
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "the write was attempted");
     }
 
     /// Rule 1 (authz): a moderator may pin — the flag flips and the repo writes.

@@ -31,8 +31,8 @@ use harmony_api::domain::models::{ChannelId, ServerId, UserId};
 use harmony_api::domain::ports::{MessageRepository, MessageSearchFilters};
 use harmony_api::domain::services::{ContentFilter, MessageService, SpamGuard};
 use harmony_api::infra::postgres::{
-    PgAttachmentRepository, PgChannelRepository, PgFriendshipRepository, PgMemberRepository,
-    PgMessageRepository, PgPlanLimitChecker, PgReactionRepository,
+    PgAttachmentRepository, PgChannelRepository, PgEmbedRepository, PgFriendshipRepository,
+    PgMemberRepository, PgMessageRepository, PgPlanLimitChecker, PgReactionRepository,
 };
 
 // ── DB pool (mirrors mentions_test) ──────────────────────────────────────
@@ -213,6 +213,7 @@ fn build_service(pool: &PgPool) -> MessageService {
         Arc::new(PgPlanLimitChecker::new(pool.clone())),
         Arc::new(PgReactionRepository::new(pool.clone())),
         Arc::new(PgAttachmentRepository::new(pool.clone())),
+        Arc::new(PgEmbedRepository::new(pool.clone())),
         Arc::new(ContentFilter::new()),
         Arc::new(SpamGuard::with_enabled(false)),
         Arc::new(PgFriendshipRepository::new(pool.clone())),

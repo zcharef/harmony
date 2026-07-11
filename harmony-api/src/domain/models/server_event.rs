@@ -15,11 +15,12 @@ use super::Channel;
 use super::ChannelType;
 use super::IdentityImageModerationStatus;
 use super::MentionedUser;
+use super::MessageEmbed;
 use super::MessageWithAuthor;
 use super::ServerEmoji;
 use super::UserStatus;
 use super::friendship::RequestDirection;
-use super::ids::{AttachmentId, ChannelId, EmojiId, MessageId, ServerId, UserId};
+use super::ids::{AttachmentId, ChannelId, EmbedId, EmojiId, MessageId, ServerId, UserId};
 use super::message::MessageType;
 use super::role::Role;
 use super::voice_session::VoiceAction;
@@ -74,6 +75,40 @@ impl From<Attachment> for AttachmentPayload {
     }
 }
 
+/// Slim link-preview shape for the SSE wire.
+///
+/// WHY not the full domain [`MessageEmbed`]: `message_id`/`created_at` are
+/// wire-dead weight and every byte counts against the 7500-byte `pg_notify`
+/// envelope cap (same reasoning as [`AttachmentPayload`]). Optional fields
+/// are omitted (not `null`) when absent.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedPayload {
+    pub id: EmbedId,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+}
+
+impl From<MessageEmbed> for EmbedPayload {
+    fn from(e: MessageEmbed) -> Self {
+        Self {
+            id: e.id,
+            url: e.url,
+            title: e.title,
+            description: e.description,
+            site_name: e.site_name,
+            image_url: e.image_url,
+        }
+    }
+}
+
 /// Message payload embedded in message events.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,6 +156,18 @@ pub struct MessagePayload {
     /// [`ServerEvent::shed_attachments`]) rather than dropping the event.
     #[serde(default)]
     pub attachments: Vec<AttachmentPayload>,
+    /// Link previews unfurled from URLs in the content (slim wire shape).
+    /// Rides both `message.created` (usually empty — unfurl is async) and
+    /// `message.updated` (the unfurl worker's fan-out) so every reader
+    /// renders previews live, no refetch.
+    ///
+    /// WHY `default`: same rollout reasoning as `mentions`/`attachments` — an
+    /// older instance publishes this payload WITHOUT the field over
+    /// `pg_notify`; `default` lets a new instance deserialize it (empty
+    /// embeds) instead of dropping the event. An oversize envelope sheds this
+    /// field before `pg_notify` (see [`ServerEvent::shed_embeds`]).
+    #[serde(default)]
+    pub embeds: Vec<EmbedPayload>,
     /// Whether this message is pinned in its channel. Rides `message.created`/
     /// `updated`/`pinned`/`unpinned` so every client's cache keeps `isPinned`
     /// convergent without a refetch.
@@ -147,6 +194,7 @@ impl From<MessageWithAuthor> for MessagePayload {
             .into_iter()
             .map(AttachmentPayload::from)
             .collect();
+        let embeds = mwa.embeds.into_iter().map(EmbedPayload::from).collect();
         let m = mwa.message;
         Self {
             id: m.id,
@@ -166,6 +214,7 @@ impl From<MessageWithAuthor> for MessagePayload {
             moderation_reason: m.moderation_reason,
             mentions,
             attachments,
+            embeds,
             is_pinned: m.is_pinned,
             pinned_by: m.pinned_by,
             pinned_at: m.pinned_at,
@@ -995,6 +1044,27 @@ impl ServerEvent {
             _ => false,
         }
     }
+
+    /// Drop the link-preview payload from a message event. Returns `true`
+    /// when something was actually shed.
+    ///
+    /// WHY: same 7500-byte `pg_notify` degradation as
+    /// [`ServerEvent::shed_attachments`] — previews are the lowest-value
+    /// payload on the wire, so the notify worker sheds them FIRST. Remote
+    /// readers heal on the next REST fetch/reconnect invalidation.
+    pub fn shed_embeds(&mut self) -> bool {
+        match self {
+            Self::MessageCreated { message, .. } | Self::MessageUpdated { message, .. } => {
+                if message.embeds.is_empty() {
+                    false
+                } else {
+                    message.embeds.clear();
+                    true
+                }
+            }
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1045,6 +1115,7 @@ mod tests {
                         moderation_reason: None,
                         mentions: vec![],
                         attachments: vec![],
+                        embeds: vec![],
                         is_pinned: false,
                         pinned_by: None,
                         pinned_at: None,
@@ -1176,6 +1247,7 @@ mod tests {
                 moderation_reason: None,
                 mentions: vec![],
                 attachments: vec![],
+                embeds: vec![],
                 is_pinned: false,
                 pinned_by: None,
                 pinned_at: None,
@@ -1636,6 +1708,7 @@ mod tests {
                 moderation_reason: None,
                 mentions: vec![],
                 attachments: vec![attachment.clone()],
+                embeds: vec![],
                 is_pinned: false,
                 pinned_by: None,
                 pinned_at: None,
@@ -1838,6 +1911,7 @@ mod tests {
             moderation_reason: None,
             mentions: vec![],
             attachments: vec![],
+            embeds: vec![],
             is_pinned: true,
             pinned_by: Some(test_user_id()),
             pinned_at: Some(Utc::now()),

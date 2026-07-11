@@ -56,9 +56,9 @@ pub use members::{
     TransferOwnershipRequest,
 };
 pub use messages::{
-    AttachmentResponse, EditMessageRequest, MentionedUserResponse, MessageListQuery,
-    MessageListResponse, MessageResponse, MessageSearchQuery, MessageSearchResponse,
-    NewAttachmentRequest, PinnedMessagesResponse, SendMessageRequest,
+    AttachmentResponse, EditMessageRequest, MentionedUserResponse, MessageEmbedResponse,
+    MessageListQuery, MessageListResponse, MessageResponse, MessageSearchQuery,
+    MessageSearchResponse, NewAttachmentRequest, PinnedMessagesResponse, SendMessageRequest,
 };
 pub use moderation::{
     ModerationLogListResponse, ModerationLogQuery, ModerationLogResponse, ReportListQuery,

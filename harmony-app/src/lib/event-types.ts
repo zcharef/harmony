@@ -116,6 +116,21 @@ export const messagePayloadSchema = z.object({
       }),
     )
     .optional(),
+  // WHY optional: older API instances omit the field during rollout (link
+  // previews — same rollout contract as `mentions`/`attachments`). Optional
+  // metadata keys are omitted (not null) on the wire when absent.
+  embeds: z
+    .array(
+      z.object({
+        id: z.string(),
+        url: z.string(),
+        title: z.string().nullable().optional(),
+        description: z.string().nullable().optional(),
+        siteName: z.string().nullable().optional(),
+        imageUrl: z.string().nullable().optional(),
+      }),
+    )
+    .optional(),
   // WHY optional: older API instances omit the field during rollout (pins T2.3 —
   // same rollout contract as `mentions`/`attachments`). Defaults to `false` so
   // the main-list cache keeps `isPinned` convergent when a message arrives.

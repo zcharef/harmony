@@ -179,6 +179,9 @@ async fn build_app_state(pool: PgPool, analytics_recorder: Arc<dyn AnalyticsReco
         plan_checker.clone(),
         reaction_repo.clone(),
         attachment_repo.clone(),
+        Arc::new(harmony_api::infra::postgres::PgEmbedRepository::new(
+            pool.clone(),
+        )),
         content_filter.clone(),
         spam_guard.clone(),
         friendship_repo.clone(),

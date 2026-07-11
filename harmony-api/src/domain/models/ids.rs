@@ -133,6 +133,31 @@ impl From<Uuid> for AttachmentId {
     }
 }
 
+/// Unique identifier for a message link-preview embed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(example = "330e8400-e29b-41d4-a716-44665544000d")]
+#[serde(transparent)]
+pub struct EmbedId(pub Uuid);
+
+impl EmbedId {
+    #[must_use]
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for EmbedId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for EmbedId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
 /// Unique identifier for a custom server emoji.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[schema(example = "220e8400-e29b-41d4-a716-44665544000c")]

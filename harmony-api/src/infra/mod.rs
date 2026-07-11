@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod klipy;
+pub mod link_unfurl;
 pub mod livekit;
 pub mod noop_csam_matcher;
 pub mod noop_image_classifier;

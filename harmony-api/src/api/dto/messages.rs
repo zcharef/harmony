@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::domain::models::{
-    Attachment, AttachmentId, AttachmentModerationStatus, ChannelId, MentionedUser, MessageId,
-    MessageType, MessageWithAuthor, ParentMessagePreview, ReactionSummary, UserId,
+    Attachment, AttachmentId, AttachmentModerationStatus, ChannelId, EmbedId, MentionedUser,
+    MessageEmbed, MessageId, MessageType, MessageWithAuthor, ParentMessagePreview, ReactionSummary,
+    UserId,
 };
 
 /// Request body for sending a new message.
@@ -138,6 +139,10 @@ pub struct MessageResponse {
     pub mentions: Vec<MentionedUserResponse>,
     /// Files attached to this message, in insertion order.
     pub attachments: Vec<AttachmentResponse>,
+    /// Link previews unfurled from URLs in the content, in insertion order.
+    /// Empty right after send (unfurl is async — previews arrive via
+    /// `message.updated`). Suppressed previews are never included.
+    pub embeds: Vec<MessageEmbedResponse>,
     /// Whether this message is pinned in its channel. Always present (defaults
     /// `false`) so the client always knows the state.
     pub is_pinned: bool,
@@ -185,6 +190,44 @@ impl From<Attachment> for AttachmentResponse {
     }
 }
 
+/// A link preview attached to a message (unfurled Open Graph metadata).
+///
+/// All metadata fields are plain TEXT — the client must render them as text
+/// nodes, never as HTML.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageEmbedResponse {
+    pub id: EmbedId,
+    /// The URL that was unfurled (the card's link target).
+    pub url: String,
+    /// Page title. Always present in practice (an embed without a title is
+    /// never persisted), optional for schema honesty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Page description, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Site name (`og:site_name`); the client falls back to the URL host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    /// Thumbnail URL (absolute http(s)), if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+}
+
+impl From<MessageEmbed> for MessageEmbedResponse {
+    fn from(e: MessageEmbed) -> Self {
+        Self {
+            id: e.id,
+            url: e.url,
+            title: e.title,
+            description: e.description,
+            site_name: e.site_name,
+            image_url: e.image_url,
+        }
+    }
+}
+
 /// A user mentioned in a message, resolved to display data (mirrors
 /// `MemberResponse` field naming).
 #[derive(Debug, Serialize, ToSchema)]
@@ -219,6 +262,11 @@ impl From<MessageWithAuthor> for MessageResponse {
             .into_iter()
             .map(AttachmentResponse::from)
             .collect();
+        let embeds = mwa
+            .embeds
+            .into_iter()
+            .map(MessageEmbedResponse::from)
+            .collect();
         let reactions = mwa.reactions;
         let parent_message = mwa.parent_message;
         let author_username = mwa.author_username;
@@ -246,6 +294,7 @@ impl From<MessageWithAuthor> for MessageResponse {
             moderation_reason: m.moderation_reason,
             mentions,
             attachments,
+            embeds,
             is_pinned: m.is_pinned,
             pinned_by: m.pinned_by,
             pinned_at: m.pinned_at,
@@ -397,6 +446,7 @@ mod tests {
             parent_message: None,
             mentions: vec![],
             attachments: vec![],
+            embeds: vec![],
         }
     }
 

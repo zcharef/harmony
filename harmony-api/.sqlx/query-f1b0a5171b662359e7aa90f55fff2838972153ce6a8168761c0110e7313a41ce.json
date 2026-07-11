@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE message_embeds\n            SET suppressed = true\n            WHERE id = $1 AND message_id = $2 AND suppressed = false\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f1b0a5171b662359e7aa90f55fff2838972153ce6a8168761c0110e7313a41ce"
+}

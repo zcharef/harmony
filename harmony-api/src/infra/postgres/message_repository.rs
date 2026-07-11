@@ -207,6 +207,9 @@ impl MessageWithAuthorRow {
             // WHY: Attachments are set by the send_to_channel transaction on
             // write and batch-fetched by MessageService on read paths.
             attachments: vec![],
+            // WHY: Embeds are written by the async unfurl worker and
+            // batch-fetched by MessageService on read paths.
+            embeds: vec![],
         }
     }
 }

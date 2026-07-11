@@ -10,6 +10,7 @@
 use crate::domain::models::Attachment;
 use crate::domain::models::MentionedUser;
 use crate::domain::models::Message;
+use crate::domain::models::MessageEmbed;
 use crate::domain::models::ParentMessagePreview;
 use crate::domain::models::ReactionSummary;
 
@@ -40,4 +41,9 @@ pub struct MessageWithAuthor {
     /// `send_to_channel` transaction on write and by
     /// `AttachmentRepository::batch_for_messages` on read (mirrors `reactions`).
     pub attachments: Vec<Attachment>,
+    /// Link previews unfurled from URLs in the content, insertion order.
+    /// Written by the async unfurl worker AFTER the message commits; read via
+    /// `EmbedRepository::batch_for_messages` (mirrors `attachments`).
+    /// Suppressed previews are never present.
+    pub embeds: Vec<MessageEmbed>,
 }

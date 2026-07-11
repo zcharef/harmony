@@ -59,6 +59,17 @@ export function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>)
       ...a,
       moderationStatus: a.moderationStatus ?? 'pending',
     })),
+    // WHY: Link previews ride the same payload — the unfurl worker's
+    // message.updated carries the resolved embeds so cards appear live, no
+    // refetch. Default to [] for older instances that omit the field.
+    embeds: (payload.embeds ?? []).map((e) => ({
+      id: e.id,
+      url: e.url,
+      title: e.title ?? undefined,
+      description: e.description ?? undefined,
+      siteName: e.siteName ?? undefined,
+      imageUrl: e.imageUrl ?? undefined,
+    })),
     // WHY: pin state rides the payload so the main-list cache keeps `isPinned`
     // convergent when a message arrives/updates. Defaults to false for older
     // instances that omit the field during rollout (spec §5.1).

@@ -144,28 +144,35 @@ fn bounded_payload(envelope: &mut NotifyEnvelope) -> Option<String> {
     }
 
     let full_bytes = payload.len();
-    if envelope.e.shed_attachments() {
+
+    // Degradation ladder: shed embeds first (lowest-value payload — previews
+    // heal on the next REST fetch), then attachments. Stop at the first stage
+    // that brings the envelope under the cap.
+    type ShedFn = fn(&mut ServerEvent) -> bool;
+    let shed_stages: [(&str, ShedFn); 2] = [
+        ("embeds", ServerEvent::shed_embeds),
+        ("attachments", ServerEvent::shed_attachments),
+    ];
+    for (label, shed) in shed_stages {
+        if !shed(&mut envelope.e) {
+            continue;
+        }
         match serde_json::to_string(envelope) {
             Ok(degraded) if degraded.len() <= MAX_PG_NOTIFY_PAYLOAD => {
                 // WHY warn, not error: graceful degradation — the event is
-                // still delivered cross-instance, minus attachments (ADR-046).
+                // still delivered cross-instance, minus this payload (ADR-046).
                 tracing::warn!(
                     payload_bytes = full_bytes,
                     degraded_bytes = degraded.len(),
                     max_bytes = MAX_PG_NOTIFY_PAYLOAD,
                     event_type = envelope.e.event_name(),
-                    "notify payload exceeded pg limit — shed attachments for cross-instance delivery"
+                    shed = label,
+                    "notify payload exceeded pg limit — shed payload for cross-instance delivery"
                 );
                 return Some(degraded);
             }
-            Ok(degraded) => {
-                tracing::error!(
-                    payload_bytes = degraded.len(),
-                    max_bytes = MAX_PG_NOTIFY_PAYLOAD,
-                    event_type = envelope.e.event_name(),
-                    "notify payload exceeds pg limit even after shedding attachments — skipping"
-                );
-                return None;
+            Ok(_still_oversize) => {
+                // Fall through to the next shed stage (or the terminal error).
             }
             Err(err) => {
                 tracing::error!(
@@ -182,7 +189,7 @@ fn bounded_payload(envelope: &mut NotifyEnvelope) -> Option<String> {
         payload_bytes = full_bytes,
         max_bytes = MAX_PG_NOTIFY_PAYLOAD,
         event_type = envelope.e.event_name(),
-        "notify payload exceeds pg limit — skipping"
+        "notify payload exceeds pg limit even after shedding — skipping"
     );
     None
 }
@@ -411,6 +418,7 @@ mod tests {
                 moderation_reason: None,
                 mentions: vec![],
                 attachments,
+                embeds: vec![],
                 is_pinned: false,
                 pinned_by: None,
                 pinned_at: None,

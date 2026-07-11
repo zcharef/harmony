@@ -9,7 +9,7 @@ use tokio::sync::Semaphore;
 use crate::domain::models::ServerId;
 use crate::domain::ports::{
     AnalyticsRecorder, AttachmentRepository, AttachmentScanRetryRepository, BanRepository,
-    ChannelRepository, ContentModerator, CsamMatcher, DesktopAuthRepository,
+    ChannelRepository, ContentModerator, CsamMatcher, DesktopAuthRepository, EmbedRepository,
     EmojiImageScanRetryRepository, EventBus, IdentityImageScanRetryRepository, ImageClassifier,
     MegolmSessionRepository, MemberRepository, MessageRepository, ModerationLogRepository,
     ModerationRetryRepository, PlanLimitChecker, ServerRepository, StorageObjectRemover,
@@ -23,6 +23,7 @@ use crate::domain::services::{
 };
 use crate::infra::PgPresenceTracker;
 use crate::infra::klipy::KlipyClient;
+use crate::infra::link_unfurl::LinkUnfurler;
 use crate::infra::noop_storage_object_remover::NoopStorageObjectRemover;
 use crate::infra::postgres::{
     PgEmojiImageScanRetryRepository, PgIdentityImageScanRetryRepository,
@@ -122,6 +123,10 @@ pub struct AppState {
     csam_matcher: Arc<dyn CsamMatcher>,
     /// Attachment repository — the async scan task's moderation-status writer.
     attachment_repository: Arc<dyn AttachmentRepository>,
+    /// Embed repository — the async unfurl task's writer + suppression path.
+    embed_repository: Arc<dyn EmbedRepository>,
+    /// SSRF-safe link unfurler (outbound OG fetcher) for the async task.
+    link_unfurler: Arc<LinkUnfurler>,
     /// Dead-letter queue for failed image scans (fail-closed retry).
     attachment_scan_retry_repository: Arc<dyn AttachmentScanRetryRepository>,
     /// Dead-letter queue for failed identity-image (avatar/banner) scans.
@@ -198,6 +203,8 @@ impl std::fmt::Debug for AppState {
             .field("image_classifier", &self.image_classifier)
             .field("csam_matcher", &self.csam_matcher)
             .field("attachment_repository", &self.attachment_repository)
+            .field("embed_repository", &self.embed_repository)
+            .field("link_unfurler", &self.link_unfurler)
             .field(
                 "attachment_scan_retry_repository",
                 &self.attachment_scan_retry_repository,
@@ -318,6 +325,15 @@ impl AppState {
         // test call sites) stable, mirroring server_emoji_service above.
         let identity_image_scan_retry_repository: Arc<dyn IdentityImageScanRetryRepository> =
             Arc::new(PgIdentityImageScanRetryRepository::new(pool.clone()));
+
+        // WHY constructed here (not positional params): the async unfurl task
+        // needs only a Postgres repo over the same pool and a config-less
+        // SSRF-safe fetcher — wiring both internally keeps the large
+        // constructor signature (and its many test call sites) stable,
+        // mirroring migration_service/server_emoji_service above.
+        let embed_repository: Arc<dyn EmbedRepository> =
+            Arc::new(crate::infra::postgres::PgEmbedRepository::new(pool.clone()));
+        let link_unfurler = Arc::new(LinkUnfurler::new());
         let emoji_image_scan_retry_repository: Arc<dyn EmojiImageScanRetryRepository> =
             Arc::new(PgEmojiImageScanRetryRepository::new(pool.clone()));
         let storage_object_remover: Arc<dyn StorageObjectRemover> =
@@ -363,6 +379,8 @@ impl AppState {
             image_classifier,
             csam_matcher,
             attachment_repository,
+            embed_repository,
+            link_unfurler,
             attachment_scan_retry_repository,
             identity_image_scan_retry_repository,
             emoji_image_scan_retry_repository,
@@ -650,6 +668,18 @@ impl AppState {
     #[must_use]
     pub fn attachment_scan_retry_repository(&self) -> &Arc<dyn AttachmentScanRetryRepository> {
         &self.attachment_scan_retry_repository
+    }
+
+    /// Access the embed repository (unfurl writer + suppression path).
+    #[must_use]
+    pub fn embed_repository(&self) -> &Arc<dyn EmbedRepository> {
+        &self.embed_repository
+    }
+
+    /// Access the SSRF-safe link unfurler (for the async unfurl task).
+    #[must_use]
+    pub fn link_unfurler(&self) -> &Arc<LinkUnfurler> {
+        &self.link_unfurler
     }
 
     /// Whether image attachments must be refused when no real CSAM matcher is

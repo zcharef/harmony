@@ -341,6 +341,7 @@ async fn init_app_state(config: &Config) -> AppInit {
         plan_limit_checker.clone(),
         reaction_repo.clone(),
         attachment_repo,
+        Arc::new(infra::postgres::PgEmbedRepository::new(pool.clone())),
         content_filter.clone(),
         spam_guard.clone(),
         friendship_repo.clone(),
