@@ -131,22 +131,55 @@ export async function previewInvite(
   return (await res.json()) as { serverId: string; serverName: string; memberCount: number }
 }
 
+type SentMessage = { id: string; content: string; createdAt: string }
+
+/**
+ * POST a message, transparently retrying the per-plan rate limit (429).
+ *
+ * WHY: Specs seed bursts of messages as a single author into one channel. The
+ * Free-plan limit (5 messages / 5s per channel+author, enforced by
+ * `PgPlanLimitChecker`) 429s the burst. The limiter is working as designed —
+ * `plan-limits.spec.ts` asserts enforcement stays ON, so we cannot disable it
+ * globally. Instead the seeding self-heals by honouring `Retry-After` (default
+ * 5s) and retrying, capped so a genuine outage still fails fast.
+ */
+async function postChannelMessage(
+  token: string,
+  channelId: string,
+  body: Record<string, unknown>,
+  label: string,
+): Promise<SentMessage> {
+  const MAX_RETRIES = 6
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(body),
+    })
+    if (res.ok) {
+      return (await res.json()) as SentMessage
+    }
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      const header = res.headers.get('retry-after')
+      const parsed = header === null ? Number.NaN : Number.parseInt(header, 10)
+      const waitSecs = Number.isNaN(parsed) ? 5 : parsed
+      await new Promise((resolve) => setTimeout(resolve, waitSecs * 1000))
+      continue
+    }
+    const errBody = await res.text()
+    throw new Error(`${label} failed: ${res.status} ${errBody}`)
+  }
+  // Unreachable: the loop returns on success or throws on a non-retryable / exhausted error.
+  throw new Error(`${label} failed: exhausted ${MAX_RETRIES} rate-limit retries`)
+}
+
 /** POST /v1/channels/{id}/messages — send a message to a channel. */
 export async function sendMessage(
   token: string,
   channelId: string,
   content: string,
-): Promise<{ id: string; content: string; createdAt: string }> {
-  const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: JSON.stringify({ content }),
-  })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`sendMessage failed: ${res.status} ${body}`)
-  }
-  return (await res.json()) as { id: string; content: string; createdAt: string }
+): Promise<SentMessage> {
+  return postChannelMessage(token, channelId, { content }, 'sendMessage')
 }
 
 /**
@@ -158,17 +191,8 @@ export async function sendReply(
   channelId: string,
   content: string,
   parentMessageId: string,
-): Promise<{ id: string; content: string; createdAt: string }> {
-  const res = await fetch(`${API_URL}/v1/channels/${channelId}/messages`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: JSON.stringify({ content, parentMessageId }),
-  })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`sendReply failed: ${res.status} ${body}`)
-  }
-  return (await res.json()) as { id: string; content: string; createdAt: string }
+): Promise<SentMessage> {
+  return postChannelMessage(token, channelId, { content, parentMessageId }, 'sendReply')
 }
 
 /**
