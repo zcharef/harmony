@@ -1,19 +1,20 @@
 //! In-process `ONNX` adult-NSFW image classifier (Phase 2).
 //!
 //! Implements the [`ImageClassifier`] port with a bundled binary `ViT` model
-//! (`Marqo/nsfw-image-detection-384`, Apache-2.0) run in-process via ONNX
-//! Runtime (`ort`). The model is loaded **once** at startup and shared behind an
-//! `Arc`; inference for each attachment runs on a blocking thread so it never
-//! stalls the async runtime.
+//! (`Falconsai/nsfw_image_detection`, Apache-2.0), shipped as the pre-converted
+//! `onnx-community/nsfw_image_detection-ONNX` artifact and run in-process via
+//! ONNX Runtime (`ort`). The model is loaded **once** at startup and shared
+//! behind an `Arc`; inference for each attachment runs on a blocking thread so
+//! it never stalls the async runtime.
 //!
 //! **This detects LEGAL adult porn vs clean — it does NOT detect CSAM.** CSAM is
 //! a separate hash-matching concern ([`CsamMatcher`](crate::domain::ports::CsamMatcher)).
 //!
-//! Preprocessing mirrors the model card
-//! (`config.json`: `image_input_size=[3,384,384]`, `mean=std=0.5`, `id2label`
-//! `0=NSFW`, `1=SFW`): decode → resize to 384×384 → normalize to `[-1, 1]` →
+//! Preprocessing mirrors the model's `preprocessor_config.json`
+//! (`size=224×224`, bilinear `resample`, `image_mean=image_std=0.5`, `id2label`
+//! `0=normal`, `1=nsfw`): decode → resize to 224×224 → normalize to `[-1, 1]` →
 //! `NCHW` `f32` tensor. The two output logits are soft-maxed; the NSFW
-//! probability (index 0) is the score. `<0.5` → `Clean`, otherwise `Nsfw`
+//! probability (index 1) is the score. `<0.5` → `Clean`, otherwise `Nsfw`
 //! (spec §d Phase 2); the raw score is persisted server-side and the decision
 //! table maps the label to a status.
 
@@ -29,13 +30,13 @@ use tokio::sync::Mutex;
 use crate::domain::errors::DomainError;
 use crate::domain::ports::{ImageClassifier, NsfwLabel, NsfwVerdict};
 
-/// Model input spatial size (`Marqo/nsfw-image-detection-384` → 384×384).
-const INPUT_SIZE: u32 = 384;
-/// Pixels per channel plane (`384 * 384`), for `NCHW` buffer indexing.
-const PLANE: usize = 384 * 384;
-/// Per-channel normalization mean (model `preprocessing_config`, all channels).
+/// Model input spatial size (`Falconsai/nsfw_image_detection` `ViT` → 224×224).
+const INPUT_SIZE: u32 = 224;
+/// Pixels per channel plane (`224 * 224`), for `NCHW` buffer indexing.
+const PLANE: usize = 224 * 224;
+/// Per-channel normalization mean (model `preprocessor_config`, all channels).
 const NORM_MEAN: f32 = 0.5;
-/// Per-channel normalization std (model `preprocessing_config`, all channels).
+/// Per-channel normalization std (model `preprocessor_config`, all channels).
 const NORM_STD: f32 = 0.5;
 /// Score at/above which raw bytes are labelled adult-NSFW (spec §d Phase 2:
 /// `<0.5` → clean; `0.5-0.85` and `>=0.85` both treated as NSFW → single label
@@ -102,11 +103,22 @@ impl OnnxNsfwClassifier {
                 DomainError::ExternalService("ONNX model exposes no outputs".to_string())
             })?;
 
+        // File size proves a REAL model shipped (not a 0-byte placeholder); it is
+        // the load-bearing signal for "real model vs Noop" in the Fly logs. The
+        // model already loaded (`commit_from_file` above), so a metadata failure
+        // here is cosmetic — but warn! so a logged `0` is never mistaken for the
+        // 0-byte placeholder operators watch for (ADR-027: no silent failures).
+        let model_bytes = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or_else(|e| {
+            tracing::warn!(model_path, error = %e, "nsfw model loaded but size unreadable");
+            0
+        });
+
         tracing::info!(
             model_path,
+            model_bytes,
             input_name,
             output_name,
-            "loaded ONNX adult-NSFW classifier"
+            "nsfw classifier: loaded ONNX model — adult-NSFW detection ACTIVE"
         );
         Ok(Self {
             session: Arc::new(Mutex::new(session)),
@@ -131,8 +143,9 @@ impl ImageClassifier for OnnxNsfwClassifier {
         // (dedicated blocking thread; the guard never crosses an `.await`).
         let score = tokio::task::spawn_blocking(move || -> Result<f32, DomainError> {
             let input = preprocess(&bytes)?;
+            let dim = INPUT_SIZE as usize;
             let tensor =
-                Tensor::from_array(([1_usize, 3, 384, 384], input)).map_err(|e| onnx_err(&e))?;
+                Tensor::from_array(([1_usize, 3, dim, dim], input)).map_err(|e| onnx_err(&e))?;
             let mut session = session.blocking_lock();
             let outputs = session
                 .run(ort::inputs![input_name.as_str() => tensor])
@@ -182,13 +195,14 @@ fn preprocess(bytes: &[u8]) -> Result<Vec<f32>, DomainError> {
     let decoded = image::load_from_memory(bytes)
         .map_err(|e| DomainError::ExternalService(format!("image decode failed: {e}")))?;
     let rgb = decoded.to_rgb8();
-    // Full-image resize (model `crop_pct = 1.0`, i.e. no crop). CatmullRom is a
-    // cubic filter, the closest stable analogue to the card's `bicubic`.
+    // Full-image resize to the model's square input (no crop). `Triangle` is a
+    // linear filter — the direct analogue of the preprocessor's `resample=2`
+    // (PIL `BILINEAR`), keeping Rust preprocessing in lockstep with the model.
     let resized = image::imageops::resize(
         &rgb,
         INPUT_SIZE,
         INPUT_SIZE,
-        image::imageops::FilterType::CatmullRom,
+        image::imageops::FilterType::Triangle,
     );
 
     // `as_raw` is row-major RGB (HWC), length `3 * PLANE`. Rearrange to CHW and
@@ -205,16 +219,17 @@ fn preprocess(bytes: &[u8]) -> Result<Vec<f32>, DomainError> {
     Ok(data)
 }
 
-/// Soft-max the two output logits `[NSFW, SFW]` and return the NSFW probability
-/// (`id2label`: index 0 = NSFW). Numerically stable (subtracts the max).
+/// Soft-max the two output logits `[normal, nsfw]` and return the NSFW
+/// probability (`id2label`: index 1 = nsfw). Numerically stable (subtracts the
+/// max).
 ///
 /// # Errors
 /// Returns [`DomainError::ExternalService`] if the model did not produce exactly
 /// two logits (a wrong/corrupt model) — fail-closed, the attachment stays
 /// `pending` rather than silently scoring off the wrong output shape.
 fn nsfw_score(logits: &[f32]) -> Result<f32, DomainError> {
-    let (&nsfw_logit, &sfw_logit) = match logits {
-        [nsfw, sfw] => (nsfw, sfw),
+    let (&normal_logit, &nsfw_logit) = match logits {
+        [normal, nsfw] => (normal, nsfw),
         _ => {
             return Err(DomainError::ExternalService(format!(
                 "expected exactly 2 output logits, got {}",
@@ -222,10 +237,10 @@ fn nsfw_score(logits: &[f32]) -> Result<f32, DomainError> {
             )));
         }
     };
-    let max = nsfw_logit.max(sfw_logit);
+    let max = normal_logit.max(nsfw_logit);
+    let e_normal = (normal_logit - max).exp();
     let e_nsfw = (nsfw_logit - max).exp();
-    let e_sfw = (sfw_logit - max).exp();
-    Ok(e_nsfw / (e_nsfw + e_sfw))
+    Ok(e_nsfw / (e_normal + e_nsfw))
 }
 
 #[cfg(test)]
@@ -273,16 +288,16 @@ mod tests {
 
     #[test]
     fn nsfw_score_high_when_nsfw_logit_dominates() {
-        // logits [nsfw, sfw] = [10, 0] → ~1.0 NSFW probability.
-        let score = nsfw_score(&[10.0, 0.0]).expect("score");
+        // logits [normal, nsfw] = [0, 10] → ~1.0 NSFW probability.
+        let score = nsfw_score(&[0.0, 10.0]).expect("score");
         assert!(score > 0.99, "expected ~1.0, got {score}");
         assert!(score >= NSFW_LABEL_THRESHOLD);
     }
 
     #[test]
-    fn nsfw_score_low_when_sfw_logit_dominates() {
-        // logits [nsfw, sfw] = [0, 10] → ~0.0 NSFW probability → Clean.
-        let score = nsfw_score(&[0.0, 10.0]).expect("score");
+    fn nsfw_score_low_when_normal_logit_dominates() {
+        // logits [normal, nsfw] = [10, 0] → ~0.0 NSFW probability → Clean.
+        let score = nsfw_score(&[10.0, 0.0]).expect("score");
         assert!(score < 0.01, "expected ~0.0, got {score}");
         assert!(score < NSFW_LABEL_THRESHOLD);
     }
