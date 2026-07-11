@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type UserSettingsTab = 'profile' | 'notifications'
+export type UserSettingsTab = 'profile' | 'notifications' | 'desktop'
 
 interface SettingsUiState {
   showServerSettings: boolean

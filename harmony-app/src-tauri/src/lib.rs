@@ -39,7 +39,10 @@ pub fn run() {
             // The single-instance plugin with "deep-link" feature forwards
             // the URL to the existing process via onOpenUrl instead.
             // Focus the existing window so the user sees the app respond.
+            // WHY show(): with close-to-tray the window may be hidden — a deep
+            // link must bring it back, not just focus an invisible window.
             if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
@@ -87,6 +90,31 @@ pub fn run() {
             crypto::megolm::megolm_get_session_key,
         ])
         .setup(|app| {
+            // WHY in setup (desktop-gated) instead of .plugin() on the builder:
+            // these plugins are desktop-only (Cargo desktop target section) —
+            // registering them here keeps the builder chain compiling for all
+            // targets without per-plugin cfg noise.
+            #[cfg(desktop)]
+            {
+                // WHY no with_handler: shortcuts are registered from the
+                // frontend (use-push-to-talk.ts) — the JS register() callback
+                // receives Pressed/Released events through the plugin's
+                // default dispatch.
+                app.handle()
+                    .plugin(tauri_plugin_global_shortcut::Builder::new().build())?;
+                // WHY: restores window size/position/maximized across launches.
+                // tauri.conf.json values remain the first-launch defaults.
+                app.handle()
+                    .plugin(tauri_plugin_window_state::Builder::default().build())?;
+                // WHY LaunchAgent: standard macOS login-item mechanism; no
+                // launch args needed. Enable/disable is driven by the user
+                // setting in the frontend (default OFF — never auto-enabled).
+                app.handle().plugin(tauri_plugin_autostart::init(
+                    tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                    None,
+                ))?;
+            }
+
             // WHY: After relaunch() from the updater plugin, macOS may start the
             // new process in the background. Explicitly focusing the main window
             // ensures the app comes to the foreground after an update restart.

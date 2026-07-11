@@ -1,15 +1,18 @@
 import { useEffect } from 'react'
 import { useTotalUnread } from '@/features/channels'
 import { logger } from '@/lib/logger'
-import { isTauri } from '@/lib/platform'
+import { renderOverlayBadgePng } from '@/lib/overlay-badge'
+import { isTauri, isWindows } from '@/lib/platform'
 
 /**
- * Sets the macOS dock icon badge count to the total unread count.
+ * Sets the dock/taskbar unread indicator to the total unread count.
  *
- * WHY: Desktop users need an at-a-glance indicator on the dock/taskbar icon.
- * Uses Tauri's built-in setBadgeCount() which maps to NSDockTile on macOS.
- * On Windows this is a no-op (Tauri handles gracefully). On Linux, behavior
- * depends on the desktop environment.
+ * WHY two per-OS paths (explicit, never fall through):
+ * - macOS/Linux: Tauri's setBadgeCount() maps to NSDockTile on macOS; on
+ *   Linux behavior depends on the desktop environment.
+ * - Windows: setBadgeCount() is unsupported — the taskbar equivalent is
+ *   setOverlayIcon() with a small canvas-generated count badge, cleared
+ *   with `undefined` when unread drops to 0.
  *
  * Follows the same isTauri() guard + dynamic import pattern as use-app-updater.ts.
  */
@@ -22,8 +25,24 @@ export function useDockBadge(): void {
     async function updateBadge() {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        // WHY: undefined clears the badge on macOS. setBadgeCount is a
-        // silent no-op on Windows (Tauri returns Ok(())).
+
+        if (isWindows()) {
+          // WHY <= 0: a desynced unread store must clear the badge, never
+          // render a negative count.
+          if (totalUnread <= 0) {
+            // WHY undefined: clears the overlay icon per the Tauri API contract.
+            await getCurrentWindow().setOverlayIcon(undefined)
+            return
+          }
+          const png = renderOverlayBadgePng(totalUnread)
+          // WHY null check: canvas failure is already logged in the renderer;
+          // keep the previous overlay rather than clearing a valid indicator.
+          if (png === null) return
+          await getCurrentWindow().setOverlayIcon(png)
+          return
+        }
+
+        // WHY: undefined clears the badge on macOS.
         await getCurrentWindow().setBadgeCount(totalUnread > 0 ? totalUnread : undefined)
       } catch (err: unknown) {
         // WHY: Background operation — fail silently (ADR-045).
@@ -33,6 +52,6 @@ export function useDockBadge(): void {
       }
     }
 
-    updateBadge()
+    void updateBadge()
   }, [totalUnread])
 }

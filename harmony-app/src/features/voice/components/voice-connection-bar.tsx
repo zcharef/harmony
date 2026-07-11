@@ -93,6 +93,7 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
   const isKrispEnabled = useVoiceConnectionStore((s) => s.isKrispEnabled)
   const isPttMode = useVoiceConnectionStore((s) => s.isPttMode)
   const pttShortcut = useVoiceConnectionStore((s) => s.pttShortcut)
+  const pttRegisterError = useVoiceConnectionStore((s) => s.pttRegisterError)
   const togglePttMode = useVoiceConnectionStore((s) => s.togglePttMode)
   const toggleKrisp = useVoiceConnectionStore((s) => s.toggleKrisp)
   // WHY: Use the hook's leaveVoice instead of store.disconnect so the API
@@ -151,6 +152,14 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
                 data-test="voice-device-fallback-notice"
               >
                 {t(fallbackNoticeKey(deviceFallbacks))}
+              </p>
+            )}
+
+            {/* WHY: Mirrors the device-fallback notice above — a PTT hotkey
+             * that failed to bind must not be a silent no-op (ADR-028). */}
+            {pttRegisterError !== null && (
+              <p className="mb-1 px-1 text-xs text-warning" data-test="voice-ptt-error">
+                {t('pttShortcutFailed', { shortcut: pttRegisterError })}
               </p>
             )}
 

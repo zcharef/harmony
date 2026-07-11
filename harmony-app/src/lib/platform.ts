@@ -12,6 +12,15 @@ export function isTauri(): boolean {
 }
 
 /**
+ * Returns true on Windows. Used to pick per-OS Tauri APIs (e.g. taskbar
+ * overlay icon vs dock badge) without pulling in the plugin-os dependency
+ * for a single boolean.
+ */
+export function isWindows(): boolean {
+  return typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
+}
+
+/**
  * Opens a URL in the system browser.
  *
  * WHY: Tauri blocks `<a target="_blank">` — links do nothing unless opened via

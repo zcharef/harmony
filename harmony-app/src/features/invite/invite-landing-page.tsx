@@ -19,6 +19,7 @@ import { LoginPage, useAuthStore } from '@/features/auth'
 import { useServers } from '@/features/server-nav'
 import type { InvitePreviewResponse } from '@/lib/api'
 import { getApiErrorDetail } from '@/lib/api-error'
+import { isTauri } from '@/lib/platform'
 import { useAcceptInvite } from './hooks/use-accept-invite'
 import { isInviteNotFound, useInvitePreview } from './hooks/use-invite-preview'
 import { clearInviteIntent, hasInviteIntent, recordInviteIntent } from './lib/invite-intent'
@@ -144,6 +145,19 @@ export function InviteLandingPage({ code, onDone }: InviteLandingPageProps) {
               onAccept={handleAccept}
               onAlreadyMember={handleAlreadyMember}
             />
+          )}
+
+          {/* WHY web only: inside Tauri this page IS the desktop app — the
+              link would be a no-op loop. The harmony:// scheme is registered
+              by the desktop install; browsers no-op cleanly when it isn't. */}
+          {preview.isSuccess && !isTauri() && (
+            <a
+              href={`harmony://invite/${code}`}
+              className="text-center text-xs text-default-400 underline-offset-2 hover:underline"
+              data-test="invite-open-in-app"
+            >
+              {t('openInDesktopApp')}
+            </a>
           )}
         </CardBody>
       </Card>

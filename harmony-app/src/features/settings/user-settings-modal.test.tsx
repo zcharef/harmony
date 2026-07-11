@@ -59,6 +59,12 @@ vi.mock('@/features/notifications', () => ({
   NotificationSettingsTab: () => <div data-test="stub-notifications-tab" />,
 }))
 
+// WHY mockable: the Desktop tab is Tauri-only — tests flip this per case.
+const { isTauriMock } = vi.hoisted(() => ({ isTauriMock: vi.fn(() => false) }))
+vi.mock('@/lib/platform', () => ({
+  isTauri: () => isTauriMock(),
+}))
+
 vi.mock('./stores/settings-ui-store', () => ({
   useSettingsUiStore: (
     selector: (s: {
@@ -122,5 +128,21 @@ describe('UserSettingsModal username field', () => {
     const displayName = screen.getByTestId('profile-display-name-input')
     expect(displayName).toHaveProperty('readOnly', false)
     expect(displayName).toHaveProperty('value', 'Zayed')
+  })
+})
+
+describe('UserSettingsModal desktop tab gating', () => {
+  it('hides the Desktop tab on the web', () => {
+    isTauriMock.mockReturnValue(false)
+    render(<UserSettingsModal />)
+
+    expect(screen.queryByTestId('user-settings-tab-desktop')).toBeNull()
+  })
+
+  it('shows the Desktop tab inside the Tauri shell', () => {
+    isTauriMock.mockReturnValue(true)
+    render(<UserSettingsModal />)
+
+    expect(screen.getByTestId('user-settings-tab-desktop')).toBeTruthy()
   })
 })

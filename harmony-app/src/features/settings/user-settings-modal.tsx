@@ -30,6 +30,8 @@ import { NotificationSettingsTab } from '@/features/notifications'
 import type { ProfileResponse } from '@/lib/api'
 import { getApiErrorDetail } from '@/lib/api-error'
 import { resolveDisplayName } from '@/lib/display-name'
+import { isTauri } from '@/lib/platform'
+import { DesktopSettingsTab } from './desktop-settings-tab'
 import { type UserSettingsTab, useSettingsUiStore } from './stores/settings-ui-store'
 
 const DISPLAY_NAME_MAX = 32
@@ -107,7 +109,7 @@ export function UserSettingsModal() {
             selectedKey={selectedTab}
             onSelectionChange={(key) => {
               const tab: UserSettingsTab | null =
-                key === 'profile' || key === 'notifications' ? key : null
+                key === 'profile' || key === 'notifications' || key === 'desktop' ? key : null
               if (tab !== null) setUserSettingsTab(tab)
             }}
             aria-label={t('userSettingsTitle')}
@@ -122,6 +124,13 @@ export function UserSettingsModal() {
             >
               <NotificationSettingsTab />
             </Tab>
+            {/* WHY isTauri gate: tray/autostart are desktop-shell behaviors —
+                the web app has nothing to configure here. */}
+            {isTauri() && (
+              <Tab key="desktop" title={t('tabDesktop')} data-test="user-settings-tab-desktop">
+                <DesktopSettingsTab />
+              </Tab>
+            )}
           </Tabs>
         </ModalBody>
       </ModalContent>

@@ -1,6 +1,6 @@
 import { HeroUIProvider, Spinner, ToastProvider } from '@heroui/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { FeatureErrorBoundary } from '@/components/shared/error-boundary'
 import { UpdateNotification } from '@/components/shared/update-notification'
@@ -18,7 +18,10 @@ import { useAppUpdater } from '@/hooks/use-app-updater'
 import { useDockBadge } from '@/hooks/use-dock-badge'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { useFaviconBadge } from '@/hooks/use-favicon-badge'
+import { useSystemTray } from '@/hooks/use-system-tray'
 import { getInviteCodeFromPath } from '@/lib/invite-path'
+import { logger } from '@/lib/logger'
+import { isTauri } from '@/lib/platform'
 import { ROUTES } from '@/lib/routes'
 
 const queryClient = new QueryClient({
@@ -53,14 +56,68 @@ function AppContent() {
   // notification never appears on the login page.
   const isLoggedIn = !isLoading && session !== null
   const update = useAppUpdater(isLoggedIn)
+  // WHY here (not MainLayout): the tray and close-to-tray must exist on the
+  // login screen too — AppContent never unmounts (CLAUDE.md 4.6).
+  useSystemTray()
 
   // WHY: /invite/:code is the only "route" rendered outside the main shell
   // (the app has no client-side router — ADR-033 constants + location checks).
   // `inviteResult` flips once the flow finishes so the shell can mount with
   // the joined server preselected.
-  const inviteCode = getInviteCodeFromPath(window.location.pathname)
+  // WHY deepLinkInviteCode state: harmony://invite/<code> deep links arrive
+  // as events, not as the initial pathname — state is what re-renders the
+  // shell into the invite flow when the desktop app is already running.
+  const [deepLinkInviteCode, setDeepLinkInviteCode] = useState<string | null>(null)
   const [inviteResult, setInviteResult] = useState<{ serverId: string | null } | null>(null)
+  const inviteCode = deepLinkInviteCode ?? getInviteCodeFromPath(window.location.pathname)
   const isInviteFlow = inviteCode !== null && inviteResult === null
+
+  useEffect(() => {
+    if (!isTauri()) return
+
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+
+    function handleInviteDeepLink(code: string) {
+      // WHY reset inviteResult: a second invite link after a finished
+      // flow must re-open the landing page, not be swallowed.
+      setDeepLinkInviteCode(code)
+      setInviteResult(null)
+      // WHY: the window may be hidden in the tray — an invite click must
+      // bring the app back (background op, log-only on failure).
+      import('@tauri-apps/api/window')
+        .then(({ getCurrentWindow }) => {
+          const win = getCurrentWindow()
+          return win.show().then(() => win.setFocus())
+        })
+        .catch((err: unknown) => {
+          logger.warn('invite_deep_link_focus_failed', {
+            error: err instanceof Error ? err.message : String(err),
+          })
+        })
+    }
+
+    async function setupInviteListener() {
+      const { listenForInviteDeepLinks } = await import('@/features/invite')
+      const stop = await listenForInviteDeepLinks(handleInviteDeepLink)
+      if (cancelled) {
+        stop()
+      } else {
+        unlisten = stop
+      }
+    }
+
+    setupInviteListener().catch((err: unknown) => {
+      logger.error('invite_deep_link_listener_setup_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
+
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [])
 
   // WHY useCallback: this is an effect dependency inside InviteLandingPage
   // (intent auto-join) — a fresh reference on every AppContent render would
@@ -69,6 +126,7 @@ function AppContent() {
     // WHY replaceState: leave /invite/:code without a reload and without
     // polluting history — Back must not re-trigger the join flow.
     window.history.replaceState(null, '', ROUTES.home())
+    setDeepLinkInviteCode(null)
     setInviteResult({ serverId })
   }, [])
 

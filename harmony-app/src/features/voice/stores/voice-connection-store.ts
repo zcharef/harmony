@@ -47,6 +47,11 @@ interface VoiceConnectionState {
   /** WHY: Tauri global shortcut string for PTT. Default is Space —
    * standard in gaming/voice apps. Only used when isPttMode is true. */
   pttShortcut: string
+  /** WHY: The shortcut that failed to register globally (e.g. taken by
+   * another app), or null when registration is healthy. Enabling PTT is a
+   * user-initiated action — a dead hotkey must surface inline in the voice
+   * bar, never be a silent no-op (ADR-028). */
+  pttRegisterError: string | null
 
   /** WHY: Survives room recreation (token refresh). Without these, a new Room()
    * defaults to system audio devices, losing the user's selection mid-call.
@@ -72,6 +77,7 @@ interface VoiceConnectionState {
   setPttMicEnabled: (enabled: boolean) => void
   togglePttMode: () => void
   setPttShortcut: (shortcut: string) => void
+  setPttRegisterError: (shortcut: string | null) => void
   setPreferredDevice: (kind: AudioDeviceKind, deviceId: string) => void
   clearDeviceFallback: () => void
   reset: () => void
@@ -91,6 +97,7 @@ const INITIAL_STATE = {
   isKrispEnabled: true,
   isPttMode: false,
   pttShortcut: 'Space',
+  pttRegisterError: null,
   // WHY: Hydrated once at module init so a fresh session restores the devices
   // the user picked last time (restorePreferredDevices applies them on connect).
   preferredAudioInputId: loadPreferredDeviceId('audioinput'),
@@ -834,7 +841,10 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
   togglePttMode: () => {
     const { room, isPttMode } = get()
     const nextPttMode = !isPttMode
-    set({ isPttMode: nextPttMode })
+    // WHY clear the register error on every toggle: turning PTT off removes
+    // the failing registration; turning it on retries and will re-set the
+    // error if it still fails.
+    set({ isPttMode: nextPttMode, pttRegisterError: null })
     // WHY: When PTT is toggled ON, mute the mic so the user must hold the key
     // to speak. When toggled OFF, unmute to return to normal voice mode.
     if (room !== null) {
@@ -849,7 +859,13 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
   },
 
   setPttShortcut: (shortcut) => {
-    set({ pttShortcut: shortcut })
+    // WHY clear the error: it references the OLD shortcut — the register
+    // effect re-runs for the new one and re-sets the error if still failing.
+    set({ pttShortcut: shortcut, pttRegisterError: null })
+  },
+
+  setPttRegisterError: (shortcut) => {
+    set({ pttRegisterError: shortcut })
   },
 
   setPreferredDevice: (kind, deviceId) => {
