@@ -45,6 +45,8 @@ primary_region = "cdg"  # Paris — closest to Supabase eu-west-3
   strategy = "rolling"
 
 [[vm]]
-  memory = "512mb"
+  # 1GB (not 512MB): the in-process ONNX NSFW classifier loads an ~87MB model
+  # at startup; 512MB left no headroom. Keep in sync with `fly scale memory`.
+  memory = "1024mb"
   cpu_kind = "shared"
   cpus = 1
