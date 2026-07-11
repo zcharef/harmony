@@ -149,14 +149,16 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     // Vanity URL:
     //   Creator only.
 
-    // ── TODO(plan-limits-v3): §9 — Emoji (per server) ───────────────────
-    //
-    // async fn check_emoji_limit(&self, server_id: &ServerId) -> Result<(), DomainError>;
-    //
-    //   Free: 0 custom (RED LINE — NEVER increase), 10 reactions/msg.
-    //   Supporter: 100 custom, 512KB, animated, 20 reactions/msg.
-    //   Creator: 500 custom, 1MB, animated, 50 reactions/msg.
-    // Implement when EmojiService is created.
+    /// Check if the server can add another custom emoji. (§9)
+    ///
+    /// RED LINE: Free's cap is **0**, so every Free POST fails here — custom
+    /// emoji is a paid feature and this must never be relaxed.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::LimitExceeded` when the emoji count equals or
+    /// exceeds the plan limit, or `DomainError::Internal` on infrastructure failure.
+    async fn check_emoji_limit(&self, server_id: &ServerId) -> Result<(), DomainError>;
 
     /// Check if the user can open another DM conversation. (§10, per-user)
     ///

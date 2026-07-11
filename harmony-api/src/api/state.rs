@@ -16,8 +16,8 @@ use crate::domain::ports::{
 use crate::domain::services::{
     ChannelService, DmService, FriendshipService, InviteService, KeyService, MessageService,
     MigrationService, ModerationService, NotificationSettingsService, ProfileService,
-    ReactionService, ReadStateService, ServerService, SpamGuard, UserPreferencesService,
-    VoiceService,
+    ReactionService, ReadStateService, ServerEmojiService, ServerService, SpamGuard,
+    UserPreferencesService, VoiceService,
 };
 use crate::infra::PgPresenceTracker;
 use crate::infra::klipy::KlipyClient;
@@ -59,6 +59,8 @@ pub struct AppState {
     dm_service: Arc<DmService>,
     /// Friendship domain service (friend requests, unfriend, blocks).
     friendship_service: Arc<FriendshipService>,
+    /// Custom server-emoji domain service (create/list/delete).
+    server_emoji_service: Arc<ServerEmojiService>,
     /// Key distribution domain service (E2EE device keys and pre-key bundles).
     key_service: Arc<KeyService>,
     /// Reaction domain service (add/remove message reactions).
@@ -148,6 +150,7 @@ impl std::fmt::Debug for AppState {
             .field("moderation_service", &self.moderation_service)
             .field("dm_service", &self.dm_service)
             .field("friendship_service", &self.friendship_service)
+            .field("server_emoji_service", &self.server_emoji_service)
             .field("key_service", &self.key_service)
             .field("reaction_service", &self.reaction_service)
             .field("read_state_service", &self.read_state_service)
@@ -260,6 +263,18 @@ impl AppState {
             Arc::new(PgMigrationDashboardRepository::new(pool.clone())),
         ));
 
+        // WHY constructed here (not a positional param): the emoji service needs
+        // only a Postgres repo over the same pool, the shared plan checker, and
+        // the already-derived storage origin — wiring it internally keeps the
+        // large constructor signature (and its many test call sites) stable.
+        let server_emoji_service = Arc::new(ServerEmojiService::new(
+            Arc::new(crate::infra::postgres::PgServerEmojiRepository::new(
+                pool.clone(),
+            )),
+            plan_limit_checker.clone(),
+            attachment_url_origin.clone(),
+        ));
+
         Self {
             pool,
             jwt_secret,
@@ -273,6 +288,7 @@ impl AppState {
             moderation_service,
             dm_service,
             friendship_service,
+            server_emoji_service,
             key_service,
             reaction_service,
             read_state_service,
@@ -362,6 +378,12 @@ impl AppState {
     #[must_use]
     pub fn friendship_service(&self) -> &FriendshipService {
         &self.friendship_service
+    }
+
+    /// Access the custom server-emoji domain service.
+    #[must_use]
+    pub fn server_emoji_service(&self) -> &ServerEmojiService {
+        &self.server_emoji_service
     }
 
     /// Access the key distribution domain service (E2EE).

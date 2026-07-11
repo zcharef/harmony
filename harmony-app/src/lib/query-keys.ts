@@ -33,6 +33,7 @@ export const queryKeys = {
     roles: (serverId: string) => ['servers', serverId, 'roles'] as const,
     invites: (serverId: string) => ['servers', serverId, 'invites'] as const,
     bans: (serverId: string) => ['servers', serverId, 'bans'] as const,
+    emojis: (serverId: string) => ['servers', serverId, 'emojis'] as const,
     moderation: (serverId: string) => ['servers', serverId, 'moderation'] as const,
     migrationProgress: (serverId: string) =>
       ['servers', serverId, 'migration', 'progress'] as const,

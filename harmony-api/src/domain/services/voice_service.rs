@@ -975,6 +975,10 @@ mod tests {
             Ok(())
         }
 
+        async fn check_emoji_limit(&self, _server_id: &ServerId) -> Result<(), DomainError> {
+            Ok(())
+        }
+
         async fn get_server_plan_limits(
             &self,
             _server_id: &ServerId,

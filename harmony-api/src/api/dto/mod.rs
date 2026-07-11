@@ -18,6 +18,7 @@ pub mod pagination;
 pub mod profiles;
 pub mod read_states;
 pub mod serde_helpers;
+pub mod server_emojis;
 pub mod servers;
 pub mod user_preferences;
 pub mod voice;
@@ -64,4 +65,5 @@ pub use profiles::{
     CheckUsernameQuery, CheckUsernameResponse, ProfileResponse, UpdateProfileRequest,
 };
 pub use read_states::{ChannelReadStateResponse, MarkReadRequest};
+pub use server_emojis::{CreateEmojiRequest, EmojiListResponse, EmojiResponse};
 pub use servers::{CreateServerRequest, ServerListResponse, ServerResponse, UpdateServerRequest};

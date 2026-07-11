@@ -11,8 +11,10 @@ use crate::domain::ports::{
 use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::spam_guard::SpamGuard;
 
-/// Maximum emoji length in characters.
-const MAX_EMOJI_LENGTH: usize = 32;
+/// Maximum emoji length in characters. Raised 32→64 to admit custom-emoji
+/// reaction keys of the form `:name:` (name ≤ 32 ⇒ up to 34 chars); the DB
+/// `message_reactions_emoji_length` CHECK was raised to match.
+const MAX_EMOJI_LENGTH: usize = 64;
 
 /// Maximum DISTINCT emoji per message. Adding to an already-present emoji
 /// stays allowed at the cap (it doesn't increase variety).

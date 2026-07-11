@@ -15,9 +15,10 @@ use super::Channel;
 use super::ChannelType;
 use super::MentionedUser;
 use super::MessageWithAuthor;
+use super::ServerEmoji;
 use super::UserStatus;
 use super::friendship::RequestDirection;
-use super::ids::{AttachmentId, ChannelId, MessageId, ServerId, UserId};
+use super::ids::{AttachmentId, ChannelId, EmojiId, MessageId, ServerId, UserId};
 use super::message::MessageType;
 use super::role::Role;
 use super::voice_session::VoiceAction;
@@ -282,6 +283,34 @@ pub struct FriendPayload {
     pub friends_since: DateTime<Utc>,
 }
 
+/// Custom-emoji payload embedded in `EmojiCreated`. Server-wide metadata visible
+/// to every member — carries no routing scope (see the variant docs).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmojiPayload {
+    pub id: EmojiId,
+    pub server_id: ServerId,
+    pub name: String,
+    pub url: String,
+    pub is_animated: bool,
+    pub created_by: UserId,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<ServerEmoji> for EmojiPayload {
+    fn from(e: ServerEmoji) -> Self {
+        Self {
+            id: e.id,
+            server_id: e.server_id,
+            name: e.name,
+            url: e.url,
+            is_animated: e.is_animated,
+            created_by: e.created_by,
+            created_at: e.created_at,
+        }
+    }
+}
+
 /// Bounded routing metadata: the roles explicitly granted access to a PRIVATE
 /// channel (its `channel_role_access` rows). Attached to message/reaction/typing
 /// events so the SSE layer can gate delivery by channel access, not by server
@@ -494,6 +523,24 @@ pub enum ServerEvent {
         user_id: UserId,
     },
 
+    // ── Custom emoji (server-scoped, no channel_access) ──────
+    /// A custom emoji was created. Server-scoped broadcast so every member's
+    /// `:name:` tokens resolve live. Carries the full payload (ADR-SSE-003); no
+    /// `channel_access` (emoji are server-wide, not channel-private) and nothing
+    /// to redact — the simplest event class.
+    EmojiCreated {
+        sender_id: UserId,
+        server_id: ServerId,
+        emoji: EmojiPayload,
+    },
+    /// A custom emoji was deleted. Members drop it from their resolution map so
+    /// `:name:` degrades to literal text (Discord-parity).
+    EmojiDeleted {
+        sender_id: UserId,
+        server_id: ServerId,
+        emoji_id: EmojiId,
+    },
+
     // ── Profiles (user-scoped, not server-scoped) ────────────
     /// A user's public profile changed (display name / avatar / custom status /
     /// bio / banner). Carries the NEW current values so every observer can
@@ -670,6 +717,8 @@ impl ServerEvent {
             Self::FriendRemoved { .. } => "friend.removed",
             Self::BlockCreated { .. } => "block.created",
             Self::BlockRemoved { .. } => "block.removed",
+            Self::EmojiCreated { .. } => "emoji.created",
+            Self::EmojiDeleted { .. } => "emoji.deleted",
             Self::ProfileUpdated { .. } => "profile.updated",
             Self::TypingStarted { .. } => "typing.started",
             Self::PresenceChanged { .. } => "presence.changed",
@@ -708,6 +757,8 @@ impl ServerEvent {
             | Self::FriendRemoved { sender_id, .. }
             | Self::BlockCreated { sender_id, .. }
             | Self::BlockRemoved { sender_id, .. }
+            | Self::EmojiCreated { sender_id, .. }
+            | Self::EmojiDeleted { sender_id, .. }
             | Self::ProfileUpdated { sender_id, .. }
             | Self::TypingStarted { sender_id, .. }
             | Self::PresenceChanged { sender_id, .. }
@@ -744,6 +795,8 @@ impl ServerEvent {
             | Self::ReactionRemoved { server_id, .. }
             | Self::VoiceStateUpdate { server_id, .. }
             | Self::MentionReceived { server_id, .. }
+            | Self::EmojiCreated { server_id, .. }
+            | Self::EmojiDeleted { server_id, .. }
             | Self::ForceDisconnect { server_id, .. } => Some(server_id),
             Self::DmCreated { .. }
             | Self::FriendRequestCreated { .. }
@@ -791,6 +844,8 @@ impl ServerEvent {
             | Self::PresenceChanged { .. }
             | Self::ReactionAdded { .. }
             | Self::ReactionRemoved { .. }
+            | Self::EmojiCreated { .. }
+            | Self::EmojiDeleted { .. }
             | Self::VoiceStateUpdate { .. } => None,
         }
     }
@@ -831,6 +886,8 @@ impl ServerEvent {
             | Self::FriendRemoved { .. }
             | Self::BlockCreated { .. }
             | Self::BlockRemoved { .. }
+            | Self::EmojiCreated { .. }
+            | Self::EmojiDeleted { .. }
             | Self::ProfileUpdated { .. }
             | Self::PresenceChanged { .. }
             | Self::MentionReceived { .. }
@@ -879,6 +936,8 @@ impl ServerEvent {
             | Self::FriendRemoved { .. }
             | Self::BlockCreated { .. }
             | Self::BlockRemoved { .. }
+            | Self::EmojiCreated { .. }
+            | Self::EmojiDeleted { .. }
             | Self::MentionReceived { .. }
             | Self::ForceDisconnect { .. } => {}
         }
@@ -1831,5 +1890,51 @@ mod tests {
             !json.contains("displayName"),
             "absent display name must be omitted: {json}"
         );
+    }
+
+    /// Both emoji variants name correctly and are server-scoped broadcasts with
+    /// no target, no channel access, and a no-op redaction (the six-match cover).
+    #[test]
+    fn emoji_events_are_server_scoped_broadcasts() {
+        let server = test_server_id();
+        let created = ServerEvent::EmojiCreated {
+            sender_id: test_user_id(),
+            server_id: server.clone(),
+            emoji: EmojiPayload {
+                id: EmojiId::new(Uuid::new_v4()),
+                server_id: server.clone(),
+                name: "party".to_string(),
+                url: "https://x.supabase.co/storage/v1/object/public/server-emojis/s/p.png"
+                    .to_string(),
+                is_animated: false,
+                created_by: test_user_id(),
+                created_at: Utc::now(),
+            },
+        };
+        let deleted = ServerEvent::EmojiDeleted {
+            sender_id: test_user_id(),
+            server_id: server.clone(),
+            emoji_id: EmojiId::new(Uuid::new_v4()),
+        };
+
+        for (event, name) in [(&created, "emoji.created"), (&deleted, "emoji.deleted")] {
+            assert_eq!(event.event_name(), name);
+            assert_eq!(event.server_id(), Some(&server), "{name} is server-scoped");
+            assert!(event.target_user_id().is_none(), "{name} is a broadcast");
+            assert!(
+                event.channel_access().is_none(),
+                "{name} has no channel scope"
+            );
+        }
+
+        // Redaction is a no-op and the tagged-union round-trips in camelCase.
+        let mut redacted = created;
+        redacted.redact_routing_metadata();
+        let json = serde_json::to_value(&redacted).unwrap();
+        assert_eq!(json["type"], "emojiCreated");
+        assert_eq!(json["emoji"]["name"], "party");
+        assert_eq!(json["emoji"]["isAnimated"], false);
+        let back: ServerEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(back.event_name(), "emoji.created");
     }
 }

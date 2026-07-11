@@ -19,6 +19,7 @@ pub mod presence;
 pub mod profiles;
 pub mod reactions;
 pub mod read_states;
+pub mod server_emojis;
 pub mod servers;
 pub mod typing;
 pub mod user_preferences;

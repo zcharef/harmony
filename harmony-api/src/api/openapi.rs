@@ -13,11 +13,12 @@ use super::dto::{
     BanUserRequest, ChannelListResponse, ChannelReadStateResponse, ChannelResponse,
     ChannelRoleAccessResponse, CheckUsernameQuery, CheckUsernameResponse, ClaimedKeyResponse,
     CreateChannelRequest, CreateDesktopAuthRequest, CreateDesktopAuthResponse, CreateDmRequest,
-    CreateInviteRequest, CreateMegolmSessionRequest, CreateServerRequest, DeviceListResponse,
-    DeviceResponse, DmLastMessageResponse, DmListItem, DmListQuery, DmListResponse,
-    DmRecipientResponse, DmResponse, EditMessageRequest, GifItem, GifListResponse, GifSearchQuery,
-    GifTrendingQuery, InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse,
-    MarkReadRequest, MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
+    CreateEmojiRequest, CreateInviteRequest, CreateMegolmSessionRequest, CreateServerRequest,
+    DeviceListResponse, DeviceResponse, DmLastMessageResponse, DmListItem, DmListQuery,
+    DmListResponse, DmRecipientResponse, DmResponse, EditMessageRequest, EmojiListResponse,
+    EmojiResponse, GifItem, GifListResponse, GifSearchQuery, GifTrendingQuery,
+    InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse, MarkReadRequest,
+    MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
     MentionedUserResponse, MessageListQuery, MessageListResponse, MessageResponse,
     MessageSearchQuery, MessageSearchResponse, NewAttachmentRequest, OfficialBadgeGrantRequest,
     OfficialBadgesResponse, OneTimeKeyDto, PinnedMessagesResponse, PreKeyBundleResponse,
@@ -30,8 +31,8 @@ use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
 use crate::domain::models::{
     AttachmentId, AttachmentModerationStatus, CategoryId, ChannelId, ChannelType, DeviceId,
-    DeviceKeyId, InviteCode, MegolmSessionId, MessageId, MessageType, OneTimeKeyId, ServerId,
-    UserId, UserStatus, VoiceAction,
+    DeviceKeyId, EmojiId, InviteCode, MegolmSessionId, MessageId, MessageType, OneTimeKeyId,
+    ServerId, UserId, UserStatus, VoiceAction,
 };
 use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
 
@@ -76,6 +77,10 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         handlers::channels::get_channel_role_access,
         handlers::channels::set_channel_role_access,
         handlers::channels::create_megolm_session,
+        // Custom server emoji
+        handlers::server_emojis::list_server_emojis,
+        handlers::server_emojis::create_server_emoji,
+        handlers::server_emojis::delete_server_emoji,
         // Invites
         handlers::invites::create_invite,
         handlers::invites::preview_invite,
@@ -178,6 +183,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             OneTimeKeyId,
             DeviceId,
             MegolmSessionId,
+            EmojiId,
             // Domain enums
             UserStatus,
             ChannelType,
@@ -247,6 +253,10 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             ReactionSummary,
             Reactor,
             ParentMessagePreview,
+            // Custom emoji DTOs
+            CreateEmojiRequest,
+            EmojiResponse,
+            EmojiListResponse,
             // GIF DTOs (Klipy proxy)
             GifItem,
             GifListResponse,
@@ -326,6 +336,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         (name = "Moderation", description = "Server moderation (bans, kicks)"),
         (name = "Messages", description = "Messaging within channels"),
         (name = "Reactions", description = "Message reactions"),
+        (name = "Emoji", description = "Custom server emoji"),
         (name = "Gifs", description = "GIF picker (Klipy proxy)"),
         (name = "ReadStates", description = "Channel read state tracking"),
         (name = "NotificationSettings", description = "Per-channel notification preferences"),

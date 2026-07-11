@@ -45,6 +45,10 @@ impl PlanLimitChecker for AlwaysAllowedChecker {
         Ok(())
     }
 
+    async fn check_emoji_limit(&self, _server_id: &ServerId) -> Result<(), DomainError> {
+        Ok(())
+    }
+
     async fn check_dm_limit(&self, _user_id: &UserId) -> Result<(), DomainError> {
         Ok(())
     }

@@ -215,6 +215,24 @@ impl PlanLimitChecker for PgPlanLimitChecker {
             .await
     }
 
+    async fn check_emoji_limit(&self, server_id: &ServerId) -> Result<(), DomainError> {
+        let sid = server_id.0;
+
+        // WHY: COUNT custom emoji for the server — small, indexed set. Free's cap
+        // is 0, so this always trips on Free (custom emoji is a paid feature).
+        let count = sqlx::query_scalar!(
+            r#"SELECT COALESCE(COUNT(*)::BIGINT, 0) as "count!" FROM server_emojis WHERE server_id = $1"#,
+            sid
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_err)?;
+
+        #[allow(clippy::cast_sign_loss)] // WHY: COALESCE guarantees non-negative
+        self.check_limit(server_id, ResourceKind::CustomEmoji, count as u64)
+            .await
+    }
+
     async fn check_dm_limit(&self, user_id: &UserId) -> Result<(), DomainError> {
         let uid = user_id.0;
 
