@@ -6,7 +6,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Channel, ChannelId, ChannelType, Role, ServerId, UserId};
+use crate::domain::models::{
+    Channel, ChannelId, ChannelModerationContext, ChannelType, Role, ServerId, UserId,
+};
 use crate::domain::ports::ChannelRepository;
 
 /// PostgreSQL-backed channel repository.
@@ -207,6 +209,30 @@ impl ChannelRepository for PgChannelRepository {
                 updated_at: r.updated_at,
             }
             .into_channel()
+        }))
+    }
+
+    async fn get_moderation_context(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Result<Option<ChannelModerationContext>, DomainError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT c.is_nsfw, s.is_dm, s.owner_id
+            FROM channels c
+            JOIN servers s ON s.id = c.server_id
+            WHERE c.id = $1
+            "#,
+            channel_id.0,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        Ok(row.map(|r| ChannelModerationContext {
+            is_nsfw: r.is_nsfw,
+            is_dm: r.is_dm,
+            owner_id: UserId::new(r.owner_id),
         }))
     }
 

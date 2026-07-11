@@ -591,6 +591,7 @@ describe('useRealtimeMessages attachments', () => {
     size: 2048,
     width: 800,
     height: 600,
+    moderationStatus: 'approved' as const,
   }
 
   beforeEach(() => {

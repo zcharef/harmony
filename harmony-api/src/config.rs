@@ -67,6 +67,23 @@ pub struct Config {
     /// When set, URLs in messages are checked against Google's threat lists.
     pub safe_browsing_api_key: Option<SecretString>,
 
+    /// Enable the in-process ONNX adult-NSFW image classifier (Phase 2).
+    /// Default `false`: the `NoopImageClassifier` is used (never flags) until a
+    /// real model is wired. Requires `nsfw_model_path` when true.
+    #[serde(default = "default_false")]
+    pub nsfw_classifier_enabled: bool,
+
+    /// Filesystem path to the bundled ONNX NSFW model (Phase 2). When absent,
+    /// the classifier falls back to Noop even if `nsfw_classifier_enabled`.
+    pub nsfw_model_path: Option<String>,
+
+    /// Refuse image attachments when no REAL CSAM matcher is configured
+    /// (fail-closed hard gate, spec §c.3). Default `false` (owner decision):
+    /// while invite-only we run a Noop matcher and do NOT refuse images. A
+    /// public launch flips this to `true` alongside a real matcher (Phase 3).
+    #[serde(default = "default_false")]
+    pub attachments_require_csam_scan: bool,
+
     /// Klipy GIF API key (optional). When absent, the `/v1/gifs/*` proxy
     /// endpoints return `503` and the client hides the GIF picker button.
     /// Server-side only — this key is NEVER exposed to the browser.
@@ -129,6 +146,10 @@ fn default_plan_enforcement() -> bool {
 
 fn default_content_moderation() -> bool {
     true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 fn default_spam_guard() -> bool {
@@ -202,6 +223,12 @@ impl std::fmt::Debug for Config {
             .field(
                 "safe_browsing_api_key",
                 &self.safe_browsing_api_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("nsfw_classifier_enabled", &self.nsfw_classifier_enabled)
+            .field("nsfw_model_path", &self.nsfw_model_path)
+            .field(
+                "attachments_require_csam_scan",
+                &self.attachments_require_csam_scan,
             )
             .field(
                 "klipy_api_key",

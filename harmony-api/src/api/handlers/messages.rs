@@ -109,6 +109,19 @@ pub async fn send_message(
         })
         .collect::<Result<_, DomainError>>()?;
 
+    // Fail-closed CSAM gate (spec §c.3): when the deployment requires a real
+    // CSAM scan but none is configured (Noop matcher), image attachments are
+    // refused outright. Default false while invite-only, so normally inert.
+    if !attachments.is_empty()
+        && state.attachments_require_csam_scan()
+        && !state.csam_matcher().is_configured()
+    {
+        return Err(ApiError::service_unavailable(
+            "Image attachments unavailable",
+            "Image attachments are temporarily unavailable on this server.",
+        ));
+    }
+
     let message = state
         .message_service()
         .create(
@@ -160,6 +173,13 @@ pub async fn send_message(
     // Message is already delivered; background task checks and soft-deletes if flagged.
     if !encrypted {
         spawn_async_moderation(&state, &message, &channel_id, &channel.server_id);
+    }
+
+    // Image content-moderation (spec §c.1): attachments were delivered as
+    // `pending` (blurred). A background task scans each and flips the status via
+    // MessageUpdated. Scan-before-reveal — never blocks the send.
+    if !message.attachments.is_empty() {
+        spawn_attachment_moderation(&state, &message, &channel_id, &channel.server_id);
     }
 
     // §10 activation funnel: first message ever (fire-and-forget). The DB
@@ -909,4 +929,48 @@ mod search_param_tests {
         assert_eq!(clamp_search_limit(Some(50)), 50);
         assert_eq!(clamp_search_limit(Some(999)), 50);
     }
+}
+
+/// Spawn the async image content-moderation scan for a freshly-sent message
+/// (spec §c.1). The attachments were delivered `pending` (blurred); the task
+/// scans each, writes the verdict, and emits `MessageUpdated` so every reader's
+/// tile flips. Scan-before-reveal, fail-closed — an unscanned image is never
+/// revealed.
+fn spawn_attachment_moderation(
+    state: &AppState,
+    message: &MessageWithAuthor,
+    channel_id: &ChannelId,
+    server_id: &ServerId,
+) {
+    let deps = crate::api::attachment_scan::AttachmentScanDeps::from_state(state);
+    let message_id = message.message.id.clone();
+    let author_id = message.message.author_id.clone();
+    let channel_id = channel_id.clone();
+    let server_id = server_id.clone();
+    let semaphore = state.moderation_semaphore().clone();
+
+    tokio::spawn(async move {
+        // Bound concurrent scans on the shared moderation permit pool.
+        let _permit = match timeout(SEMAPHORE_TIMEOUT, semaphore.acquire_owned()).await {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_closed)) => {
+                tracing::warn!(message_id = %message_id, "attachment scan: semaphore closed — skipping");
+                return;
+            }
+            Err(_elapsed) => {
+                // Leave attachments pending; the retry sweep re-scans stragglers.
+                tracing::warn!(message_id = %message_id, "attachment scan: semaphore timeout — leaving pending for sweep");
+                return;
+            }
+        };
+
+        crate::api::attachment_scan::scan_message_attachments(
+            &deps,
+            &message_id,
+            &author_id,
+            &channel_id,
+            &server_id,
+        )
+        .await;
+    });
 }

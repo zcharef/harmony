@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{Channel, ChannelId, Role, ServerId, UserId};
+use crate::domain::models::{Channel, ChannelId, ChannelModerationContext, Role, ServerId, UserId};
 
 /// Intent-based repository for channels.
 #[async_trait]
@@ -20,6 +20,16 @@ pub trait ChannelRepository: Send + Sync + std::fmt::Debug {
 
     /// Get a channel by ID. Returns `None` if not found.
     async fn get_by_id(&self, channel_id: &ChannelId) -> Result<Option<Channel>, DomainError>;
+
+    /// Resolve the image-moderation context for a channel (its `is_nsfw` plus
+    /// the parent server's `is_dm`/`owner_id`) in one join. Returns `None` if
+    /// the channel does not exist. WHY a dedicated read (not the `Channel`
+    /// model): the decision table needs `is_nsfw` + server fields at scan time
+    /// without rippling `is_nsfw` through every channel DTO.
+    async fn get_moderation_context(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Result<Option<ChannelModerationContext>, DomainError>;
 
     /// Create a new channel. Returns the created channel.
     async fn create_channel(&self, channel: &Channel) -> Result<Channel, DomainError>;

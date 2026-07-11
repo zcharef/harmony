@@ -1,3 +1,4 @@
+pub mod attachment_scan;
 pub mod client_ip;
 pub mod dto;
 pub mod errors;

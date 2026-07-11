@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::domain::models::{
-    Attachment, AttachmentId, ChannelId, MentionedUser, MessageId, MessageType, MessageWithAuthor,
-    ParentMessagePreview, ReactionSummary, UserId,
+    Attachment, AttachmentId, AttachmentModerationStatus, ChannelId, MentionedUser, MessageId,
+    MessageType, MessageWithAuthor, ParentMessagePreview, ReactionSummary, UserId,
 };
 
 /// Request body for sending a new message.
@@ -157,6 +157,9 @@ pub struct AttachmentResponse {
     /// Pixel height for images; omitted for non-images.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub height: Option<i32>,
+    /// Content-moderation verdict driving the client render (blur/reveal/
+    /// removed). `nsfwScore` is server-side only and never shipped.
+    pub moderation_status: AttachmentModerationStatus,
 }
 
 impl From<Attachment> for AttachmentResponse {
@@ -168,6 +171,7 @@ impl From<Attachment> for AttachmentResponse {
             size: a.size,
             width: a.width,
             height: a.height,
+            moderation_status: a.moderation_status,
         }
     }
 }
@@ -406,6 +410,7 @@ mod tests {
             size: 2048,
             width: None,
             height: None,
+            moderation_status: AttachmentModerationStatus::Approved,
             created_at: Utc::now(),
         }];
 

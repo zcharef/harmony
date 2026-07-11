@@ -85,6 +85,15 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
     /// Find a message by ID (returns `None` if not found OR soft-deleted).
     async fn find_by_id(&self, message_id: &MessageId) -> Result<Option<Message>, DomainError>;
 
+    /// Find a message by ID WITH author + parent-preview joins (returns `None`
+    /// if not found OR soft-deleted). Reactions/attachments/mentions are left
+    /// empty for the caller to enrich — used to rebuild a `MessagePayload` for a
+    /// `MessageUpdated` SSE after an async attachment-moderation verdict.
+    async fn find_with_author(
+        &self,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageWithAuthor>, DomainError>;
+
     /// Fetch a window of messages centered on `anchor_id` (jump-to-message).
     ///
     /// Returns up to `before_limit` strictly-older rows, the anchor itself, and

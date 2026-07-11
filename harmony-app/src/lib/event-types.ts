@@ -96,6 +96,12 @@ export const messagePayloadSchema = z.object({
         size: z.number(),
         width: z.number().nullable().optional(),
         height: z.number().nullable().optional(),
+        // WHY optional + fail-closed default: an older API instance omits the
+        // key during rollout; treat a missing status as `pending` (blurred)
+        // rather than revealing an unscanned image (image-moderation §c.4).
+        moderationStatus: z
+          .enum(['pending', 'approved', 'gated', 'blocked', 'quarantined'])
+          .optional(),
       }),
     )
     .optional(),

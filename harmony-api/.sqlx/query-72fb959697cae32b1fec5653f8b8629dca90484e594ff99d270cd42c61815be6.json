@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE message_attachments\n            SET moderation_status = ($2::text)::attachment_moderation_status,\n                nsfw_score = $3,\n                moderation_reason = $4,\n                scanned_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Float4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "72fb959697cae32b1fec5653f8b8629dca90484e594ff99d270cd42c61815be6"
+}

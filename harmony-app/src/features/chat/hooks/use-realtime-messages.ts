@@ -50,8 +50,14 @@ function toMessageResponse(payload: z.infer<typeof messagePayloadSchema>): Messa
     // for older instances that omit the field during rollout (spec §5.3).
     mentions: payload.mentions ?? [],
     // WHY: Attachments ride the same payload — this is what makes an
-    // attachment arriving on message.created render live, no refetch.
-    attachments: payload.attachments ?? [],
+    // attachment arriving on message.created render live, no refetch. The
+    // moderation status flips in-place on message.updated. Default a missing
+    // status to `pending` (fail-closed) so an older instance's payload never
+    // reveals an unscanned image (image-moderation §c.4).
+    attachments: (payload.attachments ?? []).map((a) => ({
+      ...a,
+      moderationStatus: a.moderationStatus ?? 'pending',
+    })),
   }
 }
 

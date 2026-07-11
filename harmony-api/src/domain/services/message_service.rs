@@ -668,6 +668,50 @@ impl MessageService {
         self.enrich_page(server_id, user_id, messages).await
     }
 
+    /// Reload a message as a full [`MessageWithAuthor`] (author + attachments +
+    /// resolved mentions) for a `MessageUpdated` SSE after an async
+    /// attachment-moderation verdict. Returns `None` if the message no longer
+    /// exists (soft-deleted meanwhile). Reactions are intentionally left empty —
+    /// the SSE `MessagePayload` carries no reactions.
+    ///
+    /// # Errors
+    /// Returns a repository error on failure.
+    pub async fn reload_for_moderation_event(
+        &self,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageWithAuthor>, DomainError> {
+        let Some(mut message) = self.repo.find_with_author(message_id).await? else {
+            return Ok(None);
+        };
+
+        // Attachments carry the fresh moderation statuses just written.
+        let mut attachments_map = self
+            .attachment_repo
+            .batch_for_messages(std::slice::from_ref(message_id))
+            .await?;
+        if let Some(attachments) = attachments_map.remove(message_id) {
+            message.attachments = attachments;
+        }
+
+        // Resolve mentions so pills render identically to the create/edit paths.
+        if !message.message.mentioned_user_ids.is_empty() {
+            let channel = self
+                .channel_repo
+                .get_by_id(&message.message.channel_id)
+                .await?
+                .ok_or_else(|| DomainError::NotFound {
+                    resource_type: "Channel",
+                    id: message.message.channel_id.to_string(),
+                })?;
+            message.mentions = self
+                .member_repo
+                .resolve_mentioned_users(&channel.server_id, &message.message.mentioned_user_ids)
+                .await?;
+        }
+
+        Ok(Some(message))
+    }
+
     /// Edit a message's content. Only the author can edit.
     ///
     /// Plaintext edits re-parse mentions and persist the new list; only

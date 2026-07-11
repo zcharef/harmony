@@ -28,9 +28,9 @@ use super::dto::{
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
 use crate::domain::models::{
-    AttachmentId, CategoryId, ChannelId, ChannelType, DeviceId, DeviceKeyId, InviteCode,
-    MegolmSessionId, MessageId, MessageType, OneTimeKeyId, ServerId, UserId, UserStatus,
-    VoiceAction,
+    AttachmentId, AttachmentModerationStatus, CategoryId, ChannelId, ChannelType, DeviceId,
+    DeviceKeyId, InviteCode, MegolmSessionId, MessageId, MessageType, OneTimeKeyId, ServerId,
+    UserId, UserStatus, VoiceAction,
 };
 use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
 
@@ -236,6 +236,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             MentionedUserResponse,
             NewAttachmentRequest,
             AttachmentResponse,
+            AttachmentModerationStatus,
             // Reaction DTOs
             super::handlers::reactions::AddReactionRequest,
             ReactionSummary,

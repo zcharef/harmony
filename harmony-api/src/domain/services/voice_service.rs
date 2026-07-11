@@ -533,6 +533,13 @@ mod tests {
             Ok(self.channels.lock().await.get(channel_id).cloned())
         }
 
+        async fn get_moderation_context(
+            &self,
+            _channel_id: &ChannelId,
+        ) -> Result<Option<crate::domain::models::ChannelModerationContext>, DomainError> {
+            Ok(None)
+        }
+
         async fn list_for_server(
             &self,
             _server_id: &ServerId,

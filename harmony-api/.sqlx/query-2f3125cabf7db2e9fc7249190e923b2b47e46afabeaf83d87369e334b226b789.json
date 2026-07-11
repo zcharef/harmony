@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT attachment_id, message_id, channel_id, url, mime,\n                   retry_count, last_error, created_at\n            FROM attachment_scan_retry\n            WHERE retry_count < 5\n            ORDER BY created_at ASC\n            LIMIT $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attachment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "mime",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "retry_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "2f3125cabf7db2e9fc7249190e923b2b47e46afabeaf83d87369e334b226b789"
+}

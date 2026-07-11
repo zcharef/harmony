@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM attachment_scan_retry\n            WHERE attachment_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c9b4cae7d1ded0bc40db745655dba5ce1278904a33dfdf480adcd34c931b5900"
+}
