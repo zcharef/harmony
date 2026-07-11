@@ -48,6 +48,7 @@ import {
 import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
 import { useChannelNotificationLevel } from '@/features/notifications'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
+import { useSearchStore } from '@/features/search'
 import type { DmRecipientResponse, MessageResponse } from '@/lib/api'
 import { getApiErrorDetail } from '@/lib/api-error'
 import { encrypt } from '@/lib/crypto'
@@ -380,6 +381,9 @@ function ChatToolbar({
   const { t } = useTranslation('chat')
   const notifLevel = useChannelNotificationLevel(channelId)
   const updateNotif = useUpdateNotificationSettings(channelId ?? '')
+  // WHY: the toolbar Search affordance opens the shared overlay pre-scoped to
+  // this channel (in:#current, §5.2). The overlay is mounted once in MainLayout.
+  const openSearch = useSearchStore((s) => s.openInChannel)
   // WHY no 'mentions' for DMs (D14): every DM message is mention-equivalent —
   // Discord DMs only offer mute. Stale 'mentions' rows on DM channels behave
   // as 'all' by policy construction.
@@ -434,10 +438,25 @@ function ChatToolbar({
             <Users className="h-5 w-5 text-default-500" />
           </Button>
         )}
-        <div className="ml-2 flex h-6 items-center rounded bg-default-100 px-1.5">
+        <Button
+          variant="light"
+          size="sm"
+          className="ml-2 h-6 gap-1 px-1.5"
+          aria-label={t('common:search')}
+          data-test="chat-toolbar-search"
+          onPress={() => {
+            if (channelId !== null) {
+              openSearch({
+                channelId,
+                channelName: channelName ?? '',
+                encrypted: isChannelEncrypted,
+              })
+            }
+          }}
+        >
           <Search className="h-4 w-4 text-default-500" />
-          <span className="ml-1 text-xs text-default-500">{t('common:search')}</span>
-        </div>
+          <span className="text-xs text-default-500">{t('common:search')}</span>
+        </Button>
       </div>
     </div>
   )

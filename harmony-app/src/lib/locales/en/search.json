@@ -1,0 +1,18 @@
+{
+  "searchLabel": "Search messages",
+  "placeholderChannel": "Search #{{channel}}",
+  "placeholderServer": "Search {{server}}",
+  "idleHint": "Type to search messages",
+  "noResults": "No messages found",
+  "noResultsHint": "Try different keywords or filters.",
+  "channelForbidden": "You don't have access to that channel",
+  "encryptedNotice": "Encrypted messages can't be searched",
+  "rateLimited": "Searching too fast — try again in a moment",
+  "error": "Search failed",
+  "loadMore": "Load more",
+  "resultsInChannel": "in #{{channel}}",
+  "fromFilter": "from: {{name}}",
+  "inFilter": "in: #{{name}}",
+  "unknownUserFilter": "Unknown user: {{name}}",
+  "unknownChannelFilter": "Unknown channel: {{name}}"
+}

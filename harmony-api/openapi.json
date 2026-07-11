@@ -4573,6 +4573,139 @@
         ]
       }
     },
+    "/v1/servers/{id}/messages/search": {
+      "get": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Full-text search messages within a server, gated by per-channel access.",
+        "description": "Takes only structured params (the filter grammar is parsed client-side).\nResults are ordered most-recent-first with keyset pagination via `before`.\nA per-user rate limit (30 / 60s) guards the heaviest read in the app.\n\n# Errors\nReturns `ApiError` for a missing/oversized `q` (400), an invalid `before`\ncursor (400), a non-member caller or an inaccessible explicit `channelId`\n(403), or when the per-user search rate limit is exceeded (429).",
+        "operationId": "search_messages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Server ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Full-text query. Required, 1..=200 chars after trim. Parsed by Postgres\n`websearch_to_tsquery` (\"quoted phrases\", OR, -negation supported).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "query",
+            "description": "`in:` filter — restrict to a single channel of this server.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ChannelId"
+            }
+          },
+          {
+            "name": "authorId",
+            "in": "query",
+            "description": "`from:` filter — restrict to a single author.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/UserId"
+            }
+          },
+          {
+            "name": "has",
+            "in": "query",
+            "description": "`has:` filter. Accepts `link` or `image`. Any other value is ignored.\n(Repeatable via comma, e.g. `has=link,image`.)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "ISO 8601 keyset cursor — messages created before this time.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Max results (1..=50, default 25).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageSearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query, cursor, or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a server member or channel forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Search rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/servers/{id}/migration/cohort": {
       "get": {
         "tags": [
@@ -6980,6 +7113,84 @@
               "null"
             ],
             "description": "System event key (e.g. `member_join`). Only present for system messages."
+          }
+        }
+      },
+      "MessageSearchQuery": {
+        "type": "object",
+        "description": "Query parameters for full-text message search.",
+        "properties": {
+          "authorId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserId",
+                "description": "`from:` filter — restrict to a single author."
+              }
+            ]
+          },
+          "before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 keyset cursor — messages created before this time."
+          },
+          "channelId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ChannelId",
+                "description": "`in:` filter — restrict to a single channel of this server."
+              }
+            ]
+          },
+          "has": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`has:` filter. Accepts `link` or `image`. Any other value is ignored.\n(Repeatable via comma, e.g. `has=link,image`.)"
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Max results (1..=50, default 25)."
+          },
+          "q": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Full-text query. Required, 1..=200 chars after trim. Parsed by Postgres\n`websearch_to_tsquery` (\"quoted phrases\", OR, -negation supported)."
+          }
+        }
+      },
+      "MessageSearchResponse": {
+        "type": "object",
+        "description": "Search results envelope. Same shape as `MessageListResponse` but a distinct\ntype so future search-only fields (snippets, rank) don't leak into the list\nendpoint.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

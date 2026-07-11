@@ -8,7 +8,8 @@ use serde::Deserialize;
 use tokio::time::{Duration, timeout};
 
 use crate::api::dto::{
-    EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, SendMessageRequest,
+    EditMessageRequest, MessageListQuery, MessageListResponse, MessageResponse, MessageSearchQuery,
+    MessageSearchResponse, SendMessageRequest,
 };
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
@@ -19,6 +20,7 @@ use crate::domain::models::{
     AnalyticsEvent, AnalyticsEventName, ChannelId, MessageId, MessageWithAuthor, NewAttachment,
     SYSTEM_MODERATOR_ID, ServerEvent, ServerId,
 };
+use crate::domain::ports::MessageSearchFilters;
 use crate::domain::services::content_moderation::{
     ModerationDecision, SCORE_THRESHOLD, evaluate_moderation,
 };
@@ -31,6 +33,19 @@ const SEMAPHORE_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_MESSAGE_LIMIT: i64 = 50;
 /// Maximum message page size.
 const MAX_MESSAGE_LIMIT: i64 = 100;
+
+/// Default search page size.
+const DEFAULT_SEARCH_LIMIT: i64 = 25;
+/// Maximum search page size.
+const MAX_SEARCH_LIMIT: i64 = 50;
+/// Max `q` length (chars) — bounds the FTS query cost.
+const MAX_SEARCH_QUERY_CHARS: usize = 200;
+/// Max search actions per user within [`SEARCH_RATE_WINDOW`]. Search is the
+/// heaviest read (GIN scan + access EXISTS across a server), so it gets a
+/// dedicated per-user cap on top of Cloudflare's per-IP limit.
+const SEARCH_RATE_MAX: usize = 30;
+/// Window for the per-user search rate limit.
+const SEARCH_RATE_WINDOW: Duration = Duration::from_secs(60);
 
 /// Send a message to a channel.
 ///
@@ -251,6 +266,145 @@ pub async fn list_messages(
     Ok((
         StatusCode::OK,
         Json(MessageListResponse::from_messages(messages, next_cursor)),
+    ))
+}
+
+/// Validate and trim the `q` search param. `q` is required in v1.
+///
+/// Returns the trimmed query on success, or the (stable) 400 detail string.
+fn validate_search_query(q: Option<&str>) -> Result<&str, &'static str> {
+    match q.map(str::trim) {
+        Some(trimmed) if !trimmed.is_empty() => {
+            if trimmed.chars().count() > MAX_SEARCH_QUERY_CHARS {
+                Err("Search query 'q' must not exceed 200 characters")
+            } else {
+                Ok(trimmed)
+            }
+        }
+        _ => Err("Search query 'q' is required"),
+    }
+}
+
+/// Map the `has` param into the two structured filter booleans. Splits on `,`,
+/// maps `link`/`image`, and ignores any unknown token (forward-compat, §3.2b).
+fn parse_has_filters(has: Option<&str>) -> (bool, bool) {
+    let mut has_link = false;
+    let mut has_image = false;
+    if let Some(has) = has {
+        for token in has.split(',') {
+            match token.trim() {
+                "link" => has_link = true,
+                "image" => has_image = true,
+                _ => {}
+            }
+        }
+    }
+    (has_link, has_image)
+}
+
+/// Clamp the search `limit` to `1..=50`, defaulting to 25.
+fn clamp_search_limit(limit: Option<i64>) -> i64 {
+    limit
+        .unwrap_or(DEFAULT_SEARCH_LIMIT)
+        .clamp(1, MAX_SEARCH_LIMIT)
+}
+
+/// Full-text search messages within a server, gated by per-channel access.
+///
+/// Takes only structured params (the filter grammar is parsed client-side).
+/// Results are ordered most-recent-first with keyset pagination via `before`.
+/// A per-user rate limit (30 / 60s) guards the heaviest read in the app.
+///
+/// # Errors
+/// Returns `ApiError` for a missing/oversized `q` (400), an invalid `before`
+/// cursor (400), a non-member caller or an inaccessible explicit `channelId`
+/// (403), or when the per-user search rate limit is exceeded (429).
+#[utoipa::path(
+    get,
+    path = "/v1/servers/{id}/messages/search",
+    tag = "Messages",
+    security(("bearer_auth" = [])),
+    params(
+        ("id" = ServerId, Path, description = "Server ID"),
+        MessageSearchQuery,
+    ),
+    responses(
+        (status = 200, description = "Search results", body = MessageSearchResponse),
+        (status = 400, description = "Invalid query, cursor, or limit", body = ProblemDetails),
+        (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Not a server member or channel forbidden", body = ProblemDetails),
+        (status = 429, description = "Search rate limit exceeded", body = ProblemDetails),
+    )
+)]
+#[tracing::instrument(skip(state, query))]
+pub async fn search_messages(
+    AuthUser(user_id): AuthUser,
+    State(state): State<AppState>,
+    ApiPath(server_id): ApiPath<ServerId>,
+    Query(query): Query<MessageSearchQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    // WHY first (before any DB work): search is the heaviest read — reject a
+    // flooding client with 429 + Retry-After before touching the GIN index.
+    state.spam_guard().check_and_record_action(
+        &user_id,
+        "search",
+        SEARCH_RATE_MAX,
+        SEARCH_RATE_WINDOW,
+    )?;
+
+    // `q` is required in v1 (a bare `from:@x` browse is out of scope §10).
+    let query_text = validate_search_query(query.q.as_deref()).map_err(ApiError::bad_request)?;
+
+    let (has_link, has_image) = parse_has_filters(query.has.as_deref());
+    let limit = clamp_search_limit(query.limit);
+
+    let cursor = query
+        .before
+        .as_deref()
+        .map(|s| {
+            s.parse::<chrono::DateTime<chrono::Utc>>()
+                .map_err(|_| "Invalid 'before' cursor: expected ISO 8601 timestamp")
+        })
+        .transpose()
+        .map_err(ApiError::bad_request)?;
+
+    // WHY move (not clone): `query` is not used past this point — only the
+    // already-derived `query_text`/`has_*`/`limit`/`cursor` are.
+    let filters = MessageSearchFilters {
+        channel_id: query.channel_id,
+        author_id: query.author_id,
+        has_link,
+        has_image,
+    };
+    let has_channel_filter = filters.channel_id.is_some();
+    let has_author_filter = filters.author_id.is_some();
+
+    let started = std::time::Instant::now();
+    let messages = state
+        .message_service()
+        .search_messages(&server_id, &user_id, query_text, filters, cursor, limit)
+        .await?;
+
+    // WHY: If we received exactly `limit` rows, there may be more — provide a cursor.
+    let next_cursor = if i64::try_from(messages.len()).unwrap_or(0) == limit {
+        messages.last().map(|m| m.message.created_at.to_rfc3339())
+    } else {
+        None
+    };
+
+    // WHY IDs + counts only, NEVER the query text: `q` is user content / PII.
+    tracing::debug!(
+        server_id = %server_id,
+        result_count = messages.len(),
+        has_channel_filter,
+        has_author_filter,
+        elapsed_ms = started.elapsed().as_millis(),
+        "message search"
+    );
+
+    Ok((
+        StatusCode::OK,
+        Json(MessageSearchResponse::from_messages(messages, next_cursor)),
     ))
 }
 
@@ -666,4 +820,93 @@ fn spawn_async_moderation(
         let receivers = event_bus.publish(event);
         tracing::debug!(message_id = %msg_id, receivers, "emitted moderation message.deleted");
     });
+}
+
+#[cfg(test)]
+mod search_param_tests {
+    use super::{clamp_search_limit, parse_has_filters, validate_search_query};
+
+    // ── validate_search_query (§7.1) ──────────────────────────────────
+
+    #[test]
+    fn missing_q_is_rejected() {
+        assert!(validate_search_query(None).is_err());
+    }
+
+    #[test]
+    fn empty_and_whitespace_q_is_rejected() {
+        assert!(validate_search_query(Some("")).is_err());
+        assert!(validate_search_query(Some("   \t")).is_err());
+    }
+
+    #[test]
+    fn q_is_trimmed() {
+        assert_eq!(validate_search_query(Some("  hello  ")), Ok("hello"));
+    }
+
+    #[test]
+    fn q_at_200_chars_is_accepted_over_200_rejected() {
+        let at_limit = "a".repeat(200);
+        assert_eq!(
+            validate_search_query(Some(&at_limit)),
+            Ok(at_limit.as_str())
+        );
+        let over = "a".repeat(201);
+        assert!(validate_search_query(Some(&over)).is_err());
+    }
+
+    #[test]
+    fn q_length_counts_chars_not_bytes() {
+        // 200 multi-byte chars is within the limit (char count, not byte count).
+        let emoji = "\u{1f600}".repeat(200);
+        assert!(validate_search_query(Some(&emoji)).is_ok());
+        let over = "\u{1f600}".repeat(201);
+        assert!(validate_search_query(Some(&over)).is_err());
+    }
+
+    // ── parse_has_filters (§7.1) ──────────────────────────────────────
+
+    #[test]
+    fn has_none_is_all_false() {
+        assert_eq!(parse_has_filters(None), (false, false));
+    }
+
+    #[test]
+    fn has_link_and_image_with_unknown_ignored() {
+        // `has=link,image,bogus` → both true, unknown ignored (forward-compat).
+        assert_eq!(parse_has_filters(Some("link,image,bogus")), (true, true));
+    }
+
+    #[test]
+    fn has_single_tokens() {
+        assert_eq!(parse_has_filters(Some("link")), (true, false));
+        assert_eq!(parse_has_filters(Some("image")), (false, true));
+    }
+
+    #[test]
+    fn has_tokens_are_trimmed() {
+        assert_eq!(parse_has_filters(Some(" link , image ")), (true, true));
+    }
+
+    #[test]
+    fn has_unknown_only_is_all_false() {
+        assert_eq!(parse_has_filters(Some("embed,video")), (false, false));
+    }
+
+    // ── clamp_search_limit (§7.1) ─────────────────────────────────────
+
+    #[test]
+    fn limit_defaults_to_25() {
+        assert_eq!(clamp_search_limit(None), 25);
+    }
+
+    #[test]
+    fn limit_is_clamped_to_1_50() {
+        assert_eq!(clamp_search_limit(Some(0)), 1);
+        assert_eq!(clamp_search_limit(Some(-5)), 1);
+        assert_eq!(clamp_search_limit(Some(1)), 1);
+        assert_eq!(clamp_search_limit(Some(25)), 25);
+        assert_eq!(clamp_search_limit(Some(50)), 50);
+        assert_eq!(clamp_search_limit(Some(999)), 50);
+    }
 }

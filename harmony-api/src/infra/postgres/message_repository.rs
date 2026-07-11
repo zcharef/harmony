@@ -8,9 +8,9 @@ use uuid::Uuid;
 use crate::domain::errors::DomainError;
 use crate::domain::models::{
     Attachment, AttachmentId, ChannelId, Message, MessageId, MessageType, MessageWithAuthor,
-    NewAttachment, ParentMessagePreview, UserId,
+    NewAttachment, ParentMessagePreview, Role, ServerId, UserId,
 };
-use crate::domain::ports::{AroundWindow, MessageRepository};
+use crate::domain::ports::{AroundWindow, MessageRepository, MessageSearchFilters};
 
 /// Parse the Postgres `message_type` enum value into the domain enum.
 fn parse_message_type(value: &str) -> MessageType {
@@ -553,6 +553,137 @@ impl MessageRepository for PgMessageRepository {
             LIMIT $3
             "#,
             cid,
+            cursor,
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        let messages = rows
+            .into_iter()
+            .map(|r| {
+                MessageWithAuthorRow {
+                    id: r.id,
+                    channel_id: r.channel_id,
+                    author_id: r.author_id,
+                    content: r.content,
+                    edited_at: r.edited_at,
+                    deleted_at: r.deleted_at,
+                    deleted_by: r.deleted_by,
+                    encrypted: r.encrypted,
+                    sender_device_id: r.sender_device_id,
+                    message_type: r.message_type,
+                    system_event_key: r.system_event_key,
+                    parent_message_id: r.parent_message_id,
+                    moderated_at: r.moderated_at,
+                    moderation_reason: r.moderation_reason,
+                    original_content: r.original_content,
+                    mentioned_user_ids: r.mentioned_user_ids,
+                    created_at: r.created_at,
+                    author_username: r.author_username,
+                    author_display_name: r.author_display_name,
+                    author_avatar_url: r.author_avatar_url,
+                    parent_author_username: r.parent_author_username,
+                    parent_content_preview: r.parent_content_preview,
+                    parent_deleted: r.parent_deleted,
+                }
+                .into_message_with_author()
+            })
+            .collect();
+
+        Ok(messages)
+    }
+
+    async fn search_in_server(
+        &self,
+        server_id: &ServerId,
+        caller_user_id: &UserId,
+        query_text: &str,
+        filters: &MessageSearchFilters,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+        let sid = server_id.0;
+        let uid = caller_user_id.0;
+        // Nullable filter binds — `$n::uuid IS NULL` short-circuits the predicate.
+        let channel_filter: Option<uuid::Uuid> = filters.channel_id.as_ref().map(|c| c.0);
+        let author_filter: Option<uuid::Uuid> = filters.author_id.as_ref().map(|a| a.0);
+
+        // FTS search (ADR-036 keyset pagination). The `content_tsv @@ ...`
+        // predicate uses the GIN index; the access EXISTS mirrors
+        // channel_repository::list_for_server so search cannot diverge from the
+        // channel-visibility gate. Encrypted channels/messages are excluded
+        // (content_tsv is NULL there anyway — belt + suspenders).
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                m.id,
+                m.channel_id,
+                m.author_id,
+                m.content,
+                m.edited_at,
+                m.deleted_at,
+                m.deleted_by,
+                m.encrypted,
+                m.sender_device_id,
+                m.message_type as "message_type!: String",
+                m.system_event_key,
+                m.parent_message_id,
+                m.moderated_at,
+                m.moderation_reason,
+                m.original_content,
+                m.mentioned_user_ids as "mentioned_user_ids!",
+                m.created_at,
+                p.username AS "author_username?",
+                p.display_name AS "author_display_name?",
+                p.avatar_url AS "author_avatar_url?",
+                parent_p.username AS "parent_author_username?",
+                LEFT(parent_m.content, 100) AS "parent_content_preview?",
+                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
+            FROM messages m
+            JOIN channels c ON c.id = m.channel_id
+            LEFT JOIN profiles p ON p.id = m.author_id
+            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id
+            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
+            WHERE c.server_id = $1
+              AND c.encrypted = false
+              AND m.encrypted = false
+              AND m.deleted_at IS NULL
+              AND m.message_type != 'system'
+              AND m.content_tsv @@ websearch_to_tsquery('english', $3)
+              AND (
+                  c.is_private = false
+                  OR EXISTS (
+                      SELECT 1 FROM server_members sm
+                      WHERE sm.server_id = c.server_id
+                        AND sm.user_id = $2
+                        AND (
+                            sm.role IN ($4, $5)
+                            OR EXISTS (
+                                SELECT 1 FROM channel_role_access cra
+                                WHERE cra.channel_id = c.id AND cra.role = sm.role
+                            )
+                        )
+                  )
+              )
+              AND ($6::uuid IS NULL OR m.channel_id = $6)
+              AND ($7::uuid IS NULL OR m.author_id = $7)
+              AND ($8 = false OR m.content ~* 'https?://')
+              AND ($9 = false OR m.content ~* '(?i)https?://\S+\.(png|jpe?g|gif|webp|bmp|svg)(\?\S*)?')
+              AND ($10::timestamptz IS NULL OR m.created_at < $10)
+            ORDER BY m.created_at DESC, m.id DESC
+            LIMIT $11
+            "#,
+            sid,
+            uid,
+            query_text,
+            Role::Owner.as_str(),
+            Role::Admin.as_str(),
+            channel_filter,
+            author_filter,
+            filters.has_link,
+            filters.has_image,
             cursor,
             limit,
         )

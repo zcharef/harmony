@@ -538,6 +538,17 @@ mod tests {
         ) -> Result<Option<crate::domain::ports::AroundWindow>, DomainError> {
             Ok(None)
         }
+        async fn search_in_server(
+            &self,
+            _server_id: &ServerId,
+            _caller_user_id: &UserId,
+            _query_text: &str,
+            _filters: &crate::domain::ports::MessageSearchFilters,
+            _cursor: Option<DateTime<Utc>>,
+            _limit: i64,
+        ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+            Ok(vec![])
+        }
         async fn update_content(
             &self,
             _message_id: &MessageId,

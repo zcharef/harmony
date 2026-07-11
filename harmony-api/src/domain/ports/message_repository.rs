@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{
-    ChannelId, Message, MessageId, MessageWithAuthor, NewAttachment, UserId,
+    ChannelId, Message, MessageId, MessageWithAuthor, NewAttachment, ServerId, UserId,
 };
 
 /// Result of [`MessageRepository::list_around`]: the centered window plus a
@@ -24,6 +24,22 @@ pub struct AroundWindow {
     /// True when the older sub-window was filled to `before_limit` rows — more
     /// history may exist below the window, so backward paging must stay armed.
     pub has_more_older: bool,
+}
+
+/// Structured search filters (parsed client-side, §5.3). All optional.
+#[derive(Debug, Clone)]
+pub struct MessageSearchFilters {
+    /// Restrict to one channel (the `in:` filter). When None, search every
+    /// channel of the server the caller can access.
+    pub channel_id: Option<ChannelId>,
+    /// Restrict to one author (the `from:` filter).
+    pub author_id: Option<UserId>,
+    /// `has:link` — message content contains a URL.
+    pub has_link: bool,
+    /// `has:image` — message content contains an image URL (URL ending in an
+    /// image extension). URL-based until attachments (T1.3) land; then this
+    /// should switch to an attachments join (§10).
+    pub has_image: bool,
 }
 
 /// Intent-based repository for messages.
@@ -137,6 +153,29 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
         channel_id: &ChannelId,
         author_id: &UserId,
     ) -> Result<Option<DateTime<Utc>>, DomainError>;
+
+    /// Full-text search messages within a server, gated by per-channel access.
+    ///
+    /// Access model mirrors `channel_repository::list_for_server`
+    /// (channel_repository.rs:117-133): a channel is searchable when it is public,
+    /// OR the caller's role is owner/admin, OR their role has a `channel_role_access`
+    /// grant. Encrypted channels are always excluded (`content_tsv` is NULL there and
+    /// `c.encrypted` is filtered). This method is the single source of truth for the access gate —
+    /// integration tests pin it against the same fixtures as `ensure_channel_access`
+    /// (§7.2), exactly as `filter_mentionable` is pinned for mentions.
+    ///
+    /// Returns messages older than `cursor` (keyset pagination, ADR-036), newest
+    /// first, limited to `limit` rows. Enrichment (reactions, mention resolution)
+    /// is done by the service layer, identical to `list_for_channel`.
+    async fn search_in_server(
+        &self,
+        server_id: &ServerId,
+        caller_user_id: &UserId,
+        query_text: &str,
+        filters: &MessageSearchFilters,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<MessageWithAuthor>, DomainError>;
 
     /// Create a system message (e.g. join announcement).
     ///

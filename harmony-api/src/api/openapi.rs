@@ -19,10 +19,11 @@ use super::dto::{
     GifTrendingQuery, InvitePreviewResponse, InviteResponse, JoinServerRequest, KeyCountResponse,
     MarkReadRequest, MegolmSessionResponse, MemberListQuery, MemberListResponse, MemberResponse,
     MentionedUserResponse, MessageListQuery, MessageListResponse, MessageResponse,
-    NewAttachmentRequest, OneTimeKeyDto, PreKeyBundleResponse, ProfileResponse,
-    RedeemDesktopAuthRequest, RedeemDesktopAuthResponse, RegisterDeviceRequest, SendMessageRequest,
-    ServerListResponse, ServerResponse, SetChannelRoleAccessRequest, TransferOwnershipRequest,
-    UpdateChannelRequest, UpdateProfileRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
+    MessageSearchQuery, MessageSearchResponse, NewAttachmentRequest, OneTimeKeyDto,
+    PreKeyBundleResponse, ProfileResponse, RedeemDesktopAuthRequest, RedeemDesktopAuthResponse,
+    RegisterDeviceRequest, SendMessageRequest, ServerListResponse, ServerResponse,
+    SetChannelRoleAccessRequest, TransferOwnershipRequest, UpdateChannelRequest,
+    UpdateProfileRequest, UpdateServerRequest, UploadOneTimeKeysRequest,
 };
 use super::errors::ProblemDetails;
 use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
@@ -93,6 +94,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         // Messages
         handlers::messages::send_message,
         handlers::messages::list_messages,
+        handlers::messages::search_messages,
         handlers::messages::edit_message,
         handlers::messages::delete_message,
         // Reactions
@@ -222,6 +224,8 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             MessageResponse,
             MessageListResponse,
             MessageListQuery,
+            MessageSearchResponse,
+            MessageSearchQuery,
             MentionedUserResponse,
             NewAttachmentRequest,
             AttachmentResponse,
