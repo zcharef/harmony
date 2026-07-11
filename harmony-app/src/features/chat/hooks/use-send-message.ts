@@ -15,10 +15,12 @@ import { getApiErrorDetail, isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 import { toast } from '@/lib/toast'
+import { OPTIMISTIC_ID_PREFIX } from '../lib/optimistic-id'
 import { buildParentPreview } from './build-parent-preview'
 
-/** WHY: Shared prefix so useMarkReadOnFocus can skip optimistic messages. */
-export const OPTIMISTIC_ID_PREFIX = 'temp-'
+// WHY re-exported: existing consumers import this from the send hook; the SSoT
+// now lives in the React-free lib/optimistic-id module.
+export { OPTIMISTIC_ID_PREFIX }
 
 export interface SendMessageInput {
   /** Content AFTER the mention transform — `<@uuid>` markers already applied. */

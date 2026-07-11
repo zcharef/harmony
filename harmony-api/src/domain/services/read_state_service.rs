@@ -82,6 +82,24 @@ impl ReadStateService {
     ) -> Result<Vec<ChannelReadState>, DomainError> {
         self.repo.list_all_for_user(user_id).await
     }
+
+    /// Read the caller's read position for one channel (powers the "new
+    /// messages" divider anchor). Gated by the same membership check as
+    /// `mark_read` — a non-member or a member without a private-channel grant
+    /// gets `Forbidden`, a missing channel gets `NotFound`.
+    ///
+    /// # Errors
+    /// Returns `DomainError::NotFound` if the channel doesn't exist,
+    /// `DomainError::Forbidden` if the caller may not access it, or a
+    /// repository error on failure.
+    pub async fn get_for_channel(
+        &self,
+        channel_id: &ChannelId,
+        user_id: &UserId,
+    ) -> Result<ChannelReadState, DomainError> {
+        self.verify_channel_membership(channel_id, user_id).await?;
+        self.repo.get_for_channel(channel_id, user_id).await
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +164,19 @@ mod tests {
             _user_id: &UserId,
         ) -> Result<Vec<ChannelReadState>, DomainError> {
             Ok(vec![])
+        }
+        async fn get_for_channel(
+            &self,
+            channel_id: &ChannelId,
+            _user_id: &UserId,
+        ) -> Result<ChannelReadState, DomainError> {
+            Ok(ChannelReadState {
+                channel_id: channel_id.clone(),
+                unread_count: 0,
+                mention_count: 0,
+                last_read_at: None,
+                last_message_id: None,
+            })
         }
     }
 
@@ -363,6 +394,47 @@ mod tests {
     #[tokio::test]
     async fn member_without_grant_cannot_mark_read_private_channel() {
         let err = run(Some(Role::Member), true, false).await.unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)), "got {err:?}");
+    }
+
+    async fn run_get(
+        member: Option<Role>,
+        is_private: bool,
+        grant_extra: bool,
+    ) -> Result<ChannelReadState, DomainError> {
+        let channel = make_channel(server_id(1), is_private);
+        let service = ReadStateService::new(
+            Arc::new(FakeReadStateRepo),
+            Arc::new(FakeChannelRepo {
+                channel,
+                grant_extra,
+            }),
+            Arc::new(FakeMemberRepo { member }),
+        );
+        service
+            .get_for_channel(&channel_id(100), &user_id(42))
+            .await
+    }
+
+    /// The divider anchor read is gated identically to `mark_read`: a non-member
+    /// cannot read another user's channel read position.
+    #[tokio::test]
+    async fn non_member_cannot_get_read_state() {
+        let err = run_get(None, false, false).await.unwrap_err();
+        assert!(matches!(err, DomainError::Forbidden(_)), "got {err:?}");
+    }
+
+    /// Any member may read their own read position on a public channel.
+    #[tokio::test]
+    async fn member_may_get_read_state_public_channel() {
+        assert!(run_get(Some(Role::Member), false, false).await.is_ok());
+    }
+
+    /// A plain member WITHOUT a grant cannot read a private channel's boundary —
+    /// the same IDOR guard as `mark_read` (a leaked anchor reveals message timing).
+    #[tokio::test]
+    async fn member_without_grant_cannot_get_read_state_private_channel() {
+        let err = run_get(Some(Role::Member), true, false).await.unwrap_err();
         assert!(matches!(err, DomainError::Forbidden(_)), "got {err:?}");
     }
 }

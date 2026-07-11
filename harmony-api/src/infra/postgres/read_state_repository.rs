@@ -124,4 +124,68 @@ impl ReadStateRepository for PgReadStateRepository {
 
         Ok(states)
     }
+
+    async fn get_for_channel(
+        &self,
+        channel_id: &ChannelId,
+        user_id: &UserId,
+    ) -> Result<ChannelReadState, DomainError> {
+        // WHY same aggregate as list_all_for_user, narrowed to one channel: the
+        // divider boundary MUST match the badge byte-for-byte (unread-divider
+        // ticket §1.2). Same `author_id != $2`, `message_type != 'system'`,
+        // `created_at > last_read_at`, LEAST(..., 999), and the DM-or-mention
+        // FILTER. No HAVING here — a single-channel read returns its state even
+        // when unread is 0 (the client needs the null/zero anchor to decide not
+        // to draw a divider). Access is already gated by the service's
+        // `verify_channel_membership` before this runs.
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                c.id AS "channel_id!",
+                crs.last_read_at AS "last_read_at?",
+                crs.last_message_id,
+                LEAST(COALESCE(COUNT(m.id)::BIGINT, 0), 999) AS "unread_count!",
+                LEAST(COALESCE((COUNT(m.id) FILTER (
+                    WHERE s.is_dm OR m.mentioned_user_ids @> ARRAY[$2]::uuid[]
+                ))::BIGINT, 0), 999) AS "mention_count!"
+            FROM channels c
+            JOIN servers s ON s.id = c.server_id
+            LEFT JOIN channel_read_states crs
+                ON crs.channel_id = c.id AND crs.user_id = $2
+            LEFT JOIN messages m
+                ON m.channel_id = c.id
+                AND m.deleted_at IS NULL
+                AND m.author_id != $2
+                AND m.message_type != 'system'
+                AND (crs.last_read_at IS NULL OR m.created_at > crs.last_read_at)
+            WHERE c.id = $1
+            GROUP BY c.id, crs.last_read_at, crs.last_message_id
+            "#,
+            channel_id.0,
+            user_id.0,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        // WHY default when None: a channel with zero messages produces no row
+        // from the GROUP BY. Return a never-read, zero-count state so the client
+        // simply draws no divider.
+        Ok(row.map_or_else(
+            || ChannelReadState {
+                channel_id: channel_id.clone(),
+                unread_count: 0,
+                mention_count: 0,
+                last_read_at: None,
+                last_message_id: None,
+            },
+            |r| ChannelReadState {
+                channel_id: ChannelId::new(r.channel_id),
+                unread_count: r.unread_count,
+                mention_count: r.mention_count,
+                last_read_at: r.last_read_at,
+                last_message_id: r.last_message_id.map(MessageId::new),
+            },
+        ))
+    }
 }

@@ -39,6 +39,10 @@ interface MessageItemProps {
   isEditing: boolean
   /** WHY: When true, hides avatar and header to visually group consecutive same-author messages. */
   isGrouped?: boolean
+  /** WHY: Briefly tints the row after a jump-to-message lands on it (§5.10). */
+  isFlashing?: boolean
+  /** WHY: Jump to this message's replied-to parent (§5.9). Absent = quote not clickable. */
+  onJumpToParent?: () => void
   onStartEdit: () => void
   onSaveEdit: (content: string) => void
   onCancelEdit: () => void
@@ -386,21 +390,41 @@ function SystemMessageItem({ message, t }: { message: MessageResponse; t: TFunct
 }
 
 // WHY extracted: Reduces MessageItem cognitive complexity below Biome's limit of 15.
-function ParentQuote({ parentMessage }: { parentMessage?: MessageResponse['parentMessage'] }) {
+function ParentQuote({
+  parentMessage,
+  onJump,
+}: {
+  parentMessage?: MessageResponse['parentMessage']
+  onJump?: () => void
+}) {
   const { t } = useTranslation('messages')
   if (parentMessage === undefined || parentMessage === null) return null
 
+  const body =
+    parentMessage.deleted === true ? (
+      <p className="text-xs italic text-default-400">{t('deletedParentMessage')}</p>
+    ) : (
+      <>
+        <span className="text-xs font-medium">{parentMessage.authorUsername}</span>
+        <p className="truncate text-xs text-default-500">{parentMessage.contentPreview}</p>
+      </>
+    )
+
+  // WHY not clickable without onJump: a jump handler only exists inside a
+  // channel view; keeping the plain div otherwise avoids a dead affordance.
+  if (onJump === undefined) {
+    return <div className="mb-1 border-l-2 border-default-300 pl-2 opacity-75">{body}</div>
+  }
+
   return (
-    <div className="mb-1 border-l-2 border-default-300 pl-2 opacity-75">
-      {parentMessage.deleted === true ? (
-        <p className="text-xs italic text-default-400">{t('deletedParentMessage')}</p>
-      ) : (
-        <>
-          <span className="text-xs font-medium">{parentMessage.authorUsername}</span>
-          <p className="truncate text-xs text-default-500">{parentMessage.contentPreview}</p>
-        </>
-      )}
-    </div>
+    <button
+      type="button"
+      aria-label={t('jumpToRepliedMessage')}
+      onClick={onJump}
+      className="mb-1 block w-full cursor-pointer border-default-300 border-l-2 pl-2 text-left opacity-75 transition-opacity hover:opacity-100 focus:outline-none focus-visible:opacity-100"
+    >
+      {body}
+    </button>
   )
 }
 
@@ -684,6 +708,8 @@ export const MessageItem = memo(function MessageItem({
   canModerateMessages,
   isEditing,
   isGrouped = false,
+  isFlashing = false,
+  onJumpToParent,
   onStartEdit,
   onSaveEdit,
   onCancelEdit,
@@ -746,7 +772,7 @@ export const MessageItem = memo(function MessageItem({
       data-test="message-item"
       data-message-id={message.id}
       data-test-mentions-me={mentionsMe ? 'true' : undefined}
-      className={`group relative flex gap-4 px-4 hover:bg-default-200/50${mentionsMe ? ' border-l-2 border-warning bg-warning/10' : ''}${isPending ? ' opacity-60' : ''}${isGrouped ? ' py-0.5' : ' pt-3 pb-0.5'}`}
+      className={`group relative flex gap-4 px-4 transition-colors hover:bg-default-200/50${mentionsMe ? ' border-l-2 border-warning bg-warning/10' : ''}${isFlashing ? ' ring-2 ring-warning/40 ring-inset' : ''}${isPending ? ' opacity-60' : ''}${isGrouped ? ' py-0.5' : ' pt-3 pb-0.5'}`}
     >
       {isGrouped ? (
         <div className="w-10 shrink-0" />
@@ -777,7 +803,7 @@ export const MessageItem = memo(function MessageItem({
           />
         )}
 
-        <ParentQuote parentMessage={message.parentMessage} />
+        <ParentQuote parentMessage={message.parentMessage} onJump={onJumpToParent} />
 
         <MessageContent
           message={message}

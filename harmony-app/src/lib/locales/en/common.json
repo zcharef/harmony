@@ -25,5 +25,6 @@
   "updateAction": "Restart now",
   "updateDismiss": "Not now",
   "restartFailed": "Failed to restart — please restart manually",
-  "newEncryptedMessage": "New encrypted message"
+  "newEncryptedMessage": "New encrypted message",
+  "networkError": "Network error — please try again"
 }

@@ -11,6 +11,8 @@ import {
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual'
 import {
   Bell,
+  ChevronDown,
+  ChevronUp,
   Film,
   Hash,
   MessageCircle,
@@ -58,10 +60,12 @@ import { MentionAutocomplete, mentionOptionId } from './components/mention-autoc
 import { EmojiPickerPopover } from './emoji-picker-popover'
 import { GifPickerPopover } from './gif-picker-popover'
 import { useAddReaction } from './hooks/use-add-reaction'
+import { useChannelReadState } from './hooks/use-channel-read-state'
 import { type ComposerAttachments, useComposerAttachments } from './hooks/use-composer-attachments'
 import { useDeleteMessage } from './hooks/use-delete-message'
 import { useEditMessage } from './hooks/use-edit-message'
 import { useGifCapability } from './hooks/use-gif-capability'
+import { useJumpToMessage } from './hooks/use-jump-to-message'
 import type { UseMentionAutocompleteResult } from './hooks/use-mention-autocomplete'
 import { useMentionAutocomplete } from './hooks/use-mention-autocomplete'
 import { useMessages } from './hooks/use-messages'
@@ -77,6 +81,7 @@ import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE } from './lib/att
 import { buildVirtualItems } from './lib/build-virtual-items'
 import { applyMentionMap } from './lib/mention-tokens'
 import { MessageItem } from './message-item'
+import { useDividerStore } from './stores/divider-store'
 import { TypingIndicator } from './typing-indicator'
 
 interface ChatAreaProps {
@@ -444,6 +449,22 @@ function DateDivider({ label }: { label: string }) {
       <Divider className="flex-1" />
       <span className="text-xs font-semibold text-default-500">{label}</span>
       <Divider className="flex-1" />
+    </div>
+  )
+}
+
+// WHY danger token only (HeroUI/ADR-044): the red "new messages" separator uses
+// the semantic `danger` color, no hardcoded red and no dark: overrides.
+function NewMessagesDivider() {
+  const { t } = useTranslation('chat')
+  // WHY no explicit role: HeroUI <Divider> already renders role="separator"; the
+  // visible "New messages" label carries the meaning to screen readers.
+  return (
+    <div data-test="new-messages-divider" className="flex items-center gap-2 px-4 py-1">
+      <Divider className="flex-1 bg-danger" />
+      <span className="font-semibold text-[10px] text-danger uppercase tracking-wide">
+        {t('newMessages')}
+      </span>
     </div>
   )
 }
@@ -1283,19 +1304,145 @@ export function ChatArea({
 
   useMarkReadOnFocus(channelId, messages)
 
-  const virtualItems = useMemo(() => buildVirtualItems(messages), [messages])
+  // WHY: freeze the "new messages" divider boundary ONCE on channel open. The
+  // read-state query snapshots lastReadAt (staleTime: Infinity), and the store
+  // holds it frozen so the concurrent mark-read doesn't erase the divider (§5.6).
+  const { data: readState } = useChannelReadState(channelId)
+  const freezeDivider = useDividerStore((s) => s.freeze)
+  const clearDivider = useDividerStore((s) => s.clear)
+  useEffect(() => {
+    if (channelId !== null && readState !== undefined) {
+      freezeDivider(channelId, readState.lastReadAt ?? null)
+    }
+  }, [channelId, readState, freezeDivider])
+
+  const isDividerFrozen = useDividerStore(
+    (s) => channelId !== null && s.anchors[channelId] !== undefined,
+  )
+  const dividerAnchorAt = useDividerStore((s) =>
+    channelId === null ? null : (s.anchors[channelId]?.anchorAt ?? null),
+  )
+
+  // WHY clear on channel switch: re-entry must re-freeze a fresh boundary below
+  // where the user left off (mirrors the prevChannelIdRef pattern in useAutoScroll).
+  const prevDividerChannelRef = useRef(channelId)
+  useEffect(() => {
+    const prev = prevDividerChannelRef.current
+    if (prev !== channelId && prev !== null) clearDivider(prev)
+    prevDividerChannelRef.current = channelId
+  }, [channelId, clearDivider])
+
+  // §6.2: when the whole loaded window is newer than the boundary AND more
+  // history exists, the real first-unread is above the window — suppress the
+  // inline divider and let the jump-to-unread pill fetch it on demand.
+  const boundaryAboveWindow = useMemo(() => {
+    if (!isDividerFrozen || dividerAnchorAt === null) return false
+    const oldest = messages[0]
+    if (oldest === undefined || hasNextPage !== true) return false
+    return new Date(oldest.createdAt).getTime() > new Date(dividerAnchorAt).getTime()
+  }, [isDividerFrozen, dividerAnchorAt, messages, hasNextPage])
+
+  const virtualItems = useMemo(
+    () =>
+      buildVirtualItems(
+        messages,
+        isDividerFrozen && !boundaryAboveWindow
+          ? { dividerAnchorAt, currentUserId: currentUser.id }
+          : null,
+      ),
+    [messages, isDividerFrozen, boundaryAboveWindow, dividerAnchorAt, currentUser.id],
+  )
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const virtualizer = useVirtualizer({
     count: virtualItems.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => (virtualItems[index]?.type === 'date' ? 36 : 56),
+    estimateSize: (index) => {
+      const type = virtualItems[index]?.type
+      return type === 'date' || type === 'new-messages' ? 36 : 56
+    },
     overscan: 10,
   })
 
   useAutoScroll(scrollRef, virtualItems.length, channelId, virtualizer, typingUsers.length > 0)
 
-  const handleScroll = useThrottledScroll(scrollRef, hasNextPage, isFetchingNextPage, fetchNextPage)
+  const { jumpToMessage, flashMessageId } = useJumpToMessage({
+    channelId,
+    virtualItems,
+    virtualizer,
+  })
+
+  const dividerIndex = useMemo(
+    () => virtualItems.findIndex((item) => item.type === 'new-messages'),
+    [virtualItems],
+  )
+
+  // WHY scroll-driven state: the jump pills depend on the current viewport
+  // (divider above the top edge / far from the bottom). A tiny state bump on
+  // scroll keeps them reactive without measuring on every render.
+  const [pillView, setPillView] = useState({ firstIndex: 0, distanceFromBottom: 0 })
+  const updatePillView = useCallback(() => {
+    const el = scrollRef.current
+    const firstIndex = virtualizer.getVirtualItems()[0]?.index ?? 0
+    const distanceFromBottom = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0
+    setPillView((prev) =>
+      prev.firstIndex === firstIndex && prev.distanceFromBottom === distanceFromBottom
+        ? prev
+        : { firstIndex, distanceFromBottom },
+    )
+  }, [virtualizer])
+
+  useEffect(() => {
+    updatePillView()
+  }, [updatePillView])
+
+  const paginateScroll = useThrottledScroll(
+    scrollRef,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  )
+  const handleScroll = useCallback(() => {
+    paginateScroll()
+    updatePillView()
+  }, [paginateScroll, updatePillView])
+
+  // Show "↑ New messages" when unread exists above the viewport (divider row
+  // scrolled above the top, or the boundary is still unloaded — §5.7 / §6.2).
+  const hasUnreadBoundary = dividerIndex !== -1 || boundaryAboveWindow
+  const showJumpToUnread =
+    hasUnreadBoundary && (dividerIndex === -1 || pillView.firstIndex > dividerIndex)
+  const showJumpToPresent = pillView.distanceFromBottom > 400
+
+  const handleJumpToUnread = useCallback(() => {
+    if (dividerIndex !== -1) {
+      virtualizer.scrollToIndex(dividerIndex, { align: 'start' })
+      return
+    }
+    // §6.2: boundary above the loaded window. Fetch around the last-read message
+    // so the divider renders naturally; if never read, climb history from the top.
+    const lastReadId = readState?.lastReadMessageId
+    if (lastReadId !== undefined && lastReadId !== null) {
+      void jumpToMessage(lastReadId)
+    } else {
+      virtualizer.scrollToIndex(0, { align: 'start' })
+      if (hasNextPage === true && isFetchingNextPage === false) fetchNextPage()
+    }
+  }, [
+    dividerIndex,
+    virtualizer,
+    readState,
+    jumpToMessage,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  ])
+
+  const handleJumpToPresent = useCallback(() => {
+    if (virtualItems.length > 0) {
+      virtualizer.scrollToIndex(virtualItems.length - 1, { align: 'end' })
+    }
+  }, [virtualizer, virtualItems.length])
 
   const { isBlocked, isInputDisabled, isDmInitFailed, inputPlaceholder } = useChatInputState(
     isDm,
@@ -1404,88 +1551,134 @@ export function ChatArea({
 
       <Divider />
 
-      {/* Virtualized message list */}
-      <div
-        data-test="message-list"
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto"
-      >
-        <MessageListStatus
-          isDm={isDm}
-          isChannelEncrypted={isChannelEncrypted}
-          channelId={channelId}
-          channelName={channelName}
-          dmRecipient={dmRecipient}
-          hasNextPage={hasNextPage}
-          isFetchingNextPage={isFetchingNextPage}
-          isPending={isPending}
-          isError={isError}
-          messageCount={messages.length}
-          onRetry={() => refetch()}
-          isRetrying={isRefetching}
-        />
-
-        {/* WHY: Virtualizer container is separate — only absolute-positioned items inside.
-            getTotalSize() is accurate because it only accounts for measured message rows. */}
+      {/* Virtualized message list + floating jump pills */}
+      <div className="relative flex-1 overflow-hidden">
+        {showJumpToUnread && (
+          <Button
+            size="sm"
+            variant="flat"
+            color="danger"
+            startContent={<ChevronUp className="h-3 w-3" />}
+            onPress={handleJumpToUnread}
+            data-test="jump-to-unread"
+            className="-translate-x-1/2 absolute top-2 left-1/2 z-10"
+          >
+            {t('jumpToNewMessages')}
+          </Button>
+        )}
+        {showJumpToPresent && (
+          <Button
+            size="sm"
+            variant="flat"
+            color="default"
+            startContent={<ChevronDown className="h-3 w-3" />}
+            onPress={handleJumpToPresent}
+            data-test="jump-to-present"
+            className="-translate-x-1/2 absolute bottom-2 left-1/2 z-10"
+          >
+            {t('jumpToPresent')}
+          </Button>
+        )}
         <div
-          className={isError && messages.length > 0 ? 'opacity-70' : undefined}
-          style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}
+          data-test="message-list"
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="h-full overflow-y-auto"
         >
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const item = virtualItems[virtualRow.index]
-            if (!item) return null
+          <MessageListStatus
+            isDm={isDm}
+            isChannelEncrypted={isChannelEncrypted}
+            channelId={channelId}
+            channelName={channelName}
+            dmRecipient={dmRecipient}
+            hasNextPage={hasNextPage}
+            isFetchingNextPage={isFetchingNextPage}
+            isPending={isPending}
+            isError={isError}
+            messageCount={messages.length}
+            onRetry={() => refetch()}
+            isRetrying={isRefetching}
+          />
 
-            const key = item.type === 'date' ? `date-${virtualRow.index}` : item.msg.id
+          {/* WHY: Virtualizer container is separate — only absolute-positioned items inside.
+            getTotalSize() is accurate because it only accounts for measured message rows. */}
+          <div
+            className={isError && messages.length > 0 ? 'opacity-70' : undefined}
+            style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const item = virtualItems[virtualRow.index]
+              if (!item) return null
 
-            return (
-              <div
-                key={key}
-                data-index={virtualRow.index}
-                ref={virtualizer.measureElement}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
-              >
-                {item.type === 'date' ? (
-                  <DateDivider label={item.label} />
-                ) : (
-                  <MessageItem
-                    message={item.msg}
-                    currentUserId={currentUser.id}
-                    serverId={serverId}
-                    canModerateMessages={
-                      ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.moderator
-                    }
-                    isEditing={editingMessageId === item.msg.id}
-                    isGrouped={item.isGrouped}
-                    onStartEdit={() => handleStartEdit(item.msg.id)}
-                    onSaveEdit={(content) => handleSaveEdit(item.msg.id, content)}
-                    onCancelEdit={handleCancelEdit}
-                    onDelete={() => handleDelete(item.msg.id)}
-                    onReply={() => setReplyingTo(item.msg)}
-                    onAddReaction={(emoji) =>
-                      addReactionMutation.mutate({ messageId: item.msg.id, emoji })
-                    }
-                    onRemoveReaction={(emoji) =>
-                      removeReactionMutation.mutate({ messageId: item.msg.id, emoji })
-                    }
-                    isDm={isDm}
-                    isChannelEncrypted={isChannelEncrypted}
-                    decryptMessage={decryptMessage}
-                    decryptChannelMessage={decryptChannelMessage}
-                    getCachedPlaintext={
-                      isChannelEncrypted ? getChannelCachedPlaintext : getCachedPlaintext
-                    }
-                  />
-                )}
-              </div>
-            )
-          })}
+              const key =
+                item.type === 'date'
+                  ? `date-${virtualRow.index}`
+                  : item.type === 'new-messages'
+                    ? 'new-messages'
+                    : item.msg.id
+
+              return (
+                <div
+                  key={key}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  {item.type === 'date' ? (
+                    <DateDivider label={item.label} />
+                  ) : item.type === 'new-messages' ? (
+                    <NewMessagesDivider />
+                  ) : (
+                    <MessageItem
+                      message={item.msg}
+                      currentUserId={currentUser.id}
+                      serverId={serverId}
+                      canModerateMessages={
+                        ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.moderator
+                      }
+                      isEditing={editingMessageId === item.msg.id}
+                      isGrouped={item.isGrouped}
+                      isFlashing={flashMessageId === item.msg.id}
+                      onJumpToParent={
+                        item.msg.parentMessageId !== undefined && item.msg.parentMessageId !== null
+                          ? () => {
+                              const parentId = item.msg.parentMessageId
+                              if (parentId !== undefined && parentId !== null) {
+                                void jumpToMessage(parentId)
+                              }
+                            }
+                          : undefined
+                      }
+                      onStartEdit={() => handleStartEdit(item.msg.id)}
+                      onSaveEdit={(content) => handleSaveEdit(item.msg.id, content)}
+                      onCancelEdit={handleCancelEdit}
+                      onDelete={() => handleDelete(item.msg.id)}
+                      onReply={() => setReplyingTo(item.msg)}
+                      onAddReaction={(emoji) =>
+                        addReactionMutation.mutate({ messageId: item.msg.id, emoji })
+                      }
+                      onRemoveReaction={(emoji) =>
+                        removeReactionMutation.mutate({ messageId: item.msg.id, emoji })
+                      }
+                      isDm={isDm}
+                      isChannelEncrypted={isChannelEncrypted}
+                      decryptMessage={decryptMessage}
+                      decryptChannelMessage={decryptChannelMessage}
+                      getCachedPlaintext={
+                        isChannelEncrypted ? getChannelCachedPlaintext : getCachedPlaintext
+                      }
+                    />
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
 

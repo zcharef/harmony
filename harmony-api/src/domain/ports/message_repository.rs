@@ -8,6 +8,24 @@ use crate::domain::models::{
     ChannelId, Message, MessageId, MessageWithAuthor, NewAttachment, UserId,
 };
 
+/// Result of [`MessageRepository::list_around`]: the centered window plus a
+/// signal for whether older history remains *below* it.
+///
+/// The window is two-sided, so its total row count is short whenever EITHER
+/// half is short. That makes `rows.len() == limit` useless for deriving the
+/// backward-paging cursor — a full older half with a short newer half (anchor
+/// near the present) would wrongly look "exhausted". `has_more_older` reports
+/// the older half's fill state directly so the handler can set `nextCursor`
+/// correctly.
+#[derive(Debug)]
+pub struct AroundWindow {
+    /// The centered page, `created_at DESC` (same shape as `list_for_channel`).
+    pub messages: Vec<MessageWithAuthor>,
+    /// True when the older sub-window was filled to `before_limit` rows — more
+    /// history may exist below the window, so backward paging must stay armed.
+    pub has_more_older: bool,
+}
+
 /// Intent-based repository for messages.
 #[async_trait]
 pub trait MessageRepository: Send + Sync + std::fmt::Debug {
@@ -50,6 +68,24 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
 
     /// Find a message by ID (returns `None` if not found OR soft-deleted).
     async fn find_by_id(&self, message_id: &MessageId) -> Result<Option<Message>, DomainError>;
+
+    /// Fetch a window of messages centered on `anchor_id` (jump-to-message).
+    ///
+    /// Returns up to `before_limit` strictly-older rows, the anchor itself, and
+    /// up to `after_limit` strictly-newer rows, all ordered `created_at DESC`
+    /// (same shape as [`list_for_channel`](Self::list_for_channel) so the client
+    /// reverse keeps working). Soft-deleted rows are excluded EXCEPT the anchor,
+    /// which is always included so a jump can land on a tombstone.
+    ///
+    /// Returns `None` when `anchor_id` does not exist or does not belong to
+    /// `channel_id` — the service maps that to `NotFound`.
+    async fn list_around(
+        &self,
+        channel_id: &ChannelId,
+        anchor_id: &MessageId,
+        before_limit: i64,
+        after_limit: i64,
+    ) -> Result<Option<AroundWindow>, DomainError>;
 
     /// Update message content. Sets `is_edited=true`, `edited_at=now()`.
     /// Returns the updated message.

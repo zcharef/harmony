@@ -10,7 +10,7 @@ use crate::domain::models::{
     Attachment, AttachmentId, ChannelId, Message, MessageId, MessageType, MessageWithAuthor,
     NewAttachment, ParentMessagePreview, UserId,
 };
-use crate::domain::ports::MessageRepository;
+use crate::domain::ports::{AroundWindow, MessageRepository};
 
 /// Parse the Postgres `message_type` enum value into the domain enum.
 fn parse_message_type(value: &str) -> MessageType {
@@ -648,6 +648,145 @@ impl MessageRepository for PgMessageRepository {
                 created_at: r.created_at,
             }
             .into_message()
+        }))
+    }
+
+    async fn list_around(
+        &self,
+        channel_id: &ChannelId,
+        anchor_id: &MessageId,
+        before_limit: i64,
+        after_limit: i64,
+    ) -> Result<Option<AroundWindow>, DomainError> {
+        let cid = channel_id.0;
+        let aid = anchor_id.0;
+
+        // WHY a dedicated anchor lookup that ignores deleted_at: jump-to-message
+        // must land on a soft-deleted tombstone (ticket §3.2), and we need the
+        // anchor's created_at to split the window. Scoped to the channel so an
+        // anchor from another channel yields None → NotFound at the service.
+        let Some(anchor) = sqlx::query!(
+            r#"SELECT created_at FROM messages WHERE id = $1 AND channel_id = $2"#,
+            aid,
+            cid,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(super::db_err)?
+        else {
+            return Ok(None);
+        };
+        let anchor_at = anchor.created_at;
+
+        // WHY the target_ids CTE: apply independent LIMITs to the older and
+        // newer half around the anchor, then re-join the SAME projection as
+        // list_for_channel so parent-preview/author columns stay identical.
+        // The anchor id is unioned in unconditionally (may be deleted); the two
+        // windows use strict < / > so it is never double-counted. Final order is
+        // created_at DESC to match list_for_channel's client-side reverse.
+        let rows = sqlx::query!(
+            r#"
+            WITH target_ids AS (
+                (SELECT id FROM messages
+                    WHERE channel_id = $1 AND deleted_at IS NULL AND created_at < $2
+                    ORDER BY created_at DESC LIMIT $3)
+                UNION ALL
+                (SELECT id FROM messages
+                    WHERE channel_id = $1 AND deleted_at IS NULL AND created_at > $2
+                    ORDER BY created_at ASC LIMIT $4)
+                UNION ALL
+                SELECT $5::uuid AS id
+            )
+            SELECT
+                m.id,
+                m.channel_id,
+                m.author_id,
+                m.content,
+                m.edited_at,
+                m.deleted_at,
+                m.deleted_by,
+                m.encrypted,
+                m.sender_device_id,
+                m.message_type as "message_type!: String",
+                m.system_event_key,
+                m.parent_message_id,
+                m.moderated_at,
+                m.moderation_reason,
+                m.original_content,
+                m.mentioned_user_ids as "mentioned_user_ids!",
+                m.created_at,
+                p.username AS "author_username?",
+                p.display_name AS "author_display_name?",
+                p.avatar_url AS "author_avatar_url?",
+                parent_p.username AS "parent_author_username?",
+                LEFT(parent_m.content, 100) AS "parent_content_preview?",
+                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
+            FROM messages m
+            JOIN target_ids ti ON ti.id = m.id
+            LEFT JOIN profiles p ON p.id = m.author_id
+            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id
+            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
+            WHERE m.channel_id = $1
+            ORDER BY m.created_at DESC
+            "#,
+            cid,
+            anchor_at,
+            before_limit,
+            after_limit,
+            aid,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(super::db_err)?;
+
+        let messages = rows
+            .into_iter()
+            .map(|r| {
+                MessageWithAuthorRow {
+                    id: r.id,
+                    channel_id: r.channel_id,
+                    author_id: r.author_id,
+                    content: r.content,
+                    edited_at: r.edited_at,
+                    deleted_at: r.deleted_at,
+                    deleted_by: r.deleted_by,
+                    encrypted: r.encrypted,
+                    sender_device_id: r.sender_device_id,
+                    message_type: r.message_type,
+                    system_event_key: r.system_event_key,
+                    parent_message_id: r.parent_message_id,
+                    moderated_at: r.moderated_at,
+                    moderation_reason: r.moderation_reason,
+                    original_content: r.original_content,
+                    mentioned_user_ids: r.mentioned_user_ids,
+                    created_at: r.created_at,
+                    author_username: r.author_username,
+                    author_display_name: r.author_display_name,
+                    author_avatar_url: r.author_avatar_url,
+                    parent_author_username: r.parent_author_username,
+                    parent_content_preview: r.parent_content_preview,
+                    parent_deleted: r.parent_deleted,
+                }
+                .into_message_with_author()
+            })
+            .collect::<Vec<_>>();
+
+        // WHY count strictly-older rows: the older sub-window is the only source
+        // of `created_at < anchor_at` rows (the anchor sits at `anchor_at`, the
+        // newer half strictly above). If that count hit `before_limit`, the half
+        // was capped and more history may exist below — the handler must keep the
+        // backward cursor armed. This drives `nextCursor`, NOT the total row count
+        // (a two-sided window is short whenever either half is short).
+        let older_count = messages
+            .iter()
+            .filter(|m| m.message.created_at < anchor_at)
+            .count();
+        let has_more_older =
+            before_limit > 0 && older_count == usize::try_from(before_limit).unwrap_or(usize::MAX);
+
+        Ok(Some(AroundWindow {
+            messages,
+            has_more_older,
         }))
     }
 

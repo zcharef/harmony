@@ -8,11 +8,12 @@ use std::collections::{HashMap, HashSet};
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{
-    Channel, ChannelId, MentionedUser, MessageId, MessageWithAuthor, NewAttachment, Role, UserId,
+    Channel, ChannelId, MentionedUser, MessageId, MessageWithAuthor, NewAttachment, Role, ServerId,
+    UserId,
 };
 use crate::domain::ports::{
-    AttachmentRepository, ChannelRepository, MemberRepository, MessageRepository, PlanLimitChecker,
-    ReactionRepository,
+    AroundWindow, AttachmentRepository, ChannelRepository, MemberRepository, MessageRepository,
+    PlanLimitChecker, ReactionRepository,
 };
 use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
@@ -481,11 +482,68 @@ impl MessageService {
     ) -> Result<Vec<MessageWithAuthor>, DomainError> {
         let channel = self.verify_channel_membership(channel_id, user_id).await?;
 
-        let mut messages = self
+        let messages = self
             .repo
             .list_for_channel(channel_id, cursor, limit)
             .await?;
 
+        self.enrich_page(&channel.server_id, user_id, messages)
+            .await
+    }
+
+    /// Fetch a window of messages centered on `message_id` (jump-to-message).
+    ///
+    /// Returns up to `limit` messages: `floor(limit/2)` strictly-older, the
+    /// anchor, and the rest strictly-newer, ordered `created_at DESC`. The
+    /// anchor is included even when soft-deleted so a jump lands on the
+    /// tombstone. Membership is gated by the same check as `list_for_channel`.
+    ///
+    /// # Errors
+    /// Returns `DomainError::Forbidden`/`NotFound` when the caller may not
+    /// access the channel, and `DomainError::NotFound` when the anchor does not
+    /// exist in this channel.
+    pub async fn list_around(
+        &self,
+        channel_id: &ChannelId,
+        user_id: &UserId,
+        message_id: &MessageId,
+        limit: i64,
+    ) -> Result<AroundWindow, DomainError> {
+        let channel = self.verify_channel_membership(channel_id, user_id).await?;
+
+        // WHY floor(limit/2) older + anchor + rest newer: keeps the target
+        // centered while spending the full budget (ticket §3.2).
+        let before_limit = limit / 2;
+        let after_limit = (limit - 1 - before_limit).max(0);
+
+        let window = self
+            .repo
+            .list_around(channel_id, message_id, before_limit, after_limit)
+            .await?
+            .ok_or_else(|| DomainError::NotFound {
+                resource_type: "Message",
+                id: message_id.to_string(),
+            })?;
+
+        // Enrichment preserves order, so the `has_more_older` flag stays valid.
+        let messages = self
+            .enrich_page(&channel.server_id, user_id, window.messages)
+            .await?;
+        Ok(AroundWindow {
+            messages,
+            has_more_older: window.has_more_older,
+        })
+    }
+
+    /// Enrich a raw message page with reactions, attachments, and resolved
+    /// mention display data (single batched query each). Shared by
+    /// `list_for_channel` and `list_around` so both pages render identically.
+    async fn enrich_page(
+        &self,
+        server_id: &ServerId,
+        user_id: &UserId,
+        mut messages: Vec<MessageWithAuthor>,
+    ) -> Result<Vec<MessageWithAuthor>, DomainError> {
         // WHY: Batch-fetch reactions for all messages in a single query,
         // then zip into each MessageWithAuthor. Avoids N+1 queries.
         let ids: Vec<crate::domain::models::MessageId> =
@@ -517,7 +575,7 @@ impl MessageService {
         if !mention_ids.is_empty() {
             let resolved = self
                 .member_repo
-                .resolve_mentioned_users(&channel.server_id, &mention_ids)
+                .resolve_mentioned_users(server_id, &mention_ids)
                 .await?;
             let by_id: HashMap<UserId, MentionedUser> = resolved
                 .into_iter()

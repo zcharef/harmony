@@ -194,25 +194,58 @@ pub async fn list_messages(
         .unwrap_or(DEFAULT_MESSAGE_LIMIT)
         .clamp(1, MAX_MESSAGE_LIMIT);
 
-    let cursor = query
-        .before
-        .map(|s| {
-            s.parse::<chrono::DateTime<chrono::Utc>>()
-                .map_err(|_| "Invalid 'before' cursor: expected ISO 8601 timestamp")
-        })
-        .transpose()
-        .map_err(ApiError::bad_request)?;
+    // WHY mutually exclusive: `around` centers a window on a target message and
+    // `before` pages backward from a cursor — combining them is ambiguous.
+    if query.around.is_some() && query.before.is_some() {
+        return Err(ApiError::bad_request(
+            "`around` and `before` are mutually exclusive",
+        ));
+    }
 
-    let messages = state
-        .message_service()
-        .list_for_channel(&channel_id, &user_id, cursor, limit)
-        .await?;
+    let (messages, next_cursor) = if let Some(anchor_id) = query.around {
+        let window = state
+            .message_service()
+            .list_around(&channel_id, &user_id, &anchor_id, limit)
+            .await?;
 
-    // WHY: If we received exactly `limit` rows, there may be more — provide a cursor.
-    let next_cursor = if i64::try_from(messages.len()).unwrap_or(0) == limit {
-        messages.last().map(|m| m.message.created_at.to_rfc3339())
+        // WHY not `rows.len() == limit` for the around window: it is two-sided,
+        // so the total is short whenever EITHER half is short. When the newer
+        // half is short (anchor near the present) but the older half was capped,
+        // older history still exists below the window — a count-based cursor
+        // would wrongly null out and break backward (`before`) paging. Drive it
+        // from the older-side fill flag instead (§3.2).
+        let next_cursor = if window.has_more_older {
+            window
+                .messages
+                .last()
+                .map(|m| m.message.created_at.to_rfc3339())
+        } else {
+            None
+        };
+        (window.messages, next_cursor)
     } else {
-        None
+        let cursor = query
+            .before
+            .map(|s| {
+                s.parse::<chrono::DateTime<chrono::Utc>>()
+                    .map_err(|_| "Invalid 'before' cursor: expected ISO 8601 timestamp")
+            })
+            .transpose()
+            .map_err(ApiError::bad_request)?;
+
+        let messages = state
+            .message_service()
+            .list_for_channel(&channel_id, &user_id, cursor, limit)
+            .await?;
+
+        // WHY: If we received exactly `limit` rows, there may be more older
+        // history — provide the oldest row's timestamp as the `before` cursor.
+        let next_cursor = if i64::try_from(messages.len()).unwrap_or(0) == limit {
+            messages.last().map(|m| m.message.created_at.to_rfc3339())
+        } else {
+            None
+        };
+        (messages, next_cursor)
     };
 
     Ok((

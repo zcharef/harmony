@@ -1,8 +1,9 @@
 import type { MessageResponse } from '@/lib/api'
+import { OPTIMISTIC_ID_PREFIX } from './optimistic-id'
 
 /**
- * Virtualizer row model for the chat area: either a message row (with
- * grouping metadata) or a date separator row.
+ * Virtualizer row model for the chat area: a message row (with grouping
+ * metadata), a date separator row, or the "new messages" divider row.
  *
  * WHY extracted from chat-area.tsx: pure list-shaping logic with no React
  * dependency — extraction enables direct unit testing of the grouping rules
@@ -11,8 +12,40 @@ import type { MessageResponse } from '@/lib/api'
 export type VirtualItem =
   | { type: 'message'; msg: MessageResponse; isGrouped: boolean }
   | { type: 'date'; label: string }
+  | { type: 'new-messages' }
+
+/**
+ * Options controlling the "new messages" divider. `null` disables the divider
+ * entirely (e.g. while the read-state request is in flight, or on a channel
+ * with no open view).
+ */
+export interface DividerOptions {
+  /** Frozen `lastReadAt` (ISO). `null` = never read (divider may sit at the very top). */
+  dividerAnchorAt: string | null
+  /** The current user's id — their own messages never count as unread. */
+  currentUserId: string
+}
 
 const GROUPING_THRESHOLD_MS = 5 * 60 * 1000
+
+/**
+ * Divider placement predicate (unread-divider ticket §1.2) — byte-for-byte the
+ * same "unread" definition the server uses in `list_all_for_user`:
+ *   createdAt > anchor AND authorId !== me AND type !== 'system' AND not optimistic.
+ * Timestamp comparison (not id-equality) is deliberate so it degrades for the
+ * never-read (`anchorAt === null`) and unloaded-boundary cases.
+ */
+function isFirstUnread(
+  msg: MessageResponse,
+  anchorAt: string | null,
+  currentUserId: string,
+): boolean {
+  if (msg.authorId === currentUserId) return false
+  if (msg.messageType === 'system') return false
+  if (msg.id.startsWith(OPTIMISTIC_ID_PREFIX)) return false
+  if (anchorAt === null) return true
+  return new Date(msg.createdAt).getTime() > new Date(anchorAt).getTime()
+}
 
 function getDateLabel(date: Date, today: Date, yesterday: Date): string {
   if (date.toDateString() === today.toDateString()) return 'Today'
@@ -20,12 +53,21 @@ function getDateLabel(date: Date, today: Date, yesterday: Date): string {
   return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
 }
 
-export function buildVirtualItems(messages: MessageResponse[]): VirtualItem[] {
+export function buildVirtualItems(
+  messages: MessageResponse[],
+  divider: DividerOptions | null = null,
+): VirtualItem[] {
   if (messages.length === 0) return []
   const items: VirtualItem[] = []
   const now = new Date()
   const yesterday = new Date(now)
   yesterday.setDate(yesterday.getDate() - 1)
+
+  // WHY a single flag: exactly one divider is emitted, before the FIRST message
+  // matching §1.2. Placement lives ONLY here (single source of truth for row
+  // shaping). A date row for that message is pushed first, so the order is
+  // deterministic: date separator, then divider, then the message.
+  let dividerInserted = false
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
@@ -40,6 +82,15 @@ export function buildVirtualItems(messages: MessageResponse[]): VirtualItem[] {
       if (msgDate.toDateString() !== prevDate.toDateString()) {
         items.push({ type: 'date', label: getDateLabel(msgDate, now, yesterday) })
       }
+    }
+
+    if (
+      divider !== null &&
+      !dividerInserted &&
+      isFirstUnread(msg, divider.dividerAnchorAt, divider.currentUserId)
+    ) {
+      items.push({ type: 'new-messages' })
+      dividerInserted = true
     }
 
     // WHY: Deleted messages always break grouping so the "[Message deleted]"
