@@ -67,6 +67,7 @@ async fn main() {
     spawn_moderation_retry_sweep(state.clone());
     spawn_attachment_scan_sweep(state.clone());
     spawn_identity_image_scan_sweep(state.clone());
+    spawn_emoji_image_scan_sweep(state.clone());
     spawn_voice_session_sweep(state.clone());
 
     // Background tasks: PG LISTEN/NOTIFY workers for cross-instance SSE + presence
@@ -770,6 +771,52 @@ fn spawn_identity_image_scan_sweep(state: api::AppState) {
                 // Re-scan every pending image for this user. Idempotent: a
                 // candidate no longer pending (resolved or superseded) is skipped.
                 scan_pending_identity_images(&deps, &retry.user_id).await;
+            }
+        }
+    });
+}
+
+/// Spawn a background task that retries failed custom-emoji image scans every
+/// 60s (fail-closed). Mirrors `spawn_identity_image_scan_sweep`: a dead-lettered
+/// emoji stays `pending` (never revealed) until a retry resolves it. `scan_emoji`
+/// re-reads status, so an emoji already resolved out-of-band is a cheap no-op.
+fn spawn_emoji_image_scan_sweep(state: api::AppState) {
+    use crate::api::emoji_image_scan::{EmojiImageScanDeps, scan_emoji};
+
+    const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+    /// Maximum records to process per sweep cycle.
+    const BATCH_LIMIT: i64 = 20;
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(SWEEP_INTERVAL);
+        loop {
+            interval.tick().await;
+
+            let retry_repo = state.emoji_image_scan_retry_repository();
+
+            // Saturation signal: how deep is the unmoderated backlog?
+            if let Ok(depth) = retry_repo.count_pending().await
+                && depth > 0
+            {
+                tracing::info!(dead_letter_depth = depth, "emoji image scan retry backlog");
+            }
+
+            let pending = match retry_repo.list_pending(BATCH_LIMIT).await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    tracing::warn!(error = %e, "emoji image scan sweep: failed to fetch pending retries");
+                    continue;
+                }
+            };
+            if pending.is_empty() {
+                continue;
+            }
+
+            let deps = EmojiImageScanDeps::from_state(&state);
+            for retry in pending {
+                // Re-scan. Idempotent: an emoji no longer pending (resolved or
+                // deleted) is skipped by scan_emoji's status re-read.
+                scan_emoji(&deps, &retry.emoji_id).await;
             }
         }
     });

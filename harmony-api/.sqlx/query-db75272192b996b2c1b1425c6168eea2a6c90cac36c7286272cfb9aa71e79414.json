@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, server_id, name, url, is_animated, created_by,\n                   moderation_status::text AS \"moderation_status!\", created_at\n            FROM server_emojis\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_animated",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "moderation_status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "db75272192b996b2c1b1425c6168eea2a6c90cac36c7286272cfb9aa71e79414"
+}

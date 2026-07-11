@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) AS \"count!\"\n            FROM emoji_image_scan_retry\n            WHERE retry_count < 5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0a6bbb741c994600edee62a79347d9630bf655ec118384eaed248b765a2a5e10"
+}

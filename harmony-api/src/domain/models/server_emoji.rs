@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::errors::DomainError;
 
+use super::IdentityImageModerationStatus;
 use super::ids::{EmojiId, ServerId, UserId};
 
 /// Minimum length of a custom emoji name.
@@ -80,9 +81,16 @@ pub struct ServerEmoji {
     pub id: EmojiId,
     pub server_id: ServerId,
     pub name: String,
+    /// Public Storage URL of the emoji image. While `moderation_status` is
+    /// `Pending` this is the candidate under scan — NOT shown to other members;
+    /// it is revealed (via `emoji.created`) only when the async scan promotes it.
     pub url: String,
     pub is_animated: bool,
     pub created_by: UserId,
+    /// Scan-before-reveal state: a newly-created emoji is `Pending` (invisible to
+    /// other members) until the async image scan clears it to `Approved`; a
+    /// flagged emoji is `Rejected` (its row is deleted, never revealed).
+    pub moderation_status: IdentityImageModerationStatus,
     pub created_at: DateTime<Utc>,
 }
 

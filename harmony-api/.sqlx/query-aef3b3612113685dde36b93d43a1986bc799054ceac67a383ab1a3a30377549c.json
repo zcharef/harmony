@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO server_emojis (server_id, name, url, is_animated, created_by)\n            VALUES ($1, $2, $3, $4, $5)\n            RETURNING id, server_id, name, url, is_animated, created_by, created_at\n            ",
+  "query": "\n            UPDATE server_emojis\n            SET moderation_status = 'approved'::identity_image_moderation_status,\n                nsfw_score = $2,\n                scanned_at = now()\n            WHERE id = $1\n              AND moderation_status = 'pending'::identity_image_moderation_status\n            RETURNING id, server_id, name, url, is_animated, created_by,\n                      moderation_status::text AS \"moderation_status!\", created_at\n            ",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,11 @@
       },
       {
         "ordinal": 6,
+        "name": "moderation_status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -42,10 +47,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
-        "Text",
-        "Bool",
-        "Uuid"
+        "Float4"
       ]
     },
     "nullable": [
@@ -55,8 +57,9 @@
       false,
       false,
       false,
+      null,
       false
     ]
   },
-  "hash": "af7fb3b230f925cd8a13e8f4d6611a810c7d64dc0d54185c176d6010425c626f"
+  "hash": "aef3b3612113685dde36b93d43a1986bc799054ceac67a383ab1a3a30377549c"
 }

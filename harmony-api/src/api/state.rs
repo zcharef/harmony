@@ -9,10 +9,11 @@ use tokio::sync::Semaphore;
 use crate::domain::models::ServerId;
 use crate::domain::ports::{
     AnalyticsRecorder, AttachmentRepository, AttachmentScanRetryRepository, BanRepository,
-    ChannelRepository, ContentModerator, CsamMatcher, DesktopAuthRepository, EventBus,
-    IdentityImageScanRetryRepository, ImageClassifier, MegolmSessionRepository, MemberRepository,
-    MessageRepository, ModerationLogRepository, ModerationRetryRepository, PlanLimitChecker,
-    ServerRepository, StorageObjectRemover, VoiceSessionRepository,
+    ChannelRepository, ContentModerator, CsamMatcher, DesktopAuthRepository,
+    EmojiImageScanRetryRepository, EventBus, IdentityImageScanRetryRepository, ImageClassifier,
+    MegolmSessionRepository, MemberRepository, MessageRepository, ModerationLogRepository,
+    ModerationRetryRepository, PlanLimitChecker, ServerRepository, StorageObjectRemover,
+    VoiceSessionRepository,
 };
 use crate::domain::services::{
     ChannelService, DmService, FriendshipService, InviteService, KeyService, MessageService,
@@ -24,7 +25,8 @@ use crate::infra::PgPresenceTracker;
 use crate::infra::klipy::KlipyClient;
 use crate::infra::noop_storage_object_remover::NoopStorageObjectRemover;
 use crate::infra::postgres::{
-    PgIdentityImageScanRetryRepository, PgMigrationDashboardRepository, PgModerationLogRepository,
+    PgEmojiImageScanRetryRepository, PgIdentityImageScanRetryRepository,
+    PgMigrationDashboardRepository, PgModerationLogRepository,
 };
 use crate::infra::safe_browsing::SafeBrowsingClient;
 
@@ -124,6 +126,8 @@ pub struct AppState {
     attachment_scan_retry_repository: Arc<dyn AttachmentScanRetryRepository>,
     /// Dead-letter queue for failed identity-image (avatar/banner) scans.
     identity_image_scan_retry_repository: Arc<dyn IdentityImageScanRetryRepository>,
+    /// Dead-letter queue for failed custom-emoji image scans.
+    emoji_image_scan_retry_repository: Arc<dyn EmojiImageScanRetryRepository>,
     /// Deletes a flagged identity-image object from its bucket on rejection
     /// (best-effort; Noop until a service-role adapter lands).
     storage_object_remover: Arc<dyn StorageObjectRemover>,
@@ -201,6 +205,10 @@ impl std::fmt::Debug for AppState {
             .field(
                 "identity_image_scan_retry_repository",
                 &self.identity_image_scan_retry_repository,
+            )
+            .field(
+                "emoji_image_scan_retry_repository",
+                &self.emoji_image_scan_retry_repository,
             )
             .field("storage_object_remover", &self.storage_object_remover)
             .field(
@@ -291,6 +299,9 @@ impl AppState {
             )),
             plan_limit_checker.clone(),
             attachment_url_origin.clone(),
+            // Reuse the server service's config-driven filter so emoji names are
+            // moderated by the same policy as server/channel/profile names.
+            server_service.content_filter().clone(),
         ));
 
         // WHY constructed here (not a positional param): only the async automod
@@ -307,6 +318,8 @@ impl AppState {
         // test call sites) stable, mirroring server_emoji_service above.
         let identity_image_scan_retry_repository: Arc<dyn IdentityImageScanRetryRepository> =
             Arc::new(PgIdentityImageScanRetryRepository::new(pool.clone()));
+        let emoji_image_scan_retry_repository: Arc<dyn EmojiImageScanRetryRepository> =
+            Arc::new(PgEmojiImageScanRetryRepository::new(pool.clone()));
         let storage_object_remover: Arc<dyn StorageObjectRemover> =
             Arc::new(NoopStorageObjectRemover);
 
@@ -352,6 +365,7 @@ impl AppState {
             attachment_repository,
             attachment_scan_retry_repository,
             identity_image_scan_retry_repository,
+            emoji_image_scan_retry_repository,
             storage_object_remover,
             attachments_require_csam_scan,
             voice_service,
@@ -388,12 +402,24 @@ impl AppState {
         &self.server_service
     }
 
+    /// Cloneable handle to the emoji service (for `tokio::spawn` scan tasks).
+    #[must_use]
+    pub fn server_emoji_service_arc(&self) -> &Arc<ServerEmojiService> {
+        &self.server_emoji_service
+    }
+
     /// Identity-image scan dead-letter queue (fail-closed retry).
     #[must_use]
     pub fn identity_image_scan_retry_repository(
         &self,
     ) -> &Arc<dyn IdentityImageScanRetryRepository> {
         &self.identity_image_scan_retry_repository
+    }
+
+    /// Emoji-image scan dead-letter queue (fail-closed retry).
+    #[must_use]
+    pub fn emoji_image_scan_retry_repository(&self) -> &Arc<dyn EmojiImageScanRetryRepository> {
+        &self.emoji_image_scan_retry_repository
     }
 
     /// Best-effort remover of flagged identity-image objects.

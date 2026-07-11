@@ -9,7 +9,6 @@ use crate::api::dto::{CreateEmojiRequest, EmojiListResponse, EmojiResponse};
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, ApiPath, AuthUser};
 use crate::api::state::AppState;
-use crate::domain::models::server_event::EmojiPayload;
 use crate::domain::models::{EmojiId, Role, ServerEvent, ServerId};
 
 /// Max custom-emoji creations per user per minute (gentle admin guard, §3.4).
@@ -111,16 +110,16 @@ pub async fn create_server_emoji(
         .create(&server_id, &req.name, &req.url, req.is_animated, &user_id)
         .await?;
 
-    let receivers = state.event_bus().publish(ServerEvent::EmojiCreated {
-        sender_id: user_id,
-        server_id: server_id.clone(),
-        emoji: EmojiPayload::from(emoji.clone()),
-    });
+    // Scan-before-reveal: the emoji is staged PENDING and NOT broadcast to other
+    // members. The async scan reveals it (emits `emoji.created`) on a clean
+    // verdict, or rejects it (deletes the row, notifies the creator) on a flag.
+    // The 201 response carries the pending emoji so the creator sees it
+    // optimistically; other members only ever receive an approved one.
+    crate::api::emoji_image_scan::spawn_emoji_image_scan(&state, &emoji.id);
     tracing::debug!(
         server_id = %server_id,
         emoji_id = %emoji.id,
-        receivers,
-        "emitted emoji.created"
+        "emoji created (pending scan-before-reveal)"
     );
 
     Ok((StatusCode::CREATED, Json(EmojiResponse::from(emoji))))

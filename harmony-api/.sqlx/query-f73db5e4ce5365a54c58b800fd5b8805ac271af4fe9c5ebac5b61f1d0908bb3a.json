@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO emoji_image_scan_retry (emoji_id, url, last_error)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (emoji_id) DO UPDATE\n            SET retry_count = emoji_image_scan_retry.retry_count + 1,\n                url = EXCLUDED.url,\n                last_error = EXCLUDED.last_error,\n                updated_at = now()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f73db5e4ce5365a54c58b800fd5b8805ac271af4fe9c5ebac5b61f1d0908bb3a"
+}

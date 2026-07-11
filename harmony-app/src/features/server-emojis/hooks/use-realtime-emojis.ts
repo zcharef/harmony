@@ -1,10 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
+import i18n from 'i18next'
 import { useCallback } from 'react'
 import { z } from 'zod'
 import { useServerEvent } from '@/hooks/use-server-event'
 import type { EmojiListResponse, EmojiResponse } from '@/lib/api'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 
 /**
  * WHY local schemas: the SSE layer already validated the full discriminated
@@ -26,6 +28,12 @@ const emojiCreatedSchema = z.object({
 const emojiDeletedSchema = z.object({
   serverId: z.string(),
   emojiId: z.string(),
+})
+
+const emojiRejectedSchema = z.object({
+  serverId: z.string(),
+  emojiId: z.string(),
+  name: z.string(),
 })
 
 /**
@@ -87,6 +95,37 @@ export function useRealtimeEmojis() {
     [queryClient],
   )
 
+  // Scan-before-reveal rejection: the creator's optimistic emoji (added on the
+  // POST 201) must be dropped and a notice shown — the image did not pass review
+  // and was never revealed to other members. Delivered ONLY to the creator.
+  const handleRejected = useCallback(
+    (payload: unknown) => {
+      const parsed = emojiRejectedSchema.safeParse(payload)
+      if (!parsed.success) {
+        logger.error('Malformed emoji.rejected SSE payload', { error: parsed.error.message })
+        return
+      }
+      queryClient.setQueryData<EmojiListResponse>(
+        queryKeys.servers.emojis(parsed.data.serverId),
+        (old) => {
+          if (old === undefined) return old
+          if (!old.items.some((e) => e.id === parsed.data.emojiId)) return old
+          return {
+            items: old.items.filter((e) => e.id !== parsed.data.emojiId),
+            total: Math.max(0, old.total - 1),
+          }
+        },
+      )
+      // Explicit user action (an upload) that failed review → visible notice
+      // (ADR-045). i18n'd from the start.
+      toast.error(i18n.t('server-emojis:rejectedTitle'), {
+        description: i18n.t('server-emojis:rejectedBody', { name: parsed.data.name }),
+      })
+    },
+    [queryClient],
+  )
+
   useServerEvent('emoji.created', handleCreated)
   useServerEvent('emoji.deleted', handleDeleted)
+  useServerEvent('emoji.rejected', handleRejected)
 }

@@ -60,7 +60,8 @@ pub use migration::{
     MigrationProgress, NotYetActiveMember, RecommendedAction, ServerAliveSnapshot,
 };
 pub use moderation::{
-    AttachmentScanRetry, IdentityImageScanRetry, ModerationRetry, ServerModerationSettings,
+    AttachmentScanRetry, EmojiImageScanRetry, IdentityImageScanRetry, ModerationRetry,
+    ServerModerationSettings,
 };
 pub use moderation_log::{ModerationAction, ModerationLogEntry, NewModerationLogEntry};
 pub use plan::{Plan, PlanLimits, ResourceKind};

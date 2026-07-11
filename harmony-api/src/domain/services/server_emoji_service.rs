@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::domain::errors::DomainError;
 use crate::domain::models::{EmojiId, EmojiName, ServerEmoji, ServerId, UserId};
 use crate::domain::ports::{PlanLimitChecker, ServerEmojiRepository};
+use crate::domain::services::content_filter::ContentFilter;
 
 /// DB ceiling on the stored URL (mirrors the `server_emojis_url_length` CHECK).
 const MAX_EMOJI_URL_LEN: usize = 2048;
@@ -22,6 +23,9 @@ pub struct ServerEmojiService {
     /// live on. `None` = unconfigured → creation FAILS CLOSED (rejects all),
     /// same posture as attachment URL validation.
     storage_origin: Option<String>,
+    /// Synchronous banned-word filter — the SAME instance server/channel/profile
+    /// names use, so emoji names are moderated by one policy (config-driven).
+    content_filter: Arc<ContentFilter>,
 }
 
 impl ServerEmojiService {
@@ -30,11 +34,13 @@ impl ServerEmojiService {
         repo: Arc<dyn ServerEmojiRepository>,
         plan_checker: Arc<dyn PlanLimitChecker>,
         storage_origin: Option<String>,
+        content_filter: Arc<ContentFilter>,
     ) -> Self {
         Self {
             repo,
             plan_checker,
             storage_origin,
+            content_filter,
         }
     }
 
@@ -59,6 +65,12 @@ impl ServerEmojiService {
         created_by: &UserId,
     ) -> Result<ServerEmoji, DomainError> {
         let name = EmojiName::parse(raw_name)?;
+
+        // WHY: the `^[a-z0-9_]{2,32}$` grammar still admits slurs (e.g.
+        // `slur_word`); moderate the name with the same synchronous filter that
+        // gates server/channel/profile names. A hit rejects the create (a Tier-1
+        // violation in a short identifier → reject, never mask).
+        self.content_filter.check_hard(name.as_str())?;
 
         self.validate_url(server_id, url)?;
 
@@ -124,6 +136,39 @@ impl ServerEmojiService {
         Ok(emoji)
     }
 
+    /// Fetch a single emoji by id (any status), for the async scan pipeline.
+    ///
+    /// # Errors
+    /// Returns a repository error on failure.
+    pub async fn get_by_id(&self, emoji_id: &EmojiId) -> Result<Option<ServerEmoji>, DomainError> {
+        self.repo.get_by_id(emoji_id).await
+    }
+
+    /// Promote a `pending` emoji to `approved` (scan verdict clean).
+    ///
+    /// Returns `None` when the emoji is gone or no longer pending (a superseding
+    /// verdict already resolved it). Thin pass-through to the repository.
+    ///
+    /// # Errors
+    /// Returns a repository error on failure.
+    pub async fn promote(
+        &self,
+        emoji_id: &EmojiId,
+        nsfw_score: Option<f32>,
+    ) -> Result<Option<ServerEmoji>, DomainError> {
+        self.repo.promote(emoji_id, nsfw_score).await
+    }
+
+    /// Reject a `pending` emoji (scan verdict flagged): the row is deleted so it
+    /// never goes live. Returns the deleted emoji (for object cleanup), or `None`
+    /// when it is gone or no longer pending.
+    ///
+    /// # Errors
+    /// Returns a repository error on failure.
+    pub async fn reject(&self, emoji_id: &EmojiId) -> Result<Option<ServerEmoji>, DomainError> {
+        self.repo.reject(emoji_id).await
+    }
+
     /// Bind the stored URL to this server's public bucket path.
     ///
     /// WHY: the bucket RLS already gates writes to admins under
@@ -161,7 +206,7 @@ mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
-    use crate::domain::models::{Plan, PlanLimits};
+    use crate::domain::models::{IdentityImageModerationStatus, Plan, PlanLimits};
 
     fn server_id() -> ServerId {
         ServerId::new(Uuid::from_u128(1))
@@ -200,6 +245,7 @@ mod tests {
                 url: url.to_string(),
                 is_animated,
                 created_by: created_by.clone(),
+                moderation_status: IdentityImageModerationStatus::Pending,
                 created_at: Utc::now(),
             })
         }
@@ -210,6 +256,16 @@ mod tests {
             Ok(vec![])
         }
         async fn get_by_id(&self, _emoji_id: &EmojiId) -> Result<Option<ServerEmoji>, DomainError> {
+            Ok(None)
+        }
+        async fn promote(
+            &self,
+            _emoji_id: &EmojiId,
+            _nsfw_score: Option<f32>,
+        ) -> Result<Option<ServerEmoji>, DomainError> {
+            Ok(None)
+        }
+        async fn reject(&self, _emoji_id: &EmojiId) -> Result<Option<ServerEmoji>, DomainError> {
             Ok(None)
         }
         async fn delete(&self, _emoji_id: &EmojiId) -> Result<(), DomainError> {
@@ -282,8 +338,23 @@ mod tests {
             repo.clone(),
             Arc::new(FakePlanChecker { plan, at_cap }),
             Some(ORIGIN.to_string()),
+            Arc::new(ContentFilter::noop()),
         );
         (svc, repo)
+    }
+
+    /// Service whose content filter rejects the synthetic word `"slur"`, to
+    /// exercise the emoji-name moderation gate.
+    fn service_rejecting_slur() -> ServerEmojiService {
+        ServerEmojiService::new(
+            Arc::new(FakeEmojiRepo),
+            Arc::new(FakePlanChecker {
+                plan: Plan::Creator,
+                at_cap: false,
+            }),
+            Some(ORIGIN.to_string()),
+            Arc::new(ContentFilter::from_words(&["slur"])),
+        )
     }
 
     #[tokio::test]
@@ -348,6 +419,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_rejects_offensive_name() {
+        // The name grammar (`^[a-z0-9_]{2,32}$`) admits `slur_word`; the content
+        // filter must reject it with a ValidationError before any persistence.
+        let svc = service_rejecting_slur();
+        let err = svc
+            .create(&server_id(), "slur_word", &valid_url(), false, &user_id())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::ValidationError(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_stages_pending_for_scan() {
+        // A freshly-created emoji is held PENDING (scan-before-reveal), never
+        // returned as approved.
+        let (svc, _) = service(Plan::Creator, false);
+        let emoji = svc
+            .create(&server_id(), "fire", &valid_url(), false, &user_id())
+            .await
+            .unwrap();
+        assert_eq!(
+            emoji.moderation_status,
+            IdentityImageModerationStatus::Pending
+        );
+    }
+
+    #[tokio::test]
     async fn create_fails_closed_without_storage_origin() {
         let svc = ServerEmojiService::new(
             Arc::new(FakeEmojiRepo),
@@ -356,6 +457,7 @@ mod tests {
                 at_cap: false,
             }),
             None,
+            Arc::new(ContentFilter::noop()),
         );
         let err = svc
             .create(&server_id(), "party", &valid_url(), false, &user_id())
