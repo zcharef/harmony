@@ -1381,4 +1381,875 @@ mod tests {
         assert!(over_supporter.chars().count() > supporter_plan_limit);
         assert!(over_supporter.chars().count() <= MAX_MESSAGE_LENGTH);
     }
+
+    // ── set_pinned business rules (moderator gate, cap, idempotency) ──
+    //
+    // These drive the REAL `MessageService::set_pinned` against fake repos so a
+    // regression that drops the moderator gate, flips the cap comparison
+    // (`>=` → `>`), or removes the idempotent short-circuit fails the normal
+    // `just wall`. The repo-layer SQL is covered separately by the `#[ignore]`
+    // integration tests in `tests/pins_test.rs` (which are excluded from CI).
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use uuid::Uuid;
+
+    use crate::domain::models::friendship::{
+        BlockOutcome, BlockedUserRow, FriendRequestRow, FriendRow, Friendship, RequestDirection,
+        RequestOutcome,
+    };
+    use crate::domain::models::{
+        Attachment, AttachmentId, AttachmentModerationStatus, ChannelType, EmojiVariety, Message,
+        MessageType, PlanLimits, ReactionSummary, ServerMember,
+    };
+
+    fn pin_user_id(n: u128) -> UserId {
+        UserId::new(Uuid::from_u128(n))
+    }
+    fn pin_server_id(n: u128) -> ServerId {
+        ServerId::new(Uuid::from_u128(n))
+    }
+    fn pin_channel_id(n: u128) -> ChannelId {
+        ChannelId::new(Uuid::from_u128(n))
+    }
+    fn pin_message_id(n: u128) -> MessageId {
+        MessageId::new(Uuid::from_u128(n))
+    }
+
+    /// A public channel in server 1, id 100 — the path channel for the tests.
+    fn pin_channel() -> Channel {
+        let now = Utc::now();
+        Channel {
+            id: pin_channel_id(100),
+            server_id: pin_server_id(1),
+            name: "general".to_string(),
+            topic: None,
+            channel_type: ChannelType::Text,
+            position: 0,
+            category_id: None,
+            is_private: false,
+            is_read_only: false,
+            encrypted: false,
+            slow_mode_seconds: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// A message in `channel`, with the given pin state.
+    fn pin_message(channel_id: ChannelId, is_pinned: bool) -> Message {
+        Message {
+            id: pin_message_id(7),
+            channel_id,
+            author_id: pin_user_id(1),
+            content: "hello".to_string(),
+            edited_at: None,
+            deleted_at: None,
+            deleted_by: None,
+            encrypted: false,
+            sender_device_id: None,
+            message_type: MessageType::Default,
+            system_event_key: None,
+            parent_message_id: None,
+            moderated_at: None,
+            moderation_reason: None,
+            original_content: None,
+            mentioned_user_ids: vec![],
+            is_pinned,
+            pinned_by: None,
+            pinned_at: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    /// `MessageRepository` fake for the pin path. `find_by_id` returns the
+    /// configured message (`None` models missing/soft-deleted), `count_pinned`
+    /// returns the configured count, and `set_pinned` records how many times it
+    /// was invoked so the idempotent no-op can assert "no write".
+    #[derive(Debug)]
+    struct PinFakeMessageRepo {
+        message: Option<Message>,
+        pinned_count: i64,
+        set_pinned_calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl MessageRepository for PinFakeMessageRepo {
+        async fn find_by_id(
+            &self,
+            _message_id: &MessageId,
+        ) -> Result<Option<Message>, DomainError> {
+            Ok(self.message.clone())
+        }
+        async fn count_pinned(&self, _channel_id: &ChannelId) -> Result<i64, DomainError> {
+            Ok(self.pinned_count)
+        }
+        async fn set_pinned(
+            &self,
+            _message_id: &MessageId,
+            pinned_by: &UserId,
+            pinned: bool,
+        ) -> Result<MessageWithAuthor, DomainError> {
+            self.set_pinned_calls.fetch_add(1, Ordering::SeqCst);
+            let mut message = self.message.clone().unwrap();
+            message.is_pinned = pinned;
+            message.pinned_by = pinned.then(|| pinned_by.clone());
+            Ok(MessageWithAuthor {
+                message,
+                author_username: "author".to_string(),
+                author_display_name: None,
+                author_avatar_url: None,
+                reactions: vec![],
+                parent_message: None,
+                mentions: vec![],
+                attachments: vec![],
+            })
+        }
+
+        // -- unused by set_pinned --
+        async fn find_with_author(
+            &self,
+            _message_id: &MessageId,
+        ) -> Result<Option<MessageWithAuthor>, DomainError> {
+            Ok(None)
+        }
+        async fn list_pinned(
+            &self,
+            _channel_id: &ChannelId,
+            _limit: i64,
+        ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+            Ok(vec![])
+        }
+        #[allow(clippy::too_many_arguments)]
+        async fn send_to_channel(
+            &self,
+            _channel_id: &ChannelId,
+            _author_id: &UserId,
+            _content: String,
+            _encrypted: bool,
+            _sender_device_id: Option<String>,
+            _parent_message_id: Option<MessageId>,
+            _moderated_at: Option<DateTime<Utc>>,
+            _moderation_reason: Option<String>,
+            _original_content: Option<String>,
+            _mentioned_user_ids: Vec<UserId>,
+            _attachments: Vec<NewAttachment>,
+            _slow_mode_seconds: i32,
+        ) -> Result<MessageWithAuthor, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn list_for_channel(
+            &self,
+            _channel_id: &ChannelId,
+            _cursor: Option<DateTime<Utc>>,
+            _limit: i64,
+        ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+            Ok(vec![])
+        }
+        async fn list_around(
+            &self,
+            _channel_id: &ChannelId,
+            _anchor_id: &MessageId,
+            _before_limit: i64,
+            _after_limit: i64,
+        ) -> Result<Option<AroundWindow>, DomainError> {
+            Ok(None)
+        }
+        async fn search_in_server(
+            &self,
+            _server_id: &ServerId,
+            _caller_user_id: &UserId,
+            _query_text: &str,
+            _filters: &MessageSearchFilters,
+            _cursor: Option<DateTime<Utc>>,
+            _limit: i64,
+        ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+            Ok(vec![])
+        }
+        async fn update_content(
+            &self,
+            _message_id: &MessageId,
+            _content: String,
+            _moderated_at: Option<DateTime<Utc>>,
+            _moderation_reason: Option<String>,
+            _original_content: Option<String>,
+            _mentioned_user_ids: Option<Vec<UserId>>,
+        ) -> Result<MessageWithAuthor, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn soft_delete(
+            &self,
+            _message_id: &MessageId,
+            _deleted_by: &UserId,
+            _checked_at: Option<DateTime<Utc>>,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn count_recent(
+            &self,
+            _channel_id: &ChannelId,
+            _author_id: &UserId,
+            _window_secs: i64,
+        ) -> Result<i64, DomainError> {
+            Ok(0)
+        }
+        async fn get_last_message_time(
+            &self,
+            _channel_id: &ChannelId,
+            _author_id: &UserId,
+        ) -> Result<Option<DateTime<Utc>>, DomainError> {
+            Ok(None)
+        }
+        async fn create_system(
+            &self,
+            _channel_id: &ChannelId,
+            _author_id: &UserId,
+            _system_event_key: String,
+        ) -> Result<MessageWithAuthor, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+    }
+
+    /// `MemberRepository` fake: `get_member_role` returns the configured role
+    /// (`None` = not a member). All other methods are unused by `set_pinned`.
+    #[derive(Debug)]
+    struct PinFakeMemberRepo {
+        role: Option<Role>,
+    }
+
+    #[async_trait]
+    impl MemberRepository for PinFakeMemberRepo {
+        async fn get_member_role(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<Option<Role>, DomainError> {
+            Ok(self.role)
+        }
+
+        // -- unused by set_pinned --
+        async fn list_by_server(
+            &self,
+            _server_id: &ServerId,
+        ) -> Result<Vec<ServerMember>, DomainError> {
+            Ok(vec![])
+        }
+        async fn list_by_server_paginated(
+            &self,
+            _server_id: &ServerId,
+            _cursor: Option<DateTime<Utc>>,
+            _limit: i64,
+        ) -> Result<Vec<ServerMember>, DomainError> {
+            Ok(vec![])
+        }
+        async fn is_member(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<bool, DomainError> {
+            Ok(true)
+        }
+        async fn add_member(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn remove_member(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn get_member(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+        ) -> Result<Option<ServerMember>, DomainError> {
+            Ok(None)
+        }
+        async fn update_member_role(
+            &self,
+            _server_id: &ServerId,
+            _user_id: &UserId,
+            _new_role: Role,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn count_by_server(&self, _server_id: &ServerId) -> Result<i64, DomainError> {
+            Ok(0)
+        }
+        async fn transfer_ownership(
+            &self,
+            _server_id: &ServerId,
+            _old_owner_id: &UserId,
+            _new_owner_id: &UserId,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn filter_mentionable(
+            &self,
+            _channel: &Channel,
+            _user_ids: &[UserId],
+        ) -> Result<Vec<UserId>, DomainError> {
+            Ok(vec![])
+        }
+        async fn resolve_mentioned_users(
+            &self,
+            _server_id: &ServerId,
+            _user_ids: &[UserId],
+        ) -> Result<Vec<MentionedUser>, DomainError> {
+            Ok(vec![])
+        }
+        async fn search_by_server(
+            &self,
+            _server_id: &ServerId,
+            _q: &str,
+            _limit: i64,
+        ) -> Result<Vec<ServerMember>, DomainError> {
+            Ok(vec![])
+        }
+    }
+
+    /// `ChannelRepository` fake — unused by `set_pinned` (the channel is passed
+    /// in directly), so every method returns a benign default.
+    #[derive(Debug)]
+    struct PinFakeChannelRepo;
+
+    #[async_trait]
+    impl ChannelRepository for PinFakeChannelRepo {
+        async fn get_by_id(&self, _channel_id: &ChannelId) -> Result<Option<Channel>, DomainError> {
+            Ok(None)
+        }
+        async fn get_moderation_context(
+            &self,
+            _channel_id: &ChannelId,
+        ) -> Result<Option<crate::domain::models::ChannelModerationContext>, DomainError> {
+            Ok(None)
+        }
+        async fn has_private_channel_access(
+            &self,
+            _channel_id: &ChannelId,
+            _member_role: Role,
+        ) -> Result<bool, DomainError> {
+            Ok(true)
+        }
+        async fn list_authorized_roles(
+            &self,
+            _channel_id: &ChannelId,
+        ) -> Result<Vec<Role>, DomainError> {
+            Ok(vec![])
+        }
+        async fn replace_role_access(
+            &self,
+            _channel_id: &ChannelId,
+            _roles: &[Role],
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn list_for_server(
+            &self,
+            _server_id: &ServerId,
+            _caller_user_id: &UserId,
+        ) -> Result<Vec<Channel>, DomainError> {
+            Ok(vec![])
+        }
+        async fn create_channel(&self, channel: &Channel) -> Result<Channel, DomainError> {
+            Ok(channel.clone())
+        }
+        async fn update_channel(
+            &self,
+            _channel_id: &ChannelId,
+            _name: Option<String>,
+            _topic: Option<Option<String>>,
+            _is_private: Option<bool>,
+            _is_read_only: Option<bool>,
+            _encrypted: Option<bool>,
+            _slow_mode_seconds: Option<i32>,
+        ) -> Result<Channel, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn delete_if_not_last(&self, _channel_id: &ChannelId) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn count_for_server(&self, _server_id: &ServerId) -> Result<i64, DomainError> {
+            Ok(0)
+        }
+        async fn find_default_for_server(
+            &self,
+            _server_id: &ServerId,
+        ) -> Result<Option<Channel>, DomainError> {
+            Ok(None)
+        }
+    }
+
+    /// `PlanLimitChecker` fake — unused by `set_pinned`.
+    #[derive(Debug)]
+    struct PinFakePlanChecker;
+
+    #[async_trait]
+    impl PlanLimitChecker for PinFakePlanChecker {
+        async fn check_channel_limit(&self, _server_id: &ServerId) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn check_member_limit(&self, _server_id: &ServerId) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn get_server_plan_limits(
+            &self,
+            _server_id: &ServerId,
+        ) -> Result<PlanLimits, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn check_owned_server_limit(&self, _user_id: &UserId) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn check_joined_server_limit(&self, _user_id: &UserId) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn check_attachment_count(
+            &self,
+            _server_id: &ServerId,
+            _count: u64,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn check_attachment_size(
+            &self,
+            _server_id: &ServerId,
+            _size_bytes: u64,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn check_voice_concurrent(&self, _server_id: &ServerId) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn check_invite_limit(&self, _server_id: &ServerId) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn check_dm_limit(&self, _user_id: &UserId) -> Result<(), DomainError> {
+            Ok(())
+        }
+    }
+
+    /// `ReactionRepository` fake — unused by `set_pinned`.
+    #[derive(Debug)]
+    struct PinFakeReactionRepo;
+
+    #[async_trait]
+    impl ReactionRepository for PinFakeReactionRepo {
+        async fn add(
+            &self,
+            _message_id: &MessageId,
+            _user_id: &UserId,
+            _emoji: &str,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn emoji_variety(
+            &self,
+            _message_id: &MessageId,
+            _emoji: &str,
+        ) -> Result<EmojiVariety, DomainError> {
+            Ok(EmojiVariety {
+                distinct_count: 0,
+                emoji_present: false,
+            })
+        }
+        async fn remove(
+            &self,
+            _message_id: &MessageId,
+            _user_id: &UserId,
+            _emoji: &str,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn batch_for_messages(
+            &self,
+            _message_ids: &[MessageId],
+            _viewer_id: &UserId,
+        ) -> Result<HashMap<MessageId, Vec<ReactionSummary>>, DomainError> {
+            Ok(HashMap::new())
+        }
+    }
+
+    /// `AttachmentRepository` fake — unused by `set_pinned`.
+    #[derive(Debug)]
+    struct PinFakeAttachmentRepo;
+
+    #[async_trait]
+    impl AttachmentRepository for PinFakeAttachmentRepo {
+        async fn batch_for_messages(
+            &self,
+            _message_ids: &[MessageId],
+        ) -> Result<HashMap<MessageId, Vec<Attachment>>, DomainError> {
+            Ok(HashMap::new())
+        }
+        async fn list_pending_for_message(
+            &self,
+            _message_id: &MessageId,
+        ) -> Result<Vec<Attachment>, DomainError> {
+            Ok(vec![])
+        }
+        async fn update_moderation(
+            &self,
+            _attachment_id: &AttachmentId,
+            _status: AttachmentModerationStatus,
+            _nsfw_score: Option<f32>,
+            _reason: Option<&str>,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+    }
+
+    /// `FriendshipRepository` fake — unused by `set_pinned`.
+    #[derive(Debug)]
+    struct PinFakeFriendshipRepo;
+
+    #[async_trait]
+    impl FriendshipRepository for PinFakeFriendshipRepo {
+        async fn create_request(
+            &self,
+            _requester: &UserId,
+            _addressee: &UserId,
+        ) -> Result<RequestOutcome, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn accept_request(
+            &self,
+            _caller: &UserId,
+            _requester: &UserId,
+        ) -> Result<Friendship, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn delete_request(
+            &self,
+            _caller: &UserId,
+            _other: &UserId,
+        ) -> Result<bool, DomainError> {
+            Ok(false)
+        }
+        async fn delete_friendship(&self, _a: &UserId, _b: &UserId) -> Result<bool, DomainError> {
+            Ok(false)
+        }
+        async fn list_friends(&self, _user: &UserId) -> Result<Vec<FriendRow>, DomainError> {
+            Ok(vec![])
+        }
+        async fn list_requests(
+            &self,
+            _user: &UserId,
+            _direction: RequestDirection,
+        ) -> Result<Vec<FriendRequestRow>, DomainError> {
+            Ok(vec![])
+        }
+        async fn list_friend_ids(&self, _user: &UserId) -> Result<Vec<UserId>, DomainError> {
+            Ok(vec![])
+        }
+        async fn are_friends(&self, _a: &UserId, _b: &UserId) -> Result<bool, DomainError> {
+            Ok(false)
+        }
+        async fn count_friends(&self, _user: &UserId) -> Result<i64, DomainError> {
+            Ok(0)
+        }
+        async fn count_outgoing_pending(&self, _user: &UserId) -> Result<i64, DomainError> {
+            Ok(0)
+        }
+        async fn create_block(
+            &self,
+            _blocker: &UserId,
+            _blocked: &UserId,
+        ) -> Result<BlockOutcome, DomainError> {
+            Err(DomainError::Internal("not implemented".to_string()))
+        }
+        async fn delete_block(
+            &self,
+            _blocker: &UserId,
+            _blocked: &UserId,
+        ) -> Result<bool, DomainError> {
+            Ok(false)
+        }
+        async fn list_blocks(&self, _blocker: &UserId) -> Result<Vec<BlockedUserRow>, DomainError> {
+            Ok(vec![])
+        }
+        async fn count_blocks(&self, _blocker: &UserId) -> Result<i64, DomainError> {
+            Ok(0)
+        }
+        async fn is_blocked_between(&self, _a: &UserId, _b: &UserId) -> Result<bool, DomainError> {
+            Ok(false)
+        }
+        async fn share_non_dm_server(&self, _a: &UserId, _b: &UserId) -> Result<bool, DomainError> {
+            Ok(false)
+        }
+        async fn dm_send_blocked(
+            &self,
+            _author: &UserId,
+            _channel_id: &ChannelId,
+        ) -> Result<bool, DomainError> {
+            Ok(false)
+        }
+    }
+
+    /// Build a `MessageService` wired to the pin fakes. Only the message repo
+    /// and member repo participate in `set_pinned`; the rest are inert.
+    fn pin_service(
+        message: Option<Message>,
+        role: Option<Role>,
+        pinned_count: i64,
+        set_pinned_calls: Arc<AtomicUsize>,
+    ) -> MessageService {
+        MessageService::new(
+            Arc::new(PinFakeMessageRepo {
+                message,
+                pinned_count,
+                set_pinned_calls,
+            }),
+            Arc::new(PinFakeChannelRepo),
+            Arc::new(PinFakeMemberRepo { role }),
+            Arc::new(PinFakePlanChecker),
+            Arc::new(PinFakeReactionRepo),
+            Arc::new(PinFakeAttachmentRepo),
+            Arc::new(ContentFilter::noop()),
+            Arc::new(SpamGuard::new()),
+            Arc::new(PinFakeFriendshipRepo),
+        )
+    }
+
+    /// Rule 1 (authz): a moderator may pin — the flag flips and the repo writes.
+    #[tokio::test]
+    async fn set_pinned_moderator_can_pin() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let svc = pin_service(
+            Some(pin_message(channel.id.clone(), false)),
+            Some(Role::Moderator),
+            0,
+            calls.clone(),
+        );
+
+        let result = svc
+            .set_pinned(&pin_message_id(7), &pin_user_id(9), &channel, true)
+            .await
+            .unwrap();
+
+        assert!(result.is_some(), "moderator pin yields an updated message");
+        assert!(result.unwrap().message.is_pinned);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "repo write happened");
+    }
+
+    /// Rule 1 (authz): an owner may pin too (above moderator).
+    #[tokio::test]
+    async fn set_pinned_owner_can_pin() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let svc = pin_service(
+            Some(pin_message(channel.id.clone(), false)),
+            Some(Role::Owner),
+            0,
+            calls.clone(),
+        );
+
+        let result = svc
+            .set_pinned(&pin_message_id(7), &pin_user_id(9), &channel, true)
+            .await
+            .unwrap();
+
+        assert!(result.is_some());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// Rule 1 (authz): a plain member is `Forbidden` — no author exception — and
+    /// no write occurs.
+    #[tokio::test]
+    async fn set_pinned_member_is_forbidden() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let svc = pin_service(
+            Some(pin_message(channel.id.clone(), false)),
+            Some(Role::Member),
+            0,
+            calls.clone(),
+        );
+
+        let err = svc
+            .set_pinned(&pin_message_id(7), &pin_user_id(9), &channel, true)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, DomainError::Forbidden(_)), "got {err:?}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no write on rejection");
+    }
+
+    /// Rule 1 (authz): a non-member (no role row) is `Forbidden`.
+    #[tokio::test]
+    async fn set_pinned_non_member_is_forbidden() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let svc = pin_service(
+            Some(pin_message(channel.id.clone(), false)),
+            None,
+            0,
+            calls.clone(),
+        );
+
+        let err = svc
+            .set_pinned(&pin_message_id(7), &pin_user_id(9), &channel, true)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, DomainError::Forbidden(_)), "got {err:?}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// Rule 2 (cap): pinning at `MAX_PINS` is a `Conflict` (→ 409) and never
+    /// writes. Guards the `>=` comparison against a `>` regression.
+    #[tokio::test]
+    async fn set_pinned_at_cap_is_conflict() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let svc = pin_service(
+            Some(pin_message(channel.id.clone(), false)),
+            Some(Role::Moderator),
+            MessageService::MAX_PINS,
+            calls.clone(),
+        );
+
+        let err = svc
+            .set_pinned(&pin_message_id(7), &pin_user_id(9), &channel, true)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, DomainError::Conflict(_)), "got {err:?}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no write at the cap");
+    }
+
+    /// Rule 2 (cap): the cap is NOT checked on unpin — a channel sitting at
+    /// `MAX_PINS` can still remove a pin.
+    #[tokio::test]
+    async fn set_pinned_unpin_at_cap_skips_cap_check() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let svc = pin_service(
+            Some(pin_message(channel.id.clone(), true)),
+            Some(Role::Moderator),
+            MessageService::MAX_PINS,
+            calls.clone(),
+        );
+
+        let result = svc
+            .set_pinned(&pin_message_id(7), &pin_user_id(9), &channel, false)
+            .await
+            .unwrap();
+
+        assert!(result.is_some(), "unpin succeeds even at the cap");
+        assert!(!result.unwrap().message.is_pinned);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// Rule 3 (idempotency): pinning an already-pinned message returns
+    /// `Ok(None)` with NO repo write (and thus no SSE event).
+    #[tokio::test]
+    async fn set_pinned_already_pinned_is_noop() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let svc = pin_service(
+            Some(pin_message(channel.id.clone(), true)),
+            Some(Role::Moderator),
+            0,
+            calls.clone(),
+        );
+
+        let result = svc
+            .set_pinned(&pin_message_id(7), &pin_user_id(9), &channel, true)
+            .await
+            .unwrap();
+
+        assert!(result.is_none(), "no-op returns None");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "no write on idempotent pin"
+        );
+    }
+
+    /// Rule 3 (idempotency): unpinning an already-unpinned message is the same
+    /// no-op.
+    #[tokio::test]
+    async fn set_pinned_already_unpinned_is_noop() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let svc = pin_service(
+            Some(pin_message(channel.id.clone(), false)),
+            Some(Role::Moderator),
+            0,
+            calls.clone(),
+        );
+
+        let result = svc
+            .set_pinned(&pin_message_id(7), &pin_user_id(9), &channel, false)
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// Path binding: a message living in another channel is `NotFound` (not
+    /// `Forbidden`) — the id's existence elsewhere is never revealed, and the
+    /// authz/cap checks are short-circuited before any write.
+    #[tokio::test]
+    async fn set_pinned_message_in_another_channel_is_not_found() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let svc = pin_service(
+            Some(pin_message(pin_channel_id(999), false)),
+            Some(Role::Moderator),
+            0,
+            calls.clone(),
+        );
+
+        let err = svc
+            .set_pinned(&pin_message_id(7), &pin_user_id(9), &channel, true)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                DomainError::NotFound {
+                    resource_type: "Message",
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// Missing/soft-deleted message (repo `find_by_id` → `None`) is `NotFound`.
+    #[tokio::test]
+    async fn set_pinned_missing_message_is_not_found() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let channel = pin_channel();
+        let svc = pin_service(None, Some(Role::Moderator), 0, calls.clone());
+
+        let err = svc
+            .set_pinned(&pin_message_id(7), &pin_user_id(9), &channel, true)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                DomainError::NotFound {
+                    resource_type: "Message",
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
 }
