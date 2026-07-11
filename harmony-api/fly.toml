@@ -13,6 +13,12 @@ primary_region = "cdg"  # Paris — closest to Supabase eu-west-3
   SERVER_PORT = "3000"
   ENVIRONMENT = "production"
   RUST_LOG = "info,harmony_api=info"
+  # Adult-NSFW image classifier (Phase 2). The ONNX model is bundled by the
+  # Dockerfile at /app/models/nsfw.onnx. If the model is missing/invalid the API
+  # logs an error and falls back to the Noop classifier (images auto-approve);
+  # CSAM detection is a separate matcher and is unaffected.
+  NSFW_CLASSIFIER_ENABLED = "true"
+  NSFW_MODEL_PATH = "/app/models/nsfw.onnx"
 
 [http_service]
   internal_port = 3000

@@ -42,6 +42,16 @@ jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 # External Services (rustls-tls avoids OpenSSL deps in Distroless)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
+# In-process adult-NSFW image classifier (Phase 2). `ort` (ONNX Runtime) runs a
+# bundled ViT model in-process; `download-binaries` STATICALLY links the CPU
+# runtime (build emits `rustc-link-lib=static=onnxruntime`), so the Distroless
+# image is self-contained — no libonnxruntime.so to ship. `image` decodes/resizes the
+# attachment bytes (pure-Rust codecs — no native deps, Distroless-safe). AVIF is
+# intentionally omitted (its decoder needs a C library); AVIF uploads dead-letter
+# and stay `pending` (fail-closed), which is safe.
+ort = "=2.0.0-rc.10"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+
 # Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }

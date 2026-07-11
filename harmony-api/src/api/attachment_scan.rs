@@ -182,8 +182,12 @@ async fn apply_one(
         .await;
     }
 
+    // Four Golden Signals (latency): time the classifiers on the scan path so a
+    // slow/degrading model is observable, not just the per-inference log.
+    let started = std::time::Instant::now();
     match classify(deps, attachment).await {
         Ok((label, csam_match, score)) => {
+            let scan_latency_ms = started.elapsed().as_millis();
             let status = resolve_status(*ctx, label, csam_match);
             let reason = match status {
                 AttachmentModerationStatus::Gated => "adult_nsfw_gated",
@@ -191,6 +195,13 @@ async fn apply_one(
                 AttachmentModerationStatus::Quarantined => "csam_match",
                 _ => "clean",
             };
+            tracing::info!(
+                attachment_id = %attachment.id,
+                status = status.as_db_str(),
+                nsfw_score = f64::from(score),
+                scan_latency_ms,
+                "attachment scan verdict resolved"
+            );
             write_status(deps, attachment, status, Some(score), reason).await
         }
         Err(e) => {
