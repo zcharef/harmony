@@ -10,15 +10,22 @@ import { InviteLandingPage } from './invite-landing-page'
 // WHY: The repo uses data-test (not data-testid) — align Testing Library queries.
 configure({ testIdAttribute: 'data-test' })
 
-const { previewInviteMock, joinServerMock, useAuthStoreMock } = vi.hoisted(() => ({
+const { previewInviteMock, joinServerMock, useAuthStoreMock, useServersMock } = vi.hoisted(() => ({
   previewInviteMock: vi.fn(),
   joinServerMock: vi.fn(),
   useAuthStoreMock: vi.fn(),
+  useServersMock: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
   previewInvite: previewInviteMock,
   joinServer: joinServerMock,
+}))
+
+// WHY: The real barrel drags the whole server-nav feature (channels, dms,
+// friends imports) into this test. Only the membership lookup matters here.
+vi.mock('@/features/server-nav', () => ({
+  useServers: () => useServersMock(),
 }))
 
 vi.mock('@/lib/logger', () => ({
@@ -77,6 +84,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   sessionStorage.clear()
   setSession(null)
+  // Default: an authed visitor is NOT yet a member of the previewed server.
+  useServersMock.mockReturnValue({ data: [], isPending: false })
 })
 
 describe('InviteLandingPage — preview states', () => {
@@ -239,5 +248,52 @@ describe('InviteLandingPage — authed accept', () => {
     })
     // Intent is single-use.
     expect(sessionStorage.getItem(`harmony:invite-intent:${CODE}`)).toBeNull()
+  })
+})
+
+describe('InviteLandingPage — already a member', () => {
+  it('navigates straight into the server without an accept round-trip', async () => {
+    setSession({ user: { id: 'user-1' } })
+    previewInviteMock.mockResolvedValue({ data: validPreview })
+    useServersMock.mockReturnValue({
+      data: [{ id: SERVER_ID, name: 'Test Server' }],
+      isPending: false,
+    })
+    const { onDone } = renderPage()
+
+    await waitFor(() => {
+      expect(onDone).toHaveBeenCalledWith(SERVER_ID)
+    })
+    // No join call, no CTA — membership short-circuits the accept step.
+    expect(joinServerMock).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('invite-accept-button')).toBeNull()
+  })
+
+  it('clears a recorded intent so it cannot re-fire on a later visit', async () => {
+    setSession({ user: { id: 'user-1' } })
+    sessionStorage.setItem(`harmony:invite-intent:${CODE}`, '1')
+    previewInviteMock.mockResolvedValue({ data: validPreview })
+    useServersMock.mockReturnValue({
+      data: [{ id: SERVER_ID, name: 'Test Server' }],
+      isPending: false,
+    })
+    const { onDone } = renderPage()
+
+    await waitFor(() => {
+      expect(onDone).toHaveBeenCalledWith(SERVER_ID)
+    })
+    expect(sessionStorage.getItem(`harmony:invite-intent:${CODE}`)).toBeNull()
+  })
+
+  it('falls back to the accept CTA when the membership lookup fails', async () => {
+    setSession({ user: { id: 'user-1' } })
+    previewInviteMock.mockResolvedValue({ data: validPreview })
+    useServersMock.mockReturnValue({ data: undefined, isPending: false })
+    renderPage()
+
+    // Degradation: the CTA still works (409 is treated as success upstream).
+    await waitFor(() => {
+      expect(screen.getByTestId('invite-accept-button')).toBeTruthy()
+    })
   })
 })

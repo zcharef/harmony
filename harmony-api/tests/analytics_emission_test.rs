@@ -30,7 +30,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
     middleware,
-    routing::post,
+    routing::{get, post},
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header as JwtHeader};
 use secrecy::SecretString;
@@ -329,7 +329,14 @@ fn test_router(state: AppState) -> Router {
         .route("/v1/channels/{id}/voice/join", post(voice::join_voice))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
-    Router::new().merge(authenticated).with_state(state)
+    // WHY outside the auth layer: the invite preview is the unauthenticated
+    // landing-page surface — `invite_viewed` must be emitted with no user.
+    let public = Router::new().route("/v1/invites/{code}", get(invites::preview_invite));
+
+    Router::new()
+        .merge(public)
+        .merge(authenticated)
+        .with_state(state)
 }
 
 // ── Seeding helpers ─────────────────────────────────────────────────────
@@ -378,6 +385,40 @@ async fn wait_for_event_count(pool: &PgPool, name: &str, user_id: Uuid, expected
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     count
+}
+
+/// Poll for a fire-and-forget event row keyed by server (for user-less
+/// events such as `invite_viewed`, emitted on the unauthenticated preview).
+async fn wait_for_server_event_count(
+    pool: &PgPool,
+    name: &str,
+    server_id: Uuid,
+    expected: i64,
+) -> i64 {
+    let mut count: i64 = -1;
+    for _ in 0..40 {
+        count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM analytics_events WHERE name = $1 AND server_id = $2",
+        )
+        .bind(name)
+        .bind(server_id)
+        .fetch_one(pool)
+        .await
+        .expect("count analytics_events");
+        if count == expected {
+            return count;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    count
+}
+
+fn unauthed_get(uri: &str) -> Request<Body> {
+    Request::builder()
+        .method("GET")
+        .uri(uri)
+        .body(Body::empty())
+        .expect("request build")
 }
 
 fn authed_post(uri: &str, jwt: &str, body: &serde_json::Value) -> Request<Body> {
@@ -473,6 +514,13 @@ async fn funnel_points_emit_analytics_events() {
         1,
         "server_joined event should be recorded"
     );
+    // The joiner's profile was seeded moments ago — inside the attribution
+    // window, so this join also counts as an invite-driven signup.
+    assert_eq!(
+        wait_for_event_count(&pool, "signup_via_invite", joiner, 1).await,
+        1,
+        "signup_via_invite event should be recorded for a fresh account"
+    );
 
     // Find the default channel created with the server.
     let channel_id = sqlx::query_scalar::<_, Uuid>(
@@ -562,6 +610,189 @@ async fn funnel_points_emit_analytics_events() {
         wait_for_event_count(&pool, "voice_joined", joiner, 1).await,
         1,
         "voice_joined event should be recorded"
+    );
+}
+
+/// The unauthenticated invite preview emits `invite_viewed` carrying the
+/// server id and a truncated code HASH — never the raw code (a join
+/// capability) and never a user id (there is no user pre-auth).
+#[tokio::test]
+#[ignore = "requires local Postgres (Supabase) with Harmony schema"]
+async fn invite_preview_emits_invite_viewed_without_pii() {
+    let pool = test_pool().await;
+    let recorder: Arc<dyn AnalyticsRecorder> = Arc::new(PgAnalyticsRecorder::new(pool.clone()));
+    let state = build_app_state(pool.clone(), recorder).await;
+    let router = test_router(state);
+
+    let owner = seed_user(&pool).await;
+    let owner_jwt = sign_test_jwt(owner);
+
+    let response = router
+        .clone()
+        .oneshot(authed_post(
+            "/v1/servers",
+            &owner_jwt,
+            &serde_json::json!({ "name": "Invite Viewed Server" }),
+        ))
+        .await
+        .expect("create server");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let server = body_json(response).await;
+    let server_id = server["id"].as_str().expect("server id").to_string();
+    let server_uuid = Uuid::parse_str(&server_id).expect("uuid");
+
+    let response = router
+        .clone()
+        .oneshot(authed_post(
+            &format!("/v1/servers/{server_id}/invites"),
+            &owner_jwt,
+            &serde_json::json!({}),
+        ))
+        .await
+        .expect("create invite");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let invite = body_json(response).await;
+    let code = invite["code"].as_str().expect("invite code").to_string();
+
+    let response = router
+        .clone()
+        .oneshot(unauthed_get(&format!("/v1/invites/{code}")))
+        .await
+        .expect("preview invite");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    assert_eq!(
+        wait_for_server_event_count(&pool, "invite_viewed", server_uuid, 1).await,
+        1,
+        "invite_viewed event should be recorded"
+    );
+
+    let (user_id, properties) = sqlx::query_as::<_, (Option<Uuid>, serde_json::Value)>(
+        "SELECT user_id, properties FROM analytics_events
+         WHERE name = 'invite_viewed' AND server_id = $1
+         ORDER BY occurred_at DESC LIMIT 1",
+    )
+    .bind(server_uuid)
+    .fetch_one(&pool)
+    .await
+    .expect("fetch invite_viewed row");
+
+    assert_eq!(user_id, None, "pre-auth view must carry no user id");
+    let code_hash = properties["code_hash"].as_str().expect("code_hash");
+    assert_eq!(code_hash.len(), 16, "truncated SHA-256 = 16 hex chars");
+    assert_ne!(code_hash, code, "the raw code must never be stored");
+    assert!(
+        !properties.to_string().contains(&code),
+        "the raw code must not appear anywhere in properties"
+    );
+}
+
+/// `signup_via_invite` attribution: only accounts created within the
+/// attribution window emit it, and only ONCE per user (partial unique
+/// index + ON CONFLICT DO NOTHING) even across several invite joins.
+#[tokio::test]
+#[ignore = "requires local Postgres (Supabase) with Harmony schema"]
+async fn signup_via_invite_fresh_accounts_only_and_once_per_user() {
+    let pool = test_pool().await;
+    let recorder: Arc<dyn AnalyticsRecorder> = Arc::new(PgAnalyticsRecorder::new(pool.clone()));
+    let state = build_app_state(pool.clone(), recorder).await;
+    let router = test_router(state);
+
+    let owner = seed_user(&pool).await;
+    let owner_jwt = sign_test_jwt(owner);
+
+    // Two servers, one invite each, from the same owner.
+    let mut invites: Vec<(String, String)> = Vec::new();
+    for name in ["Attribution Server A", "Attribution Server B"] {
+        let response = router
+            .clone()
+            .oneshot(authed_post(
+                "/v1/servers",
+                &owner_jwt,
+                &serde_json::json!({ "name": name }),
+            ))
+            .await
+            .expect("create server");
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let server = body_json(response).await;
+        let server_id = server["id"].as_str().expect("server id").to_string();
+
+        let response = router
+            .clone()
+            .oneshot(authed_post(
+                &format!("/v1/servers/{server_id}/invites"),
+                &owner_jwt,
+                &serde_json::json!({}),
+            ))
+            .await
+            .expect("create invite");
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let invite = body_json(response).await;
+        let code = invite["code"].as_str().expect("invite code").to_string();
+        invites.push((server_id, code));
+    }
+
+    // Fresh account: first join emits the event, second join must not add one.
+    let fresh = seed_user(&pool).await;
+    let fresh_jwt = sign_test_jwt(fresh);
+    for (server_id, code) in &invites {
+        let response = router
+            .clone()
+            .oneshot(authed_post(
+                &format!("/v1/servers/{server_id}/members"),
+                &fresh_jwt,
+                &serde_json::json!({ "inviteCode": code }),
+            ))
+            .await
+            .expect("join server");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+    assert_eq!(
+        wait_for_event_count(&pool, "signup_via_invite", fresh, 1).await,
+        1,
+        "signup_via_invite must be once-per-user across multiple joins"
+    );
+    // Give a wrong duplicate insert time to land before re-asserting.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        wait_for_event_count(&pool, "signup_via_invite", fresh, 1).await,
+        1,
+        "signup_via_invite must stay once-per-user"
+    );
+
+    // Stale account (created outside the window): no attribution at all.
+    let stale = seed_user(&pool).await;
+    let stale_jwt = sign_test_jwt(stale);
+    sqlx::query("UPDATE profiles SET created_at = now() - interval '48 hours' WHERE id = $1")
+        .bind(stale)
+        .execute(&pool)
+        .await
+        .expect("backdate profile");
+
+    let (server_id, code) = &invites[0];
+    let response = router
+        .clone()
+        .oneshot(authed_post(
+            &format!("/v1/servers/{server_id}/members"),
+            &stale_jwt,
+            &serde_json::json!({ "inviteCode": code }),
+        ))
+        .await
+        .expect("join server");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // The join itself is still tracked…
+    assert_eq!(
+        wait_for_event_count(&pool, "invite_redeemed", stale, 1).await,
+        1,
+        "invite_redeemed should be recorded for the stale account"
+    );
+    // …but no signup attribution (fire-and-forget: give it time to be wrong).
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        wait_for_event_count(&pool, "signup_via_invite", stale, 0).await,
+        0,
+        "signup_via_invite must not fire for accounts older than the window"
     );
 }
 

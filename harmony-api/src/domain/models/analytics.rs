@@ -26,8 +26,15 @@ pub enum AnalyticsEventName {
     FirstMessage,
     /// A member created an invite (referral funnel: K-factor numerator).
     InviteCreated,
+    /// An invite preview was rendered pre-auth (funnel top: landing views).
+    /// Carries server id + a truncated code hash — never the raw code
+    /// (a join capability) and never the viewer's IP.
+    InviteViewed,
     /// A user joined a server through an invite (K-factor conversion).
     InviteRedeemed,
+    /// A join-via-invite by an account created moments earlier — the invite
+    /// drove the signup (referral attribution). Once per user (DB-deduped).
+    SignupViaInvite,
     /// A user joined a voice channel (WCU + retention meaningful action).
     VoiceJoined,
     /// A user added a reaction (retention meaningful action).
@@ -44,7 +51,9 @@ impl AnalyticsEventName {
             Self::ServerJoined => "server_joined",
             Self::FirstMessage => "first_message",
             Self::InviteCreated => "invite_created",
+            Self::InviteViewed => "invite_viewed",
             Self::InviteRedeemed => "invite_redeemed",
+            Self::SignupViaInvite => "signup_via_invite",
             Self::VoiceJoined => "voice_joined",
             Self::ReactionAdded => "reaction_added",
             Self::SessionConnected => "session_connected",

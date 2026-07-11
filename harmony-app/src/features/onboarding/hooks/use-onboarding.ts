@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { usePreferences, useUpdatePreferences } from '@/features/preferences'
 
 /**
@@ -22,20 +22,38 @@ import { usePreferences, useUpdatePreferences } from '@/features/preferences'
  * ("the user still proceeds into the app for this session"). The latch is
  * plain useState in a hook mounted by MainLayout (never unmounts), so a
  * rollback only re-shows onboarding on the next full load, as specified.
+ *
+ * WHY inviteDeepLand: a user who just joined a server through an invite
+ * (invite-landing deep-land) must land INSIDE that server, never in the
+ * generic tour — the tour's terminal goal (get into a server) is already
+ * met. The flag both suppresses the flow this render AND persists
+ * completion so the tour does not resurface on the next load. Non-invite
+ * first-runs are unaffected.
  */
-export function useOnboarding() {
+export function useOnboarding(inviteDeepLand = false) {
   const { data: preferences } = usePreferences()
   const updatePreferences = useUpdatePreferences()
   const [completedThisSession, setCompletedThisSession] = useState(false)
 
-  const showOnboarding =
+  const needsOnboarding =
     !completedThisSession && preferences !== undefined && preferences.onboardingCompleted === false
+
+  const showOnboarding = !inviteDeepLand && needsOnboarding
 
   const { mutate } = updatePreferences
   const completeOnboarding = useCallback(() => {
     setCompletedThisSession(true)
     mutate({ onboardingCompleted: true })
   }, [mutate])
+
+  // WHY effect (not render-time): completing writes server state; it must
+  // run once when the deep-land is known, not on every render. The
+  // completedThisSession latch inside completeOnboarding makes it idempotent.
+  useEffect(() => {
+    if (inviteDeepLand && needsOnboarding) {
+      completeOnboarding()
+    }
+  }, [inviteDeepLand, needsOnboarding, completeOnboarding])
 
   return { showOnboarding, completeOnboarding }
 }
