@@ -286,16 +286,41 @@ async fn init_app_state(config: &Config) -> AppInit {
     // no external dependency. The in-process ONNX NSFW classifier (Phase 2) and
     // a real CSAM matcher (Phase 3) are documented follow-ups — swapping them in
     // touches only this wiring, never the pipeline.
-    let image_classifier: Arc<dyn domain::ports::ImageClassifier> = {
-        if config.nsfw_classifier_enabled {
+    let image_classifier: Arc<dyn domain::ports::ImageClassifier> = match (
+        config.nsfw_classifier_enabled,
+        config.nsfw_model_path.as_deref(),
+    ) {
+        (true, Some(model_path)) => match infra::OnnxNsfwClassifier::load(model_path) {
+            Ok(classifier) => {
+                tracing::info!(
+                    model_path,
+                    "Adult-NSFW image classifier: in-process ONNX ViT (enabled)"
+                );
+                Arc::new(classifier)
+            }
+            // Fail-SAFE, not fail-open on the CSAM axis: a missing/invalid
+            // NSFW model only means adult content is not auto-detected (it can
+            // never quarantine — that is CSAM's job). error! so an operator is
+            // paged (ADR-046) that the classifier silently degraded to Noop.
+            Err(e) => {
+                tracing::error!(
+                    model_path,
+                    error = %e,
+                    "failed to load ONNX NSFW model — falling back to Noop (adult images auto-approved)"
+                );
+                Arc::new(infra::NoopImageClassifier)
+            }
+        },
+        (true, None) => {
             tracing::warn!(
-                model_path = ?config.nsfw_model_path,
-                "NSFW_CLASSIFIER_ENABLED is set but the ONNX classifier is not built in this release — using Noop (images auto-approved)"
+                "NSFW_CLASSIFIER_ENABLED is set but NSFW_MODEL_PATH is empty — using Noop (images auto-approved)"
             );
-        } else {
-            tracing::info!("Adult-NSFW image classifier: Noop (disabled)");
+            Arc::new(infra::NoopImageClassifier)
         }
-        Arc::new(infra::NoopImageClassifier)
+        (false, _) => {
+            tracing::info!("Adult-NSFW image classifier: Noop (disabled)");
+            Arc::new(infra::NoopImageClassifier)
+        }
     };
     let csam_matcher: Arc<dyn domain::ports::CsamMatcher> = Arc::new(infra::NoopCsamMatcher);
     if config.attachments_require_csam_scan && !csam_matcher.is_configured() {
