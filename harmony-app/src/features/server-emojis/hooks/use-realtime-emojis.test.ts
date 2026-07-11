@@ -4,11 +4,26 @@ import { vi } from 'vitest'
 import { SSE_EVENT_PREFIX } from '@/hooks/use-server-event'
 import type { EmojiListResponse, EmojiResponse } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
+import { toast } from '@/lib/toast'
 import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
 import { useRealtimeEmojis } from './use-realtime-emojis'
 
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+}))
+
+vi.mock('@/lib/toast', () => ({
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}))
+
+// WHY interpolate: returning the key alone would not prove the emoji name reaches
+// i18n, so the toast-payload assertion could not catch a dropped interpolation arg.
+vi.mock('i18next', () => ({
+  default: {
+    t: vi.fn((key: string, opts?: { name?: string }) =>
+      opts?.name === undefined ? key : `${key}:${opts.name}`,
+    ),
+  },
 }))
 
 const SERVER_ID = 'server-1'
@@ -148,5 +163,59 @@ describe('useRealtimeEmojis', () => {
     const cache = emojisInCache(queryClient)
     expect(cache?.total).toBe(0)
     expect(cache?.items).toHaveLength(0)
+  })
+
+  it('removes the rejected emoji and decrements total on emoji.rejected', () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData<EmojiListResponse>(queryKeys.servers.emojis(SERVER_ID), {
+      items: [buildEmoji('e1'), buildEmoji('e2')],
+      total: 2,
+    })
+    renderEmojis(queryClient)
+
+    act(() => {
+      fireSSEEvent('emoji.rejected', { serverId: SERVER_ID, emojiId: 'e1', name: 'blob' })
+    })
+
+    const cache = emojisInCache(queryClient)
+    expect(cache?.total).toBe(1)
+    expect(cache?.items.map((e) => e.id)).toEqual(['e2'])
+  })
+
+  it('does not decrement total when the rejected id is absent (idempotent)', () => {
+    // The creator's optimistic emoji may already be gone (e.g. a prior patch);
+    // the rejection echo must not decrement a second time, mirroring emoji.deleted.
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData<EmojiListResponse>(queryKeys.servers.emojis(SERVER_ID), {
+      items: [buildEmoji('e2')],
+      total: 1,
+    })
+    renderEmojis(queryClient)
+
+    act(() => {
+      fireSSEEvent('emoji.rejected', { serverId: SERVER_ID, emojiId: 'e1', name: 'blob' })
+    })
+
+    const cache = emojisInCache(queryClient)
+    expect(cache?.total).toBe(1)
+    expect(cache?.items.map((e) => e.id)).toEqual(['e2'])
+  })
+
+  it('shows a rejection toast to the creator on emoji.rejected', () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData<EmojiListResponse>(queryKeys.servers.emojis(SERVER_ID), {
+      items: [buildEmoji('e1')],
+      total: 1,
+    })
+    renderEmojis(queryClient)
+
+    act(() => {
+      fireSSEEvent('emoji.rejected', { serverId: SERVER_ID, emojiId: 'e1', name: 'blob' })
+    })
+
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledWith('server-emojis:rejectedTitle', {
+      description: 'server-emojis:rejectedBody:blob',
+    })
   })
 })
