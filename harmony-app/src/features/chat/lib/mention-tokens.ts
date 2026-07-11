@@ -8,16 +8,12 @@
 
 import { defaultSchema } from 'rehype-sanitize'
 import type { MentionedUserResponse } from '@/lib/api'
+import { MENTION_MARKER_RE, replaceMentionMarkers } from '@/lib/mention-markers'
 
-/**
- * The §1 marker grammar. Capture group 1 = the UUID.
- *
- * WHY no exec/test on this shared instance: it carries the `g` flag, and
- * exec/test mutate `lastIndex`. Consumers use split/matchAll/replace only
- * (all three reset `lastIndex`, leaving this instance stateless).
- */
-export const MENTION_MARKER_RE =
-  /<@([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})>/g
+// WHY re-export: the marker grammar now lives in `@/lib/mention-markers` (shared
+// with the search preview so the format has a single definition). Chat internals
+// (mention-text, message-sanitize, the tests) keep importing it from here.
+export { MENTION_MARKER_RE }
 
 /** Extract mentioned user IDs from message content (deduplicated, first-appearance order). */
 export function extractMentionIds(content: string): string[] {
@@ -93,7 +89,7 @@ export function applyMentionMap<T extends MentionedUserResponse>(
  */
 export function markersToEditable(content: string, mentions: MentionedUserResponse[]): string {
   if (mentions.length === 0) return content
-  return content.replace(MENTION_MARKER_RE, (marker, userId: string): string => {
+  return replaceMentionMarkers(content, (userId, marker) => {
     const mention = mentions.find((m) => m.userId === userId)
     return mention === undefined ? marker : `@${mention.username}`
   })

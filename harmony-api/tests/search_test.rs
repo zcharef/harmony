@@ -20,14 +20,20 @@
 //!      cargo test --test search_test -- --ignored`
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use harmony_api::domain::errors::DomainError;
 use harmony_api::domain::models::{ChannelId, ServerId, UserId};
 use harmony_api::domain::ports::{MessageRepository, MessageSearchFilters};
-use harmony_api::infra::postgres::PgMessageRepository;
+use harmony_api::domain::services::{ContentFilter, MessageService, SpamGuard};
+use harmony_api::infra::postgres::{
+    PgAttachmentRepository, PgChannelRepository, PgMemberRepository, PgMessageRepository,
+    PgPlanLimitChecker, PgReactionRepository,
+};
 
 // ── DB pool (mirrors mentions_test) ──────────────────────────────────────
 
@@ -193,6 +199,23 @@ fn filters() -> MessageSearchFilters {
 /// Collect the returned message ids as a set for order-independent assertions.
 fn ids(rows: &[harmony_api::domain::models::MessageWithAuthor]) -> HashSet<Uuid> {
     rows.iter().map(|m| m.message.id.0).collect()
+}
+
+/// Build a real `MessageService` over the test pool (mirrors `attachments_test`).
+/// The service is what wraps `search_in_server` with the membership / explicit-
+/// channel access gates (§7.2) — the repo alone has no such gate. `SpamGuard`
+/// is irrelevant to search; disable it to match the E2E env.
+fn build_service(pool: &PgPool) -> MessageService {
+    MessageService::new(
+        Arc::new(PgMessageRepository::new(pool.clone())),
+        Arc::new(PgChannelRepository::new(pool.clone())),
+        Arc::new(PgMemberRepository::new(pool.clone())),
+        Arc::new(PgPlanLimitChecker::new(pool.clone())),
+        Arc::new(PgReactionRepository::new(pool.clone())),
+        Arc::new(PgAttachmentRepository::new(pool.clone())),
+        Arc::new(ContentFilter::new()),
+        Arc::new(SpamGuard::with_enabled(false)),
+    )
 }
 
 // ── FTS basics ────────────────────────────────────────────────────────────
@@ -638,6 +661,134 @@ async fn cross_server_channel_and_author_do_not_leak() {
         .await
         .unwrap();
     assert!(r.is_empty(), "an author from another server yields nothing");
+
+    cleanup(&pool, &[server_a, server_b], &[owner_a, owner_b]).await;
+}
+
+// ── Service access gates (§7.2 — the gates the repo does NOT have) ────────
+//
+// These exercise `MessageService::search_messages`, not the repo. The repo's
+// SQL short-circuits to TRUE on `c.is_private = false` regardless of membership
+// (see `search_in_server`: `c.is_private = false OR EXISTS(...)`) — so a
+// PUBLIC-channel match leaks to anyone at the repo level. The service is the
+// SOLE gate stopping that: the `is_member` check, and the explicit-channel
+// `ensure_channel_access` / cross-server 403. Delete either and the repo tests
+// above still pass; these fail. Spec §7.2 (non-member -> 403, cross-server
+// injection -> 403) + §7.4 scenarios 7-8.
+
+/// A non-member of the server gets `Forbidden` even when a matching message
+/// exists in a PUBLIC channel — proving the `is_member` gate is load-bearing.
+/// The same query hits the repo directly to show the row DOES leak without the
+/// service (the gate is not redundant with the SQL).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a running Postgres with the Harmony schema"]
+async fn service_non_member_is_forbidden_even_for_public_channel() {
+    let pool = test_pool().await;
+    let repo = PgMessageRepository::new(pool.clone());
+    let service = build_service(&pool);
+
+    let owner = seed_user(&pool).await;
+    let outsider = seed_user(&pool).await; // NOT added to the server
+    let server = seed_server(&pool, owner).await;
+    add_member(&pool, server, owner, "owner").await;
+    let public = seed_channel(&pool, server, "general", false, false).await;
+    let msg = post(&pool, public, owner, "public treasure map").await;
+
+    let sid = ServerId::new(server);
+    let outsider_uid = UserId::new(outsider);
+
+    // Repo (no gate): the public-channel row IS returned to the outsider.
+    let raw = repo
+        .search_in_server(&sid, &outsider_uid, "treasure", &filters(), None, 25)
+        .await
+        .unwrap();
+    assert!(
+        ids(&raw).contains(&msg),
+        "repo has no membership gate — public-channel row leaks (this is why the service gate exists)"
+    );
+
+    // Service (gated): the non-member is refused before any row is read.
+    let err = service
+        .search_messages(&sid, &outsider_uid, "treasure", filters(), None, 25)
+        .await
+        .expect_err("non-member must be Forbidden");
+    assert!(
+        matches!(err, DomainError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+
+    cleanup(&pool, &[server], &[owner, outsider]).await;
+}
+
+/// An explicit `in:#channel` on a PRIVATE channel the caller cannot access is a
+/// clean `Forbidden` (not empty results) — the service's `ensure_channel_access`
+/// on the explicit filter.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a running Postgres with the Harmony schema"]
+async fn service_explicit_private_channel_without_access_is_forbidden() {
+    let pool = test_pool().await;
+    let service = build_service(&pool);
+
+    let owner = seed_user(&pool).await;
+    let member = seed_user(&pool).await;
+    let server = seed_server(&pool, owner).await;
+    add_member(&pool, server, owner, "owner").await;
+    add_member(&pool, server, member, "member").await;
+    let private = seed_channel(&pool, server, "secret-room", true, false).await;
+    post(&pool, private, owner, "classified treasure").await;
+
+    let sid = ServerId::new(server);
+    let member_uid = UserId::new(member);
+    let in_private = MessageSearchFilters {
+        channel_id: Some(ChannelId::new(private)),
+        ..filters()
+    };
+
+    let err = service
+        .search_messages(&sid, &member_uid, "treasure", in_private, None, 25)
+        .await
+        .expect_err("explicit in:#private without a grant must be Forbidden");
+    assert!(
+        matches!(err, DomainError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+
+    cleanup(&pool, &[server], &[owner, member]).await;
+}
+
+/// An explicit `in:#channel` whose channel belongs to ANOTHER server is a
+/// `Forbidden` (no 404 existence oracle) — the service validates the channel's
+/// `server_id` before any search runs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a running Postgres with the Harmony schema"]
+async fn service_explicit_cross_server_channel_is_forbidden() {
+    let pool = test_pool().await;
+    let service = build_service(&pool);
+
+    let owner_a = seed_user(&pool).await;
+    let owner_b = seed_user(&pool).await;
+    let server_a = seed_server(&pool, owner_a).await;
+    let server_b = seed_server(&pool, owner_b).await;
+    add_member(&pool, server_a, owner_a, "owner").await;
+    add_member(&pool, server_b, owner_b, "owner").await;
+    let chan_b = seed_channel(&pool, server_b, "b-general", false, false).await;
+    post(&pool, chan_b, owner_b, "shared keyword there").await;
+
+    let sid_a = ServerId::new(server_a);
+    let caller = UserId::new(owner_a); // member of A, injecting B's channel id
+    let foreign_channel = MessageSearchFilters {
+        channel_id: Some(ChannelId::new(chan_b)),
+        ..filters()
+    };
+
+    let err = service
+        .search_messages(&sid_a, &caller, "shared", foreign_channel, None, 25)
+        .await
+        .expect_err("a channel id from another server must be Forbidden");
+    assert!(
+        matches!(err, DomainError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
 
     cleanup(&pool, &[server_a, server_b], &[owner_a, owner_b]).await;
 }
