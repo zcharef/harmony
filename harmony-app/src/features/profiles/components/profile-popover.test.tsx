@@ -144,6 +144,23 @@ describe('ProfilePopover states', () => {
     expect(screen.getByTestId('profile-card-banner-empty')).toBeTruthy()
   })
 
+  it('USERNAME: shows the @username handle under the display name', async () => {
+    mockProfileQuery({ data: buildProfile() })
+    renderAndOpen({ withContext: true })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    expect(screen.getByTestId('profile-card-name').textContent).toBe('Subject Name')
+    expect(screen.getByTestId('profile-card-username').textContent).toBe('@subject')
+  })
+
+  it('USERNAME (no context): falls back to the account-tier username', async () => {
+    mockProfileQuery({ data: buildProfile() })
+    renderAndOpen({ withContext: false })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    expect(screen.getByTestId('profile-card-username').textContent).toBe('@subject')
+  })
+
   it('FOUNDING: renders the founding badge in the name row', async () => {
     mockProfileQuery({ data: buildProfile({ isFounding: true }) })
     renderAndOpen({ withContext: true })

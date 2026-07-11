@@ -78,6 +78,10 @@
 
   "userSettingsTooltip": "User Settings",
   "profileSettingsTitle": "Profile Settings",
+  "usernameLabel": "Username",
+  "usernameHelp": "Usernames can't be changed yet.",
+  "copyUsername": "Copy username",
+  "usernameCopied": "Copied",
   "displayNameLabel": "Display Name",
   "displayNamePlaceholder": "How others see you",
   "displayNameHelp": "Leave blank to use your username.",
