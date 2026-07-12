@@ -1,7 +1,7 @@
 import type { PopoverProps } from '@heroui/react'
 import { Avatar, Button, Popover, PopoverContent, PopoverTrigger, Spinner } from '@heroui/react'
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
-import { Crown, type LucideIcon, Shield, Star, UserX } from 'lucide-react'
+import { Crown, type LucideIcon, MessageSquare, Shield, Star, UserX } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
@@ -41,6 +41,13 @@ interface ProfilePopoverProps {
   /** The trigger element (avatar or name). Becomes the popover's pressable child. */
   children: ReactNode
   placement?: PopoverProps['placement']
+  /**
+   * Opens a DM with the subject. Injected by the caller (e.g. the members
+   * feature) so `profiles` stays free of a `dms` import — importing `useCreateDm`
+   * here would form a `profiles ↔ dms` cycle (`dms` already imports this popover).
+   * When omitted, the Message button is not rendered.
+   */
+  onStartDm?: (userId: string) => void
 }
 
 /**
@@ -59,6 +66,7 @@ export function ProfilePopover({
   serverId,
   children,
   placement = 'right-start',
+  onStartDm,
 }: ProfilePopoverProps) {
   const [isOpen, setIsOpen] = useState(false)
 
@@ -67,7 +75,12 @@ export function ProfilePopover({
       <PopoverTrigger>{children}</PopoverTrigger>
       <PopoverContent className="w-72 p-0">
         {isOpen ? (
-          <ProfileCard userId={userId} serverId={serverId} onClose={() => setIsOpen(false)} />
+          <ProfileCard
+            userId={userId}
+            serverId={serverId}
+            onClose={() => setIsOpen(false)}
+            onStartDm={onStartDm}
+          />
         ) : null}
       </PopoverContent>
     </Popover>
@@ -90,10 +103,12 @@ function ProfileCard({
   userId,
   serverId,
   onClose,
+  onStartDm,
 }: {
   userId: string
   serverId: string | null
   onClose: () => void
+  onStartDm?: (userId: string) => void
 }) {
   const { t } = useTranslation('profiles')
   const queryClient = useQueryClient()
@@ -161,7 +176,7 @@ function ProfileCard({
             className="ring-4 ring-content1"
             data-test="profile-card-avatar"
           />
-          {isSelf && (
+          {isSelf ? (
             <Button
               size="sm"
               variant="flat"
@@ -173,6 +188,25 @@ function ProfileCard({
             >
               {t('editProfile')}
             </Button>
+          ) : (
+            onStartDm !== undefined && (
+              <Button
+                size="sm"
+                variant="flat"
+                startContent={<MessageSquare className="h-4 w-4" />}
+                onPress={() => {
+                  // WHY fire-then-close: kick off the DM mutation before the
+                  // popover unmounts; navigation lands on the caller's onSuccess
+                  // (main-layout state outlives this card). Mirrors the
+                  // right-click context menu's Send Message.
+                  onStartDm(userId)
+                  onClose()
+                }}
+                data-test="profile-card-message"
+              >
+                {t('message')}
+              </Button>
+            )
           )}
         </div>
 

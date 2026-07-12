@@ -1,5 +1,6 @@
-import { configure, fireEvent, render, screen } from '@testing-library/react'
+import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
+import { useAuthStore } from '@/features/auth'
 import type { MemberListResponse, ProfileResponse } from '@/lib/api'
 // WHY side-effect import: initializes the real i18n instance so the profiles
 // namespace keys resolve to text (missing keys would otherwise log).
@@ -78,9 +79,11 @@ function memberList(): MemberListResponse {
 function renderAndOpen({
   withContext,
   officialUserIds,
+  onStartDm,
 }: {
   withContext: boolean
   officialUserIds?: string[]
+  onStartDm?: (userId: string) => void
 }) {
   const queryClient = createTestQueryClient()
   if (withContext) {
@@ -90,7 +93,7 @@ function renderAndOpen({
     queryClient.setQueryData(queryKeys.badges.official(), { userIds: officialUserIds })
   }
   render(
-    <ProfilePopover userId={SUBJECT} serverId={withContext ? SERVER : null}>
+    <ProfilePopover userId={SUBJECT} serverId={withContext ? SERVER : null} onStartDm={onStartDm}>
       <button type="button" data-test="trigger">
         open
       </button>
@@ -217,5 +220,43 @@ describe('ProfilePopover states', () => {
     renderAndOpen({ withContext: false })
 
     expect(await screen.findByTestId('profile-card-deleted')).toBeTruthy()
+  })
+})
+
+describe('ProfilePopover Message action', () => {
+  beforeEach(() => vi.clearAllMocks())
+  // WHY: isSelf reads useAuthStore; reset it so the "self" test does not leak.
+  afterEach(() => useAuthStore.setState({ user: null }))
+
+  it('SHOWS + FIRES: clicking Message calls onStartDm with the subject and closes the card', async () => {
+    const onStartDm = vi.fn()
+    mockProfileQuery({ data: buildProfile() })
+    renderAndOpen({ withContext: true, onStartDm })
+
+    const button = await screen.findByTestId('profile-card-message')
+    fireEvent.click(button)
+
+    expect(onStartDm).toHaveBeenCalledTimes(1)
+    expect(onStartDm).toHaveBeenCalledWith(SUBJECT)
+    // onClose fired → the popover closes and the card unmounts.
+    await waitFor(() => expect(screen.queryByTestId('profile-card')).toBeNull())
+  })
+
+  it('HIDDEN for self: no Message button, Edit Profile shown instead', async () => {
+    useAuthStore.setState({ user: { id: SUBJECT } as never })
+    mockProfileQuery({ data: buildProfile() })
+    renderAndOpen({ withContext: true, onStartDm: vi.fn() })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    expect(screen.queryByTestId('profile-card-message')).toBeNull()
+    expect(screen.getByTestId('profile-card-edit')).toBeTruthy()
+  })
+
+  it('HIDDEN without the callback: guards the chat/voice/dm surfaces that do not wire it', async () => {
+    mockProfileQuery({ data: buildProfile() })
+    renderAndOpen({ withContext: true })
+
+    expect(await screen.findByTestId('profile-card')).toBeTruthy()
+    expect(screen.queryByTestId('profile-card-message')).toBeNull()
   })
 })

@@ -5,6 +5,7 @@
   "memberSince": "Member since {{date}}",
   "accountCreated": "Joined Harmony {{date}}",
   "editProfile": "Edit Profile",
+  "message": "Message",
   "loadFailed": "Couldn't load full profile",
   "loadFailedFull": "Couldn't load this profile",
   "retry": "Retry",
