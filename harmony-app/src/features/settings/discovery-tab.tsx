@@ -65,13 +65,13 @@ export function DiscoveryTab({ server }: DiscoveryTabProps) {
   }
 
   return (
-    <div data-test="settings-discovery" className="space-y-8">
+    <div data-test="settings-discovery" className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold text-foreground">{t('discoveryTitle')}</h2>
         <p className="mt-1 text-sm text-default-500">{t('discoveryDescription')}</p>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="max-w-lg space-y-6">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-foreground">{t('discoveryToggleLabel')}</p>

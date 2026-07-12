@@ -112,7 +112,7 @@ export function EmojiSettingsTab({ serverId }: EmojiSettingsTabProps) {
   }
 
   return (
-    <div className="mx-auto max-w-2xl" data-test="emoji-settings-tab">
+    <div data-test="emoji-settings-tab">
       {/* Header: count is the quiet meta; Upload is the focal action. */}
       <div className="mb-4 flex items-center justify-between">
         <div>

@@ -111,4 +111,16 @@ describe('ServerSettings permission gating', () => {
     expect(closeServerSettings).toHaveBeenCalled()
     expect(screen.queryByTestId('settings-tab-reports')).toBeNull()
   })
+
+  // WHY: The single centered column (mx-auto max-w-3xl) is what keeps every tab
+  // at one constant width/left edge. If a refactor drops the shared wrapper or a
+  // tab escapes it, tabs jump between widths again — guard the invariant here.
+  it('renders the active tab inside the shared centered content column', () => {
+    mockRole.mockReturnValue('admin')
+    render(<ServerSettings serverId="server-1" />)
+
+    const column = screen.getByTestId('stub-overview-tab').closest('.max-w-3xl')
+    expect(column).not.toBeNull()
+    expect(column?.className).toContain('mx-auto')
+  })
 })

@@ -96,7 +96,7 @@ export function OverviewTab({ server, callerRole, onServerDeleted }: OverviewTab
   }
 
   return (
-    <div data-test="settings-overview" className="space-y-8">
+    <div data-test="settings-overview" className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold text-foreground">{t('serverOverview')}</h2>
         <p className="mt-1 text-sm text-default-500">
@@ -104,7 +104,7 @@ export function OverviewTab({ server, callerRole, onServerDeleted }: OverviewTab
         </p>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="max-w-lg space-y-4">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <Input
           label={t('serverName')}
           isReadOnly={isAdmin === false}
