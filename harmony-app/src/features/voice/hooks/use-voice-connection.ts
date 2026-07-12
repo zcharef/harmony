@@ -441,6 +441,15 @@ export function useVoiceConnection() {
           evictFromPreviousChannel(data.previousChannelId, userId, queryClient)
         }
 
+        // WHY: Capture the pre-call mute/deaf intent BEFORE storeConnect applies
+        // it. storeConnect only changes isMuted when the mic fails to enable
+        // (micFailed forces mute); isDeafened never changes across connect. The
+        // conditional re-arm below compares against these to decide whether the
+        // sync effect will actually fire post-join.
+        const preConnectState = useVoiceConnectionStore.getState()
+        const preMuted = preConnectState.isMuted
+        const preDeafened = preConnectState.isDeafened
+
         await storeConnect(channelId, serverId, data.token, data.url)
 
         // WHY: storeConnect resolves even when the LiveKit connection fails or
@@ -464,11 +473,17 @@ export function useVoiceConnection() {
         // Mirrors the evictFromPreviousChannel pattern.
         insertSelfIntoParticipantCache(channelId, userId, queryClient)
         sessionIdRef.current = data.sessionId
-        // WHY (H2): Skip the first post-join mute/deaf sync effect run — the
-        // server upsert already wrote is_muted=false,is_deafened=false, and the
-        // effect only fires on a value CHANGE (a pre-muted user's value does not
-        // change across join, so it would never fire anyway).
-        isInitialMuteDeafRef.current = true
+        // WHY (H2): Re-arm the sync effect's skip-once guard ONLY when storeConnect
+        // actually changed isMuted/isDeafened (micFailed forced mute) — that change
+        // makes the effect fire once with state the server already has (join upsert
+        // + syncInitialVoiceState below), so the guard swallows exactly that run.
+        // When the value did NOT change (the common pre-muted/deafened join), the
+        // effect never fires, so arming here would instead eat the user's FIRST real
+        // toggle (their unmute) and desync it from every other client via SSE.
+        const postConnectState = useVoiceConnectionStore.getState()
+        if (postConnectState.isMuted !== preMuted || postConnectState.isDeafened !== preDeafened) {
+          isInitialMuteDeafRef.current = true
+        }
         // WHY: A pre-muted/deafened user (persisted pre-call intent) differs
         // from the server's unmuted default — push it once explicitly so other
         // clients see it via SSE from the start (the sync effect cannot).
