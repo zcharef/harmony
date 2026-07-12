@@ -72,7 +72,7 @@ export function ModerationTab({ serverId, isOwner }: ModerationTabProps) {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Tier 1: Always enforced */}
       <section>
         <div className="mb-4">

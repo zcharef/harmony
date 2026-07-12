@@ -111,7 +111,7 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
   }
 
   return (
-    <div data-test="server-settings" className="flex h-screen bg-background">
+    <div data-test="server-settings" className="flex h-screen w-full bg-background">
       {/* Left sidebar with tab navigation */}
       <div className="flex w-56 flex-col border-r border-divider bg-default-100">
         <div className="flex h-12 items-center border-b border-divider px-4">
@@ -163,36 +163,42 @@ export function ServerSettings({ serverId }: ServerSettingsProps) {
             <X className="h-5 w-5 text-default-500" />
           </Button>
         </div>
-        <div className="flex-1 overflow-y-auto p-6">
-          {/* WHY isAdmin guards: these tabs are admin+ (mod-dashboard §9 #1).
-              The nav already hides them from moderators; the guard is
-              defense-in-depth so an admin-only surface never renders for a
-              moderator, even for a single render before the tab redirect. */}
-          {isAdmin && activeTab === 'overview' && (
-            <OverviewTab
-              server={server}
-              callerRole={callerRole}
-              onServerDeleted={handleServerDeleted}
-            />
-          )}
-          {isAdmin && activeTab === 'discovery' && <DiscoveryTab server={server} />}
-          {isAdmin && activeTab === 'roles' && (
-            <RolesTab serverId={serverId} callerRole={callerRole} />
-          )}
-          {isAdmin && activeTab === 'channels' && (
-            <ChannelsTab serverId={serverId} callerRole={callerRole} isOwner={isOwner} />
-          )}
-          {isAdmin && activeTab === 'emojis' && <EmojiSettingsTab serverId={serverId} />}
-          {isAdmin && activeTab === 'moderation' && (
-            <ModerationTab serverId={serverId} isOwner={isOwner} />
-          )}
-          {activeTab === 'reports' && <ReportsTab serverId={serverId} callerRole={callerRole} />}
-          {isAdmin && activeTab === 'audit' && (
-            <AuditLogTab serverId={serverId} callerRole={callerRole} />
-          )}
-          {isAdmin && activeTab === 'bans' && (
-            <BansTab serverId={serverId} callerRole={callerRole} />
-          )}
+        {/* WHY one shared column: every tab renders inside a single centered
+            max-w-3xl (~768px, in Discord's ~740px settings-pane range) with
+            uniform px-8 py-6, so switching tabs never shifts the content width
+            or left edge. Tabs must NOT re-declare their own width cap. */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-3xl px-8 py-6">
+            {/* WHY isAdmin guards: these tabs are admin+ (mod-dashboard §9 #1).
+                The nav already hides them from moderators; the guard is
+                defense-in-depth so an admin-only surface never renders for a
+                moderator, even for a single render before the tab redirect. */}
+            {isAdmin && activeTab === 'overview' && (
+              <OverviewTab
+                server={server}
+                callerRole={callerRole}
+                onServerDeleted={handleServerDeleted}
+              />
+            )}
+            {isAdmin && activeTab === 'discovery' && <DiscoveryTab server={server} />}
+            {isAdmin && activeTab === 'roles' && (
+              <RolesTab serverId={serverId} callerRole={callerRole} />
+            )}
+            {isAdmin && activeTab === 'channels' && (
+              <ChannelsTab serverId={serverId} callerRole={callerRole} isOwner={isOwner} />
+            )}
+            {isAdmin && activeTab === 'emojis' && <EmojiSettingsTab serverId={serverId} />}
+            {isAdmin && activeTab === 'moderation' && (
+              <ModerationTab serverId={serverId} isOwner={isOwner} />
+            )}
+            {activeTab === 'reports' && <ReportsTab serverId={serverId} callerRole={callerRole} />}
+            {isAdmin && activeTab === 'audit' && (
+              <AuditLogTab serverId={serverId} callerRole={callerRole} />
+            )}
+            {isAdmin && activeTab === 'bans' && (
+              <BansTab serverId={serverId} callerRole={callerRole} />
+            )}
+          </div>
         </div>
       </div>
     </div>
