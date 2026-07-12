@@ -21,7 +21,8 @@
     "open_dms": "open DM conversations",
     "attachments_per_message": "attachments per message",
     "attachment_size": "upload size",
-    "custom_emoji": "custom emoji"
+    "custom_emoji": "custom emoji",
+    "banner": "profile banners"
   },
   "headline": {
     "feature": "{{resource}} are a {{plan}} feature",
