@@ -93,6 +93,8 @@ pub enum ResourceKind {
     AttachmentSize,
     // §9 Emoji (per server)
     CustomEmoji,
+    // §11 Profile (per user)
+    Banner,
 }
 
 impl ResourceKind {
@@ -112,6 +114,7 @@ impl ResourceKind {
             Self::AttachmentsPerMessage => "attachments per message",
             Self::AttachmentSize => "attachment size",
             Self::CustomEmoji => "custom emoji",
+            Self::Banner => "profile banner",
         }
     }
 
@@ -135,6 +138,7 @@ impl ResourceKind {
             Self::AttachmentsPerMessage => "attachments_per_message",
             Self::AttachmentSize => "attachment_size",
             Self::CustomEmoji => "custom_emoji",
+            Self::Banner => "banner",
         }
     }
 }
@@ -179,6 +183,9 @@ pub struct PlanLimits {
     pub max_open_dms: u64,
     // §11 Profile (per user)
     pub max_bio_chars: u64,
+    /// Max profile banners. Free is **0** (banner is a paid feature, unlocked
+    /// at Supporter+); paid tiers get 1.
+    pub max_banners: u64,
     // §11 Profile — text limits
     pub max_custom_status_chars: u64,
     // §6 Files (per message / per file)
@@ -222,6 +229,7 @@ const FREE_LIMITS: PlanLimits = PlanLimits {
     max_active_invites: 5,
     max_open_dms: 20,
     max_bio_chars: 200,
+    max_banners: 0, // RED LINE — Free never gets a profile banner
     max_custom_status_chars: 50,
     max_attachments_per_message: 1,
     max_attachment_size_bytes: 8_388_608, // 8 MB
@@ -250,6 +258,7 @@ const SUPPORTER_LIMITS: PlanLimits = PlanLimits {
     max_active_invites: 25,
     max_open_dms: 100,
     max_bio_chars: 500,
+    max_banners: 1,
     max_custom_status_chars: 128,
     max_attachments_per_message: 5,
     max_attachment_size_bytes: 52_428_800, // 50 MB
@@ -278,6 +287,7 @@ const CREATOR_LIMITS: PlanLimits = PlanLimits {
     max_active_invites: 100,
     max_open_dms: 500,
     max_bio_chars: 1_000,
+    max_banners: 1,
     max_custom_status_chars: 128,
     max_attachments_per_message: 10,
     max_attachment_size_bytes: 104_857_600, // 100 MB
@@ -307,6 +317,7 @@ pub const SELF_HOSTED_LIMITS: PlanLimits = PlanLimits {
     max_active_invites: 1_000,
     max_open_dms: 2_000,
     max_bio_chars: 4_000,
+    max_banners: 1,
     max_custom_status_chars: 256,
     max_attachments_per_message: 50,
     max_attachment_size_bytes: 104_857_600, // 100 MB (bucket hard cap)
@@ -359,6 +370,7 @@ impl PlanLimits {
             ResourceKind::AttachmentsPerMessage => self.max_attachments_per_message,
             ResourceKind::AttachmentSize => self.max_attachment_size_bytes,
             ResourceKind::CustomEmoji => self.max_custom_emojis,
+            ResourceKind::Banner => self.max_banners,
         }
     }
 }
@@ -395,6 +407,7 @@ mod tests {
         assert_eq!(limits.max_open_dms, 20);
         // §11 Profile
         assert_eq!(limits.max_bio_chars, 200);
+        assert_eq!(limits.max_banners, 0); // RED LINE — Free never gets a banner
         assert_eq!(limits.max_custom_status_chars, 50);
         // §6 Files
         assert_eq!(limits.max_attachments_per_message, 1);
@@ -432,6 +445,7 @@ mod tests {
         assert_eq!(limits.max_active_invites, 25);
         assert_eq!(limits.max_open_dms, 100);
         assert_eq!(limits.max_bio_chars, 500);
+        assert_eq!(limits.max_banners, 1);
         assert_eq!(limits.max_custom_status_chars, 128);
         // §6 Files
         assert_eq!(limits.max_attachments_per_message, 5);
@@ -468,6 +482,7 @@ mod tests {
         assert_eq!(limits.max_active_invites, 100);
         assert_eq!(limits.max_open_dms, 500);
         assert_eq!(limits.max_bio_chars, 1_000);
+        assert_eq!(limits.max_banners, 1);
         assert_eq!(limits.max_custom_status_chars, 128);
         // §6 Files
         assert_eq!(limits.max_attachments_per_message, 10);
@@ -504,6 +519,7 @@ mod tests {
         assert_eq!(limits.max_active_invites, 1_000);
         assert_eq!(limits.max_open_dms, 2_000);
         assert_eq!(limits.max_bio_chars, 4_000);
+        assert_eq!(limits.max_banners, 1);
         assert_eq!(limits.max_custom_status_chars, 256);
         // §6 Files
         assert_eq!(limits.max_attachments_per_message, 50);
@@ -570,6 +586,9 @@ mod tests {
 
         assert!(free.max_custom_status_chars <= supporter.max_custom_status_chars);
         assert!(supporter.max_custom_status_chars <= creator.max_custom_status_chars);
+
+        assert!(free.max_banners <= supporter.max_banners);
+        assert!(supporter.max_banners <= creator.max_banners);
 
         assert!(free.max_messages_per_5s <= supporter.max_messages_per_5s);
         assert!(supporter.max_messages_per_5s <= creator.max_messages_per_5s);
@@ -754,6 +773,22 @@ mod tests {
     }
 
     #[test]
+    fn limit_for_banner() {
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::Banner),
+            0
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Supporter).limit_for(ResourceKind::Banner),
+            1
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::Banner),
+            1
+        );
+    }
+
+    #[test]
     fn limit_for_attachment_size() {
         assert_eq!(
             PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::AttachmentSize),
@@ -772,6 +807,12 @@ mod tests {
         // Free's custom emoji cap is 0 — Supporter is the cheapest unlock.
         assert_eq!(
             Plan::lowest_tier_unlocking(ResourceKind::CustomEmoji, 0),
+            Some(Plan::Supporter)
+        );
+        // Free's banner cap is 0 — Supporter is the cheapest unlock, so the
+        // paywall pitches the Supporter upsell (required_plan = supporter).
+        assert_eq!(
+            Plan::lowest_tier_unlocking(ResourceKind::Banner, 0),
             Some(Plan::Supporter)
         );
     }
@@ -823,6 +864,7 @@ mod tests {
         );
         assert_eq!(ResourceKind::AttachmentSize.key(), "attachment_size");
         assert_eq!(ResourceKind::CustomEmoji.key(), "custom_emoji");
+        assert_eq!(ResourceKind::Banner.key(), "banner");
     }
 
     // ── Plan FromStr round-trip ─────────────────────────────────────────
@@ -922,6 +964,7 @@ mod tests {
             "attachments per message"
         );
         assert_eq!(ResourceKind::CustomEmoji.display_name(), "custom emoji");
+        assert_eq!(ResourceKind::Banner.display_name(), "profile banner");
     }
 
     // ── Display impls ───────────────────────────────────────────────────

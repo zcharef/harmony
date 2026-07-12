@@ -59,6 +59,32 @@ function mutationStub() {
   return { mutate: vi.fn(), isPending: false, isError: false, error: null }
 }
 
+// WHY a mutable holder: the banner-upload mutation state is varied per test
+// (idle, plan-gate 403, generic failure) to exercise the inline-error
+// suppression. vi.hoisted keeps it reachable inside the hoisted vi.mock factory.
+const { uploadBannerState } = vi.hoisted(() => ({
+  uploadBannerState: {
+    current: { mutate: () => {}, isPending: false, isError: false, error: null as unknown },
+  },
+}))
+
+/** A FEATURE_NOT_IN_PLAN 403 exactly as the API returns it for a Free banner set. */
+function bannerPlanGateError() {
+  return {
+    type: 'about:blank',
+    title: 'Feature Not In Plan',
+    status: 403,
+    detail: 'profile banner are not included in the free plan',
+    code: 'FEATURE_NOT_IN_PLAN',
+    plan_gate: {
+      resource: 'banner',
+      current_plan: 'free',
+      limit: 0,
+      required_plan: 'supporter',
+    },
+  }
+}
+
 // WHY full mock (no importOriginal): the auth barrel pulls in the Supabase
 // client and env validation, neither of which belongs in this render test.
 vi.mock('@/features/auth', () => ({
@@ -66,7 +92,7 @@ vi.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ data: buildProfile(), isPending: false }),
   useUpdateProfile: () => mutationStub(),
   useUploadAvatar: () => mutationStub(),
-  useUploadBanner: () => mutationStub(),
+  useUploadBanner: () => uploadBannerState.current,
 }))
 
 vi.mock('@/features/notifications', () => ({
@@ -106,6 +132,13 @@ const writeText = vi.fn(() => Promise.resolve())
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Reset the banner-upload mutation to idle between tests.
+  uploadBannerState.current = {
+    mutate: () => {},
+    isPending: false,
+    isError: false,
+    error: null,
+  }
   // WHY defineProperty: jsdom has no navigator.clipboard — install a stub.
   Object.defineProperty(navigator, 'clipboard', {
     value: { writeText },
@@ -171,6 +204,36 @@ describe('UserSettingsModal admin tab gating', () => {
     render(<UserSettingsModal />)
 
     expect(screen.queryByTestId('user-settings-tab-admin')).toBeNull()
+  })
+})
+
+describe('UserSettingsModal banner plan gate', () => {
+  it('suppresses the inline banner error on a FEATURE_NOT_IN_PLAN 403', () => {
+    // A Free user setting a banner is rejected with a plan-gate 403. The global
+    // MutationCache opens the UpgradeModal, so the inline error must be hidden
+    // to avoid duplicate feedback.
+    uploadBannerState.current = {
+      mutate: () => {},
+      isPending: false,
+      isError: true,
+      error: bannerPlanGateError(),
+    }
+    render(<UserSettingsModal />)
+
+    expect(screen.queryByTestId('profile-banner-error')).toBeNull()
+  })
+
+  it('still shows the inline banner error for a non-plan-gate failure', () => {
+    // A generic upload failure (not a plan gate) must surface inline (ADR-045).
+    uploadBannerState.current = {
+      mutate: () => {},
+      isPending: false,
+      isError: true,
+      error: { status: 500, detail: 'boom' },
+    }
+    render(<UserSettingsModal />)
+
+    expect(screen.getByTestId('profile-banner-error')).toBeTruthy()
   })
 })
 

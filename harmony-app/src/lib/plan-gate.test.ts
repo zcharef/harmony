@@ -48,6 +48,27 @@ describe('extractPlanGateError', () => {
     })
   })
 
+  it('parses a banner FEATURE_NOT_IN_PLAN rejection (Supporter upsell)', () => {
+    const problem = planGateProblem({
+      detail: 'profile banner are not included in the free plan',
+      plan_gate: {
+        resource: 'banner',
+        current_plan: 'free',
+        limit: 0,
+        required_plan: 'supporter',
+      },
+    })
+    // WHY: this is exactly the object App.tsx feeds openUpgradeModal — a banner
+    // 403 must produce a gate so the UpgradeModal opens with the Supporter pitch.
+    expect(extractPlanGateError(problem)).toEqual({
+      code: 'FEATURE_NOT_IN_PLAN',
+      resource: 'banner',
+      currentPlan: 'free',
+      limit: 0,
+      requiredPlan: 'supporter',
+    })
+  })
+
   it('returns null for other 403 problems (no code)', () => {
     expect(extractPlanGateError(planGateProblem({ code: undefined }))).toBeNull()
   })

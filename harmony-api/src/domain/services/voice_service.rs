@@ -1117,6 +1117,10 @@ mod tests {
             Ok(())
         }
 
+        async fn check_banner_allowed(&self, _user_id: &UserId) -> Result<(), DomainError> {
+            Ok(())
+        }
+
         async fn check_attachment_count(
             &self,
             _server_id: &ServerId,

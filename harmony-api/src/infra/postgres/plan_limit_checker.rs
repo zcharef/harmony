@@ -316,6 +316,15 @@ impl PlanLimitChecker for PgPlanLimitChecker {
             .await
     }
 
+    async fn check_banner_allowed(&self, user_id: &UserId) -> Result<(), DomainError> {
+        // WHY count 0: the banner is a single-slot capability, not a countable
+        // collection. Passing 0 makes the generic check trip whenever the plan's
+        // cap is 0 (Free) and pass whenever it is >= 1 (Supporter/Creator,
+        // self-hosted, founder). No COUNT query — the plan value is the gate.
+        self.check_user_limit(user_id, ResourceKind::Banner, 0)
+            .await
+    }
+
     async fn check_dm_limit(&self, user_id: &UserId) -> Result<(), DomainError> {
         let uid = user_id.0;
 

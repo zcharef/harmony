@@ -3996,6 +3996,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Plan gate — setting a banner requires a paid tier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         },
         "security": [
