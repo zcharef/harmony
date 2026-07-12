@@ -106,4 +106,30 @@ describe('MentionAutocomplete', () => {
     expect(listbox.id).toBe('mention-listbox')
     expect(screen.getAllByRole('option')).toHaveLength(2)
   })
+
+  // WHY: the root cause of the stolen-focus bug was rendering the popup as a
+  // react-aria dialog (focus trap). A plain positioned listbox must NEVER be a
+  // dialog, so focus stays in the composer textarea and the query types through.
+  it('is a listbox, not a dialog (focus stays in the composer)', () => {
+    renderPopup()
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByTestId('mention-autocomplete').closest('[role="dialog"]')).toBeNull()
+  })
+
+  it('closes on an outside mousedown', () => {
+    const { onClose } = renderPopup()
+
+    fireEvent.mouseDown(document.body)
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT close on a mousedown inside the listbox', () => {
+    const { onClose } = renderPopup()
+
+    fireEvent.mouseDown(screen.getByTestId('mention-autocomplete'))
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
 })
