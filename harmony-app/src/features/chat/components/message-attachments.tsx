@@ -5,6 +5,26 @@ import { ExternalLinkWarning } from '@/components/shared/external-link-warning'
 import type { AttachmentResponse } from '@/lib/api'
 import { attachmentFilename, humanFileSize, isImageMime } from '../lib/attachment-file'
 import { MeasureRowContext } from '../lib/measure-row-context'
+import { MediaLightbox } from './media-lightbox'
+
+/** True when the mime denotes a video renderable inline via `<video>`. */
+function isVideoMime(mime: string): boolean {
+  return mime.startsWith('video/')
+}
+
+/** Muted "media unavailable" chip for a deleted/expired object. */
+function UnavailableChip() {
+  const { t } = useTranslation('messages')
+  return (
+    <span
+      data-test="attachment-unavailable"
+      className="inline-flex items-center gap-1.5 rounded-lg bg-default-100 px-3 py-2 text-sm italic text-default-400"
+    >
+      <ImageOff className="h-4 w-4 shrink-0" />
+      {t('attachmentUnavailable')}
+    </span>
+  )
+}
 
 /**
  * Content-moderation verdict driving the render (mirrors the Rust
@@ -33,6 +53,11 @@ const PLACEHOLDER_BOX = 'aspect-video w-60 max-w-full'
  * height (see MeasureRowContext).
  * WHY onError fallback: a deleted/expired object renders a muted
  * "Image unavailable" chip, never the broken-image glyph.
+ *
+ * WHY primary click opens the lightbox (not `onOpen`): clicking an image now
+ * enlarges it in a centered dark-backdrop preview. `onOpen` is retained as the
+ * lightbox's *secondary* "open original in new tab" action, preserving the
+ * `ExternalLinkWarning` gate for arbitrary content URLs.
  */
 export function EmbeddedImage({
   src,
@@ -49,6 +74,7 @@ export function EmbeddedImage({
 }) {
   const { t } = useTranslation('messages')
   const [failed, setFailed] = useState(false)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
   const measureRow = useContext(MeasureRowContext)
   const hasIntrinsicDims = typeof width === 'number' && typeof height === 'number'
 
@@ -64,37 +90,104 @@ export function EmbeddedImage({
     [measureRow],
   )
 
-  if (failed) {
-    return (
-      <span
-        data-test="attachment-unavailable"
-        className="inline-flex items-center gap-1.5 rounded-lg bg-default-100 px-3 py-2 text-sm italic text-default-400"
-      >
-        <ImageOff className="h-4 w-4 shrink-0" />
-        {t('attachmentUnavailable')}
-      </span>
-    )
-  }
+  if (failed) return <UnavailableChip />
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(src)}
-      data-test="attachment-image"
-      aria-label={alt === '' ? t('imageAttachment') : alt}
-      className="block cursor-pointer"
-    >
-      <img
+    <>
+      <button
+        type="button"
+        onClick={() => setLightboxOpen(true)}
+        data-test="attachment-image"
+        aria-label={alt === '' ? t('imageAttachment') : alt}
+        className="block cursor-pointer"
+      >
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          width={width}
+          height={height}
+          onLoad={handleLoad}
+          onError={() => setFailed(true)}
+          className={`max-h-80 max-w-full rounded-lg bg-default-100 object-contain${hasIntrinsicDims ? '' : ' min-h-48 w-auto'}`}
+        />
+      </button>
+      <MediaLightbox
+        kind="image"
         src={src}
         alt={alt}
-        loading="lazy"
-        width={width}
-        height={height}
-        onLoad={handleLoad}
-        onError={() => setFailed(true)}
-        className={`max-h-80 max-w-full rounded-lg bg-default-100 object-contain${hasIntrinsicDims ? '' : ' min-h-48 w-auto'}`}
+        isOpen={lightboxOpen}
+        onClose={() => setLightboxOpen(false)}
+        onOpenOriginal={() => onOpen(src)}
       />
-    </button>
+    </>
+  )
+}
+
+/**
+ * Inline video render (parallel to `EmbeddedImage`): a muted, controls-less
+ * poster wrapped in a button. Primary click opens the video in the lightbox
+ * with native controls; `onOpen` is the lightbox's secondary "open original".
+ * WHY no inline controls: the inline element is a click target — controls
+ * belong in the lightbox where scrubbing won't fight the open gesture.
+ */
+function EmbeddedVideo({
+  src,
+  alt,
+  onOpen,
+}: {
+  src: string
+  alt: string
+  onOpen: (url: string) => void
+}) {
+  const { t } = useTranslation('messages')
+  const [failed, setFailed] = useState(false)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const measureRow = useContext(MeasureRowContext)
+
+  // WHY: like EmbeddedImage.handleLoad — a video carries no intrinsic dims from
+  // the API, so its poster box has no size until `loadedmetadata`. Re-measure
+  // the owning virtual row then so the virtualizer's cached height stops drifting.
+  const handleLoadedMetadata = useCallback(
+    (e: React.SyntheticEvent<HTMLVideoElement>) => {
+      if (measureRow === null) return
+      const row = e.currentTarget.closest('[data-index]')
+      if (row !== null) measureRow(row)
+    },
+    [measureRow],
+  )
+
+  if (failed) return <UnavailableChip />
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setLightboxOpen(true)}
+        data-test="attachment-video"
+        aria-label={alt === '' ? t('videoAttachment') : alt}
+        className="block cursor-pointer"
+      >
+        <video
+          src={src}
+          muted
+          preload="metadata"
+          onLoadedMetadata={handleLoadedMetadata}
+          onError={() => setFailed(true)}
+          // WHY min-h-48: reserve the row height before metadata arrives so the
+          // virtual list does not collapse to 0px then jump (matches images).
+          className="max-h-80 min-h-48 max-w-full rounded-lg bg-default-100 object-contain"
+        />
+      </button>
+      <MediaLightbox
+        kind="video"
+        src={src}
+        alt={alt}
+        isOpen={lightboxOpen}
+        onClose={() => setLightboxOpen(false)}
+        onOpenOriginal={() => onOpen(src)}
+      />
+    </>
   )
 }
 
@@ -226,12 +319,70 @@ function ModeratedImage({
 }
 
 /**
- * Discord-style attachment block below the message text: images render
- * inline (2-col grid when multiple), everything else as a download chip.
- * Each attachment's render is gated on its content-moderation status
- * (blurred while `pending`, spoiler-gated when `gated`, removed when
- * `blocked`/`quarantined`). Opening an attachment is gated by the existing
- * ExternalLinkWarning flow.
+ * Spoiler overlay for adult-NSFW video in a non-permitted context (`gated`).
+ * Parallel to `GatedImage`: bytes are not fetched until the viewer reveals.
+ */
+function GatedVideo({
+  attachment,
+  onOpen,
+}: {
+  attachment: AttachmentResponse
+  onOpen: (url: string) => void
+}) {
+  const { t } = useTranslation('messages')
+  const [revealed, setRevealed] = useState(false)
+
+  if (revealed) {
+    return (
+      <EmbeddedVideo
+        src={attachment.url}
+        alt={attachmentFilename(attachment.url)}
+        onOpen={onOpen}
+      />
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setRevealed(true)}
+      data-test="attachment-gated"
+      className={`flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg bg-default-200 text-default-500 transition-colors hover:bg-default-300 ${PLACEHOLDER_BOX}`}
+    >
+      <EyeOff className="h-5 w-5" />
+      <span className="text-xs font-medium">{t('attachmentNsfw')}</span>
+      <span className="rounded-full bg-default-100 px-2 py-0.5 text-xs">
+        {t('attachmentReveal')}
+      </span>
+    </button>
+  )
+}
+
+/** Render one video attachment switched on its moderation status (mirrors ModeratedImage). */
+function ModeratedVideo({
+  attachment,
+  onOpen,
+}: {
+  attachment: AttachmentResponse
+  onOpen: (url: string) => void
+}) {
+  const status: ModerationStatus = attachment.moderationStatus
+  if (status === 'blocked' || status === 'quarantined') return <RemovedPlaceholder />
+  if (status === 'pending') return <ScanningPlaceholder />
+  if (status === 'gated') return <GatedVideo attachment={attachment} onOpen={onOpen} />
+  return (
+    <EmbeddedVideo src={attachment.url} alt={attachmentFilename(attachment.url)} onOpen={onOpen} />
+  )
+}
+
+/**
+ * Discord-style attachment block below the message text: images and videos
+ * render inline (2-col grid when multiple images), everything else as a
+ * download chip. Each attachment's render is gated on its content-moderation
+ * status (blurred while `pending`, spoiler-gated when `gated`, removed when
+ * `blocked`/`quarantined`). Clicking an image/video enlarges it in the
+ * lightbox; opening the original in a new tab stays gated by the existing
+ * ExternalLinkWarning flow, as does opening a non-media file chip.
  */
 export function MessageAttachments({ attachments }: { attachments: AttachmentResponse[] }) {
   const [pendingUrl, setPendingUrl] = useState<string | null>(null)
@@ -245,10 +396,13 @@ export function MessageAttachments({ attachments }: { attachments: AttachmentRes
 
   if (attachments.length === 0) return null
 
-  // WHY partition (not a silent drop): every attachment renders — images as
-  // (moderation-gated) inline embeds, the rest as download chips.
+  // WHY partition (not a silent drop): every attachment renders — images and
+  // videos as (moderation-gated) inline embeds, the rest as download chips.
   const images = attachments.filter((a) => isImageMime(a.mime) === true)
-  const files = attachments.filter((a) => isImageMime(a.mime) === false)
+  const videos = attachments.filter((a) => isVideoMime(a.mime) === true)
+  const files = attachments.filter(
+    (a) => isImageMime(a.mime) === false && isVideoMime(a.mime) === false,
+  )
 
   return (
     <div data-test="message-attachments" className="mt-1 flex flex-col items-start gap-1">
@@ -259,6 +413,11 @@ export function MessageAttachments({ attachments }: { attachments: AttachmentRes
           ))}
         </div>
       )}
+      {videos.map((a) => (
+        <div key={a.id} className="max-w-lg">
+          <ModeratedVideo attachment={a} onOpen={handleOpen} />
+        </div>
+      ))}
       {files.map((a) =>
         a.moderationStatus === 'blocked' || a.moderationStatus === 'quarantined' ? (
           <RemovedPlaceholder key={a.id} />

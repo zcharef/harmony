@@ -767,12 +767,24 @@ describe('MessageItem attachments (T1.3 part 1)', () => {
     expect(screen.queryByTestId('attachment-image')).toBeNull()
   })
 
-  it('gates opening an attachment behind the external-link warning', () => {
+  it('opens the media lightbox on primary click, not the external-link warning', async () => {
     renderMessageItem(buildMessage({ attachments: [IMAGE_ATTACHMENT] }))
 
     fireEvent.click(screen.getByTestId('attachment-image'))
 
-    expect(screen.queryByTestId('external-link-warning')).not.toBeNull()
+    // Primary click enlarges the image in the lightbox…
+    expect(await screen.findByTestId('lightbox-image')).not.toBeNull()
+    // …and no longer triggers the "you're leaving Harmony" security popup.
+    expect(screen.queryByTestId('external-link-warning')).toBeNull()
+  })
+
+  it('gates the lightbox secondary "open original" behind the external-link warning', async () => {
+    renderMessageItem(buildMessage({ attachments: [IMAGE_ATTACHMENT] }))
+
+    fireEvent.click(screen.getByTestId('attachment-image'))
+    fireEvent.click(await screen.findByTestId('lightbox-open-original'))
+
+    expect(await screen.findByTestId('external-link-warning')).not.toBeNull()
   })
 })
 

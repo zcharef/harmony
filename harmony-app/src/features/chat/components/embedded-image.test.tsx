@@ -55,3 +55,22 @@ describe('EmbeddedImage onLoad re-measure', () => {
     }).not.toThrow()
   })
 })
+
+describe('EmbeddedImage primary click opens the lightbox', () => {
+  it('enlarges in the lightbox and does NOT fire the old open-link popup on primary click', async () => {
+    const onOpen = vi.fn()
+    render(<EmbeddedImage src={SRC} alt="cat" onOpen={onOpen} />)
+    fireEvent.click(screen.getByTestId('attachment-image'))
+    // Primary click now shows the lightbox, not the ExternalLinkWarning gate.
+    expect(await screen.findByTestId('lightbox-image')).not.toBeNull()
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('routes the lightbox secondary "open original" back through onOpen (security gate preserved)', async () => {
+    const onOpen = vi.fn()
+    render(<EmbeddedImage src={SRC} alt="cat" onOpen={onOpen} />)
+    fireEvent.click(screen.getByTestId('attachment-image'))
+    fireEvent.click(await screen.findByTestId('lightbox-open-original'))
+    expect(onOpen).toHaveBeenCalledWith(SRC)
+  })
+})
