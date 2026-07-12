@@ -77,17 +77,33 @@ describe('prepareAttachmentForUpload', () => {
     expect(prepared.height).toBe(600)
   })
 
-  it('returns gifs untouched to preserve animation (no canvas, no dimensions)', async () => {
+  it('keeps gif bytes untouched but decodes intrinsic dimensions to reserve its box', async () => {
+    createImageBitmapMock.mockResolvedValue({ width: 480, height: 320, close: bitmapClose })
     const gif = new File([new Uint8Array(64)], 'anim.gif', { type: 'image/gif' })
+
+    const prepared = await prepareAttachmentForUpload(gif)
+
+    // Bytes pass through unchanged (animation preserved) — the bitmap is only
+    // read for dimensions, never re-encoded through a canvas.
+    expect(prepared.blob).toBe(gif)
+    expect(prepared.contentType).toBe('image/gif')
+    expect(prepared.extension).toBe('gif')
+    expect(prepared.width).toBe(480)
+    expect(prepared.height).toBe(320)
+    expect(drawImageMock).not.toHaveBeenCalled()
+    expect(bitmapClose).toHaveBeenCalledOnce()
+  })
+
+  it('still uploads a gif whose dimensions cannot be decoded (no reserved dims)', async () => {
+    createImageBitmapMock.mockRejectedValue(new Error('corrupt header'))
+    const gif = new File([new Uint8Array(64)], 'broken.gif', { type: 'image/gif' })
 
     const prepared = await prepareAttachmentForUpload(gif)
 
     expect(prepared.blob).toBe(gif)
     expect(prepared.contentType).toBe('image/gif')
-    expect(prepared.extension).toBe('gif')
     expect(prepared.width).toBeUndefined()
     expect(prepared.height).toBeUndefined()
-    expect(createImageBitmapMock).not.toHaveBeenCalled()
   })
 
   it('passes non-images (pdf) through untouched with the filename extension', async () => {
