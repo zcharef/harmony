@@ -36,6 +36,13 @@ interface VoiceConnectionState {
   isMuted: boolean
   isDeafened: boolean
   error: string | null
+  /** WHY: Distinguishes an initial-connect *timeout* (the room never reached
+   * 'connected' within CONNECT_TIMEOUT_MS) from other failures so the connection
+   * bar can show timeout-specific, actionable copy. The store runs outside React
+   * and cannot call i18n, so it emits a typed reason the bar maps to a key —
+   * mirrors deviceFallbacks → fallbackNoticeKey. null unless status is 'failed'
+   * because of a timeout. */
+  connectFailureReason: 'timeout' | null
   /** Set of participant identities currently speaking. */
   activeSpeakers: Set<string>
 
@@ -104,6 +111,7 @@ const INITIAL_STATE = {
   preferredAudioOutputId: loadPreferredDeviceId('audiooutput'),
   deviceFallbacks: NO_DEVICE_FALLBACKS,
   error: null,
+  connectFailureReason: null,
   activeSpeakers: new Set<string>(),
 }
 
@@ -112,6 +120,34 @@ const INITIAL_STATE = {
  * so connect() and reset() can clear it if the user acts during the delay. */
 const DISCONNECT_IDLE_DELAY_MS = 3_000
 let disconnectIdleTimer: ReturnType<typeof setTimeout> | null = null
+
+/** WHY: Upper bound for the INITIAL connect — the whole phase (signal + ICE +
+ * mic acquisition), not just room.connect(). LiveKit's own guards
+ * (peerConnectionTimeout / websocketTimeout) default to 15s each; we sit just
+ * above them so a genuine ICE/WS failure surfaces LiveKit's specific error
+ * first, while this catches the pathological stall neither internal timer
+ * covers — observed in QA as 'Connecting…' forever (unreachable LiveKit, or a
+ * mic-permission prompt the user never answers). 20s is far above a normal
+ * 1-3s connect, so it never false-positives on a slow-but-working network. Does
+ * NOT apply to LiveKit's auto-reconnect of an already-connected session — that
+ * path fires Reconnecting/Reconnected and never calls connect(). */
+export const CONNECT_TIMEOUT_MS = 20_000
+
+/** WHY: Sentinel so connect()'s catch can tell a connect *timeout* apart from a
+ * LiveKit connection error and route to the timeout-specific failure state. */
+class VoiceConnectTimeoutError extends Error {
+  constructor() {
+    super('voice_connect_timeout')
+    this.name = 'VoiceConnectTimeoutError'
+  }
+}
+
+/** WHY: Monotonic id for the current connect() attempt. A newer connect
+ * (channel switch), a disconnect (user leaves/cancels), or a reset bumps it, so
+ * a superseded attempt's late outcome — including a fired connect timeout — is
+ * ignored instead of clobbering newer state or resurrecting a 'failed' bar after
+ * the user already moved on. */
+let connectGeneration = 0
 
 /** WHY: Holds the active KRISP processor so toggleKrisp() can call
  * setEnabled() without tearing down the WASM pipeline. Set on
@@ -639,6 +675,61 @@ async function teardownOldRoom(oldRoom: Room): Promise<void> {
   }
 }
 
+/** WHY: room.connect() + remote-audio start + mic acquisition, exposed as one
+ * awaitable so connect() can race the WHOLE connecting phase against
+ * CONNECT_TIMEOUT_MS — the stall can be at room.connect() OR at mic-permission
+ * acquisition. Returns micFailed so connect() sets the initial mute state.
+ * startAudio is fire-and-forget: remote playback must not block reaching
+ * 'connected' (TrackSubscribed attaches the audio elements). */
+async function establishConnection(
+  room: Room,
+  channelId: string,
+  url: string,
+  token: string,
+): Promise<boolean> {
+  await room.connect(url, token)
+  room.startAudio().catch((err: unknown) => {
+    logger.warn('voice_start_audio_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  })
+  return enableMic(room, channelId)
+}
+
+/** WHY: Extracted to keep connect() under Biome's cognitive-complexity limit.
+ * Handles a failed or timed-out INITIAL connect: guards against a superseded
+ * attempt (generation mismatch — a newer connect/disconnect/reset owns the
+ * shared listeners now, so only tear down this orphan room and bail), otherwise
+ * releases the half-open room (WebSocket/WebRTC + mic track, so retry starts
+ * fresh) and moves the state machine to 'failed' with the matching reason. */
+function handleConnectFailure(
+  err: unknown,
+  room: Room,
+  generation: number,
+  channelId: string,
+  serverId: string,
+  set: SetState,
+): void {
+  if (connectGeneration !== generation) {
+    room.disconnect().catch(() => {})
+    return
+  }
+  removeRoomListeners()
+  room.disconnect().catch(() => {})
+  krispProcessorRef = null
+  if (err instanceof VoiceConnectTimeoutError) {
+    logger.warn('voice_connect_timeout', { channelId, serverId, timeoutMs: CONNECT_TIMEOUT_MS })
+    set({ status: 'failed', error: null, room: null, connectFailureReason: 'timeout' })
+    return
+  }
+  const message = err instanceof Error ? err.message : String(err)
+  logger.warn('voice_connect_failed', { error: message, channelId, serverId })
+  // WHY: Reset connectFailureReason explicitly (not just at connect() start) so
+  // the bar never pairs a server error message with stale timeout copy, even if
+  // a future path reaches 'failed' without re-entering connect().
+  set({ status: 'failed', error: message, room: null, connectFailureReason: null })
+}
+
 export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get) => ({
   ...INITIAL_STATE,
 
@@ -648,9 +739,14 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       disconnectIdleTimer = null
     }
 
+    // WHY: A new attempt supersedes any in-flight one so a stale connect's late
+    // outcome (including a fired timeout) cannot clobber this attempt's state.
+    connectGeneration += 1
+    const generation = connectGeneration
+
     // WHY: Set connecting BEFORE tearing down the old room to avoid a transient
     // idle→connecting flicker that causes VoiceConnectionBar to animate out then back in.
-    set({ status: 'connecting', error: null })
+    set({ status: 'connecting', error: null, connectFailureReason: null })
 
     // WHY: teardownOldRoom instead of disconnect() — disconnect() sets status to
     // 'idle' which would overwrite the 'connecting' we just set above.
@@ -662,43 +758,49 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     const room = new Room(ROOM_OPTIONS)
     registerRoomEvents(room, get, set)
 
+    // WHY: Bound the whole connecting phase. On success the timer is cleared in
+    // the finally, so it can never fire after a completed connect; leaving or a
+    // channel switch bumps the generation, so a fired timeout is ignored.
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new VoiceConnectTimeoutError()), CONNECT_TIMEOUT_MS)
+    })
+    const establishPromise = establishConnection(room, channelId, url, token)
+    // WHY: If the timeout wins the race, establishPromise stays pending and may
+    // reject later once we tear the room down — swallow that late rejection so
+    // it does not surface as an unhandledRejection.
+    establishPromise.catch(() => {})
+
     try {
-      await room.connect(url, token)
-    } catch (err: unknown) {
-      removeRoomListeners()
-      // WHY: The partially-constructed Room may hold open WebSocket/WebRTC
-      // resources. Disconnect it so they are released on connect failure.
-      room.disconnect().catch(() => {})
-      krispProcessorRef = null
-      const message = err instanceof Error ? err.message : String(err)
-      logger.warn('voice_connect_failed', { error: message, channelId, serverId })
-      set({ status: 'failed', error: message, room: null })
-      return
-    }
-
-    // WHY: Ensure the AudioContext is running so remote audio can play.
-    // TrackSubscribed handles attaching audio elements — no manual iteration needed.
-    room.startAudio().catch((err: unknown) => {
-      logger.warn('voice_start_audio_failed', {
-        error: err instanceof Error ? err.message : String(err),
+      const micFailed = await Promise.race([establishPromise, timeout])
+      // WHY: Same generation guard as the failure path — a newer connect, a
+      // disconnect (user left), or a reset superseded this attempt while it was
+      // establishing. Tear down this now-orphaned room instead of resurrecting
+      // 'connected' (and a live room nothing else tracks) over the newer state.
+      if (connectGeneration !== generation) {
+        room.disconnect().catch(() => {})
+        return
+      }
+      set({
+        status: 'connected',
+        room,
+        currentChannelId: channelId,
+        currentServerId: serverId,
+        isMuted: micFailed,
+        isDeafened: false,
       })
-    })
-
-    const micFailed = await enableMic(room, channelId)
-
-    set({
-      status: 'connected',
-      room,
-      currentChannelId: channelId,
-      currentServerId: serverId,
-      isMuted: micFailed,
-      isDeafened: false,
-    })
-
-    restorePreferredDevices(room, get, set)
+      restorePreferredDevices(room, get, set)
+    } catch (err: unknown) {
+      handleConnectFailure(err, room, generation, channelId, serverId, set)
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId)
+    }
   },
 
   disconnect: async () => {
+    // WHY: Invalidate any in-flight connect so its timeout/late outcome cannot
+    // resurrect a 'failed' bar after the user has left.
+    connectGeneration += 1
     const { room } = get()
     krispProcessorRef = null
     cleanupAllSpeakerDetectors()
@@ -724,6 +826,7 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       currentChannelId: null,
       currentServerId: null,
       error: null,
+      connectFailureReason: null,
       isMuted: false,
       isDeafened: false,
       deviceFallbacks: [],
@@ -885,6 +988,9 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       clearTimeout(disconnectIdleTimer)
       disconnectIdleTimer = null
     }
+    // WHY: Invalidate any in-flight connect so its timeout cannot fire after
+    // the store has been torn down.
+    connectGeneration += 1
     krispProcessorRef = null
     cleanupAllSpeakerDetectors()
     const { room } = get()

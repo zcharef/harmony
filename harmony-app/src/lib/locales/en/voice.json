@@ -3,6 +3,7 @@
   "reconnecting": "Reconnecting...",
   "voiceConnected": "Voice Connected",
   "connectionFailed": "Connection failed",
+  "connectTimeout": "Couldn't connect to voice",
   "retry": "Retry",
   "disconnected": "Disconnected",
   "disconnect": "Disconnect",
