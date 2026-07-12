@@ -379,8 +379,10 @@ pub struct MessageSearchQuery {
     /// `has:` filter. Accepts `link` or `image`. Any other value is ignored.
     /// (Repeatable via comma, e.g. `has=link,image`.)
     pub has: Option<String>,
-    /// ISO 8601 keyset cursor — messages created before this time.
-    pub before: Option<String>,
+    /// Opaque relevance keyset cursor from a previous page's `nextCursor`. Echo
+    /// it back verbatim to fetch the next page; its internal layout is
+    /// server-owned and not a stable contract.
+    pub cursor: Option<String>,
     /// Max results (1..=50, default 25).
     pub limit: Option<i64>,
 }

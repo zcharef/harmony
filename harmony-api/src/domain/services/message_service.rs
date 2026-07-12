@@ -14,7 +14,7 @@ use crate::domain::models::{
 use crate::domain::ports::{
     AroundWindow, AttachmentRepository, ChannelRepository, EmbedRepository, FriendshipRepository,
     MemberRepository, MessageRepository, MessageSearchFilters, PlanLimitChecker,
-    ReactionRepository,
+    ReactionRepository, SearchCursor, SearchPage,
 };
 use crate::domain::services::channel_access::ensure_channel_access;
 use crate::domain::services::content_filter::{ContentFilter, ModerationVerdict};
@@ -636,9 +636,9 @@ impl MessageService {
         user_id: &UserId,
         query_text: &str,
         filters: MessageSearchFilters,
-        cursor: Option<DateTime<Utc>>,
+        cursor: Option<SearchCursor>,
         limit: i64,
-    ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+    ) -> Result<SearchPage, DomainError> {
         // 1. Membership gate — a non-member never searches this server.
         if !self.member_repo.is_member(server_id, user_id).await? {
             return Err(DomainError::Forbidden(
@@ -673,12 +673,18 @@ impl MessageService {
                 .await?;
         }
 
-        let messages = self
+        let page = self
             .repo
             .search_in_server(server_id, user_id, query_text, &filters, cursor, limit)
             .await?;
 
-        self.enrich_page(server_id, user_id, messages).await
+        // Enrichment preserves order + count, so the repo-computed `next_cursor`
+        // (built from the last row) stays valid after enrichment.
+        let messages = self.enrich_page(server_id, user_id, page.messages).await?;
+        Ok(SearchPage {
+            messages,
+            next_cursor: page.next_cursor,
+        })
     }
 
     /// Reload a message as a full [`MessageWithAuthor`] (author + attachments +
@@ -1686,10 +1692,13 @@ mod tests {
             _caller_user_id: &UserId,
             _query_text: &str,
             _filters: &MessageSearchFilters,
-            _cursor: Option<DateTime<Utc>>,
+            _cursor: Option<SearchCursor>,
             _limit: i64,
-        ) -> Result<Vec<MessageWithAuthor>, DomainError> {
-            Ok(vec![])
+        ) -> Result<SearchPage, DomainError> {
+            Ok(SearchPage {
+                messages: vec![],
+                next_cursor: None,
+            })
         }
         async fn update_content(
             &self,

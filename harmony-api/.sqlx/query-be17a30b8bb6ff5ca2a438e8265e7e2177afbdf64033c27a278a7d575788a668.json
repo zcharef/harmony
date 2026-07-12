@@ -1,0 +1,200 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH hits AS (\n                SELECT\n                    m.id,\n                    m.channel_id,\n                    m.author_id,\n                    m.content,\n                    m.edited_at,\n                    m.deleted_at,\n                    m.deleted_by,\n                    m.encrypted,\n                    m.sender_device_id,\n                    m.message_type,\n                    m.system_event_key,\n                    m.parent_message_id,\n                    m.moderated_at,\n                    m.moderation_reason,\n                    m.original_content,\n                    m.mentioned_user_ids,\n                    m.is_pinned,\n                    m.pinned_by,\n                    m.pinned_at,\n                    m.created_at,\n                    p.username AS author_username,\n                    p.display_name AS author_display_name,\n                    p.avatar_url AS author_avatar_url,\n                    parent_p.username AS parent_author_username,\n                    LEFT(parent_m.content, 100) AS parent_content_preview,\n                    (parent_m.deleted_at IS NOT NULL) AS parent_deleted,\n                    (\n                        COALESCE(ts_rank_cd(m.content_tsv, websearch_to_tsquery('english', $3)), 0)::float8\n                        + COALESCE(word_similarity($3, m.content), 0)::float8\n                    ) AS score\n                FROM messages m\n                JOIN channels c ON c.id = m.channel_id\n                LEFT JOIN profiles p ON p.id = m.author_id\n                LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id\n                LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id\n                WHERE c.server_id = $1\n                  AND c.encrypted = false\n                  AND m.encrypted = false\n                  AND m.deleted_at IS NULL\n                  AND m.message_type != 'system'\n                  AND (\n                      m.content_tsv @@ websearch_to_tsquery('english', $3)\n                      -- Trigram needs a 3-char window; skip the fuzzy branch for\n                      -- 1-2 char queries so `<%` never degrades the GIN scan.\n                      OR (char_length($3) >= 3 AND $3 <% m.content)\n                  )\n                  AND (\n                      c.is_private = false\n                      OR EXISTS (\n                          SELECT 1 FROM server_members sm\n                          WHERE sm.server_id = c.server_id\n                            AND sm.user_id = $2\n                            AND (\n                                sm.role IN ($4, $5)\n                                OR EXISTS (\n                                    SELECT 1 FROM channel_role_access cra\n                                    WHERE cra.channel_id = c.id AND cra.role = sm.role\n                                )\n                            )\n                      )\n                  )\n                  AND ($6::uuid IS NULL OR m.channel_id = $6)\n                  AND ($7::uuid IS NULL OR m.author_id = $7)\n                  AND ($8 = false OR m.content ~* 'https?://')\n                  AND ($9 = false OR m.content ~* '(?i)https?://\\S+\\.(png|jpe?g|gif|webp|bmp|svg)(\\?\\S*)?')\n            )\n            SELECT\n                id AS \"id!\",\n                channel_id AS \"channel_id!\",\n                author_id AS \"author_id!\",\n                content,\n                edited_at,\n                deleted_at,\n                deleted_by,\n                encrypted AS \"encrypted!\",\n                sender_device_id,\n                message_type as \"message_type!: String\",\n                system_event_key,\n                parent_message_id,\n                moderated_at,\n                moderation_reason,\n                original_content,\n                mentioned_user_ids as \"mentioned_user_ids!\",\n                is_pinned AS \"is_pinned!\",\n                pinned_by,\n                pinned_at,\n                created_at AS \"created_at!\",\n                author_username AS \"author_username?\",\n                author_display_name AS \"author_display_name?\",\n                author_avatar_url AS \"author_avatar_url?\",\n                parent_author_username AS \"parent_author_username?\",\n                parent_content_preview AS \"parent_content_preview?\",\n                parent_deleted AS \"parent_deleted?\",\n                score AS \"score!: f64\"\n            FROM hits\n            WHERE (\n                $10::float8 IS NULL\n                OR score < $10\n                OR (\n                    score = $10\n                    AND (created_at < $11 OR (created_at = $11 AND id < $12))\n                )\n            )\n            ORDER BY score DESC, created_at DESC, id DESC\n            LIMIT $13\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "author_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "edited_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "deleted_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "encrypted!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "sender_device_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "message_type!: String",
+        "type_info": {
+          "Custom": {
+            "name": "message_type",
+            "kind": {
+              "Enum": [
+                "default",
+                "system"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "system_event_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "parent_message_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "moderated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "moderation_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "original_content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "mentioned_user_ids!",
+        "type_info": "UuidArray"
+      },
+      {
+        "ordinal": 16,
+        "name": "is_pinned!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "pinned_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 18,
+        "name": "pinned_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "author_username?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "author_display_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "author_avatar_url?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "parent_author_username?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "parent_content_preview?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 25,
+        "name": "parent_deleted?",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 26,
+        "name": "score!: f64",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Bool",
+        "Bool",
+        "Float8",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "be17a30b8bb6ff5ca2a438e8265e7e2177afbdf64033c27a278a7d575788a668"
+}

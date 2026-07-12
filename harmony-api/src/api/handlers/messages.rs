@@ -20,7 +20,7 @@ use crate::domain::models::{
     AnalyticsEvent, AnalyticsEventName, ChannelId, EmbedId, MessageId, MessageWithAuthor,
     NewAttachment, SYSTEM_MODERATOR_ID, ServerEvent, ServerId, UserId,
 };
-use crate::domain::ports::MessageSearchFilters;
+use crate::domain::ports::{MessageSearchFilters, SearchCursor};
 use crate::domain::services::content_moderation::{
     ModerationDecision, SCORE_THRESHOLD, evaluate_moderation,
 };
@@ -339,16 +339,61 @@ fn clamp_search_limit(limit: Option<i64>) -> i64 {
         .clamp(1, MAX_SEARCH_LIMIT)
 }
 
+/// Encode a relevance keyset cursor as an opaque base64 token.
+///
+/// Layout `score_bits|created_at_rfc3339|uuid` (`score` as its IEEE-754 bit
+/// pattern so it round-trips exactly), then URL-safe base64. The layout is
+/// server-owned — clients must treat the token as opaque.
+fn encode_search_cursor(cursor: &SearchCursor) -> String {
+    use base64::Engine;
+    let raw = format!(
+        "{}|{}|{}",
+        cursor.score.to_bits(),
+        cursor.created_at.to_rfc3339(),
+        cursor.id
+    );
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw)
+}
+
+/// Decode an opaque base64 relevance cursor back into its three components.
+/// Any malformed token is a 400 (stable detail) — never a 500.
+fn decode_search_cursor(token: &str) -> Result<SearchCursor, &'static str> {
+    use base64::Engine;
+    const BAD: &str = "Invalid 'cursor': not a valid pagination token";
+
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(token)
+        .map_err(|_| BAD)?;
+    let raw = std::str::from_utf8(&bytes).map_err(|_| BAD)?;
+    let mut parts = raw.splitn(3, '|');
+    let (Some(score), Some(created_at), Some(id)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return Err(BAD);
+    };
+    let score = f64::from_bits(score.parse::<u64>().map_err(|_| BAD)?);
+    let created_at = created_at
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .map_err(|_| BAD)?;
+    let id = id.parse::<uuid::Uuid>().map_err(|_| BAD)?;
+    Ok(SearchCursor {
+        score,
+        created_at,
+        id,
+    })
+}
+
 /// Full-text search messages within a server, gated by per-channel access.
 ///
 /// Takes only structured params (the filter grammar is parsed client-side).
-/// Results are ordered most-recent-first with keyset pagination via `before`.
-/// A per-user rate limit (30 / 60s) guards the heaviest read in the app.
+/// Matching is a hybrid of full-text search and trigram similarity (partial
+/// words + typo tolerance); results are ordered best-match-first with an opaque
+/// relevance keyset `cursor`. A per-user rate limit (30 / 60s) guards the
+/// heaviest read in the app.
 ///
 /// # Errors
-/// Returns `ApiError` for a missing/oversized `q` (400), an invalid `before`
-/// cursor (400), a non-member caller or an inaccessible explicit `channelId`
-/// (403), or when the per-user search rate limit is exceeded (429).
+/// Returns `ApiError` for a missing/oversized `q` (400), an invalid `cursor`
+/// (400), a non-member caller or an inaccessible explicit `channelId` (403), or
+/// when the per-user search rate limit is exceeded (429).
 #[utoipa::path(
     get,
     path = "/v1/servers/{id}/messages/search",
@@ -389,12 +434,9 @@ pub async fn search_messages(
     let limit = clamp_search_limit(query.limit);
 
     let cursor = query
-        .before
+        .cursor
         .as_deref()
-        .map(|s| {
-            s.parse::<chrono::DateTime<chrono::Utc>>()
-                .map_err(|_| "Invalid 'before' cursor: expected ISO 8601 timestamp")
-        })
+        .map(decode_search_cursor)
         .transpose()
         .map_err(ApiError::bad_request)?;
 
@@ -410,22 +452,19 @@ pub async fn search_messages(
     let has_author_filter = filters.author_id.is_some();
 
     let started = std::time::Instant::now();
-    let messages = state
+    let page = state
         .message_service()
         .search_messages(&server_id, &user_id, query_text, filters, cursor, limit)
         .await?;
 
-    // WHY: If we received exactly `limit` rows, there may be more — provide a cursor.
-    let next_cursor = if i64::try_from(messages.len()).unwrap_or(0) == limit {
-        messages.last().map(|m| m.message.created_at.to_rfc3339())
-    } else {
-        None
-    };
+    // The repository owns "is there a next page" (it filled `limit`) and built
+    // the composite relevance cursor from the last row's score; encode it opaque.
+    let next_cursor = page.next_cursor.as_ref().map(encode_search_cursor);
 
     // WHY IDs + counts only, NEVER the query text: `q` is user content / PII.
     tracing::debug!(
         server_id = %server_id,
-        result_count = messages.len(),
+        result_count = page.messages.len(),
         has_channel_filter,
         has_author_filter,
         elapsed_ms = started.elapsed().as_millis(),
@@ -434,7 +473,10 @@ pub async fn search_messages(
 
     Ok((
         StatusCode::OK,
-        Json(MessageSearchResponse::from_messages(messages, next_cursor)),
+        Json(MessageSearchResponse::from_messages(
+            page.messages,
+            next_cursor,
+        )),
     ))
 }
 

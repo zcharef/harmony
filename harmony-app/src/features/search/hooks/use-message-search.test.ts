@@ -88,6 +88,38 @@ describe('useMessageSearch', () => {
     expect(result.current.hasNextPage).toBe(true)
   })
 
+  it('passes the opaque nextCursor back as `cursor` on the next page', async () => {
+    vi.mocked(searchMessages)
+      .mockResolvedValueOnce({
+        data: { items: [{ id: 'm1' }], nextCursor: 'opaque-cursor-1' },
+      } as never)
+      .mockResolvedValueOnce({
+        data: { items: [{ id: 'm2' }], nextCursor: undefined },
+      } as never)
+
+    const wrapper = createQueryWrapper()
+    const { result } = renderHook(() => useMessageSearch({ serverId: 's1', q: 'hi', has: [] }), {
+      wrapper,
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    await result.current.fetchNextPage()
+    await waitFor(() => expect(searchMessages).toHaveBeenCalledTimes(2))
+
+    // First page carries no cursor; the second echoes the opaque token as
+    // `cursor` (not `before` — the relevance keyset rename).
+    expect(searchMessages).toHaveBeenNthCalledWith(1, {
+      path: { id: 's1' },
+      query: { q: 'hi' },
+      throwOnError: true,
+    })
+    expect(searchMessages).toHaveBeenNthCalledWith(2, {
+      path: { id: 's1' },
+      query: { q: 'hi', cursor: 'opaque-cursor-1' },
+      throwOnError: true,
+    })
+  })
+
   it('surfaces the error (no silent swallow)', async () => {
     vi.mocked(searchMessages).mockRejectedValueOnce({ status: 500, detail: 'boom' })
 

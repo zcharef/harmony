@@ -10,9 +10,10 @@
 //! SAME fixtures `ensure_channel_access`/`filter_mentionable` use (spec §7.2,
 //! the BLOCKER regression): a private channel with no grant is absent for a
 //! plain member, present for an admin, and present for the member once granted.
-//! Also covers FTS basics, encrypted exclusion, the `from:`/`in:`/`has:` filters,
-//! soft-delete, left-author resolution, keyset pagination, and cross-server
-//! injection.
+//! Also covers FTS basics, the hybrid fuzzy/relevance behaviour (partial words,
+//! case, typos, best-match-first ranking), encrypted exclusion, the
+//! `from:`/`in:`/`has:` filters, soft-delete, left-author resolution, composite
+//! relevance-keyset pagination, and cross-server injection.
 //!
 //! WHY `#[ignore]`: requires a running Postgres with the Harmony schema (mirrors
 //! the mentions / read-state / voice integration tests). Run locally with:
@@ -27,7 +28,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use harmony_api::domain::errors::DomainError;
-use harmony_api::domain::models::{ChannelId, ServerId, UserId};
+use harmony_api::domain::models::{ChannelId, MessageWithAuthor, ServerId, UserId};
 use harmony_api::domain::ports::{MessageRepository, MessageSearchFilters};
 use harmony_api::domain::services::{ContentFilter, MessageService, SpamGuard};
 use harmony_api::infra::postgres::{
@@ -197,8 +198,24 @@ fn filters() -> MessageSearchFilters {
 }
 
 /// Collect the returned message ids as a set for order-independent assertions.
-fn ids(rows: &[harmony_api::domain::models::MessageWithAuthor]) -> HashSet<Uuid> {
+fn ids(rows: &[MessageWithAuthor]) -> HashSet<Uuid> {
     rows.iter().map(|m| m.message.id.0).collect()
+}
+
+/// Run a search (first page, default limit) and return just the message vec —
+/// the common shape for the non-pagination assertions. Pagination tests call
+/// `search_in_server` directly to reach the opaque `next_cursor`.
+async fn search(
+    repo: &PgMessageRepository,
+    sid: &ServerId,
+    uid: &UserId,
+    q: &str,
+    f: &MessageSearchFilters,
+) -> Vec<MessageWithAuthor> {
+    repo.search_in_server(sid, uid, q, f, None, 25)
+        .await
+        .unwrap()
+        .messages
 }
 
 /// Build a real `MessageService` over the test pool (mirrors `attachments_test`).
@@ -245,26 +262,153 @@ async fn fts_basics_matches_and_stopwords() {
     let uid = UserId::new(owner);
 
     // `hello` matches only the first.
-    let r = repo
-        .search_in_server(&sid, &uid, "hello", &filters(), None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &uid, "hello", &filters()).await;
     assert_eq!(ids(&r), HashSet::from([hello]));
 
-    // `world` matches both, newest-first (goodbye posted last).
-    let r = repo
-        .search_in_server(&sid, &uid, "world", &filters(), None, 25)
-        .await
-        .unwrap();
+    // `world` matches both. Scores tie (both an exact word hit), so the
+    // created_at DESC tiebreak keeps the newest (goodbye) first.
+    let r = search(&repo, &sid, &uid, "world", &filters()).await;
     assert_eq!(ids(&r), HashSet::from([hello, goodbye]));
-    assert_eq!(r.first().unwrap().message.id.0, goodbye, "newest first");
+    assert_eq!(
+        r.first().unwrap().message.id.0,
+        goodbye,
+        "score tie → newest first"
+    );
 
-    // Stopword-only query → empty tsquery → zero rows (not an error).
-    let r = repo
-        .search_in_server(&sid, &uid, "the", &filters(), None, 25)
-        .await
-        .unwrap();
+    // Stopword-only query → empty tsquery, and 'the' is not trigram-similar to
+    // either body → zero rows (not an error).
+    let r = search(&repo, &sid, &uid, "the", &filters()).await;
     assert!(r.is_empty(), "stopword-only query returns nothing");
+
+    cleanup(&pool, &[server], &[owner]).await;
+}
+
+// ── Fuzzy / partial / typo recall + relevance ranking (E6 core) ───────────
+
+/// Partial word that FTS misses (`pipel` does not stem to `pipeline`) is caught
+/// by the trigram branch. This is the "not practical" gap the epic closes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a running Postgres with the Harmony schema"]
+async fn partial_word_matches_via_trigram() {
+    let pool = test_pool().await;
+    let repo = PgMessageRepository::new(pool.clone());
+
+    let owner = seed_user(&pool).await;
+    let server = seed_server(&pool, owner).await;
+    add_member(&pool, server, owner, "owner").await;
+    let channel = seed_channel(&pool, server, "general", false, false).await;
+
+    let msg = post(&pool, channel, owner, "deployment pipeline notes").await;
+    let sid = ServerId::new(server);
+    let uid = UserId::new(owner);
+
+    // `pipel` is a substring of `pipeline` but NOT its stem — FTS returns
+    // nothing today; the trigram `<%` branch surfaces it.
+    let r = search(&repo, &sid, &uid, "pipel", &filters()).await;
+    assert!(
+        ids(&r).contains(&msg),
+        "partial word matches via trigram fuzzy branch"
+    );
+
+    cleanup(&pool, &[server], &[owner]).await;
+}
+
+/// Case-mismatched query still matches (FTS lowercases). Explicit regression
+/// assertion so a future refactor can't silently reintroduce case-sensitivity.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a running Postgres with the Harmony schema"]
+async fn case_mismatched_query_matches() {
+    let pool = test_pool().await;
+    let repo = PgMessageRepository::new(pool.clone());
+
+    let owner = seed_user(&pool).await;
+    let server = seed_server(&pool, owner).await;
+    add_member(&pool, server, owner, "owner").await;
+    let channel = seed_channel(&pool, server, "general", false, false).await;
+
+    let msg = post(&pool, channel, owner, "deployment guide").await;
+    let sid = ServerId::new(server);
+    let uid = UserId::new(owner);
+
+    let r = search(&repo, &sid, &uid, "DEPLOY", &filters()).await;
+    assert_eq!(
+        ids(&r),
+        HashSet::from([msg]),
+        "uppercase query matches lowercase content"
+    );
+
+    cleanup(&pool, &[server], &[owner]).await;
+}
+
+/// A misspelled query returns the intended message via trigram similarity.
+/// This flatly fails on FTS-only search today.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a running Postgres with the Harmony schema"]
+async fn misspelled_query_matches_via_trigram() {
+    let pool = test_pool().await;
+    let repo = PgMessageRepository::new(pool.clone());
+
+    let owner = seed_user(&pool).await;
+    let server = seed_server(&pool, owner).await;
+    add_member(&pool, server, owner, "owner").await;
+    let channel = seed_channel(&pool, server, "general", false, false).await;
+
+    let msg = post(&pool, channel, owner, "deployment").await;
+    let sid = ServerId::new(server);
+    let uid = UserId::new(owner);
+
+    // `deploymnet` (e/n transposed) never matches FTS but is well within the
+    // trigram threshold.
+    let r = search(&repo, &sid, &uid, "deploymnet", &filters()).await;
+    assert!(
+        ids(&r).contains(&msg),
+        "typo query surfaces the intended message"
+    );
+
+    cleanup(&pool, &[server], &[owner]).await;
+}
+
+/// The core behavioural assertion: a STRONG match posted EARLIER ranks ahead of
+/// a WEAK match posted LATER — proving results are best-first, not newest-first.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a running Postgres with the Harmony schema"]
+async fn relevance_ranks_best_match_first_not_newest() {
+    let pool = test_pool().await;
+    let repo = PgMessageRepository::new(pool.clone());
+
+    let owner = seed_user(&pool).await;
+    let server = seed_server(&pool, owner).await;
+    add_member(&pool, server, owner, "owner").await;
+    let channel = seed_channel(&pool, server, "general", false, false).await;
+
+    let now = Utc::now();
+    // Strong match (exact repeated term → high ts_rank_cd + word_similarity 1.0),
+    // posted 10 minutes AGO.
+    let strong = post_at(
+        &pool,
+        channel,
+        owner,
+        "deployment deployment deployment",
+        now - Duration::minutes(10),
+    )
+    .await;
+    // Weak match (typo → trigram-only, lower score), posted just NOW.
+    let weak = post_at(&pool, channel, owner, "deploymnet", now).await;
+
+    let sid = ServerId::new(server);
+    let uid = UserId::new(owner);
+
+    let r = search(&repo, &sid, &uid, "deployment", &filters()).await;
+    let got = ids(&r);
+    assert!(
+        got.contains(&strong) && got.contains(&weak),
+        "both the strong and the weak match are recalled"
+    );
+    assert_eq!(
+        r.first().unwrap().message.id.0,
+        strong,
+        "the stronger (older) match ranks first — relevance, not recency"
+    );
 
     cleanup(&pool, &[server], &[owner]).await;
 }
@@ -293,20 +437,14 @@ async fn access_gate_matches_channel_visibility() {
     let admin_uid = UserId::new(admin);
 
     // Plain member, no grant: the private-channel match is ABSENT (server-wide).
-    let r = repo
-        .search_in_server(&sid, &member_uid, "treasure", &filters(), None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &member_uid, "treasure", &filters()).await;
     assert!(
         !ids(&r).contains(&msg),
         "member without grant must NOT see a private-channel match"
     );
 
     // Admin: the same match is PRESENT (role bypass).
-    let r = repo
-        .search_in_server(&sid, &admin_uid, "treasure", &filters(), None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &admin_uid, "treasure", &filters()).await;
     assert!(
         ids(&r).contains(&msg),
         "admin sees the private-channel match"
@@ -319,10 +457,7 @@ async fn access_gate_matches_channel_visibility() {
         channel_id: Some(ChannelId::new(private)),
         ..filters()
     };
-    let r = repo
-        .search_in_server(&sid, &member_uid, "treasure", &member_in_private, None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &member_uid, "treasure", &member_in_private).await;
     assert!(
         r.is_empty(),
         "member's explicit in:#private returns no rows"
@@ -330,16 +465,44 @@ async fn access_gate_matches_channel_visibility() {
 
     // After granting the member's role, the match appears.
     grant_channel_role(&pool, private, "member").await;
-    let r = repo
-        .search_in_server(&sid, &member_uid, "treasure", &filters(), None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &member_uid, "treasure", &filters()).await;
     assert!(
         ids(&r).contains(&msg),
         "member WITH channel_role_access grant sees the match"
     );
 
     cleanup(&pool, &[server], &[owner, member, admin]).await;
+}
+
+/// The fuzzy/partial OR branch must not widen visibility: a private-channel row
+/// a non-member cannot see stays absent even on a fuzzy (trigram) hit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a running Postgres with the Harmony schema"]
+async fn fuzzy_branch_does_not_widen_access() {
+    let pool = test_pool().await;
+    let repo = PgMessageRepository::new(pool.clone());
+
+    let owner = seed_user(&pool).await;
+    let member = seed_user(&pool).await;
+    let server = seed_server(&pool, owner).await;
+    add_member(&pool, server, owner, "owner").await;
+    add_member(&pool, server, member, "member").await;
+
+    let private = seed_channel(&pool, server, "secret-room", true, false).await;
+    let msg = post(&pool, private, owner, "deployment").await;
+
+    let sid = ServerId::new(server);
+    let member_uid = UserId::new(member);
+
+    // A typo query hits `msg` ONLY through the trigram branch. The access
+    // predicate must still exclude it for the ungranted member.
+    let r = search(&repo, &sid, &member_uid, "deploymnet", &filters()).await;
+    assert!(
+        !ids(&r).contains(&msg),
+        "trigram OR branch must not bypass the private-channel access gate"
+    );
+
+    cleanup(&pool, &[server], &[owner, member]).await;
 }
 
 // ── Encrypted exclusion ───────────────────────────────────────────────────
@@ -369,13 +532,21 @@ async fn encrypted_content_is_never_returned() {
 
     let sid = ServerId::new(server);
     let uid = UserId::new(owner);
-    let r = repo
-        .search_in_server(&sid, &uid, "secretword", &filters(), None, 25)
-        .await
-        .unwrap();
+
+    // Exact FTS query: excluded.
+    let r = search(&repo, &sid, &uid, "secretword", &filters()).await;
     assert!(
         r.is_empty(),
-        "encrypted channel + encrypted message excluded"
+        "encrypted channel + encrypted message excluded (FTS)"
+    );
+
+    // Fuzzy/typo query hits the trigram branch, which reads raw `content`
+    // (ciphertext for the encrypted row). The `m.encrypted = false` predicate +
+    // the partial index still keep it out.
+    let r = search(&repo, &sid, &uid, "secretwrod", &filters()).await;
+    assert!(
+        r.is_empty(),
+        "encrypted rows excluded on the trigram branch too"
     );
 
     cleanup(&pool, &[server], &[owner]).await;
@@ -417,10 +588,7 @@ async fn structured_filters_narrow_results() {
         author_id: Some(UserId::new(alice)),
         ..filters()
     };
-    let r = repo
-        .search_in_server(&sid, &caller, "widget", &from_alice, None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &caller, "widget", &from_alice).await;
     let got = ids(&r);
     assert!(got.contains(&a_alice) && got.contains(&link_msg) && got.contains(&image_msg));
     assert!(!got.contains(&b_bob), "from:alice excludes bob's message");
@@ -430,10 +598,7 @@ async fn structured_filters_narrow_results() {
         channel_id: Some(ChannelId::new(chan_b)),
         ..filters()
     };
-    let r = repo
-        .search_in_server(&sid, &caller, "widget", &in_b, None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &caller, "widget", &in_b).await;
     assert_eq!(
         ids(&r),
         HashSet::from([b_bob]),
@@ -445,10 +610,7 @@ async fn structured_filters_narrow_results() {
         has_link: true,
         ..filters()
     };
-    let r = repo
-        .search_in_server(&sid, &caller, "widget", &has_link, None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &caller, "widget", &has_link).await;
     let got = ids(&r);
     assert!(got.contains(&link_msg) && got.contains(&image_msg));
     assert!(
@@ -461,10 +623,7 @@ async fn structured_filters_narrow_results() {
         has_image: true,
         ..filters()
     };
-    let r = repo
-        .search_in_server(&sid, &caller, "widget", &has_image, None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &caller, "widget", &has_image).await;
     assert_eq!(
         ids(&r),
         HashSet::from([image_msg]),
@@ -477,10 +636,7 @@ async fn structured_filters_narrow_results() {
         author_id: Some(UserId::new(alice)),
         ..filters()
     };
-    let r = repo
-        .search_in_server(&sid, &caller, "widget", &from_in, None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &caller, "widget", &from_in).await;
     let got = ids(&r);
     assert!(got.contains(&a_alice) && !got.contains(&b_bob));
 
@@ -504,17 +660,11 @@ async fn soft_deleted_messages_are_excluded() {
     let sid = ServerId::new(server);
     let uid = UserId::new(owner);
 
-    let r = repo
-        .search_in_server(&sid, &uid, "ephemeral", &filters(), None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &uid, "ephemeral", &filters()).await;
     assert!(ids(&r).contains(&msg), "present before delete");
 
     soft_delete(&pool, msg, owner).await;
-    let r = repo
-        .search_in_server(&sid, &uid, "ephemeral", &filters(), None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &uid, "ephemeral", &filters()).await;
     assert!(r.is_empty(), "soft-deleted message disappears from search");
 
     cleanup(&pool, &[server], &[owner]).await;
@@ -547,10 +697,7 @@ async fn message_from_a_user_who_left_is_still_returned() {
     let sid = ServerId::new(server);
     let uid = UserId::new(owner);
 
-    let r = repo
-        .search_in_server(&sid, &uid, "orphan", &filters(), None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &uid, "orphan", &filters()).await;
     assert!(
         ids(&r).contains(&msg),
         "a left member's message still matches"
@@ -561,16 +708,13 @@ async fn message_from_a_user_who_left_is_still_returned() {
         author_id: Some(UserId::new(left)),
         ..filters()
     };
-    let r = repo
-        .search_in_server(&sid, &uid, "orphan", &from_left, None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid, &uid, "orphan", &from_left).await;
     assert_eq!(ids(&r), HashSet::from([msg]));
 
     cleanup(&pool, &[server], &[owner, left]).await;
 }
 
-// ── Keyset pagination ─────────────────────────────────────────────────────
+// ── Composite relevance-keyset pagination ─────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires a running Postgres with the Harmony schema"]
@@ -583,9 +727,11 @@ async fn keyset_pagination_pages_without_gap_or_overlap() {
     add_member(&pool, server, owner, "owner").await;
     let channel = seed_channel(&pool, server, "general", false, false).await;
 
-    // 26 distinct, strictly-ordered matches (created_at spaced 1s apart).
+    // 26 identical-content matches (identical relevance score) with strictly
+    // ordered created_at → ties are broken by the (created_at, id) suffix, so
+    // the composite cursor must walk them without gap or overlap.
     let base = Utc::now() - Duration::seconds(60);
-    let mut all: Vec<Uuid> = Vec::new();
+    let mut all: HashSet<Uuid> = HashSet::new();
     for i in 0..26 {
         let id = post_at(
             &pool,
@@ -595,10 +741,8 @@ async fn keyset_pagination_pages_without_gap_or_overlap() {
             base + Duration::seconds(i),
         )
         .await;
-        all.push(id);
+        all.insert(id);
     }
-    // Newest-first expected order is the reverse of insertion order.
-    all.reverse();
 
     let sid = ServerId::new(server);
     let uid = UserId::new(owner);
@@ -607,18 +751,29 @@ async fn keyset_pagination_pages_without_gap_or_overlap() {
         .search_in_server(&sid, &uid, "paginate", &filters(), None, 25)
         .await
         .unwrap();
-    assert_eq!(page1.len(), 25, "first page fills the limit");
-    let page1_ids: Vec<Uuid> = page1.iter().map(|m| m.message.id.0).collect();
-    assert_eq!(page1_ids, all[..25].to_vec(), "newest 25 in order");
+    assert_eq!(page1.messages.len(), 25, "first page fills the limit");
+    let cursor = page1.next_cursor.expect("a full page yields a next cursor");
 
-    // Cursor = the 25th (oldest returned) row's created_at.
-    let cursor = page1.last().unwrap().message.created_at;
     let page2 = repo
         .search_in_server(&sid, &uid, "paginate", &filters(), Some(cursor), 25)
         .await
         .unwrap();
-    assert_eq!(page2.len(), 1, "second page holds the 26th match");
-    assert_eq!(page2[0].message.id.0, all[25], "no gap, no overlap");
+    assert_eq!(page2.messages.len(), 1, "second page holds the 26th match");
+    assert!(
+        page2.next_cursor.is_none(),
+        "a short final page yields no next cursor"
+    );
+
+    // No gap, no overlap: the two pages together are exactly the 26 matches,
+    // with no id appearing twice.
+    let page1_ids = ids(&page1.messages);
+    let page2_ids = ids(&page2.messages);
+    assert!(
+        page1_ids.is_disjoint(&page2_ids),
+        "no id appears on both pages"
+    );
+    let union: HashSet<Uuid> = page1_ids.union(&page2_ids).copied().collect();
+    assert_eq!(union, all, "the two pages cover every match exactly once");
 
     cleanup(&pool, &[server], &[owner]).await;
 }
@@ -652,10 +807,7 @@ async fn cross_server_channel_and_author_do_not_leak() {
         channel_id: Some(ChannelId::new(chan_b)),
         ..filters()
     };
-    let r = repo
-        .search_in_server(&sid_a, &caller, "shared", &foreign_channel, None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid_a, &caller, "shared", &foreign_channel).await;
     assert!(r.is_empty(), "a channel from another server yields nothing");
 
     // A foreign author id → zero rows (scoped by c.server_id).
@@ -663,10 +815,7 @@ async fn cross_server_channel_and_author_do_not_leak() {
         author_id: Some(UserId::new(owner_b)),
         ..filters()
     };
-    let r = repo
-        .search_in_server(&sid_a, &caller, "shared", &foreign_author, None, 25)
-        .await
-        .unwrap();
+    let r = search(&repo, &sid_a, &caller, "shared", &foreign_author).await;
     assert!(r.is_empty(), "an author from another server yields nothing");
 
     cleanup(&pool, &[server_a, server_b], &[owner_a, owner_b]).await;
@@ -705,10 +854,7 @@ async fn service_non_member_is_forbidden_even_for_public_channel() {
     let outsider_uid = UserId::new(outsider);
 
     // Repo (no gate): the public-channel row IS returned to the outsider.
-    let raw = repo
-        .search_in_server(&sid, &outsider_uid, "treasure", &filters(), None, 25)
-        .await
-        .unwrap();
+    let raw = search(&repo, &sid, &outsider_uid, "treasure", &filters()).await;
     assert!(
         ids(&raw).contains(&msg),
         "repo has no membership gate — public-channel row leaks (this is why the service gate exists)"

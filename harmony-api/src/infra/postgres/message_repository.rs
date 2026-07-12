@@ -10,7 +10,15 @@ use crate::domain::models::{
     Attachment, AttachmentId, ChannelId, Message, MessageId, MessageType, MessageWithAuthor,
     NewAttachment, ParentMessagePreview, Role, ServerId, UserId,
 };
-use crate::domain::ports::{AroundWindow, MessageRepository, MessageSearchFilters};
+use crate::domain::ports::{
+    AroundWindow, MessageRepository, MessageSearchFilters, SearchCursor, SearchPage,
+};
+
+/// Trigram word-similarity threshold for the fuzzy search branch. The `pg_trgm`
+/// default (0.6) is too strict for short queries; 0.3 is a forgiving default.
+/// Set per-statement via `set_config(..., is_local => true)` inside the search
+/// transaction. Too low → noise; revisit only if users complain (spec §gotchas).
+const TRGM_WORD_SIMILARITY_THRESHOLD: &str = "0.3";
 
 /// Parse the Postgres `message_type` enum value into the domain enum.
 fn parse_message_type(value: &str) -> MessageType {
@@ -864,82 +872,154 @@ impl MessageRepository for PgMessageRepository {
         caller_user_id: &UserId,
         query_text: &str,
         filters: &MessageSearchFilters,
-        cursor: Option<DateTime<Utc>>,
+        cursor: Option<SearchCursor>,
         limit: i64,
-    ) -> Result<Vec<MessageWithAuthor>, DomainError> {
+    ) -> Result<SearchPage, DomainError> {
         let sid = server_id.0;
         let uid = caller_user_id.0;
         // Nullable filter binds — `$n::uuid IS NULL` short-circuits the predicate.
         let channel_filter: Option<uuid::Uuid> = filters.channel_id.as_ref().map(|c| c.0);
         let author_filter: Option<uuid::Uuid> = filters.author_id.as_ref().map(|a| a.0);
+        // Composite relevance keyset binds — the three are NULL together on the
+        // first page (`$10::float8 IS NULL` short-circuits the whole predicate).
+        let cursor_score: Option<f64> = cursor.as_ref().map(|c| c.score);
+        let cursor_created_at: Option<DateTime<Utc>> = cursor.as_ref().map(|c| c.created_at);
+        let cursor_id: Option<Uuid> = cursor.as_ref().map(|c| c.id);
 
-        // FTS search (ADR-036 keyset pagination). The `content_tsv @@ ...`
-        // predicate uses the GIN index; the access EXISTS mirrors
+        // WHY a transaction: the fuzzy branch (`$3 <% content`) is gated by the
+        // per-connection `pg_trgm.word_similarity_threshold` GUC. `set_config`
+        // with `is_local => true` scopes the override to THIS transaction (like
+        // `SET LOCAL`) so it never leaks to other pooled queries.
+        let mut tx = self.pool.begin().await.map_err(super::db_err)?;
+        // `set_config(..., is_local => true)` returns the applied value (one row);
+        // fetch it to run the statement, then discard.
+        sqlx::query!(
+            "SELECT set_config('pg_trgm.word_similarity_threshold', $1, true)",
+            TRGM_WORD_SIMILARITY_THRESHOLD,
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(super::db_err)?;
+
+        // Hybrid search, relevance-ordered (ADR-036 composite keyset). Recall is
+        // `FTS OR trigram`: `content_tsv @@ query` (GIN-backed, stem/phrase) OR
+        // `$3 <% content` (GIN-backed word-similarity → partial words + typos).
+        // Ranking is `ts_rank_cd + word_similarity`: FTS rank dominates real word
+        // hits, trigram keeps typo-only hits scored above zero, both-matches get a
+        // mild boost. The `score` is computed once in the `hits` CTE so the keyset
+        // filter and ORDER BY share it. The access EXISTS mirrors
         // channel_repository::list_for_server so search cannot diverge from the
         // channel-visibility gate. Encrypted channels/messages are excluded
         // (content_tsv is NULL there anyway — belt + suspenders).
         let rows = sqlx::query!(
             r#"
-            SELECT
-                m.id,
-                m.channel_id,
-                m.author_id,
-                m.content,
-                m.edited_at,
-                m.deleted_at,
-                m.deleted_by,
-                m.encrypted,
-                m.sender_device_id,
-                m.message_type as "message_type!: String",
-                m.system_event_key,
-                m.parent_message_id,
-                m.moderated_at,
-                m.moderation_reason,
-                m.original_content,
-                m.mentioned_user_ids as "mentioned_user_ids!",
-                m.is_pinned,
-                m.pinned_by,
-                m.pinned_at,
-                m.created_at,
-                p.username AS "author_username?",
-                p.display_name AS "author_display_name?",
-                p.avatar_url AS "author_avatar_url?",
-                parent_p.username AS "parent_author_username?",
-                LEFT(parent_m.content, 100) AS "parent_content_preview?",
-                (parent_m.deleted_at IS NOT NULL) AS "parent_deleted?"
-            FROM messages m
-            JOIN channels c ON c.id = m.channel_id
-            LEFT JOIN profiles p ON p.id = m.author_id
-            LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id
-            LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
-            WHERE c.server_id = $1
-              AND c.encrypted = false
-              AND m.encrypted = false
-              AND m.deleted_at IS NULL
-              AND m.message_type != 'system'
-              AND m.content_tsv @@ websearch_to_tsquery('english', $3)
-              AND (
-                  c.is_private = false
-                  OR EXISTS (
-                      SELECT 1 FROM server_members sm
-                      WHERE sm.server_id = c.server_id
-                        AND sm.user_id = $2
-                        AND (
-                            sm.role IN ($4, $5)
-                            OR EXISTS (
-                                SELECT 1 FROM channel_role_access cra
-                                WHERE cra.channel_id = c.id AND cra.role = sm.role
-                            )
-                        )
+            WITH hits AS (
+                SELECT
+                    m.id,
+                    m.channel_id,
+                    m.author_id,
+                    m.content,
+                    m.edited_at,
+                    m.deleted_at,
+                    m.deleted_by,
+                    m.encrypted,
+                    m.sender_device_id,
+                    m.message_type,
+                    m.system_event_key,
+                    m.parent_message_id,
+                    m.moderated_at,
+                    m.moderation_reason,
+                    m.original_content,
+                    m.mentioned_user_ids,
+                    m.is_pinned,
+                    m.pinned_by,
+                    m.pinned_at,
+                    m.created_at,
+                    p.username AS author_username,
+                    p.display_name AS author_display_name,
+                    p.avatar_url AS author_avatar_url,
+                    parent_p.username AS parent_author_username,
+                    LEFT(parent_m.content, 100) AS parent_content_preview,
+                    (parent_m.deleted_at IS NOT NULL) AS parent_deleted,
+                    (
+                        COALESCE(ts_rank_cd(m.content_tsv, websearch_to_tsquery('english', $3)), 0)::float8
+                        + COALESCE(word_similarity($3, m.content), 0)::float8
+                    ) AS score
+                FROM messages m
+                JOIN channels c ON c.id = m.channel_id
+                LEFT JOIN profiles p ON p.id = m.author_id
+                LEFT JOIN messages parent_m ON parent_m.id = m.parent_message_id
+                LEFT JOIN profiles parent_p ON parent_p.id = parent_m.author_id
+                WHERE c.server_id = $1
+                  AND c.encrypted = false
+                  AND m.encrypted = false
+                  AND m.deleted_at IS NULL
+                  AND m.message_type != 'system'
+                  AND (
+                      m.content_tsv @@ websearch_to_tsquery('english', $3)
+                      -- Trigram needs a 3-char window; skip the fuzzy branch for
+                      -- 1-2 char queries so `<%` never degrades the GIN scan.
+                      OR (char_length($3) >= 3 AND $3 <% m.content)
                   )
-              )
-              AND ($6::uuid IS NULL OR m.channel_id = $6)
-              AND ($7::uuid IS NULL OR m.author_id = $7)
-              AND ($8 = false OR m.content ~* 'https?://')
-              AND ($9 = false OR m.content ~* '(?i)https?://\S+\.(png|jpe?g|gif|webp|bmp|svg)(\?\S*)?')
-              AND ($10::timestamptz IS NULL OR m.created_at < $10)
-            ORDER BY m.created_at DESC, m.id DESC
-            LIMIT $11
+                  AND (
+                      c.is_private = false
+                      OR EXISTS (
+                          SELECT 1 FROM server_members sm
+                          WHERE sm.server_id = c.server_id
+                            AND sm.user_id = $2
+                            AND (
+                                sm.role IN ($4, $5)
+                                OR EXISTS (
+                                    SELECT 1 FROM channel_role_access cra
+                                    WHERE cra.channel_id = c.id AND cra.role = sm.role
+                                )
+                            )
+                      )
+                  )
+                  AND ($6::uuid IS NULL OR m.channel_id = $6)
+                  AND ($7::uuid IS NULL OR m.author_id = $7)
+                  AND ($8 = false OR m.content ~* 'https?://')
+                  AND ($9 = false OR m.content ~* '(?i)https?://\S+\.(png|jpe?g|gif|webp|bmp|svg)(\?\S*)?')
+            )
+            SELECT
+                id AS "id!",
+                channel_id AS "channel_id!",
+                author_id AS "author_id!",
+                content,
+                edited_at,
+                deleted_at,
+                deleted_by,
+                encrypted AS "encrypted!",
+                sender_device_id,
+                message_type as "message_type!: String",
+                system_event_key,
+                parent_message_id,
+                moderated_at,
+                moderation_reason,
+                original_content,
+                mentioned_user_ids as "mentioned_user_ids!",
+                is_pinned AS "is_pinned!",
+                pinned_by,
+                pinned_at,
+                created_at AS "created_at!",
+                author_username AS "author_username?",
+                author_display_name AS "author_display_name?",
+                author_avatar_url AS "author_avatar_url?",
+                parent_author_username AS "parent_author_username?",
+                parent_content_preview AS "parent_content_preview?",
+                parent_deleted AS "parent_deleted?",
+                score AS "score!: f64"
+            FROM hits
+            WHERE (
+                $10::float8 IS NULL
+                OR score < $10
+                OR (
+                    score = $10
+                    AND (created_at < $11 OR (created_at = $11 AND id < $12))
+                )
+            )
+            ORDER BY score DESC, created_at DESC, id DESC
+            LIMIT $13
             "#,
             sid,
             uid,
@@ -950,12 +1030,29 @@ impl MessageRepository for PgMessageRepository {
             author_filter,
             filters.has_link,
             filters.has_image,
-            cursor,
+            cursor_score,
+            cursor_created_at,
+            cursor_id,
             limit,
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await
         .map_err(super::db_err)?;
+
+        tx.commit().await.map_err(super::db_err)?;
+
+        // Build the next-page cursor from the LAST (lowest-ranked) returned row,
+        // but only when the page filled `limit` — a short page has no next page.
+        // Done before mapping (enrichment preserves order + count downstream).
+        let next_cursor = if i64::try_from(rows.len()).unwrap_or(0) == limit {
+            rows.last().map(|r| SearchCursor {
+                score: r.score,
+                created_at: r.created_at,
+                id: r.id,
+            })
+        } else {
+            None
+        };
 
         let messages = rows
             .into_iter()
@@ -992,7 +1089,10 @@ impl MessageRepository for PgMessageRepository {
             })
             .collect();
 
-        Ok(messages)
+        Ok(SearchPage {
+            messages,
+            next_cursor,
+        })
     }
 
     async fn find_by_id(&self, message_id: &MessageId) -> Result<Option<Message>, DomainError> {

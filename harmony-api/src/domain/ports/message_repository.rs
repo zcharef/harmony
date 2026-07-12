@@ -26,6 +26,38 @@ pub struct AroundWindow {
     pub has_more_older: bool,
 }
 
+/// Opaque relevance keyset cursor for message search.
+///
+/// Search is ordered by a combined FTS + trigram relevance `score` (DESC), so a
+/// `created_at`-only cursor no longer paginates it — a page break can fall in the
+/// middle of a score tie. The composite `(score, created_at, id)` makes the total
+/// order deterministic and keeps pagination OFFSET-free (ADR-036). It is encoded
+/// as an opaque base64 token at the API edge; its internal layout is server-owned
+/// and MUST NOT be treated as a stable contract.
+#[derive(Debug, Clone)]
+pub struct SearchCursor {
+    /// Combined relevance score of the last returned row.
+    pub score: f64,
+    /// `created_at` of the last returned row (first tiebreak).
+    pub created_at: DateTime<Utc>,
+    /// `id` of the last returned row (final tiebreak — total order).
+    pub id: uuid::Uuid,
+}
+
+/// One page of search results plus the cursor for the next page.
+///
+/// The repository owns cursor construction because it is the layer that computed
+/// the relevance `score` — the handler only base64-encodes it. `next_cursor` is
+/// `Some` iff the page filled `limit` (there may be more), mirroring the
+/// `rows.len() == limit` convention used by the other list endpoints.
+#[derive(Debug)]
+pub struct SearchPage {
+    /// The relevance-ordered page (best match first).
+    pub messages: Vec<MessageWithAuthor>,
+    /// Cursor for the next page, or `None` when this is the last page.
+    pub next_cursor: Option<SearchCursor>,
+}
+
 /// Structured search filters (parsed client-side, §5.3). All optional.
 #[derive(Debug, Clone)]
 pub struct MessageSearchFilters {
@@ -173,18 +205,22 @@ pub trait MessageRepository: Send + Sync + std::fmt::Debug {
     /// integration tests pin it against the same fixtures as `ensure_channel_access`
     /// (§7.2), exactly as `filter_mentionable` is pinned for mentions.
     ///
-    /// Returns messages older than `cursor` (keyset pagination, ADR-036), newest
-    /// first, limited to `limit` rows. Enrichment (reactions, mention resolution)
-    /// is done by the service layer, identical to `list_for_channel`.
+    /// Returns the `limit` most relevant matches (best-first) after `cursor`
+    /// (composite relevance keyset, ADR-036), together with the cursor for the
+    /// next page. Matching is a hybrid of FTS (`content_tsv @@ query`) and
+    /// trigram word-similarity (`query <% content`) so partial words and typos
+    /// still surface; ordering is by combined relevance score, not recency.
+    /// Enrichment (reactions, mention resolution) is done by the service layer,
+    /// identical to `list_for_channel`.
     async fn search_in_server(
         &self,
         server_id: &ServerId,
         caller_user_id: &UserId,
         query_text: &str,
         filters: &MessageSearchFilters,
-        cursor: Option<DateTime<Utc>>,
+        cursor: Option<SearchCursor>,
         limit: i64,
-    ) -> Result<Vec<MessageWithAuthor>, DomainError>;
+    ) -> Result<SearchPage, DomainError>;
 
     /// Pin or unpin a message, writing the `is_pinned` flag and its provenance
     /// atomically in one `UPDATE`.

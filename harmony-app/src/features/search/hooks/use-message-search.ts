@@ -28,9 +28,10 @@ function paramsKey(params: MessageSearchParams): Record<string, unknown> {
 
 /**
  * `useInfiniteQuery` over `searchMessages` (spec §5.1). `throwOnError: true` so
- * TanStack Query sees API failures (ADR: use-members.ts). Recency keyset
- * pagination via `nextCursor`. Enabled only when `q` is non-empty — a bare
- * filter without `q` is a 400 server-side (§3.2b), so it never fires.
+ * TanStack Query sees API failures (ADR: use-members.ts). Relevance keyset
+ * pagination via the opaque `nextCursor` (best-match-first, not recency).
+ * Enabled only when `q` is non-empty — a bare filter without `q` is a 400
+ * server-side (§3.2b), so it never fires.
  */
 export function useMessageSearch(params: MessageSearchParams | null) {
   return useInfiniteQuery({
@@ -44,7 +45,7 @@ export function useMessageSearch(params: MessageSearchParams | null) {
           ...(params.channelId !== undefined ? { channelId: params.channelId } : {}),
           ...(params.authorId !== undefined ? { authorId: params.authorId } : {}),
           ...(params.has.length > 0 ? { has: params.has.join(',') } : {}),
-          ...(typeof pageParam === 'string' ? { before: pageParam } : {}),
+          ...(typeof pageParam === 'string' ? { cursor: pageParam } : {}),
         },
         throwOnError: true,
       })
