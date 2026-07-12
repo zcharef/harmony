@@ -146,6 +146,7 @@
   "discoverySaveFailed": "Could not save discovery settings",
 
   "tabDesktop": "Desktop",
+  "tabAdmin": "Admin",
   "desktopCloseToTrayLabel": "Keep running in background",
   "desktopCloseToTrayHelp": "Closing the window hides Harmony in the system tray instead of quitting",
   "desktopAutostartLabel": "Launch Harmony at login",

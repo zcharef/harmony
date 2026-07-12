@@ -43,6 +43,14 @@ pub struct ModerationService {
     mod_log_repo: Arc<dyn ModerationLogRepository>,
     report_repo: Arc<dyn ReportRepository>,
     spam_guard: Arc<SpamGuard>,
+    /// The platform founder (owner of the official server), resolved once at
+    /// startup. `None` on self-hosted/dev instances (no official server), which
+    /// makes the founder short-circuit inert. SECURITY: this is the ONLY source
+    /// of founder authority — it is a resolved `UserId`, never a client value or
+    /// a badge. When `Some` and the caller matches, `require_owner` /
+    /// `require_role_with_server` grant `Role::Owner` on EVERY server WITHOUT a
+    /// membership row (hidden admin-everywhere).
+    founder_id: Option<UserId>,
 }
 
 impl ModerationService {
@@ -67,7 +75,26 @@ impl ModerationService {
             mod_log_repo,
             report_repo,
             spam_guard,
+            founder_id: None,
         }
+    }
+
+    /// Set the resolved platform founder (owner of the official server).
+    ///
+    /// Called once at the composition root after the founder `UserId` is
+    /// resolved at startup. Absent (the `new` default) on self-hosted/dev
+    /// instances, leaving the founder short-circuit inert.
+    #[must_use]
+    pub fn with_founder(mut self, founder_id: Option<UserId>) -> Self {
+        self.founder_id = founder_id;
+        self
+    }
+
+    /// Whether `caller_id` is the resolved platform founder.
+    fn is_founder(&self, caller_id: &UserId) -> bool {
+        // Explicit match (never truthiness on the Option): only a resolved
+        // founder that equals the caller grants authority.
+        matches!(&self.founder_id, Some(founder) if founder == caller_id)
     }
 
     /// Best-effort append to the moderation audit log. Called AFTER an
@@ -103,6 +130,14 @@ impl ModerationService {
                 resource_type: "Server",
                 id: server_id.to_string(),
             })?;
+
+        // Founder short-circuit: the platform founder is treated as owner of
+        // EVERY server (hidden admin-everywhere), without a membership row. The
+        // server must still exist (NotFound above stands). SECURITY: keyed only
+        // off the resolved founder UserId — see `founder_id`.
+        if self.is_founder(caller_id) {
+            return Ok(server);
+        }
 
         if server.owner_id != *caller_id {
             return Err(DomainError::Forbidden(
@@ -153,6 +188,14 @@ impl ModerationService {
                 resource_type: "Server",
                 id: server_id.to_string(),
             })?;
+
+        // Founder short-circuit: grant `Role::Owner` on EVERY server WITHOUT a
+        // membership lookup (hidden admin-everywhere). Runs before the member
+        // query so the founder never needs a `server_members` row. SECURITY:
+        // keyed only off the resolved founder UserId — see `founder_id`.
+        if self.is_founder(caller_id) {
+            return Ok((Role::Owner, server));
+        }
 
         let caller_role = self
             .member_repo

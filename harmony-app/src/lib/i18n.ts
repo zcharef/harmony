@@ -1,6 +1,7 @@
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import about from '@/lib/locales/en/about.json'
+import admin from '@/lib/locales/en/admin.json'
 import auth from '@/lib/locales/en/auth.json'
 import channels from '@/lib/locales/en/channels.json'
 import chat from '@/lib/locales/en/chat.json'
@@ -29,6 +30,7 @@ const defaultNS = 'common' as const
 const resources = {
   en: {
     about,
+    admin,
     common,
     auth,
     chat,
@@ -58,6 +60,7 @@ i18n.use(initReactI18next).init({
   fallbackLng: 'en',
   ns: [
     'about',
+    'admin',
     'common',
     'auth',
     'chat',

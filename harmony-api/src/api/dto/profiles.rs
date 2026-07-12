@@ -41,6 +41,12 @@ pub struct ProfileResponse {
     pub pending_banner_url: Option<String>,
     /// Whether this user holds the `founding` badge (one of the first accounts).
     pub is_founding: bool,
+    /// Whether the caller is the platform founder (owner of the official
+    /// server). Present ONLY on the self endpoints (`GET/PATCH /profiles/me`) —
+    /// omitted entirely for any other user, so a caller only ever learns their
+    /// OWN admin status. The backend, not this flag, is the real authz gate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_platform_admin: Option<bool>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -61,6 +67,17 @@ impl ProfileResponse {
             pending_banner_url,
             ..Self::from(p)
         }
+    }
+
+    /// Stamp the platform-admin (founder) flag onto a self response.
+    ///
+    /// WHY here (not in `From`): founder status is not a profile column — it is
+    /// resolved from `AppState`. The `/profiles/me` handlers compute it and set
+    /// it via this builder so the flag appears ONLY on the caller's own profile.
+    #[must_use]
+    pub fn with_platform_admin(mut self, is_platform_admin: bool) -> Self {
+        self.is_platform_admin = Some(is_platform_admin);
+        self
     }
 }
 
@@ -141,6 +158,9 @@ impl From<Profile> for ProfileResponse {
             pending_avatar_url: None,
             pending_banner_url: None,
             is_founding: p.is_founding,
+            // WHY None: only the self endpoints set this (via `with_platform_admin`).
+            // Other users' responses must never carry an admin flag.
+            is_platform_admin: None,
             created_at: p.created_at,
             updated_at: p.updated_at,
         }

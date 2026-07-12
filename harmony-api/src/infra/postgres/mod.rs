@@ -1,5 +1,6 @@
 //! `PostgreSQL` adapter (Supabase Postgres via `SQLx`).
 
+mod admin_repository;
 mod analytics_recorder;
 mod attachment_repository;
 mod attachment_scan_retry_repository;
@@ -30,6 +31,7 @@ mod server_repository;
 mod user_preferences_repository;
 mod voice_session_repository;
 
+pub use admin_repository::PgAdminRepository;
 pub use analytics_recorder::PgAnalyticsRecorder;
 pub use attachment_repository::PgAttachmentRepository;
 pub use attachment_scan_retry_repository::PgAttachmentScanRetryRepository;

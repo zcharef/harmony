@@ -2,6 +2,7 @@
 //!
 //! These traits define the contracts that infrastructure adapters must implement.
 
+mod admin_repository;
 mod analytics_recorder;
 mod attachment_repository;
 mod attachment_scan_retry_repository;
@@ -38,6 +39,7 @@ mod storage_object_remover;
 mod user_preferences_repository;
 mod voice_session_repository;
 
+pub use admin_repository::AdminRepository;
 pub use analytics_recorder::AnalyticsRecorder;
 pub use attachment_repository::AttachmentRepository;
 pub use attachment_scan_retry_repository::AttachmentScanRetryRepository;

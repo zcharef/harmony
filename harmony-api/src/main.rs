@@ -158,6 +158,31 @@ async fn init_app_state(config: &Config) -> AppInit {
     // Fetch ES256 public key from Supabase JWKS (newer CLI versions sign with ECDSA)
     let es256_key = fetch_supabase_jwks(config).await;
 
+    // Resolve the platform identity ONCE at startup: the official server ID and
+    // its owner (the "founder"). The founder is granted hidden admin-everywhere
+    // + plan bypass authorization; keying it off a boot-resolved UserId (never a
+    // client value or a badge) is the security invariant. Unset official server
+    // (self-hosted/dev) → founder None → every founder short-circuit is inert.
+    let official_server_id: Option<crate::domain::models::ServerId> =
+        config.official_server_id.as_deref().map(|id| {
+            crate::domain::models::ServerId(
+                id.parse::<uuid::Uuid>()
+                    .expect("OFFICIAL_SERVER_ID must be a valid UUID"),
+            )
+        });
+    let founder_id: Option<crate::domain::models::UserId> = match &official_server_id {
+        Some(server_id) => resolve_founder(&pool, server_id).await,
+        None => None,
+    };
+    match &founder_id {
+        Some(id) => {
+            tracing::info!(founder_id = %id, "Platform founder resolved (owner of official server)");
+        }
+        None => tracing::info!(
+            "No platform founder configured (self-hosted/dev) — admin surfaces closed"
+        ),
+    }
+
     // Construct Postgres adapters (ports → adapters)
     let profile_repo = Arc::new(infra::postgres::PgProfileRepository::new(pool.clone()));
     let server_repo = Arc::new(infra::postgres::PgServerRepository::new(pool.clone()));
@@ -184,10 +209,10 @@ async fn init_app_state(config: &Config) -> AppInit {
     let plan_limit_checker: Arc<dyn crate::domain::ports::PlanLimitChecker> =
         if config.plan_enforcement_enabled {
             tracing::info!("Plan limit enforcement ENABLED (SaaS mode)");
-            Arc::new(infra::postgres::PgPlanLimitChecker::new(
-                pool.clone(),
-                analytics_recorder.clone(),
-            ))
+            Arc::new(
+                infra::postgres::PgPlanLimitChecker::new(pool.clone(), analytics_recorder.clone())
+                    .with_founder(founder_id.clone()),
+            )
         } else {
             tracing::info!("Plan limit enforcement DISABLED (self-hosted mode)");
             Arc::new(infra::AlwaysAllowedChecker)
@@ -376,16 +401,19 @@ async fn init_app_state(config: &Config) -> AppInit {
         pool.clone(),
     ));
     let report_repo = Arc::new(infra::postgres::PgReportRepository::new(pool.clone()));
-    let moderation_service = Arc::new(domain::services::ModerationService::new(
-        server_repo.clone(),
-        ban_repo.clone(),
-        member_repo.clone(),
-        channel_repo.clone(),
-        message_repo.clone(),
-        moderation_log_repo,
-        report_repo,
-        spam_guard.clone(),
-    ));
+    let moderation_service = Arc::new(
+        domain::services::ModerationService::new(
+            server_repo.clone(),
+            ban_repo.clone(),
+            member_repo.clone(),
+            channel_repo.clone(),
+            message_repo.clone(),
+            moderation_log_repo,
+            report_repo,
+            spam_guard.clone(),
+        )
+        .with_founder(founder_id.clone()),
+    );
     let friendship_service = Arc::new(domain::services::FriendshipService::new(
         friendship_repo.clone(),
         profile_repo.clone(),
@@ -562,16 +590,12 @@ async fn init_app_state(config: &Config) -> AppInit {
         config.attachments_require_csam_scan,
         voice_service,
         voice_session_repo,
-        config.official_server_id.as_deref().map(|id| {
-            domain::models::ServerId(
-                id.parse::<uuid::Uuid>()
-                    .expect("OFFICIAL_SERVER_ID must be a valid UUID"),
-            )
-        }),
+        official_server_id,
         analytics_recorder,
         attachment_url_origin,
         config.trusted_proxy_secret.clone(),
-    );
+    )
+    .with_founder(founder_id);
 
     AppInit {
         state,
@@ -1233,6 +1257,44 @@ fn spawn_voice_session_sweep(state: api::AppState) {
             }
         }
     });
+}
+
+/// Resolve the platform founder = owner of the official server, once at startup.
+///
+/// Returns `None` (with a warning) when the official server row is absent (dev
+/// before seeding) or the lookup fails — a resolution failure must degrade to
+/// "no founder" (all admin surfaces closed / short-circuits inert), never crash
+/// the boot. The founder is re-resolved on the next restart, so an ownership
+/// transfer of the official server takes effect after a rolling restart.
+async fn resolve_founder(
+    pool: &sqlx::PgPool,
+    official_server_id: &crate::domain::models::ServerId,
+) -> Option<crate::domain::models::UserId> {
+    let sid = official_server_id.0;
+    match sqlx::query_scalar!(
+        r#"SELECT owner_id AS "owner_id!" FROM servers WHERE id = $1"#,
+        sid
+    )
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(Some(owner_id)) => Some(crate::domain::models::UserId::from(owner_id)),
+        Ok(None) => {
+            tracing::warn!(
+                server_id = %official_server_id,
+                "OFFICIAL_SERVER_ID set but no such server row — founder unresolved (admin surfaces closed)"
+            );
+            None
+        }
+        Err(e) => {
+            tracing::error!(
+                server_id = %official_server_id,
+                error = %e,
+                "Failed to resolve founder from official server — admin surfaces closed until restart"
+            );
+            None
+        }
+    }
 }
 
 /// Fetch the ES256 public key from the Supabase JWKS endpoint.

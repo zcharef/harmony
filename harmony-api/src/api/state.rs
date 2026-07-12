@@ -6,14 +6,14 @@ use jsonwebtoken::DecodingKey;
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
 
-use crate::domain::models::ServerId;
+use crate::domain::models::{ServerId, UserId};
 use crate::domain::ports::{
-    AnalyticsRecorder, AttachmentRepository, AttachmentScanRetryRepository, BanRepository,
-    ChannelRepository, ContentModerator, CsamMatcher, DesktopAuthRepository, EmbedRepository,
-    EmojiImageScanRetryRepository, EventBus, IdentityImageScanRetryRepository, ImageClassifier,
-    MegolmSessionRepository, MemberRepository, MessageRepository, ModerationLogRepository,
-    ModerationRetryRepository, PlanLimitChecker, ServerRepository, StorageObjectRemover,
-    VoiceSessionRepository,
+    AdminRepository, AnalyticsRecorder, AttachmentRepository, AttachmentScanRetryRepository,
+    BanRepository, ChannelRepository, ContentModerator, CsamMatcher, DesktopAuthRepository,
+    EmbedRepository, EmojiImageScanRetryRepository, EventBus, IdentityImageScanRetryRepository,
+    ImageClassifier, MegolmSessionRepository, MemberRepository, MessageRepository,
+    ModerationLogRepository, ModerationRetryRepository, PlanLimitChecker, ServerRepository,
+    StorageObjectRemover, VoiceSessionRepository,
 };
 use crate::domain::services::{
     ChannelService, DiscoveryService, DmService, FriendshipService, InviteService, KeyService,
@@ -147,6 +147,14 @@ pub struct AppState {
     voice_session_repository: Option<Arc<dyn VoiceSessionRepository>>,
     /// Official Harmony server ID. When set, `sync_profile` auto-joins new users.
     official_server_id: Option<ServerId>,
+    /// The platform founder = owner of `official_server_id`, resolved once at
+    /// startup. `None` on self-hosted/dev instances. SECURITY: the `SSoT` of
+    /// founder authority — a resolved `UserId`, never a client value or a badge.
+    /// Set via [`AppState::with_founder`] after the boot-time lookup.
+    founder_id: Option<UserId>,
+    /// Platform-admin (founder) persistence: user search, plan management,
+    /// quota reads, audit log. Constructed internally from the pool.
+    admin_repository: Arc<dyn AdminRepository>,
     /// Append-only analytics event recorder (growth-plan §10 funnel).
     analytics_recorder: Arc<dyn AnalyticsRecorder>,
     /// Normalized Supabase origin (`scheme://host[:port]`) that attachment
@@ -231,6 +239,8 @@ impl std::fmt::Debug for AppState {
                 &self.voice_session_repository.is_some(),
             )
             .field("official_server_id", &self.official_server_id)
+            .field("founder_id", &self.founder_id)
+            .field("admin_repository", &self.admin_repository)
             .field("analytics_recorder", &self.analytics_recorder)
             .field("attachment_url_origin", &self.attachment_url_origin)
             .field(
@@ -357,6 +367,13 @@ impl AppState {
         let storage_object_remover: Arc<dyn StorageObjectRemover> =
             Arc::new(NoopStorageObjectRemover);
 
+        // WHY constructed here (not a positional param): the founder admin repo
+        // needs only a Postgres repo over the same pool — wiring it internally
+        // keeps the already-large constructor signature (and its many test call
+        // sites) stable, mirroring migration_service/server_emoji_service above.
+        let admin_repository: Arc<dyn AdminRepository> =
+            Arc::new(crate::infra::postgres::PgAdminRepository::new(pool.clone()));
+
         Self {
             pool,
             jwt_secret,
@@ -408,10 +425,25 @@ impl AppState {
             voice_service,
             voice_session_repository,
             official_server_id,
+            founder_id: None,
+            admin_repository,
             analytics_recorder,
             attachment_url_origin,
             trusted_proxy_secret,
         }
+    }
+
+    /// Set the resolved platform founder (owner of the official server).
+    ///
+    /// Called once at the composition root after the founder `UserId` is
+    /// resolved at startup (one DB query). `None` on self-hosted/dev instances,
+    /// leaving every founder short-circuit inert. SECURITY: this is the only
+    /// path that grants founder authority — it takes a server-resolved `UserId`,
+    /// never anything client-supplied.
+    #[must_use]
+    pub fn with_founder(mut self, founder_id: Option<UserId>) -> Self {
+        self.founder_id = founder_id;
+        self
     }
 
     /// Normalized Supabase origin attachment URLs are pinned to.
@@ -737,6 +769,30 @@ impl AppState {
     #[must_use]
     pub fn official_server_id(&self) -> Option<&ServerId> {
         self.official_server_id.as_ref()
+    }
+
+    /// The resolved platform founder (owner of the official server). `None` on
+    /// self-hosted/dev instances.
+    #[must_use]
+    pub fn founder_id(&self) -> Option<&UserId> {
+        self.founder_id.as_ref()
+    }
+
+    /// Whether `user_id` is the resolved platform founder.
+    ///
+    /// SECURITY: the single authorization predicate for founder-only surfaces.
+    /// Keyed ONLY off the boot-resolved founder `UserId` (owner of the official
+    /// server) — never a client value or a badge. Returns `false` when no
+    /// founder is configured (self-hosted/dev).
+    #[must_use]
+    pub fn is_platform_founder(&self, user_id: &UserId) -> bool {
+        matches!(&self.founder_id, Some(founder) if founder == user_id)
+    }
+
+    /// Access the platform-admin (founder) repository.
+    #[must_use]
+    pub fn admin_repository(&self) -> &dyn AdminRepository {
+        &*self.admin_repository
     }
 
     /// Access the analytics recorder as a cloneable `Arc` (for `tokio::spawn`

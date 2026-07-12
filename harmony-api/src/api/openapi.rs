@@ -14,6 +14,10 @@ use super::dto::voice::{
     VoiceHeartbeatRequest, VoiceParticipantResponse, VoiceParticipantsResponse, VoiceTokenResponse,
 };
 use super::dto::{
+    AdminQuotaLimits, AdminQuotaUsage, AdminUserQuotaResponse, AdminUserSearchQuery,
+    AdminUserSearchResponse, AdminUserSummaryResponse, SetUserPlanRequest,
+};
+use super::dto::{
     AssignRoleRequest, AttachmentResponse, BanListQuery, BanListResponse, BanResponse,
     BanUserRequest, ChannelListResponse, ChannelReadStateResponse, ChannelResponse,
     ChannelRoleAccessResponse, CheckUsernameQuery, CheckUsernameResponse, ClaimedKeyResponse,
@@ -38,7 +42,7 @@ use super::handlers::{self, ComponentHealth, HealthResponse, LivenessResponse};
 use crate::domain::models::{
     AttachmentId, AttachmentModerationStatus, CategoryId, ChannelId, ChannelType, DeviceId,
     DeviceKeyId, EmbedId, EmojiId, InviteCode, MegolmSessionId, MessageId, MessageType,
-    ModerationAction, ModerationLogId, OneTimeKeyId, ReportId, ReportReason, ReportStatus,
+    ModerationAction, ModerationLogId, OneTimeKeyId, Plan, ReportId, ReportReason, ReportStatus,
     ServerId, UserId, UserStatus, VoiceAction,
 };
 use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
@@ -72,6 +76,10 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         handlers::badges::list_official_badges,
         handlers::badges::grant_official_badge,
         handlers::badges::revoke_official_badge,
+        // Platform admin (founder-only)
+        handlers::admin::search_users,
+        handlers::admin::set_user_plan,
+        handlers::admin::get_user_quota,
         // Servers
         handlers::servers::create_server,
         handlers::servers::list_servers,
@@ -216,6 +224,14 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
             // Badge DTOs
             OfficialBadgesResponse,
             OfficialBadgeGrantRequest,
+            AdminUserSummaryResponse,
+            AdminUserSearchResponse,
+            AdminUserSearchQuery,
+            SetUserPlanRequest,
+            AdminQuotaLimits,
+            AdminQuotaUsage,
+            AdminUserQuotaResponse,
+            Plan,
             // Server DTOs
             CreateServerRequest,
             UpdateServerRequest,
@@ -389,6 +405,7 @@ use crate::domain::models::{ParentMessagePreview, ReactionSummary, Reactor};
         (name = "Presence", description = "User presence status updates"),
         (name = "Voice", description = "Voice channel management (LiveKit)"),
         (name = "Events", description = "Server-Sent Events for real-time updates"),
+        (name = "Admin", description = "Founder-only platform administration"),
     ),
     modifiers(&SecurityAddon)
 )]

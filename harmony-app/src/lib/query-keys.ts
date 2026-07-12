@@ -16,6 +16,11 @@ export const queryKeys = {
     detail: (profileId: string) => ['profiles', 'detail', profileId] as const,
     search: (query: string) => ['profiles', 'search', query] as const,
   },
+  admin: {
+    all: ['admin'] as const,
+    userSearch: (query: string) => ['admin', 'users', 'search', query] as const,
+    userQuota: (userId: string) => ['admin', 'users', 'quota', userId] as const,
+  },
   badges: {
     all: ['badges'] as const,
     // The set of user IDs holding the `official` verified badge. Fetched once,

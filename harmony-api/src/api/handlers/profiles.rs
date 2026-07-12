@@ -294,8 +294,12 @@ pub async fn get_my_profile(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
     let profile = state.profile_service().get_by_id(&user_id).await?;
+    let is_platform_admin = state.is_platform_founder(&user_id);
 
-    Ok((StatusCode::OK, Json(ProfileResponse::from_self(profile))))
+    Ok((
+        StatusCode::OK,
+        Json(ProfileResponse::from_self(profile).with_platform_admin(is_platform_admin)),
+    ))
 }
 
 /// Update the authenticated user's profile fields (avatar, display name, custom status).
@@ -384,7 +388,11 @@ pub async fn update_my_profile(
         crate::api::identity_image_scan::spawn_identity_image_scan(&state, &user_id);
     }
 
-    Ok((StatusCode::OK, Json(ProfileResponse::from_self(profile))))
+    let is_platform_admin = state.is_platform_founder(&user_id);
+    Ok((
+        StatusCode::OK,
+        Json(ProfileResponse::from_self(profile).with_platform_admin(is_platform_admin)),
+    ))
 }
 
 /// Get any user's public profile by ID (for the profile hover card).

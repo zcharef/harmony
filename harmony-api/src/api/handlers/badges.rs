@@ -10,6 +10,7 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use crate::api::dto::{OfficialBadgeGrantRequest, OfficialBadgesResponse};
 use crate::api::errors::{ApiError, ProblemDetails};
 use crate::api::extractors::{ApiJson, AuthUser};
+use crate::api::founder::require_platform_founder;
 use crate::api::state::AppState;
 use crate::domain::models::UserId;
 
@@ -68,7 +69,7 @@ pub async fn grant_official_badge(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<OfficialBadgeGrantRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_platform_owner(&state, &caller_id).await?;
+    require_platform_founder(&state, &caller_id)?;
     let subject = resolve_subject(&state, req).await?;
     state
         .profile_service()
@@ -106,7 +107,7 @@ pub async fn revoke_official_badge(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<OfficialBadgeGrantRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_platform_owner(&state, &caller_id).await?;
+    require_platform_founder(&state, &caller_id)?;
     let subject = resolve_subject(&state, req).await?;
     state
         .profile_service()
@@ -114,31 +115,6 @@ pub async fn revoke_official_badge(
         .await?;
     tracing::info!(actor = %caller_id, subject = %subject, "official badge revoked");
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// Gate an action behind the platform owner (the owner of the official server).
-///
-/// WHY the official server's owner: there is no separate super-admin role in
-/// v1, and the platform creator owns the official server — the same account the
-/// `official` badge is meant to verify. Self-hosted instances (no official
-/// server configured) have no platform owner, so badge administration is closed.
-async fn require_platform_owner(state: &AppState, caller_id: &UserId) -> Result<(), ApiError> {
-    let official_server_id = state.official_server_id().ok_or_else(|| {
-        ApiError::forbidden("Badge administration is not available on this instance")
-    })?;
-    let server = state
-        .server_repository_for_moderation()
-        .get_by_id(official_server_id)
-        .await?
-        .ok_or_else(|| {
-            ApiError::forbidden("Badge administration is not available on this instance")
-        })?;
-    if server.owner_id != *caller_id {
-        return Err(ApiError::forbidden(
-            "Only the platform owner can administer badges",
-        ));
-    }
-    Ok(())
 }
 
 /// Resolve the grant subject to a `UserId`, requiring exactly one of
