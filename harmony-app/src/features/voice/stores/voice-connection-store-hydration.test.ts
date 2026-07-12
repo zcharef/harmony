@@ -103,6 +103,42 @@ describe('voice-connection-store hydration from localStorage', () => {
     expect(state.preferredAudioOutputId).toBeNull()
   })
 
+  it('hydrates persisted mute/deafen intent into initial state', async () => {
+    // WHY (spec B): pre-call mute/deafen is a persistent intent, hydrated at
+    // module init exactly like the preferred device IDs.
+    localStorage.setItem('voice_preferred_muted', 'true')
+    localStorage.setItem('voice_preferred_deafened', 'true')
+
+    const store = await importFreshStore()
+
+    const state = store.getState()
+    expect(state.isMuted).toBe(true)
+    expect(state.isDeafened).toBe(true)
+  })
+
+  it('defaults to unmuted/undeafened when nothing is persisted', async () => {
+    const store = await importFreshStore()
+
+    const state = store.getState()
+    expect(state.isMuted).toBe(false)
+    expect(state.isDeafened).toBe(false)
+  })
+
+  it('applies the hydrated mute intent to the room on connect', async () => {
+    // WHY (spec B): the full persist → rehydrate → apply loop — a pre-muted
+    // user's mic is disabled on join.
+    localStorage.setItem('voice_preferred_muted', 'true')
+
+    const store = await importFreshStore()
+    await store.getState().connect('channel-1', 'server-1', 'token', 'wss://test')
+
+    expect(store.getState().isMuted).toBe(true)
+    const room = (globalThis as Record<string, unknown>).__hydrationMockRoom as {
+      localParticipant: { setMicrophoneEnabled: Mock }
+    }
+    expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false)
+  })
+
   it('connect() applies the hydrated preference to the new room', async () => {
     // WHY (spec req 4): pins the full persist → rehydrate → apply loop —
     // the next session must reuse the device picked last time.

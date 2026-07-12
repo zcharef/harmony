@@ -30,3 +30,46 @@ export function savePreferredDeviceId(kind: AudioDeviceKind, deviceId: string): 
 export function clearPreferredDeviceId(kind: AudioDeviceKind): void {
   writeStorage(STORAGE_KEYS[kind], null)
 }
+
+/**
+ * Persists the user's pre-call mute / deafen intent in localStorage.
+ *
+ * WHY the same layer as device IDs: self-mute/self-deafen is a persistent user
+ * intent (Discord semantics — it survives leaving a call), and — like device
+ * IDs — it is machine-local, so it belongs in localStorage rather than the
+ * server preferences API. The voice store hydrates from these loaders at module
+ * init and applies the intent to the LiveKit room on join.
+ */
+const AUDIO_STATE_KEYS = {
+  muted: 'voice_preferred_muted',
+  deafened: 'voice_preferred_deafened',
+} as const
+
+type AudioStateKind = keyof typeof AUDIO_STATE_KEYS
+
+/** WHY: a missing preference falls back to the unmuted/undeafened default, so
+ * only the literal string 'true' counts as on — any other value (null, legacy
+ * junk) reads false. */
+function loadAudioState(kind: AudioStateKind): boolean {
+  return readStorage(AUDIO_STATE_KEYS[kind]) === 'true'
+}
+
+function saveAudioState(kind: AudioStateKind, value: boolean): void {
+  writeStorage(AUDIO_STATE_KEYS[kind], value ? 'true' : 'false')
+}
+
+export function loadPreferredMuted(): boolean {
+  return loadAudioState('muted')
+}
+
+export function savePreferredMuted(value: boolean): void {
+  saveAudioState('muted', value)
+}
+
+export function loadPreferredDeafened(): boolean {
+  return loadAudioState('deafened')
+}
+
+export function savePreferredDeafened(value: boolean): void {
+  saveAudioState('deafened', value)
+}

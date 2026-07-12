@@ -19,7 +19,12 @@ interface DeviceInfo {
  * Refreshes the device list on RoomEvent.MediaDevicesChanged so hot-plugged
  * devices appear immediately.
  */
-export function AudioDeviceSelector() {
+/**
+ * WHY optional `kind`: the connected-only audio-settings popover renders BOTH
+ * selects (omit the prop), while the pre-call user-panel chevrons render a
+ * single kind. Omitted = both (backwards-compatible).
+ */
+export function AudioDeviceSelector({ kind }: { kind?: 'audioinput' | 'audiooutput' } = {}) {
   const { t } = useTranslation('voice')
   const room = useVoiceConnectionStore((s) => s.room)
   const setPreferredDevice = useVoiceConnectionStore((s) => s.setPreferredDevice)
@@ -93,26 +98,40 @@ export function AudioDeviceSelector() {
     }
   }, [room, refreshDevices])
 
-  function switchDevice(kind: 'audioinput' | 'audiooutput', selection: Iterable<string | number>) {
+  function switchDevice(
+    deviceKind: 'audioinput' | 'audiooutput',
+    selection: Iterable<string | number>,
+  ) {
     const first = [...selection][0]
-    if (first === undefined || room === null) return
+    if (first === undefined) return
     const deviceId = String(first)
 
     // WHY: Clear previous error on new attempt so stale feedback doesn't linger.
     setSwitchError(null)
 
-    room.switchActiveDevice(kind, deviceId).then(
+    // WHY: Pre-call (room === null) there is no live session to switch — just
+    // persist the choice; the store applies it on the next join via
+    // restorePreferredDevices. Enumeration already works room-less.
+    if (room === null) {
+      if (deviceKind === 'audioinput') setActiveInputId(deviceId)
+      else setActiveOutputId(deviceId)
+      setPreferredDevice(deviceKind, deviceId)
+      clearDeviceFallback()
+      return
+    }
+
+    room.switchActiveDevice(deviceKind, deviceId).then(
       () => {
-        if (kind === 'audioinput') setActiveInputId(deviceId)
+        if (deviceKind === 'audioinput') setActiveInputId(deviceId)
         else setActiveOutputId(deviceId)
-        setPreferredDevice(kind, deviceId)
+        setPreferredDevice(deviceKind, deviceId)
         // WHY: The user just picked a device deliberately — the "fell back to
         // default" notice no longer describes the current state.
         clearDeviceFallback()
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
-        logger.error(`voice_switch_${kind}_failed`, {
+        logger.error(`voice_switch_${deviceKind}_failed`, {
           error: message,
           deviceId,
         })
@@ -120,14 +139,16 @@ export function AudioDeviceSelector() {
         // feedback proportional to the action. No toast — inline text is
         // sufficient for a dropdown selection failure.
         setSwitchError(
-          kind === 'audioinput' ? t('switchMicrophoneFailed') : t('switchSpeakerFailed'),
+          deviceKind === 'audioinput' ? t('switchMicrophoneFailed') : t('switchSpeakerFailed'),
         )
       },
     )
   }
 
-  // WHY: No room means no active voice connection — nothing to configure.
-  if (room === null) return null
+  // WHY: `kind` scopes the render to a single select (pre-call chevron popover);
+  // omitted renders both (connected audio-settings popover).
+  const showInput = kind === undefined || kind === 'audioinput'
+  const showOutput = kind === undefined || kind === 'audiooutput'
 
   return (
     <div className="flex flex-col gap-3">
@@ -136,33 +157,37 @@ export function AudioDeviceSelector() {
           {switchError}
         </p>
       )}
-      <Select
-        aria-label={t('microphone')}
-        label={t('microphone')}
-        size="sm"
-        startContent={<Mic className="h-4 w-4 text-default-500" />}
-        selectedKeys={activeInputId !== '' ? new Set([activeInputId]) : new Set<string>()}
-        onSelectionChange={(selection) => switchDevice('audioinput', selection)}
-        data-test="audio-input-select"
-      >
-        {audioInputs.map((device) => (
-          <SelectItem key={device.deviceId}>{device.label}</SelectItem>
-        ))}
-      </Select>
+      {showInput && (
+        <Select
+          aria-label={t('microphone')}
+          label={t('microphone')}
+          size="sm"
+          startContent={<Mic className="h-4 w-4 text-default-500" />}
+          selectedKeys={activeInputId !== '' ? new Set([activeInputId]) : new Set<string>()}
+          onSelectionChange={(selection) => switchDevice('audioinput', selection)}
+          data-test="audio-input-select"
+        >
+          {audioInputs.map((device) => (
+            <SelectItem key={device.deviceId}>{device.label}</SelectItem>
+          ))}
+        </Select>
+      )}
 
-      <Select
-        aria-label={t('speaker')}
-        label={t('speaker')}
-        size="sm"
-        startContent={<Volume2 className="h-4 w-4 text-default-500" />}
-        selectedKeys={activeOutputId !== '' ? new Set([activeOutputId]) : new Set<string>()}
-        onSelectionChange={(selection) => switchDevice('audiooutput', selection)}
-        data-test="audio-output-select"
-      >
-        {audioOutputs.map((device) => (
-          <SelectItem key={device.deviceId}>{device.label}</SelectItem>
-        ))}
-      </Select>
+      {showOutput && (
+        <Select
+          aria-label={t('speaker')}
+          label={t('speaker')}
+          size="sm"
+          startContent={<Volume2 className="h-4 w-4 text-default-500" />}
+          selectedKeys={activeOutputId !== '' ? new Set([activeOutputId]) : new Set<string>()}
+          onSelectionChange={(selection) => switchDevice('audiooutput', selection)}
+          data-test="audio-output-select"
+        >
+          {audioOutputs.map((device) => (
+            <SelectItem key={device.deviceId}>{device.label}</SelectItem>
+          ))}
+        </Select>
+      )}
     </div>
   )
 }

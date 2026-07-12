@@ -15,8 +15,12 @@ import { logger } from '@/lib/logger'
 import {
   type AudioDeviceKind,
   clearPreferredDeviceId,
+  loadPreferredDeafened,
   loadPreferredDeviceId,
+  loadPreferredMuted,
+  savePreferredDeafened,
   savePreferredDeviceId,
+  savePreferredMuted,
 } from '../lib/device-preferences'
 import { createSpeakingDetector } from '../lib/speaking-detector'
 
@@ -99,8 +103,11 @@ const INITIAL_STATE = {
   currentChannelId: null,
   currentServerId: null,
   room: null,
-  isMuted: false,
-  isDeafened: false,
+  // WHY: Hydrated once at module init so pre-call mute/deafen is a persistent
+  // user intent (Discord semantics) restored on the next session and applied to
+  // the room on connect — mirrors preferredAudioInputId/OutputId below.
+  isMuted: loadPreferredMuted(),
+  isDeafened: loadPreferredDeafened(),
   isKrispEnabled: true,
   isPttMode: false,
   pttShortcut: 'Space',
@@ -559,6 +566,8 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
           pttShortcut,
           preferredAudioInputId,
           preferredAudioOutputId,
+          isMuted,
+          isDeafened,
         } = get()
         set({
           ...INITIAL_STATE,
@@ -568,6 +577,11 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
           pttShortcut,
           preferredAudioInputId,
           preferredAudioOutputId,
+          // WHY: mute/deafen is a persistent user intent (like the device IDs
+          // above) — preserve it across the disconnect→idle reset so the next
+          // join re-applies it, rather than forcing unmuted/undeafened.
+          isMuted,
+          isDeafened,
         })
       }
     }, DISCONNECT_IDLE_DELAY_MS)
@@ -706,6 +720,24 @@ function setAllParticipantVolumes(room: Room, volume: number): number {
     }
   }
   return failCount
+}
+
+/** WHY: Applies the persisted pre-call mute/deafen intent to a freshly-joined
+ * room. enableMic() always publishes the mic track (so KRISP attaches and the
+ * micFailed signal is real); this runs AFTER the connected `set` to honour a
+ * muted/deafened intent by disabling the mic, and — when deafened — silencing
+ * already-subscribed participants. Late joiners are covered by the
+ * TrackSubscribed isDeafened guard as long as isDeafened is in state first. */
+function applyInitialAudioState(room: Room, muted: boolean, deafened: boolean): void {
+  if (!muted && !deafened) return
+  room.localParticipant.setMicrophoneEnabled(false).catch((err: unknown) => {
+    logger.warn('voice_initial_mute_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  })
+  if (deafened) {
+    setAllParticipantVolumes(room, 0)
+  }
 }
 
 /** WHY: Extracted to reduce connect() cognitive complexity below Biome's limit of 15.
@@ -898,14 +930,20 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
         room.disconnect().catch(() => {})
         return
       }
+      // WHY: Apply the persisted pre-call mute/deafen intent on join. Read it
+      // from state (hydrated at init, kept across disconnect) BEFORE the set.
+      // micFailed forces mute regardless — a dead mic must show as muted.
+      const { isMuted: persistedMuted, isDeafened: persistedDeafened } = get()
+      const nextMuted = micFailed || persistedMuted
       set({
         status: 'connected',
         room,
         currentChannelId: channelId,
         currentServerId: serverId,
-        isMuted: micFailed,
-        isDeafened: false,
+        isMuted: nextMuted,
+        isDeafened: persistedDeafened,
       })
+      applyInitialAudioState(room, nextMuted, persistedDeafened)
       restorePreferredDevices(room, get, set)
     } catch (err: unknown) {
       handleConnectFailure(err, room, generation, channelId, serverId, set)
@@ -937,6 +975,9 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     // WHY: preferredAudioInputId / preferredAudioOutputId are intentionally
     // NOT cleared here. They are user preferences that should persist across
     // disconnect → rejoin so the same devices are restored automatically.
+    // WHY isMuted/isDeafened are NOT reset: they are a persistent self-mute
+    // intent (Discord semantics) that survives leaving a call and is re-applied
+    // on the next join, matching the preferred-device persistence above.
     set({
       status: 'idle',
       room: null,
@@ -944,8 +985,6 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       currentServerId: null,
       error: null,
       connectFailureReason: null,
-      isMuted: false,
-      isDeafened: false,
       deviceFallbacks: [],
       activeSpeakers: new Set(),
     })
@@ -953,25 +992,40 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
 
   toggleMute: () => {
     const { room, isMuted } = get()
-    if (room === null) return
     const nextMuted = !isMuted
+    // WHY: Persist first so the mute intent survives a reload and is re-applied
+    // on the next join — works pre-call (room === null) exactly like the
+    // device-preference persistence.
     set({ isMuted: nextMuted })
+    savePreferredMuted(nextMuted)
+    // WHY: Pre-call there is no room to act on — the persisted intent is enough;
+    // connect() applies it via applyInitialAudioState.
+    if (room === null) return
     // WHY: setMicrophoneEnabled(true) unmutes, setMicrophoneEnabled(false) mutes.
     // Optimistic update above; rolled back on failure (P0-4).
     room.localParticipant.setMicrophoneEnabled(!nextMuted).catch((err: unknown) => {
       logger.error('voice_toggle_mute_failed', {
         error: err instanceof Error ? err.message : String(err),
       })
-      // WHY (P0-4): Roll back the optimistic isMuted update so the UI
-      // reflects the actual mic state after the SDK call failed.
+      // WHY (P0-4): Roll back the optimistic isMuted update (and its persisted
+      // copy) so the UI reflects the actual mic state after the SDK call failed.
       set({ isMuted: !nextMuted })
+      savePreferredMuted(!nextMuted)
     })
   },
 
   toggleDeafen: () => {
     const { room, isDeafened, isMuted } = get()
-    if (room === null) return
     const nextDeafened = !isDeafened
+
+    // WHY: Pre-call — flip and persist the intent (deafen implies mute, Discord
+    // semantics), then stop. connect() applies it via applyInitialAudioState.
+    if (room === null) {
+      set({ isDeafened: nextDeafened, isMuted: nextDeafened })
+      savePreferredDeafened(nextDeafened)
+      savePreferredMuted(nextDeafened)
+      return
+    }
 
     // WHY: Set volume to 0 for all remote participants when deafening,
     // restore to 1 when undeafening. setVolume is the official livekit-client API
@@ -989,14 +1043,19 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
     // WHY: Deafen implies mute — if you can't hear others, you shouldn't
     // broadcast either (Discord/TeamSpeak standard). Undeafen restores the mic.
     set({ isDeafened: nextDeafened, isMuted: nextDeafened })
+    savePreferredDeafened(nextDeafened)
+    savePreferredMuted(nextDeafened)
     room.localParticipant.setMicrophoneEnabled(!nextDeafened).catch((err: unknown) => {
       logger.error('voice_deafen_mic_toggle_failed', {
         error: err instanceof Error ? err.message : String(err),
         deafened: nextDeafened,
       })
-      // WHY (P0-4): Roll back both flags and restore participant volumes so
-      // the UI reflects the actual mic/audio state after the SDK call failed.
+      // WHY (P0-4): Roll back both flags (and their persisted copies) and
+      // restore participant volumes so the UI reflects the actual mic/audio
+      // state after the SDK call failed.
       set({ isDeafened, isMuted })
+      savePreferredDeafened(isDeafened)
+      savePreferredMuted(isMuted)
       setAllParticipantVolumes(room, isDeafened ? 0 : 1)
     })
   },
@@ -1131,6 +1190,8 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       pttShortcut,
       preferredAudioInputId,
       preferredAudioOutputId,
+      isMuted,
+      isDeafened,
     } = get()
     set({
       ...INITIAL_STATE,
@@ -1140,6 +1201,10 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
       pttShortcut,
       preferredAudioInputId,
       preferredAudioOutputId,
+      // WHY: preserve the persistent self-mute/deafen intent across reset,
+      // matching the preferred-device IDs above.
+      isMuted,
+      isDeafened,
     })
   },
 }))

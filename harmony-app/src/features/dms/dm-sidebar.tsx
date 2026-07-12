@@ -1,26 +1,13 @@
-import { Avatar, Button, Spinner, Tooltip } from '@heroui/react'
-import {
-  HeadphoneOff,
-  Headphones,
-  Lock,
-  MessageSquarePlus,
-  Mic,
-  MicOff,
-  Settings,
-  Users,
-  X,
-} from 'lucide-react'
+import { Avatar, Button, Spinner } from '@heroui/react'
+import { Lock, MessageSquarePlus, Users, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
-import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { useUnreadStore } from '@/features/channels'
 import { useFriendRequests } from '@/features/friends'
-import { StatusPicker } from '@/features/preferences'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { ProfilePopover } from '@/features/profiles'
-import { useSettingsUiStore } from '@/features/settings'
-import { useVoiceConnectionStore } from '@/features/voice'
+import { UserControlPanel } from '@/features/user-panel'
 import type { DmListItem } from '@/lib/api'
 import { resolveDisplayName } from '@/lib/display-name'
 import { cn } from '@/lib/utils'
@@ -169,31 +156,9 @@ export function DmSidebar({ selectedServerId, onSelectDm, onSelectFriends }: DmS
   const { t: tFriends } = useTranslation('friends')
   const incomingRequests = useFriendRequests('incoming')
   const pendingCount = incomingRequests.data?.length ?? 0
-  const { t: tVoice } = useTranslation('voice')
-  const { t: tSettings } = useTranslation('settings')
-  const openUserSettings = useSettingsUiStore((s) => s.openUserSettings)
   const { data: dms, isPending, isError, refetch, isRefetching } = useDms()
   const closeDmMutation = useCloseDm()
   const [isSearchOpen, setIsSearchOpen] = useState(false)
-  const user = useAuthStore((s) => s.user)
-  const { data: profile } = useCurrentProfile()
-  const status = useUserStatus(user?.id ?? '')
-  const displayName =
-    profile !== undefined
-      ? resolveDisplayName({ displayName: profile.displayName, username: profile.username })
-      : t('you')
-
-  const isMuted = useVoiceConnectionStore((s) => s.isMuted)
-  const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
-  const toggleMute = useVoiceConnectionStore((s) => s.toggleMute)
-  const toggleDeafen = useVoiceConnectionStore((s) => s.toggleDeafen)
-
-  const statusLabels = {
-    online: t('statusOnline'),
-    idle: t('statusIdle'),
-    dnd: t('statusDnd'),
-    offline: t('statusOffline'),
-  } as const
 
   return (
     <div data-test="dm-sidebar" className="flex h-full flex-col bg-default-100">
@@ -291,88 +256,7 @@ export function DmSidebar({ selectedServerId, onSelectDm, onSelectFriends }: DmS
         </div>
       </div>
 
-      {/* User control panel — matches ChannelSidebar pattern */}
-      <div
-        data-test="user-control-panel"
-        className="flex items-center border-t border-divider bg-content1"
-      >
-        <StatusPicker>
-          <div className="relative">
-            <Avatar
-              name={displayName}
-              src={profile?.avatarUrl ?? undefined}
-              size="sm"
-              color="primary"
-              showFallback
-              classNames={{
-                base: 'h-8 w-8',
-                name: 'text-xs text-primary-foreground',
-              }}
-            />
-            <div className="absolute -bottom-0.5 -right-0.5">
-              <StatusIndicator status={status} size="lg" />
-            </div>
-          </div>
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
-            <span className="truncate text-xs text-default-500">{statusLabels[status]}</span>
-          </div>
-        </StatusPicker>
-        <div className="flex items-center pr-2">
-          <Tooltip
-            content={isMuted ? tVoice('unmute') : tVoice('mute')}
-            placement="top"
-            delay={300}
-          >
-            <Button
-              variant="light"
-              isIconOnly
-              size="sm"
-              className="h-8 w-8"
-              onPress={toggleMute}
-              data-test="voice-mute-btn"
-            >
-              {isMuted ? (
-                <MicOff className="h-4 w-4 text-danger" />
-              ) : (
-                <Mic className="h-4 w-4 text-default-500" />
-              )}
-            </Button>
-          </Tooltip>
-          <Tooltip
-            content={isDeafened ? tVoice('undeafen') : tVoice('deafen')}
-            placement="top"
-            delay={300}
-          >
-            <Button
-              variant="light"
-              isIconOnly
-              size="sm"
-              className="h-8 w-8"
-              onPress={toggleDeafen}
-              data-test="voice-deafen-btn"
-            >
-              {isDeafened ? (
-                <HeadphoneOff className="h-4 w-4 text-danger" />
-              ) : (
-                <Headphones className="h-4 w-4 text-default-500" />
-              )}
-            </Button>
-          </Tooltip>
-          <Tooltip content={tSettings('userSettingsTooltip')} placement="top" delay={300}>
-            <Button
-              variant="light"
-              isIconOnly
-              size="sm"
-              className="h-8 w-8"
-              onPress={() => openUserSettings()}
-              data-test="user-settings-button"
-            >
-              <Settings className="h-4 w-4 text-default-500" />
-            </Button>
-          </Tooltip>
-        </div>
-      </div>
+      <UserControlPanel />
 
       <UserSearchDialog
         isOpen={isSearchOpen}

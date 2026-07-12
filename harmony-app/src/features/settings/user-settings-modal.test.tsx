@@ -22,6 +22,20 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }))
 
+// WHY: the modal footer's logout calls supabase.auth.signOut; the real client
+// pulls env validation that does not belong in a render test. vi.hoisted keeps
+// the spy available inside the hoisted vi.mock factory.
+const { signOutMock } = vi.hoisted(() => ({
+  signOutMock: vi.fn(() => Promise.resolve({ error: null })),
+}))
+vi.mock('@/lib/supabase', () => ({
+  supabase: { auth: { signOut: signOutMock } },
+}))
+
+vi.mock('@/lib/toast', () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}))
+
 function buildProfile(): ProfileResponse {
   return {
     id: 'user-1',
@@ -157,5 +171,25 @@ describe('UserSettingsModal admin tab gating', () => {
     render(<UserSettingsModal />)
 
     expect(screen.queryByTestId('user-settings-tab-admin')).toBeNull()
+  })
+})
+
+describe('UserSettingsModal logout', () => {
+  it('renders the logout button in red (bottom-left) with a sign-out label', () => {
+    render(<UserSettingsModal />)
+
+    const button = screen.getByTestId('user-settings-logout-button')
+    expect(button).toBeTruthy()
+    expect(button.textContent).toContain('Log out')
+    // HeroUI applies the danger color token to the button.
+    expect(button.className).toContain('danger')
+  })
+
+  it('signs out when pressed', () => {
+    render(<UserSettingsModal />)
+
+    fireEvent.click(screen.getByTestId('user-settings-logout-button'))
+
+    expect(signOutMock).toHaveBeenCalledTimes(1)
   })
 })

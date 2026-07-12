@@ -645,10 +645,20 @@ describe('useVoiceConnectionStore', () => {
       })
     })
 
-    it('is a no-op when room is null', () => {
+    it('flips and persists the mute intent when room is null (pre-call)', () => {
+      // WHY (spec B): pre-call the toggle is no longer a no-op — it flips the
+      // flag and persists it so connect() re-applies it on join.
+      expect(useVoiceConnectionStore.getState().room).toBeNull()
+
+      useVoiceConnectionStore.getState().toggleMute()
+
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(true)
+      expect(localStorage.getItem('voice_preferred_muted')).toBe('true')
+
       useVoiceConnectionStore.getState().toggleMute()
 
       expect(useVoiceConnectionStore.getState().isMuted).toBe(false)
+      expect(localStorage.getItem('voice_preferred_muted')).toBe('false')
     })
   })
 
@@ -732,10 +742,24 @@ describe('useVoiceConnectionStore', () => {
       })
     })
 
-    it('is a no-op when room is null', () => {
+    it('flips, implies mute, and persists both when room is null (pre-call)', () => {
+      // WHY (spec B): pre-call deafen flips the flag, implies mute (Discord
+      // semantics), and persists both so connect() re-applies them on join.
+      expect(useVoiceConnectionStore.getState().room).toBeNull()
+
+      useVoiceConnectionStore.getState().toggleDeafen()
+
+      expect(useVoiceConnectionStore.getState().isDeafened).toBe(true)
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(true)
+      expect(localStorage.getItem('voice_preferred_deafened')).toBe('true')
+      expect(localStorage.getItem('voice_preferred_muted')).toBe('true')
+
       useVoiceConnectionStore.getState().toggleDeafen()
 
       expect(useVoiceConnectionStore.getState().isDeafened).toBe(false)
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(false)
+      expect(localStorage.getItem('voice_preferred_deafened')).toBe('false')
+      expect(localStorage.getItem('voice_preferred_muted')).toBe('false')
     })
   })
 
@@ -1174,9 +1198,8 @@ describe('useVoiceConnectionStore', () => {
   // reset()
   // -------------------------------------------------------------------------
   describe('reset', () => {
-    it('resets all state to initial values', async () => {
+    it('resets connection state to initial values', async () => {
       await connectStore()
-      useVoiceConnectionStore.setState({ isMuted: true, isDeafened: true })
 
       useVoiceConnectionStore.getState().reset()
 
@@ -1185,10 +1208,23 @@ describe('useVoiceConnectionStore', () => {
       expect(state.room).toBeNull()
       expect(state.currentChannelId).toBeNull()
       expect(state.currentServerId).toBeNull()
-      expect(state.isMuted).toBe(false)
-      expect(state.isDeafened).toBe(false)
       expect(state.error).toBeNull()
       expect(state.activeSpeakers.size).toBe(0)
+    })
+
+    it('preserves the persistent mute/deafen intent across reset', async () => {
+      // WHY (spec B): mute/deafen is a persistent self-mute intent (Discord
+      // semantics) — like the preferred device IDs, it survives reset so the
+      // next join re-applies it.
+      await connectStore()
+      useVoiceConnectionStore.setState({ isMuted: true, isDeafened: true })
+
+      useVoiceConnectionStore.getState().reset()
+
+      const state = useVoiceConnectionStore.getState()
+      expect(state.isMuted).toBe(true)
+      expect(state.isDeafened).toBe(true)
+      expect(state.status).toBe('idle')
     })
 
     it('calls room.disconnect()', async () => {
@@ -1703,6 +1739,91 @@ describe('useVoiceConnectionStore', () => {
       useVoiceConnectionStore.getState().setPreferredDevice('audiooutput', 'speaker-456')
 
       expect(localStorage.getItem('voice_preferred_audio_output')).toBe('speaker-456')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Pre-call mute/deafen intent (spec B): persisted, applied on connect,
+  // preserved across teardown
+  // -------------------------------------------------------------------------
+  describe('pre-call audio state applied on connect', () => {
+    it('applies a persisted mute intent to the room on join', async () => {
+      // WHY: The user muted before joining — connect must honour it. enableMic
+      // publishes the track (KRISP + micFailed), then applyInitialAudioState
+      // disables the mic to reflect the muted intent.
+      useVoiceConnectionStore.setState({ isMuted: true })
+
+      const room = await connectStore()
+
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(true)
+      expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false)
+    })
+
+    it('applies a persisted deafen intent to the room on join', async () => {
+      // WHY: deafen implies mute — the mic is disabled and the state stays
+      // deafened. Already-subscribed remotes are silenced; late joiners are
+      // handled by the TrackSubscribed guard (covered separately).
+      useVoiceConnectionStore.setState({ isDeafened: true, isMuted: true })
+
+      const room = await connectStore()
+
+      expect(useVoiceConnectionStore.getState().isDeafened).toBe(true)
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(true)
+      expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false)
+
+      // A participant that subscribes after a deafened join is silenced.
+      const mockElement = document.createElement('audio')
+      const mockTrack = {
+        kind: 'audio',
+        attach: vi.fn().mockReturnValue(mockElement),
+        detach: vi.fn().mockReturnValue([]),
+        mediaStreamTrack: { kind: 'audio', id: 'late-track' },
+      }
+      const mockParticipant = { identity: 'late-joiner', setVolume: vi.fn() }
+      room.__emit('trackSubscribed', mockTrack, {}, mockParticipant)
+      expect(mockParticipant.setVolume).toHaveBeenCalledWith(0)
+      mockElement.remove()
+    })
+
+    it('leaves the room unmuted when no pre-call intent is set', async () => {
+      const room = await connectStore()
+
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(false)
+      expect(useVoiceConnectionStore.getState().isDeafened).toBe(false)
+      // enableMic enabled the mic; no applyInitialAudioState disable call.
+      expect(room.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(false)
+    })
+
+    it('disconnect preserves the mute/deafen intent (not forced to false)', async () => {
+      await connectStore()
+      useVoiceConnectionStore.setState({ isMuted: true, isDeafened: true })
+
+      await useVoiceConnectionStore.getState().disconnect()
+
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(true)
+      expect(useVoiceConnectionStore.getState().isDeafened).toBe(true)
+      expect(useVoiceConnectionStore.getState().status).toBe('idle')
+    })
+
+    it('the disconnect→idle timer preserves the mute/deafen intent', async () => {
+      const room = await connectStore()
+      useVoiceConnectionStore.setState({ isMuted: true, isDeafened: true })
+
+      room.__emit('disconnected')
+      vi.advanceTimersByTime(3_000)
+
+      expect(useVoiceConnectionStore.getState().status).toBe('idle')
+      expect(useVoiceConnectionStore.getState().isMuted).toBe(true)
+      expect(useVoiceConnectionStore.getState().isDeafened).toBe(true)
+    })
+
+    it('connected toggleMute persists the new value', async () => {
+      const room = await connectStore()
+
+      useVoiceConnectionStore.getState().toggleMute()
+
+      expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenLastCalledWith(false)
+      expect(localStorage.getItem('voice_preferred_muted')).toBe('true')
     })
   })
 

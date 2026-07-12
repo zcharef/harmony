@@ -1,5 +1,4 @@
 import {
-  Avatar,
   Button,
   Dropdown,
   DropdownItem,
@@ -7,17 +6,12 @@ import {
   DropdownSection,
   DropdownTrigger,
   Spinner,
-  Tooltip,
 } from '@heroui/react'
 import {
   ChevronDown,
   Hash,
-  HeadphoneOff,
-  Headphones,
   Lock,
   Megaphone,
-  Mic,
-  MicOff,
   Search,
   Settings,
   UserPlus,
@@ -26,14 +20,12 @@ import {
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
-import { useAuthStore, useCurrentProfile } from '@/features/auth'
 import { EncryptedChannelBadge } from '@/features/crypto'
 import { ROLE_HIERARCHY, useLeaveServer, useMyMemberRole } from '@/features/members'
-import { StatusPicker } from '@/features/preferences'
-import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { useSearchStore } from '@/features/search'
 import { CreateInviteDialog } from '@/features/server-nav'
 import { useSettingsUiStore } from '@/features/settings'
+import { UserControlPanel } from '@/features/user-panel'
 import {
   AudioAutoplayPrompt,
   useVoiceConnectionStore,
@@ -42,7 +34,6 @@ import {
   VoiceParticipantList,
 } from '@/features/voice'
 import type { ChannelResponse } from '@/lib/api'
-import { resolveDisplayName } from '@/lib/display-name'
 import { cn } from '@/lib/utils'
 import { CreateChannelDialog } from './create-channel-dialog'
 import { EditChannelDialog } from './edit-channel-dialog'
@@ -293,112 +284,6 @@ function ServerHeader({
         </DropdownSection>
       </DropdownMenu>
     </Dropdown>
-  )
-}
-
-// WHY: Extracted to reduce ChannelSidebar cognitive complexity below Biome's limit of 15.
-function UserControlPanel() {
-  const { t } = useTranslation('channels')
-  const { t: tVoice } = useTranslation('voice')
-  const { t: tSettings } = useTranslation('settings')
-  const user = useAuthStore((s) => s.user)
-  const { data: profile } = useCurrentProfile()
-  const status = useUserStatus(user?.id ?? '')
-  const displayName =
-    profile !== undefined
-      ? resolveDisplayName({ displayName: profile.displayName, username: profile.username })
-      : t('youFallback')
-  const openUserSettings = useSettingsUiStore((s) => s.openUserSettings)
-  const isMuted = useVoiceConnectionStore((s) => s.isMuted)
-  const isDeafened = useVoiceConnectionStore((s) => s.isDeafened)
-  const toggleMute = useVoiceConnectionStore((s) => s.toggleMute)
-  const toggleDeafen = useVoiceConnectionStore((s) => s.toggleDeafen)
-
-  const statusLabels = {
-    online: t('statusOnline'),
-    idle: t('statusIdle'),
-    dnd: t('statusDnd'),
-    offline: t('statusOffline'),
-  } as const
-
-  return (
-    <div
-      data-test="user-control-panel"
-      className="flex items-center border-t border-divider bg-content1"
-    >
-      <StatusPicker>
-        <div className="relative">
-          <Avatar
-            name={displayName}
-            src={profile?.avatarUrl ?? undefined}
-            size="sm"
-            color="primary"
-            showFallback
-            classNames={{
-              base: 'h-8 w-8',
-              name: 'text-xs text-primary-foreground',
-            }}
-          />
-          <div className="absolute -bottom-0.5 -right-0.5">
-            <StatusIndicator status={status} size="lg" />
-          </div>
-        </div>
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
-          <span className="truncate text-xs text-default-500">{statusLabels[status]}</span>
-        </div>
-      </StatusPicker>
-      <div className="flex items-center pr-2">
-        <Tooltip content={isMuted ? tVoice('unmute') : tVoice('mute')} placement="top" delay={300}>
-          <Button
-            variant="light"
-            isIconOnly
-            size="sm"
-            className="h-8 w-8"
-            onPress={toggleMute}
-            data-test="voice-mute-btn"
-          >
-            {isMuted ? (
-              <MicOff className="h-4 w-4 text-danger" />
-            ) : (
-              <Mic className="h-4 w-4 text-default-500" />
-            )}
-          </Button>
-        </Tooltip>
-        <Tooltip
-          content={isDeafened ? tVoice('undeafen') : tVoice('deafen')}
-          placement="top"
-          delay={300}
-        >
-          <Button
-            variant="light"
-            isIconOnly
-            size="sm"
-            className="h-8 w-8"
-            onPress={toggleDeafen}
-            data-test="voice-deafen-btn"
-          >
-            {isDeafened ? (
-              <HeadphoneOff className="h-4 w-4 text-danger" />
-            ) : (
-              <Headphones className="h-4 w-4 text-default-500" />
-            )}
-          </Button>
-        </Tooltip>
-        <Tooltip content={tSettings('userSettingsTooltip')} placement="top" delay={300}>
-          <Button
-            variant="light"
-            isIconOnly
-            size="sm"
-            className="h-8 w-8"
-            onPress={() => openUserSettings()}
-            data-test="user-settings-button"
-          >
-            <Settings className="h-4 w-4 text-default-500" />
-          </Button>
-        </Tooltip>
-      </div>
-    </div>
   )
 }
 
