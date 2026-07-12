@@ -204,9 +204,13 @@ async fn init_app_state(config: &Config) -> AppInit {
     };
 
     // Construct domain services (injected with repository ports)
+    // WHY the flag: outside production, accept loopback `http://` avatar/banner
+    // URLs so local Supabase storage (`http://127.0.0.1:64321/...`) is testable.
+    // Production stays strict https-only.
     let profile_service = Arc::new(domain::services::ProfileService::new(
         profile_repo.clone(),
         content_filter.clone(),
+        !config.is_production(),
     ));
     let server_service = Arc::new(domain::services::ServerService::new(
         server_repo.clone(),

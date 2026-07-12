@@ -95,6 +95,7 @@ async fn app_state(pool: PgPool, trusted_proxy_secret: Option<SecretString>) -> 
     let profile_service = Arc::new(harmony_api::domain::services::ProfileService::new(
         profile_repo.clone(),
         content_filter.clone(),
+        false,
     ));
     // WHY enabled: this suite tests the rate limiter itself — the E2E-style
     // `SPAM_GUARD_ENABLED=false` bypass must NOT apply here.

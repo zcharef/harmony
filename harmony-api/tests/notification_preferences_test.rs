@@ -118,6 +118,7 @@ async fn build_app_state(pool: PgPool) -> AppState {
     let profile_service = Arc::new(harmony_api::domain::services::ProfileService::new(
         profile_repo.clone(),
         content_filter.clone(),
+        false,
     ));
     let spam_guard = Arc::new(SpamGuard::new());
     let server_service = Arc::new(harmony_api::domain::services::ServerService::new(
