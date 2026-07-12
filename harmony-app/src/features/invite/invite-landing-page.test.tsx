@@ -244,6 +244,42 @@ describe('InviteLandingPage — authed accept', () => {
     expect(onDone).not.toHaveBeenCalled()
   })
 
+  it('suppresses the inline join error on a plan-gate rejection (modal owns it)', async () => {
+    setSession({ user: { id: 'user-1' } })
+    previewInviteMock.mockResolvedValue({ data: validPreview })
+    // A joined_servers / members cap rejection carries the plan-gate contract:
+    // the global MutationCache opens the UpgradeModal, so the card must NOT
+    // also render the raw inline detail (duplicate feedback, ADR-045).
+    joinServerMock.mockRejectedValue({
+      status: 403,
+      title: 'Plan Limit Exceeded',
+      detail: 'Plan limit reached: 20 servers you can join on the free plan',
+      code: 'PLAN_LIMIT_REACHED',
+      plan_gate: {
+        resource: 'joined_servers',
+        current_plan: 'free',
+        limit: 20,
+        required_plan: 'supporter',
+      },
+    })
+    const { onDone } = renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('invite-accept-button')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('invite-accept-button'))
+
+    // Wait for the join to have settled into its error state.
+    await waitFor(() => {
+      expect(joinServerMock).toHaveBeenCalledTimes(1)
+    })
+    // WHY the flush: give React a beat to (wrongly) render the inline error
+    // before asserting it stayed hidden — a broken guard would surface it here.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByTestId('invite-join-error')).toBeNull()
+    expect(onDone).not.toHaveBeenCalled()
+  })
+
   it('auto-joins when a pre-auth intent was recorded', async () => {
     setSession({ user: { id: 'user-1' } })
     sessionStorage.setItem(`harmony:invite-intent:${CODE}`, '1')

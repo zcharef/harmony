@@ -475,6 +475,7 @@ async fn init_app_state(config: &Config) -> AppInit {
             member_repo.clone(),
             plan_limit_checker.clone(),
             livekit_service,
+            analytics_recorder.clone(),
         ));
         (Some(svc), Some(voice_repo))
     } else {

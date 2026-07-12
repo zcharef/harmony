@@ -10,7 +10,7 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::domain::models::{ChannelId, ServerId, UserId};
+use crate::domain::models::{ChannelId, Plan, ResourceKind, ServerId, UserId};
 
 /// Stable analytics event names (§10: "stable event names").
 ///
@@ -109,6 +109,29 @@ impl AnalyticsEvent {
             channel_id: None,
             properties: Value::Object(serde_json::Map::new()),
         }
+    }
+
+    /// Build a `plan_limit_hit` funnel event for a plan-gate rejection.
+    ///
+    /// WHY a shared constructor: every rejection site (the plan-limit checker
+    /// and the atomic voice gate inside `upsert_with_limit`) must emit an
+    /// identical event shape. The `code` mirrors the client's plan-gate
+    /// contract — `limit == 0` means the feature is not in the plan at all,
+    /// a distinct funnel signal from an exhausted nonzero allowance.
+    /// Centralizing it here keeps the emitters from ever diverging.
+    #[must_use]
+    pub fn plan_limit_hit(resource: ResourceKind, plan: Plan, limit: u64) -> Self {
+        let code = if limit == 0 {
+            "FEATURE_NOT_IN_PLAN"
+        } else {
+            "PLAN_LIMIT_REACHED"
+        };
+        Self::new(AnalyticsEventName::PlanLimitHit).properties(serde_json::json!({
+            "resource": resource.key(),
+            "code": code,
+            "plan": plan.as_str(),
+            "limit": limit,
+        }))
     }
 
     #[must_use]

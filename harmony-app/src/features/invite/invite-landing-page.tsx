@@ -19,6 +19,7 @@ import { LoginPage, useAuthStore } from '@/features/auth'
 import { useServers } from '@/features/server-nav'
 import type { InvitePreviewResponse } from '@/lib/api'
 import { getApiErrorDetail } from '@/lib/api-error'
+import { isPlanGateError } from '@/lib/plan-gate'
 import { isTauri } from '@/lib/platform'
 import { useAcceptInvite } from './hooks/use-accept-invite'
 import { isInviteNotFound, useInvitePreview } from './hooks/use-invite-preview'
@@ -98,6 +99,15 @@ export function InviteLandingPage({ code, onDone }: InviteLandingPageProps) {
     return <LoginPage />
   }
 
+  // WHY compute once: skip the inline error on a plan gate (joined_servers /
+  // members caps) — those open the UpgradeModal centrally via the MutationCache,
+  // so an inline error would be duplicate feedback (mirrors emoji-settings-tab,
+  // ADR-045). Shared by both branches so the suppression can never diverge.
+  const joinError =
+    acceptInvite.isError && !isPlanGateError(acceptInvite.error)
+      ? getApiErrorDetail(acceptInvite.error, t('joinFailed'))
+      : null
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md" data-test="invite-landing-page">
@@ -128,9 +138,7 @@ export function InviteLandingPage({ code, onDone }: InviteLandingPageProps) {
               preview={preview.data}
               isAuthed={isAuthed}
               isJoining={acceptInvite.isPending}
-              joinError={
-                acceptInvite.isError ? getApiErrorDetail(acceptInvite.error, t('joinFailed')) : null
-              }
+              joinError={joinError}
               onAccept={handleAccept}
             />
           )}
@@ -139,9 +147,7 @@ export function InviteLandingPage({ code, onDone }: InviteLandingPageProps) {
             <AuthedInviteBody
               preview={preview.data}
               isJoining={acceptInvite.isPending}
-              joinError={
-                acceptInvite.isError ? getApiErrorDetail(acceptInvite.error, t('joinFailed')) : null
-              }
+              joinError={joinError}
               onAccept={handleAccept}
               onAlreadyMember={handleAlreadyMember}
             />

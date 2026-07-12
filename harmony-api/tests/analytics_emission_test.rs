@@ -264,6 +264,7 @@ async fn build_app_state_with_checker(
         member_repo.clone(),
         plan_checker.clone(),
         Arc::new(FakeLiveKitTokenGenerator),
+        analytics_recorder.clone(),
     ));
 
     let instance_id = uuid::Uuid::new_v4();

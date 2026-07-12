@@ -9,9 +9,7 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{
-    AnalyticsEvent, AnalyticsEventName, Plan, PlanLimits, ResourceKind, ServerId, UserId,
-};
+use crate::domain::models::{AnalyticsEvent, Plan, PlanLimits, ResourceKind, ServerId, UserId};
 use crate::domain::ports::{AnalyticsRecorder, PlanLimitChecker};
 
 use super::db_err;
@@ -41,21 +39,10 @@ impl PgPlanLimitChecker {
         server_id: Option<&ServerId>,
         user_id: Option<&UserId>,
     ) -> DomainError {
-        // WHY limit == 0: the plan does not include the feature at all —
-        // a different funnel signal than an exhausted nonzero allowance.
-        let code = if limit == 0 {
-            "FEATURE_NOT_IN_PLAN"
-        } else {
-            "PLAN_LIMIT_REACHED"
-        };
-
-        let mut event =
-            AnalyticsEvent::new(AnalyticsEventName::PlanLimitHit).properties(serde_json::json!({
-                "resource": resource.key(),
-                "code": code,
-                "plan": plan.as_str(),
-                "limit": limit,
-            }));
+        // WHY the shared constructor: the atomic voice gate emits the same
+        // `plan_limit_hit` shape from `PgVoiceSessionRepository::upsert_with_limit`
+        // — building it in one place keeps the two rejection sites in sync.
+        let mut event = AnalyticsEvent::plan_limit_hit(resource, plan, limit);
         if let Some(server_id) = server_id {
             event = event.server(server_id.clone());
         }
