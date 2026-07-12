@@ -25,6 +25,29 @@ export interface PreparedAttachment {
   height?: number
 }
 
+/**
+ * Decodes a GIF's intrinsic pixel dimensions without rasterizing it, so the
+ * inline render reserves the correct box before the bytes load (kills the
+ * 0→full layout jump that shifts every row below during the load window).
+ *
+ * WHY the bytes stay untouched: `createImageBitmap` only reads the header for
+ * dimensions here — the original animated file is uploaded as-is, preserving
+ * the animation. WHY the try/catch: a GIF that cannot be decoded (rare, but a
+ * corrupt header is possible) still uploads; the render falls back to a
+ * reserved min-height box corrected on load.
+ */
+async function prepareGifForUpload(file: File): Promise<PreparedAttachment> {
+  try {
+    const bitmap = await createImageBitmap(file)
+    const width = bitmap.width
+    const height = bitmap.height
+    bitmap.close()
+    return { blob: file, contentType: 'image/gif', extension: 'gif', width, height }
+  } catch {
+    return { blob: file, contentType: 'image/gif', extension: 'gif' }
+  }
+}
+
 const IMAGE_MIME_TO_EXTENSION: Record<string, string> = {
   'image/webp': 'webp',
   'image/png': 'png',
@@ -67,8 +90,9 @@ function nonImageExtension(file: File): string {
  * Prepares a validated attachment file for upload.
  *
  * - non-images (pdf/zip/video/audio/…): returned untouched, no dimensions.
- * - gif: returned untouched — canvas would rasterize a single frame and kill
- *   the animation (same carve-out as avatars).
+ * - gif: bytes returned untouched — canvas would rasterize a single frame and
+ *   kill the animation (same carve-out as avatars) — but the intrinsic
+ *   dimensions are decoded so the render reserves the box before load (no CLS).
  * - other images: downscaled to max 1600px (aspect preserved), re-encoded as
  *   WebP via canvas (EXIF/GPS stripped), dimensions captured from the canvas.
  *
@@ -80,7 +104,7 @@ export async function prepareAttachmentForUpload(file: File): Promise<PreparedAt
   }
 
   if (file.type === 'image/gif') {
-    return { blob: file, contentType: 'image/gif', extension: 'gif' }
+    return prepareGifForUpload(file)
   }
 
   const bitmap = await createImageBitmap(file)

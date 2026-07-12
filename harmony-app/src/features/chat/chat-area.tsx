@@ -83,8 +83,10 @@ import { useTypingIndicator } from './hooks/use-typing-indicator'
 import { useUnpinMessage } from './hooks/use-unpin-message'
 import { useUpdateNotificationSettings } from './hooks/use-update-notification-settings'
 import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE } from './lib/attachment-file'
-import { buildVirtualItems } from './lib/build-virtual-items'
+import { buildVirtualItems, virtualItemKey } from './lib/build-virtual-items'
+import { MeasureRowContext } from './lib/measure-row-context'
 import { applyMentionMap } from './lib/mention-tokens'
+import { isNearBottom } from './lib/scroll-metrics'
 import { MessageItem } from './message-item'
 import { PinnedPanel } from './pinned-panel'
 import { useDividerStore } from './stores/divider-store'
@@ -180,53 +182,81 @@ function useFlatMessages(data: ReturnType<typeof useMessages>['data']) {
 }
 
 // WHY extracted: Reduces ChatArea cognitive complexity below Biome's limit of 15.
-function useAutoScroll(
+/**
+ * Stick-to-bottom auto-scroll keyed on content SIZE, not row count.
+ *
+ * The list re-anchors to the newest row whenever the rendered content GROWS
+ * while the user is pinned to the bottom — a new message, a media box reserving
+ * or loading its height, or an embed/GIF card resolving via `message.updated`
+ * (none of which change the row count). Growth is observed through the
+ * virtualizer's measured total size (`totalSize`), so a late-measuring GIF pins
+ * the view just like a fresh message does. When the user has scrolled up to read
+ * history the pinned intent is false, so new content never yanks them down.
+ *
+ * Returns the onScroll callback that recomputes the pinned intent from live
+ * scroll metrics — wire it into the list's `onScroll`.
+ */
+function useStickToBottom(
   scrollRef: React.RefObject<HTMLDivElement | null>,
-  messageCount: number,
+  itemCount: number,
   channelId: string | null,
   virtualizer: Virtualizer<HTMLDivElement, Element>,
+  totalSize: number,
   isTypingVisible: boolean,
-) {
-  const prevMessageCountRef = useRef(0)
+): () => void {
+  // WHY a ref, not state: the pinned intent is read inside effects and written
+  // from the scroll handler on every scroll frame — it must never re-render.
+  const stickyRef = useRef(true)
   const prevChannelIdRef = useRef(channelId)
+  const prevTotalSizeRef = useRef(0)
+  const didInitialScrollRef = useRef(false)
 
   useEffect(() => {
     if (prevChannelIdRef.current !== channelId) {
       prevChannelIdRef.current = channelId
-      prevMessageCountRef.current = 0
+      stickyRef.current = true
+      didInitialScrollRef.current = false
+      prevTotalSizeRef.current = 0
     }
 
-    const prevCount = prevMessageCountRef.current
+    if (itemCount === 0) return
 
-    if (messageCount > 0 && prevCount === 0) {
-      virtualizer.scrollToIndex(messageCount - 1, { align: 'end' })
-    } else if (messageCount > prevCount && prevCount > 0) {
-      const el = scrollRef.current
-      if (el) {
-        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-        if (distanceFromBottom < 200) {
-          virtualizer.scrollToIndex(messageCount - 1, { align: 'end' })
-        }
-      }
+    // Initial landing (mount / channel switch): pin to the newest row.
+    if (!didInitialScrollRef.current) {
+      didInitialScrollRef.current = true
+      prevTotalSizeRef.current = totalSize
+      virtualizer.scrollToIndex(itemCount - 1, { align: 'end' })
+      return
     }
 
-    prevMessageCountRef.current = messageCount
-  }, [messageCount, channelId, virtualizer, scrollRef])
+    // Re-anchor only on GROWTH while pinned — shrink (message deleted) or a
+    // scrolled-up user must not force the view down.
+    const grew = totalSize > prevTotalSizeRef.current
+    prevTotalSizeRef.current = totalSize
+    if (grew && stickyRef.current) {
+      virtualizer.scrollToIndex(itemCount - 1, { align: 'end' })
+    }
+  }, [totalSize, itemCount, channelId, virtualizer])
 
   // WHY: When the typing indicator appears or disappears, the scroll container
   // resizes (flex-1 gains/loses ~24px). The browser preserves scrollTop, so the
   // visible bottom edge shifts — hiding the last message. Re-anchor to bottom
-  // if the user was already near the bottom.
+  // if the user was already pinned there.
   // biome-ignore lint/correctness/useExhaustiveDependencies: isTypingVisible is a trigger-only dep — not read inside, but the effect must run when it changes
   useEffect(() => {
-    if (messageCount === 0) return
+    if (itemCount === 0 || !stickyRef.current) return
+    virtualizer.scrollToIndex(itemCount - 1, { align: 'end' })
+  }, [isTypingVisible, itemCount, virtualizer])
+
+  return useCallback(() => {
     const el = scrollRef.current
-    if (!el) return
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    if (distanceFromBottom < 200) {
-      virtualizer.scrollToIndex(messageCount - 1, { align: 'end' })
-    }
-  }, [isTypingVisible, messageCount, virtualizer, scrollRef])
+    if (el === null) return
+    stickyRef.current = isNearBottom({
+      scrollHeight: el.scrollHeight,
+      scrollTop: el.scrollTop,
+      clientHeight: el.clientHeight,
+    })
+  }, [scrollRef])
 }
 
 function useThrottledScroll(
@@ -1427,10 +1457,34 @@ export function ChatArea({
       const type = virtualItems[index]?.type
       return type === 'date' || type === 'new-messages' ? 36 : 56
     },
+    // WHY stable row identity: react-virtual caches measured heights by this key.
+    // Keying by message/row id (not index) means prepending an older page keeps
+    // each row's measured height with its row — indices shift but heights don't
+    // corrupt, so pagination never leaves gaps/overlap, and the built-in scroll
+    // adjustment preserves position as older rows measure in above the viewport.
+    getItemKey: (index) => {
+      const item = virtualItems[index]
+      return item === undefined ? index : virtualItemKey(item)
+    },
     overscan: 10,
   })
 
-  useAutoScroll(scrollRef, virtualItems.length, channelId, virtualizer, typingUsers.length > 0)
+  // WHY read once: getTotalSize() drives both the spacer height and the
+  // stick-to-bottom growth trigger — the same measured value must feed both.
+  const totalSize = virtualizer.getTotalSize()
+
+  // WHY a stable identity for the re-measure callback: passed through context to
+  // inline media so a fallback-reserved image corrects its row on load.
+  const measureRow = useCallback((node: Element) => virtualizer.measureElement(node), [virtualizer])
+
+  const updateStickToBottom = useStickToBottom(
+    scrollRef,
+    virtualItems.length,
+    channelId,
+    virtualizer,
+    totalSize,
+    typingUsers.length > 0,
+  )
 
   const { jumpToMessage, flashMessageId } = useJumpToMessage({
     channelId,
@@ -1471,7 +1525,8 @@ export function ChatArea({
   const handleScroll = useCallback(() => {
     paginateScroll()
     updatePillView()
-  }, [paginateScroll, updatePillView])
+    updateStickToBottom()
+  }, [paginateScroll, updatePillView, updateStickToBottom])
 
   // Show "↑ New messages" when unread exists above the viewport (divider row
   // scrolled above the top, or the boundary is still unloaded — §5.7 / §6.2).
@@ -1678,99 +1733,96 @@ export function ChatArea({
           />
 
           {/* WHY: Virtualizer container is separate — only absolute-positioned items inside.
-            getTotalSize() is accurate because it only accounts for measured message rows. */}
-          <div
-            className={isError && messages.length > 0 ? 'opacity-70' : undefined}
-            style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}
-          >
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const item = virtualItems[virtualRow.index]
-              if (!item) return null
+            getTotalSize() is accurate because it only accounts for measured message rows.
+            WHY the context: inline media re-measures its own virtual row on load. */}
+          <MeasureRowContext.Provider value={measureRow}>
+            <div
+              className={isError && messages.length > 0 ? 'opacity-70' : undefined}
+              style={{ height: totalSize, position: 'relative', width: '100%' }}
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const item = virtualItems[virtualRow.index]
+                if (!item) return null
 
-              const key =
-                item.type === 'date'
-                  ? `date-${virtualRow.index}`
-                  : item.type === 'new-messages'
-                    ? 'new-messages'
-                    : item.msg.id
-
-              return (
-                <div
-                  key={key}
-                  data-index={virtualRow.index}
-                  ref={virtualizer.measureElement}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                >
-                  {item.type === 'date' ? (
-                    <DateDivider label={item.label} />
-                  ) : item.type === 'new-messages' ? (
-                    <NewMessagesDivider />
-                  ) : (
-                    <MessageItem
-                      message={item.msg}
-                      currentUserId={currentUser.id}
-                      serverId={serverId}
-                      canModerateMessages={
-                        ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.moderator
-                      }
-                      isEditing={editingMessageId === item.msg.id}
-                      isGrouped={item.isGrouped}
-                      isFlashing={flashMessageId === item.msg.id}
-                      onJumpToParent={
-                        item.msg.parentMessageId !== undefined && item.msg.parentMessageId !== null
-                          ? () => {
-                              const parentId = item.msg.parentMessageId
-                              if (parentId !== undefined && parentId !== null) {
-                                void jumpToMessage(parentId)
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    {item.type === 'date' ? (
+                      <DateDivider label={item.label} />
+                    ) : item.type === 'new-messages' ? (
+                      <NewMessagesDivider />
+                    ) : (
+                      <MessageItem
+                        message={item.msg}
+                        currentUserId={currentUser.id}
+                        serverId={serverId}
+                        canModerateMessages={
+                          ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.moderator
+                        }
+                        isEditing={editingMessageId === item.msg.id}
+                        isGrouped={item.isGrouped}
+                        isFlashing={flashMessageId === item.msg.id}
+                        onJumpToParent={
+                          item.msg.parentMessageId !== undefined &&
+                          item.msg.parentMessageId !== null
+                            ? () => {
+                                const parentId = item.msg.parentMessageId
+                                if (parentId !== undefined && parentId !== null) {
+                                  void jumpToMessage(parentId)
+                                }
                               }
-                            }
-                          : undefined
-                      }
-                      onStartEdit={() => handleStartEdit(item.msg.id)}
-                      onSaveEdit={(content) => handleSaveEdit(item.msg.id, content)}
-                      onCancelEdit={handleCancelEdit}
-                      onDelete={() => handleDelete(item.msg.id)}
-                      onTogglePin={
-                        isDm
-                          ? undefined
-                          : () => {
-                              if (item.msg.isPinned) {
-                                unpinMutation.mutate(item.msg.id)
-                              } else {
-                                pinMutation.mutate(item.msg.id)
+                            : undefined
+                        }
+                        onStartEdit={() => handleStartEdit(item.msg.id)}
+                        onSaveEdit={(content) => handleSaveEdit(item.msg.id, content)}
+                        onCancelEdit={handleCancelEdit}
+                        onDelete={() => handleDelete(item.msg.id)}
+                        onTogglePin={
+                          isDm
+                            ? undefined
+                            : () => {
+                                if (item.msg.isPinned) {
+                                  unpinMutation.mutate(item.msg.id)
+                                } else {
+                                  pinMutation.mutate(item.msg.id)
+                                }
                               }
-                            }
-                      }
-                      isPinPending={
-                        (pinMutation.isPending && pinMutation.variables === item.msg.id) ||
-                        (unpinMutation.isPending && unpinMutation.variables === item.msg.id)
-                      }
-                      onReply={() => setReplyingTo(item.msg)}
-                      onAddReaction={(emoji) =>
-                        addReactionMutation.mutate({ messageId: item.msg.id, emoji })
-                      }
-                      onRemoveReaction={(emoji) =>
-                        removeReactionMutation.mutate({ messageId: item.msg.id, emoji })
-                      }
-                      isDm={isDm}
-                      isChannelEncrypted={isChannelEncrypted}
-                      decryptMessage={decryptMessage}
-                      decryptChannelMessage={decryptChannelMessage}
-                      getCachedPlaintext={
-                        isChannelEncrypted ? getChannelCachedPlaintext : getCachedPlaintext
-                      }
-                    />
-                  )}
-                </div>
-              )
-            })}
-          </div>
+                        }
+                        isPinPending={
+                          (pinMutation.isPending && pinMutation.variables === item.msg.id) ||
+                          (unpinMutation.isPending && unpinMutation.variables === item.msg.id)
+                        }
+                        onReply={() => setReplyingTo(item.msg)}
+                        onAddReaction={(emoji) =>
+                          addReactionMutation.mutate({ messageId: item.msg.id, emoji })
+                        }
+                        onRemoveReaction={(emoji) =>
+                          removeReactionMutation.mutate({ messageId: item.msg.id, emoji })
+                        }
+                        isDm={isDm}
+                        isChannelEncrypted={isChannelEncrypted}
+                        decryptMessage={decryptMessage}
+                        decryptChannelMessage={decryptChannelMessage}
+                        getCachedPlaintext={
+                          isChannelEncrypted ? getChannelCachedPlaintext : getCachedPlaintext
+                        }
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </MeasureRowContext.Provider>
         </div>
       </div>
 

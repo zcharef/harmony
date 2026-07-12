@@ -53,6 +53,26 @@ function getDateLabel(date: Date, today: Date, yesterday: Date): string {
   return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
 }
 
+/**
+ * Stable identity for a virtual row, used as the virtualizer's `getItemKey`
+ * (and the React render key) so react-virtual caches measured heights by row
+ * identity — NOT by index. Without this, prepending an older page (fetchNextPage)
+ * shifts every index and remaps cached heights onto the wrong rows, producing
+ * gaps/overlap until re-measure. Message rows key by message id; the single
+ * unread divider by a constant; date rows by their label (each calendar day
+ * emits exactly one divider, so labels are unique within a list).
+ */
+export function virtualItemKey(item: VirtualItem): string {
+  switch (item.type) {
+    case 'message':
+      return item.msg.id
+    case 'new-messages':
+      return 'new-messages'
+    case 'date':
+      return `date-${item.label}`
+  }
+}
+
 export function buildVirtualItems(
   messages: MessageResponse[],
   divider: DividerOptions | null = null,

@@ -1,5 +1,5 @@
 import type { MessageResponse } from '@/lib/api'
-import { buildVirtualItems } from './build-virtual-items'
+import { buildVirtualItems, virtualItemKey } from './build-virtual-items'
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -257,5 +257,40 @@ describe('buildVirtualItems — new-messages divider', () => {
       currentUserId: ME,
     })
     expect(idAfterDivider(items)).toBe('first')
+  })
+})
+
+describe('virtualItemKey', () => {
+  it('keys a message row by its message id (stable across index shifts)', () => {
+    expect(
+      virtualItemKey({ type: 'message', msg: buildMessage({ id: 'msg-42' }), isGrouped: false }),
+    ).toBe('msg-42')
+  })
+
+  it('keys the unread divider by a constant', () => {
+    expect(virtualItemKey({ type: 'new-messages' })).toBe('new-messages')
+  })
+
+  it('keys a date row by its label (one divider per calendar day)', () => {
+    expect(virtualItemKey({ type: 'date', label: 'Today' })).toBe('date-Today')
+  })
+
+  it('produces a stable key for a message even after older rows are prepended', () => {
+    // The same message keeps its key whether it is index 0 or index 5 — this is
+    // what lets react-virtual carry its measured height across a page prepend.
+    const target = buildMessage({ id: 'anchor' })
+    const before = buildVirtualItems([target])
+    const after = buildVirtualItems([
+      messageAt(-40_000, { id: 'older-1', authorId: 'z' }),
+      messageAt(-30_000, { id: 'older-2', authorId: 'z' }),
+      target,
+    ])
+    const keyOf = (id: string, items: ReturnType<typeof buildVirtualItems>) =>
+      items
+        .filter((i) => i.type === 'message')
+        .map(virtualItemKey)
+        .find((k) => k === id)
+    expect(keyOf('anchor', before)).toBe('anchor')
+    expect(keyOf('anchor', after)).toBe('anchor')
   })
 })

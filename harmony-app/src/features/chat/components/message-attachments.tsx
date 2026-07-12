@@ -1,9 +1,10 @@
 import { EyeOff, File, FileArchive, FileText, ImageOff, Loader2 } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { useCallback, useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ExternalLinkWarning } from '@/components/shared/external-link-warning'
 import type { AttachmentResponse } from '@/lib/api'
 import { attachmentFilename, humanFileSize, isImageMime } from '../lib/attachment-file'
+import { MeasureRowContext } from '../lib/measure-row-context'
 
 /**
  * Content-moderation verdict driving the render (mirrors the Rust
@@ -21,8 +22,15 @@ const PLACEHOLDER_BOX = 'aspect-video w-60 max-w-full'
  * Inline image render, shared by structured attachments and the markdown
  * `img` override (content-URL auto-embed, the T1.4/Klipy path).
  *
- * WHY intrinsic width/height: known dims reserve the box before the bytes
- * arrive — zero layout shift while lazy-loading.
+ * WHY intrinsic width/height: known dims (structured images + GIFs) let the
+ * browser reserve the box from the aspect ratio before the bytes arrive — zero
+ * layout shift while lazy-loading.
+ * WHY the reserved min-height when dims are unknown (markdown images, bare
+ * content-URL embeds): the box has NO intrinsic size until load, so without a
+ * reserve the row is 0px tall and every row below keeps a stale virtual offset
+ * during the load window (overlap + gaps). The reserve stabilizes the height
+ * from first paint; `onLoad` then re-measures the virtual row to the real
+ * height (see MeasureRowContext).
  * WHY onError fallback: a deleted/expired object renders a muted
  * "Image unavailable" chip, never the broken-image glyph.
  */
@@ -41,6 +49,20 @@ export function EmbeddedImage({
 }) {
   const { t } = useTranslation('messages')
   const [failed, setFailed] = useState(false)
+  const measureRow = useContext(MeasureRowContext)
+  const hasIntrinsicDims = typeof width === 'number' && typeof height === 'number'
+
+  // WHY: correct the virtual row's cached height the instant the real image
+  // dimensions land. The row's ResizeObserver would catch this a frame later;
+  // re-measuring on load closes that window so offsets never drift visibly.
+  const handleLoad = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      if (measureRow === null) return
+      const row = e.currentTarget.closest('[data-index]')
+      if (row !== null) measureRow(row)
+    },
+    [measureRow],
+  )
 
   if (failed) {
     return (
@@ -68,8 +90,9 @@ export function EmbeddedImage({
         loading="lazy"
         width={width}
         height={height}
+        onLoad={handleLoad}
         onError={() => setFailed(true)}
-        className="max-h-80 max-w-full rounded-lg bg-default-100 object-contain"
+        className={`max-h-80 max-w-full rounded-lg bg-default-100 object-contain${hasIntrinsicDims ? '' : ' min-h-48 w-auto'}`}
       />
     </button>
   )
