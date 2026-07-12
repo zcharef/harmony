@@ -56,6 +56,15 @@ import { readStorage, writeStorage } from '@/lib/storage'
 import { supabase } from '@/lib/supabase'
 import { AboutPage } from './about-page'
 import { ConnectionBanner } from './connection-banner'
+import {
+  CHAT_DEFAULT_DM,
+  CHAT_DEFAULT_SERVER,
+  CHAT_MIN,
+  SIDEBAR_DEFAULT,
+  SIDEBAR_MAX_LEFT,
+  SIDEBAR_MAX_MEMBERS,
+  SIDEBAR_MIN,
+} from './sidebar-sizes'
 import { WelcomeScreen } from './welcome-screen'
 
 // WHY: Persist last-used server/channel to localStorage so the user returns
@@ -800,7 +809,12 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
 
         {/* Resizable panels for sidebar, chat, members */}
         <Group orientation="horizontal" className="flex min-h-0 w-full flex-1">
-          <Panel data-test="server-sidebar" defaultSize="20%" minSize="15%" maxSize="30%">
+          <Panel
+            data-test="server-sidebar"
+            defaultSize={SIDEBAR_DEFAULT}
+            minSize={SIDEBAR_MIN}
+            maxSize={SIDEBAR_MAX_LEFT}
+          >
             <FeatureErrorBoundary name={isDmView ? 'DmSidebar' : 'ChannelSidebar'}>
               {isDmView ? (
                 <DmSidebar
@@ -822,7 +836,7 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
 
           <ResizeHandle />
 
-          <Panel defaultSize={isDmView ? '80%' : '60%'} minSize="30%">
+          <Panel defaultSize={isDmView ? CHAT_DEFAULT_DM : CHAT_DEFAULT_SERVER} minSize={CHAT_MIN}>
             <FeatureErrorBoundary name="ChatArea">
               {/* WHY: In DM view with no conversation selected, the Friends home
                   replaces ChatArea (Discord parity). Entering DM view resets the
@@ -849,7 +863,13 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
           {isDmView === false && (
             <>
               <ResizeHandle />
-              <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">
+              <Panel
+                defaultSize={SIDEBAR_DEFAULT}
+                minSize={SIDEBAR_MIN}
+                maxSize={SIDEBAR_MAX_MEMBERS}
+                collapsible
+                collapsedSize="0%"
+              >
                 <FeatureErrorBoundary name="MemberList">
                   <MemberList
                     serverId={selectedServerId}
