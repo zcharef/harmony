@@ -12,8 +12,10 @@
 
 CREATE TABLE IF NOT EXISTS public.platform_admin_audit (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    -- The founder who performed the action.
-    actor_id       UUID NOT NULL REFERENCES public.profiles(id) ON DELETE SET NULL,
+    -- The founder who performed the action. Nullable so ON DELETE SET NULL can
+    -- preserve this append-only row if the actor's profile is ever deleted
+    -- (a NOT NULL column would abort the cascading delete instead).
+    actor_id       UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     -- Machine action key, e.g. 'user_plan_set'. Constrained by the Rust caller.
     action         TEXT NOT NULL CHECK (char_length(action) <= 64),
     -- The user the action targeted (NULL for non-user-scoped actions).
