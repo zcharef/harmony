@@ -31,6 +31,7 @@ import { NotificationSettingsTab } from '@/features/notifications'
 import type { ProfileResponse } from '@/lib/api'
 import { getApiErrorDetail } from '@/lib/api-error'
 import { resolveDisplayName } from '@/lib/display-name'
+import { isPlanGateError } from '@/lib/plan-gate'
 import { isTauri } from '@/lib/platform'
 import { supabase } from '@/lib/supabase'
 import { toast } from '@/lib/toast'
@@ -313,11 +314,16 @@ function ProfileSettingsForm({
       ? getApiErrorDetail(removeAvatar.error, t('avatarRemoveFailed'))
       : null
 
-  const bannerErrorMessage = uploadBanner.isError
-    ? resolveBannerErrorMessage(uploadBanner.error, t)
-    : removeBanner.isError
-      ? getApiErrorDetail(removeBanner.error, t('bannerRemoveFailed'))
-      : null
+  // WHY suppress on plan gate: a FEATURE_NOT_IN_PLAN 403 (Free user setting a
+  // banner) opens the UpgradeModal centrally via the global MutationCache
+  // onError — an inline "upload failed" on top of it would be duplicate
+  // feedback. Everything else stays inline (ADR-045), mirroring emoji-settings-tab.
+  const bannerErrorMessage =
+    uploadBanner.isError && !isPlanGateError(uploadBanner.error)
+      ? resolveBannerErrorMessage(uploadBanner.error, t)
+      : removeBanner.isError
+        ? getApiErrorDetail(removeBanner.error, t('bannerRemoveFailed'))
+        : null
 
   const saveErrorMessage = saveProfile.isError
     ? getApiErrorDetail(saveProfile.error, t('profileUpdateFailed'))

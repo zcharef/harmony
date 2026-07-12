@@ -324,6 +324,9 @@ mod tests {
         async fn check_dm_limit(&self, _u: &UserId) -> Result<(), DomainError> {
             Ok(())
         }
+        async fn check_banner_allowed(&self, _u: &UserId) -> Result<(), DomainError> {
+            Ok(())
+        }
         async fn check_attachment_count(&self, _s: &ServerId, _c: u64) -> Result<(), DomainError> {
             Ok(())
         }

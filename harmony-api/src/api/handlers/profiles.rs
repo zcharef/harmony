@@ -319,6 +319,7 @@ pub async fn get_my_profile(
         (status = 200, description = "Profile updated", body = ProfileResponse),
         (status = 400, description = "Validation error", body = ProblemDetails),
         (status = 401, description = "Unauthorized", body = ProblemDetails),
+        (status = 403, description = "Plan gate — setting a banner requires a paid tier", body = ProblemDetails),
     )
 )]
 #[tracing::instrument(skip(state, req))]
@@ -327,6 +328,18 @@ pub async fn update_my_profile(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<UpdateProfileRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // WHY set-only: the banner is a paid capability (Supporter+). Gate only when
+    // the request SETS a banner (`Some(Some(_))`) — clearing (`Some(None)`) and
+    // "unchanged" (`None`) are never gated, so a downgraded user keeps rendering
+    // their existing banner and can still remove it. Founder bypass is automatic
+    // (PgPlanLimitChecker resolves the founder to SELF_HOSTED_LIMITS).
+    if matches!(req.banner_url, Some(Some(_))) {
+        state
+            .plan_limit_checker()
+            .check_banner_allowed(&user_id)
+            .await?;
+    }
+
     let profile = state
         .profile_service()
         .update_profile(

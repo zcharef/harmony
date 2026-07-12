@@ -1982,6 +1982,9 @@ mod tests {
         async fn check_dm_limit(&self, _user_id: &UserId) -> Result<(), DomainError> {
             Ok(())
         }
+        async fn check_banner_allowed(&self, _user_id: &UserId) -> Result<(), DomainError> {
+            Ok(())
+        }
     }
 
     /// `ReactionRepository` fake — unused by `set_pinned`.

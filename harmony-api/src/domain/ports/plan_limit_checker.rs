@@ -174,6 +174,19 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     /// exceeds the plan limit, or `DomainError::Internal` on infrastructure failure.
     async fn check_emoji_limit(&self, server_id: &ServerId) -> Result<(), DomainError>;
 
+    /// Check if the user may set a profile banner. (§11, per-user)
+    ///
+    /// RED LINE: Free's cap is **0**, so every Free banner-set fails here — the
+    /// profile banner is a paid feature unlocked at Supporter+. Only enforced
+    /// when a banner is being *set* (never on clear/removal).
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::LimitExceeded` (limit 0 → `FEATURE_NOT_IN_PLAN`)
+    /// when the user's plan does not include a banner, or
+    /// `DomainError::Internal` on infrastructure failure.
+    async fn check_banner_allowed(&self, user_id: &UserId) -> Result<(), DomainError>;
+
     /// Check if the user can open another DM conversation. (§10, per-user)
     ///
     /// # Errors
@@ -197,7 +210,8 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     //   Free: 2 MB, Supporter: 5 MB, Creator: 10 MB.
     //   Implement when avatar upload is added.
     // Animated avatar: Supporter/Creator only.
-    // Banner: Creator only.
+    // DONE: Banner is Supporter+ (Free = 0, Supporter/Creator = 1) via
+    //   check_banner_allowed above.
     //
     // Custom status length:
     //   Free: 50 chars, Supporter: 128 chars, Creator: 128 chars.

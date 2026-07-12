@@ -53,6 +53,10 @@ impl PlanLimitChecker for AlwaysAllowedChecker {
         Ok(())
     }
 
+    async fn check_banner_allowed(&self, _user_id: &UserId) -> Result<(), DomainError> {
+        Ok(())
+    }
+
     async fn check_joined_server_limit(&self, _user_id: &UserId) -> Result<(), DomainError> {
         Ok(())
     }
