@@ -22,6 +22,7 @@ import { FriendsPanel, useRealtimeFriends } from '@/features/friends'
 import {
   MemberList,
   useForceDisconnect,
+  useMemberListStore,
   useMyMemberRole,
   useRealtimeMembers,
 } from '@/features/members'
@@ -673,6 +674,9 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
   useNotificationNavigation(servers, setView, setSelectedServerId, setSelectedChannelId)
 
   const isDmView = view === 'dms'
+  // WHY: the channel toolbar's "people" button toggles this; gating the panel
+  // on it lets the button show/hide the member list (default open).
+  const isMemberListOpen = useMemberListStore((s) => s.isOpen)
   const showAboutPage = useAboutUiStore((s) => s.showAboutPage)
   const showServerSettings = useSettingsUiStore((s) => s.showServerSettings)
   const showDiscovery = useDiscoveryUiStore((s) => s.showDiscovery)
@@ -845,8 +849,9 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
             </FeatureErrorBoundary>
           </Panel>
 
-          {/* WHY: Hide member list in DM mode — DMs have exactly 2 members, no list needed */}
-          {isDmView === false && (
+          {/* WHY: Hide member list in DM mode — DMs have exactly 2 members, no list needed.
+              WHY isMemberListOpen: the channel toolbar's "people" button toggles it. */}
+          {isDmView === false && isMemberListOpen && (
             <>
               <ResizeHandle />
               <Panel defaultSize="20%" minSize="15%" maxSize="25%" collapsible collapsedSize="0%">

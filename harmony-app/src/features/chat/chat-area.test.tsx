@@ -1,11 +1,11 @@
 import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
-import type { NewAttachmentRequest } from '@/lib/api'
+import type { MessageResponse, NewAttachmentRequest } from '@/lib/api'
 // WHY: Side-effect import initializes the real i18n instance so the composer
 // placeholder and the mention popup rows resolve to actual translations.
 import '@/lib/i18n'
 import { createQueryWrapper, createTestQueryClient } from '@/tests/test-utils'
-import { ChatArea } from './chat-area'
+import { ChatArea, filterMessagesByMention } from './chat-area'
 
 configure({ testIdAttribute: 'data-test' })
 
@@ -24,8 +24,11 @@ const MENTION_UUID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
 const SERVER_ID = 'server-1'
 const CHANNEL_ID = 'channel-1'
 
-const { sendMutate, membersState, composerAttachments } = vi.hoisted(() => ({
+const { sendMutate, membersState, composerAttachments, messagesState } = vi.hoisted(() => ({
   sendMutate: vi.fn(),
+  // WHY mutable: most tests want an empty list (data undefined); the message
+  // filter tests seed a loaded window by assigning messagesState.data.
+  messagesState: { data: undefined as unknown },
   // WHY a shared mutable stub: the send onError guard only reaches
   // setSendError when the tray is non-empty (hasAttachments), so the plan-gate
   // suppression test flips `isEmpty` and spies on setSendError. Defaults to an
@@ -75,7 +78,7 @@ vi.mock('./hooks/use-composer-attachments', () => ({
 
 vi.mock('./hooks/use-messages', () => ({
   useMessages: () => ({
-    data: undefined,
+    data: messagesState.data,
     isPending: false,
     isError: false,
     hasNextPage: false,
@@ -84,6 +87,16 @@ vi.mock('./hooks/use-messages', () => ({
     refetch: vi.fn(),
     isRefetching: false,
   }),
+}))
+
+// WHY stub MessageItem: the filter tests assert HOW MANY message rows render;
+// the row's own rendering (crypto, embeds, reactions) is covered elsewhere.
+vi.mock('./message-item', () => ({
+  MessageItem: ({ message }: { message: { id: string; content: string } }) => (
+    <div data-test="mock-message" data-id={message.id}>
+      {message.content}
+    </div>
+  ),
 }))
 
 vi.mock('./hooks/use-slow-mode', () => ({
@@ -138,6 +151,8 @@ vi.mock('@/features/channels', () => ({
 vi.mock('@/features/members', () => ({
   ROLE_HIERARCHY: { owner: 4, admin: 3, moderator: 2, member: 1 },
   useMembers: () => ({ data: membersState.page, isPending: false, isError: false }),
+  useMemberListStore: (selector: (s: { isOpen: boolean; toggle: () => void }) => unknown) =>
+    selector({ isOpen: true, toggle: vi.fn() }),
 }))
 
 vi.mock('@/features/presence', () => ({
@@ -313,6 +328,123 @@ describe('ChatArea attachment drop wiring', () => {
     fireEvent.drop(input, { dataTransfer: { files: [], types: [] } })
 
     expect(composerAttachments.enqueueFiles).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Message-list filter (spec §2). The All/Mentions segmented control filters the
+ * loaded window client-side: a message is a "mention of me" when its
+ * `mentions[]` contains the current user's id.
+ */
+describe('ChatArea message filter', () => {
+  const CURRENT_USER_ID = 'user-me'
+
+  function makeMessage(id: string, content: string, mentionsMe: boolean): MessageResponse {
+    return {
+      id,
+      channelId: CHANNEL_ID,
+      authorId: `author-${id}`,
+      authorUsername: `user-${id}`,
+      content,
+      createdAt: '2026-01-01T00:00:00Z',
+      attachments: [],
+      embeds: [],
+      encrypted: false,
+      isPinned: false,
+      messageType: 'default',
+      mentions: mentionsMe ? [{ userId: CURRENT_USER_ID, username: 'me' }] : [],
+    }
+  }
+
+  function seedMessages(...items: ReturnType<typeof makeMessage>[]) {
+    messagesState.data = { pages: [{ items }] }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    messagesState.data = undefined
+  })
+
+  it('filterMessagesByMention keeps only mentions-of-me, All is identity', () => {
+    const loaded = [
+      makeMessage('a', 'hi @me', true),
+      makeMessage('b', 'unrelated', false),
+      makeMessage('c', 'ping @me', true),
+    ]
+
+    const all = filterMessagesByMention(loaded, 'all', CURRENT_USER_ID)
+    expect(all).toHaveLength(3)
+
+    const mentions = filterMessagesByMention(loaded, 'mentions', CURRENT_USER_ID)
+    expect(mentions.map((m) => m.id)).toEqual(['a', 'c'])
+  })
+
+  it('toggles aria-pressed on the segmented control', () => {
+    seedMessages(makeMessage('a', 'hi @me', true))
+    renderChatArea()
+
+    const allBtn = screen.getByTestId('message-filter-all')
+    const mentionsBtn = screen.getByTestId('message-filter-mentions')
+    expect(allBtn.getAttribute('aria-pressed')).toBe('true')
+    expect(mentionsBtn.getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.click(mentionsBtn)
+
+    expect(screen.getByTestId('message-filter-all').getAttribute('aria-pressed')).toBe('false')
+    expect(screen.getByTestId('message-filter-mentions').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('shows the empty hint when no loaded message mentions me', () => {
+    seedMessages(makeMessage('a', 'hello', false), makeMessage('b', 'world', false))
+    renderChatArea()
+
+    expect(screen.queryByTestId('mention-filter-empty')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('message-filter-mentions'))
+
+    expect(screen.queryAllByTestId('mock-message')).toHaveLength(0)
+    expect(screen.getByTestId('mention-filter-empty')).toBeTruthy()
+  })
+
+  it('has no dead threads/sticker buttons and wires the member + search controls', () => {
+    seedMessages(makeMessage('a', 'hey', false))
+    renderChatArea()
+
+    // The removed dead controls must be gone entirely.
+    expect(screen.queryByLabelText('Threads')).toBeNull()
+    expect(screen.queryByLabelText('Stickers')).toBeNull()
+
+    // The surviving toolbar controls are wired (member toggle exposes state).
+    const members = screen.getByTestId('chat-toolbar-members')
+    expect(members.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('chat-toolbar-search')).toBeTruthy()
+  })
+
+  it('hides the filter control in DM view', () => {
+    seedMessages(makeMessage('a', 'hey', false))
+    const Wrapper = createQueryWrapper(createTestQueryClient())
+    render(
+      <Wrapper>
+        <ChatArea
+          channelId={CHANNEL_ID}
+          channelName={null}
+          serverId={SERVER_ID}
+          currentUserRole="member"
+          isDm
+          dmRecipient={{
+            id: 'user-friend',
+            username: 'friend',
+            displayName: null,
+            avatarUrl: null,
+          }}
+        />
+      </Wrapper>,
+    )
+
+    expect(screen.queryByTestId('message-filter')).toBeNull()
   })
 })
 

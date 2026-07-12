@@ -16,13 +16,11 @@ import {
   Film,
   Hash,
   MessageCircle,
-  MessageSquare,
   Pin,
   PlusCircle,
   Search,
   ShieldCheck,
   SmilePlus,
-  Sticker,
   Users,
   X,
 } from 'lucide-react'
@@ -45,7 +43,7 @@ import {
   useTrustLevel,
   VerifyIdentityModal,
 } from '@/features/crypto'
-import { type MemberRole, ROLE_HIERARCHY } from '@/features/members'
+import { type MemberRole, ROLE_HIERARCHY, useMemberListStore } from '@/features/members'
 import { useChannelNotificationLevel } from '@/features/notifications'
 import { StatusIndicator, useUserStatus } from '@/features/presence'
 import { useSearchStore } from '@/features/search'
@@ -116,6 +114,67 @@ interface ChatAreaProps {
  * in the page cache. Deduplicating at the flatten step is the safest approach
  * since it handles all race conditions regardless of source.
  */
+
+/** Client-side message-list filter over the loaded window (spec §2). */
+type MessageFilter = 'all' | 'mentions'
+
+/**
+ * Filter the loaded messages by the active client-side filter. `mentions` keeps
+ * only messages that mention the current user (MessageResponse.mentions[]).
+ *
+ * Scope: the already-loaded window ONLY — pagination is time-cursor based, not
+ * filter-aware, so older mentions above the loaded window are not included until
+ * the user scrolls history in (spec §2). A cross-history mentions view is an
+ * explicit backend follow-up.
+ */
+export function filterMessagesByMention(
+  messages: MessageResponse[],
+  filter: MessageFilter,
+  currentUserId: string,
+): MessageResponse[] {
+  if (filter === 'all') return messages
+  return messages.filter((message) =>
+    message.mentions.some((mentioned) => mentioned.userId === currentUserId),
+  )
+}
+
+// WHY extracted: keeps ChatToolbar below Biome's cognitive complexity limit.
+/** Segmented All / Mentions control that filters the loaded message window. */
+function MessageFilterControl({
+  filter,
+  onFilterChange,
+}: {
+  filter: MessageFilter
+  onFilterChange: (filter: MessageFilter) => void
+}) {
+  const { t } = useTranslation('chat')
+  const options = ['all', 'mentions'] as const
+
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a toolbar filter segment is a group of toggle buttons, not a form fieldset
+    <div
+      role="group"
+      aria-label={t('filter.label')}
+      data-test="message-filter"
+      className="ml-1 flex items-center gap-0.5 rounded-medium bg-default-100 p-0.5"
+    >
+      {options.map((option) => (
+        <Button
+          key={option}
+          size="sm"
+          variant={filter === option ? 'flat' : 'light'}
+          color={filter === option ? 'primary' : 'default'}
+          className="h-7 min-w-0 px-2"
+          aria-pressed={filter === option}
+          data-test={`message-filter-${option}`}
+          onPress={() => onFilterChange(option)}
+        >
+          <span className="text-xs">{t(`filter.${option}`)}</span>
+        </Button>
+      ))}
+    </div>
+  )
+}
 
 // WHY extracted: Reduces ChatArea cognitive complexity below Biome's limit of 15.
 function ReplyBar({
@@ -406,6 +465,8 @@ function ChatToolbar({
   serverId,
   canModerate,
   isChannelEncrypted,
+  messageFilter,
+  onFilterChange,
   onJumpToMessage,
   onOpenVerify,
 }: {
@@ -416,6 +477,8 @@ function ChatToolbar({
   serverId: string | null
   canModerate: boolean
   isChannelEncrypted: boolean
+  messageFilter: MessageFilter
+  onFilterChange: (filter: MessageFilter) => void
   onJumpToMessage: (messageId: string) => void
   onOpenVerify: () => void
 }) {
@@ -426,6 +489,10 @@ function ChatToolbar({
   // WHY: the toolbar Search affordance opens the shared overlay pre-scoped to
   // this channel (in:#current, §5.2). The overlay is mounted once in MainLayout.
   const openSearch = useSearchStore((s) => s.openInChannel)
+  // WHY: the "people" button toggles the member-list panel mounted in
+  // MainLayout, bridged through the store (no callback threading).
+  const isMemberListOpen = useMemberListStore((s) => s.isOpen)
+  const toggleMemberList = useMemberListStore((s) => s.toggle)
   // WHY no 'mentions' for DMs (D14): every DM message is mention-equivalent —
   // Discord DMs only offer mute. Stale 'mentions' rows on DM channels behave
   // as 'all' by policy construction.
@@ -448,9 +515,8 @@ function ChatToolbar({
         </div>
       )}
       <div className="flex items-center gap-1">
-        <Button variant="light" isIconOnly size="sm" aria-label={t('threads')}>
-          <MessageSquare className="h-5 w-5 text-default-500" />
-        </Button>
+        {/* WHY not in DMs: a mentions filter is meaningless in a 2-person DM. */}
+        {!isDm && <MessageFilterControl filter={messageFilter} onFilterChange={onFilterChange} />}
         <Popover placement="bottom-end">
           <PopoverTrigger>
             <Button variant="light" isIconOnly size="sm" aria-label={t('notifications')}>
@@ -500,14 +566,22 @@ function ChatToolbar({
           </Popover>
         )}
         {!isDm && (
-          <Button variant="light" isIconOnly size="sm" aria-label={t('memberList')}>
+          <Button
+            variant={isMemberListOpen ? 'flat' : 'light'}
+            isIconOnly
+            size="sm"
+            aria-label={t('memberList')}
+            aria-pressed={isMemberListOpen}
+            data-test="chat-toolbar-members"
+            onPress={toggleMemberList}
+          >
             <Users className="h-5 w-5 text-default-500" />
           </Button>
         )}
         <Button
           variant="light"
           size="sm"
-          className="ml-2 h-6 gap-1 px-1.5"
+          className="ml-2 gap-1"
           aria-label={t('common:search')}
           data-test="chat-toolbar-search"
           onPress={() => {
@@ -792,9 +866,6 @@ function MessageInput({
         />
         {!isInputDisabled && (
           <div className="flex shrink-0 items-center gap-0.5 pr-2">
-            <Button variant="light" isIconOnly size="sm" aria-label={t('stickers')}>
-              <Sticker className="h-5 w-5 text-default-500" />
-            </Button>
             {isGifEnabled && (
               <GifPickerPopover
                 isOpen={isGifOpen}
@@ -1342,6 +1413,13 @@ export function ChatArea({
   const [messageContent, setMessageContent] = useState('')
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null)
   const [isVerifyOpen, setIsVerifyOpen] = useState(false)
+  // WHY ephemeral useState (CLAUDE.md 4.3): the All/Mentions filter is local UI
+  // state over the loaded window, not server state. Reset on channel switch.
+  const [messageFilter, setMessageFilter] = useState<MessageFilter>('all')
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on channel switch, mirroring the other channel-scoped resets
+  useEffect(() => {
+    setMessageFilter('all')
+  }, [channelId])
 
   const attachments = useComposerAttachments()
   // WHY hide attach UI in encrypted contexts: v1 ships plaintext attachments
@@ -1397,6 +1475,16 @@ export function ChatArea({
   const { typingUsers, sendTyping } = useTypingIndicator(channelId ?? '', currentUser.id)
 
   const messages = useFlatMessages(data)
+  // WHY here (not on the full list): only the rendered rows are filtered. Read
+  // state, the unread boundary and pagination stay on the full loaded window.
+  const filteredMessages = useMemo(
+    () => filterMessagesByMention(messages, messageFilter, currentUser.id),
+    [messages, messageFilter, currentUser.id],
+  )
+  // §2: the mentions filter covers only the loaded window; show an honest hint
+  // when nothing in it mentions the user rather than a blank list.
+  const showMentionFilterEmpty =
+    messageFilter === 'mentions' && filteredMessages.length === 0 && messages.length > 0
 
   useMarkReadOnFocus(channelId, messages)
 
@@ -1441,12 +1529,12 @@ export function ChatArea({
   const virtualItems = useMemo(
     () =>
       buildVirtualItems(
-        messages,
+        filteredMessages,
         isDividerFrozen && !boundaryAboveWindow
           ? { dividerAnchorAt, currentUserId: currentUser.id }
           : null,
       ),
-    [messages, isDividerFrozen, boundaryAboveWindow, dividerAnchorAt, currentUser.id],
+    [filteredMessages, isDividerFrozen, boundaryAboveWindow, dividerAnchorAt, currentUser.id],
   )
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -1677,6 +1765,8 @@ export function ChatArea({
         serverId={serverId}
         canModerate={ROLE_HIERARCHY[currentUserRole] >= ROLE_HIERARCHY.moderator}
         isChannelEncrypted={isChannelEncrypted}
+        messageFilter={messageFilter}
+        onFilterChange={setMessageFilter}
         onJumpToMessage={(messageId) => void jumpToMessage(messageId)}
         onOpenVerify={() => setIsVerifyOpen(true)}
       />
@@ -1731,6 +1821,15 @@ export function ChatArea({
             onRetry={() => refetch()}
             isRetrying={isRefetching}
           />
+
+          {showMentionFilterEmpty && (
+            <div
+              data-test="mention-filter-empty"
+              className="px-4 py-8 text-center text-sm text-default-500"
+            >
+              {t('filter.empty')}
+            </div>
+          )}
 
           {/* WHY: Virtualizer container is separate — only absolute-positioned items inside.
             getTotalSize() is accurate because it only accounts for measured message rows.

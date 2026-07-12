@@ -17,7 +17,6 @@
   "typingOne": "{{username}} is typing",
   "typingTwo": "{{first}} and {{second}} are typing",
   "typingSeveral": "Several people are typing",
-  "threads": "Threads",
   "notifications": "Notifications",
   "pinnedMessages": "Pinned Messages",
   "pinMessage": "Pin message",
@@ -42,7 +41,6 @@
   "attachUploadFailed": "Upload failed",
   "attachRemoveFailed": "Remove the failed attachment or retry before sending.",
   "attachSendFailed": "Couldn't send your attachment. Try again.",
-  "stickers": "Stickers",
   "emojiPicker": "Emoji Picker",
   "addReaction": "Add Reaction",
   "replyingTo": "Replying to",
@@ -52,6 +50,12 @@
     "all": "All Messages",
     "mentions": "@Mentions Only",
     "none": "Nothing"
+  },
+  "filter": {
+    "label": "Filter messages",
+    "all": "All",
+    "mentions": "Mentions",
+    "empty": "No mentions in the loaded messages — scroll up to load more."
   },
   "emojiPickerLoadFailed": "Couldn’t load the emoji picker. Check your connection and try again.",
   "mentionNoResults": "No members found",
