@@ -59,6 +59,10 @@ vi.mock('@/features/notifications', () => ({
   NotificationSettingsTab: () => <div data-test="stub-notifications-tab" />,
 }))
 
+vi.mock('@/features/admin', () => ({
+  AdminTab: () => <div data-test="stub-admin-tab" />,
+}))
+
 // WHY mockable: the Desktop tab is Tauri-only — tests flip this per case.
 const { isTauriMock } = vi.hoisted(() => ({ isTauriMock: vi.fn(() => false) }))
 vi.mock('@/lib/platform', () => ({
@@ -144,5 +148,14 @@ describe('UserSettingsModal desktop tab gating', () => {
     render(<UserSettingsModal />)
 
     expect(screen.getByTestId('user-settings-tab-desktop')).toBeTruthy()
+  })
+})
+
+describe('UserSettingsModal admin tab gating', () => {
+  it('hides the Admin tab for a non-founder (isPlatformAdmin absent)', () => {
+    // The mocked profile above has no isPlatformAdmin flag → the tab is hidden.
+    render(<UserSettingsModal />)
+
+    expect(screen.queryByTestId('user-settings-tab-admin')).toBeNull()
   })
 })

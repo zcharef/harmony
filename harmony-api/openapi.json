@@ -208,6 +208,210 @@
         ]
       }
     },
+    "/v1/admin/users": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Search users by username substring. Founder-only.",
+        "description": "# Errors\nReturns `ApiError` 403 if the caller is not the founder, or a repository error.",
+        "operationId": "search_users",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive username substring to match.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserSearchResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the platform founder",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/users/{id}/plan": {
+      "patch": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Set a user's plan (Free/Supporter/Creator). Founder-only.",
+        "description": "This is how Supporter/Creator are granted until Stripe billing exists.\n\n# Errors\nReturns `ApiError` 403 if the caller is not the founder, 404 if the target\nuser does not exist, or a repository error.",
+        "operationId": "set_user_plan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Target user ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUserPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserSummaryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the platform founder",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/users/{id}/quota": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Read a user's plan, per-user caps, and current usage. Founder-only.",
+        "description": "# Errors\nReturns `ApiError` 403 if the caller is not the founder, 404 if the target\nuser does not exist, or a repository error.",
+        "operationId": "get_user_quota",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Target user ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User quota",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserQuotaResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the platform founder",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/analytics/events": {
       "post": {
         "tags": [
@@ -6725,6 +6929,148 @@
         },
         "additionalProperties": false
       },
+      "AdminQuotaLimits": {
+        "type": "object",
+        "description": "Per-user caps relevant to the quota view.",
+        "required": [
+          "maxOwnedServers",
+          "maxJoinedServers",
+          "maxOpenDms"
+        ],
+        "properties": {
+          "maxJoinedServers": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "maxOpenDms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "maxOwnedServers": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AdminQuotaUsage": {
+        "type": "object",
+        "description": "Current per-user usage counts.",
+        "required": [
+          "ownedServers",
+          "joinedServers",
+          "openDms"
+        ],
+        "properties": {
+          "joinedServers": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "openDms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "ownedServers": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AdminUserQuotaResponse": {
+        "type": "object",
+        "description": "A user's plan, per-user caps, and current usage.",
+        "required": [
+          "plan",
+          "limits",
+          "usage"
+        ],
+        "properties": {
+          "limits": {
+            "$ref": "#/components/schemas/AdminQuotaLimits"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/Plan"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/AdminQuotaUsage"
+          }
+        }
+      },
+      "AdminUserSearchQuery": {
+        "type": "object",
+        "description": "Query params for the founder user-search endpoint.\n\nWHY no `deny_unknown_fields`: Axum's query deserializer passes every URL\nparam to the struct, and extra params (cache-busters) would 400 (mirrors\n`CheckUsernameQuery`).",
+        "required": [
+          "q"
+        ],
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Case-insensitive username substring to match."
+          }
+        }
+      },
+      "AdminUserSearchResponse": {
+        "type": "object",
+        "description": "Envelope for the founder user-search results (bounded, top-N).",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminUserSummaryResponse"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of items returned (bounded by the server-side cap)."
+          }
+        }
+      },
+      "AdminUserSummaryResponse": {
+        "type": "object",
+        "description": "One user in the founder search results.",
+        "required": [
+          "id",
+          "username",
+          "plan",
+          "isFounding",
+          "isOfficial"
+        ],
+        "properties": {
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "isFounding": {
+            "type": "boolean",
+            "description": "Holds the `founding` badge."
+          },
+          "isOfficial": {
+            "type": "boolean",
+            "description": "Holds the `official` verified badge (staff account)."
+          },
+          "plan": {
+            "$ref": "#/components/schemas/Plan"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "AliveSnapshotResponse": {
         "type": "object",
         "description": "The §5 week-1 alive snapshot. `isAlive` is `true` once every criterion\nholds, `false` once the week-1 window closes unmet, `null` while it is\nstill open (the §10 null/unknown rule — never a fake zero).",
@@ -9534,6 +9880,13 @@
             "type": "boolean",
             "description": "Whether this user holds the `founding` badge (one of the first accounts)."
           },
+          "isPlatformAdmin": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the caller is the platform founder (owner of the official\nserver). Present ONLY on the self endpoints (`GET/PATCH /profiles/me`) —\nomitted entirely for any other user, so a caller only ever learns their\nOWN admin status. The backend, not this flag, is the real authz gate."
+          },
           "pendingAvatarUrl": {
             "type": [
               "string",
@@ -10186,6 +10539,20 @@
         },
         "additionalProperties": false
       },
+      "SetUserPlanRequest": {
+        "type": "object",
+        "description": "Request body to set a user's plan.",
+        "required": [
+          "plan"
+        ],
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/Plan",
+            "description": "The plan to grant: `free`, `supporter`, or `creator`."
+          }
+        },
+        "additionalProperties": false
+      },
       "TransferOwnershipRequest": {
         "type": "object",
         "description": "Request body for transferring server ownership.",
@@ -10777,6 +11144,10 @@
     {
       "name": "Events",
       "description": "Server-Sent Events for real-time updates"
+    },
+    {
+      "name": "Admin",
+      "description": "Founder-only platform administration"
     }
   ]
 }

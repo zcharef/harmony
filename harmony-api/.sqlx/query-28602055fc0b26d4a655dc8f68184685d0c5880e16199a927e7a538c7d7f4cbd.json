@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                p.id                AS \"id!\",\n                p.username          AS \"username!\",\n                p.display_name      AS \"display_name\",\n                p.plan              AS \"plan!\",\n                EXISTS (\n                    SELECT 1 FROM user_badges ub\n                    WHERE ub.user_id = p.id AND ub.badge = 'founding'\n                ) AS \"is_founding!\",\n                EXISTS (\n                    SELECT 1 FROM user_badges ub\n                    WHERE ub.user_id = p.id AND ub.badge = 'official'\n                ) AS \"is_official!\"\n            FROM profiles p\n            WHERE p.id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "username!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "plan!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_founding!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_official!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "28602055fc0b26d4a655dc8f68184685d0c5880e16199a927e7a538c7d7f4cbd"
+}

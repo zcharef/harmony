@@ -129,6 +129,16 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
             "/v1/admin/badges/official/revoke",
             post(handlers::badges::revoke_official_badge),
         )
+        // Platform admin (founder-only: search users, manage plans, read quota)
+        .route("/v1/admin/users", get(handlers::admin::search_users))
+        .route(
+            "/v1/admin/users/{id}/plan",
+            patch(handlers::admin::set_user_plan),
+        )
+        .route(
+            "/v1/admin/users/{id}/quota",
+            get(handlers::admin::get_user_quota),
+        )
         // Servers
         .route(
             "/v1/servers",

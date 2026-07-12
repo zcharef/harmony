@@ -4,6 +4,7 @@ pub mod dto;
 pub mod emoji_image_scan;
 pub mod errors;
 pub mod extractors;
+pub mod founder;
 pub mod handlers;
 pub mod identity_image_scan;
 pub mod image_scan;

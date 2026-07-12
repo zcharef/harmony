@@ -9,7 +9,9 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{AnalyticsEvent, Plan, PlanLimits, ResourceKind, ServerId, UserId};
+use crate::domain::models::{
+    AnalyticsEvent, Plan, PlanLimits, ResourceKind, SELF_HOSTED_LIMITS, ServerId, UserId,
+};
 use crate::domain::ports::{AnalyticsRecorder, PlanLimitChecker};
 
 use super::db_err;
@@ -22,12 +24,33 @@ pub struct PgPlanLimitChecker {
     /// rejection is recorded HERE (the single place all checks converge),
     /// so hits are counted even when no client renders the paywall.
     analytics: Arc<dyn AnalyticsRecorder>,
+    /// The platform founder (owner of the official server), resolved once at
+    /// startup. When the relevant owner/user is the founder, every limit
+    /// resolves to `SELF_HOSTED_LIMITS` (no paywall). `None` on self-hosted/dev.
+    /// SECURITY: keyed only off the resolved founder `UserId`.
+    founder_id: Option<UserId>,
 }
 
 impl PgPlanLimitChecker {
     #[must_use]
     pub fn new(pool: PgPool, analytics: Arc<dyn AnalyticsRecorder>) -> Self {
-        Self { pool, analytics }
+        Self {
+            pool,
+            analytics,
+            founder_id: None,
+        }
+    }
+
+    /// Set the resolved platform founder (owner of the official server).
+    #[must_use]
+    pub fn with_founder(mut self, founder_id: Option<UserId>) -> Self {
+        self.founder_id = founder_id;
+        self
+    }
+
+    /// Whether `user_id` is the resolved platform founder.
+    fn is_founder(&self, user_id: &UserId) -> bool {
+        matches!(&self.founder_id, Some(founder) if founder == user_id)
     }
 
     /// Build the rejection error and emit `plan_limit_hit` (fire-and-forget).
@@ -78,19 +101,29 @@ impl PgPlanLimitChecker {
     ) -> Result<(Plan, PlanLimits), DomainError> {
         let sid = server_id.0;
 
-        let row = sqlx::query!(r#"SELECT plan as "plan!" FROM servers WHERE id = $1"#, sid)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(db_err)?
-            .ok_or_else(|| DomainError::NotFound {
-                resource_type: "Server",
-                id: server_id.to_string(),
-            })?;
+        let row = sqlx::query!(
+            r#"SELECT plan as "plan!", owner_id as "owner_id!" FROM servers WHERE id = $1"#,
+            sid
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| DomainError::NotFound {
+            resource_type: "Server",
+            id: server_id.to_string(),
+        })?;
 
         let plan: Plan = row.plan.parse().map_err(|e: String| {
             tracing::error!(server_id = %server_id, plan = %row.plan, "Invalid plan value in DB");
             DomainError::Internal(e)
         })?;
+
+        // Founder bypass: a server OWNED BY the founder never hits a paywall —
+        // resolve its limits to `SELF_HOSTED_LIMITS`. The real `plan` is still
+        // returned (used only for the rejection event, which never fires here).
+        if self.is_founder(&UserId::from(row.owner_id)) {
+            return Ok((plan, SELF_HOSTED_LIMITS));
+        }
 
         Ok((plan, PlanLimits::for_plan(plan)))
     }
@@ -129,6 +162,12 @@ impl PgPlanLimitChecker {
             tracing::error!(user_id = %user_id, plan = %row.plan, "Invalid plan value in DB");
             DomainError::Internal(e)
         })?;
+
+        // Founder bypass: the founder's own account never hits a per-user
+        // paywall — resolve to `SELF_HOSTED_LIMITS`.
+        if self.is_founder(user_id) {
+            return Ok((plan, SELF_HOSTED_LIMITS));
+        }
 
         Ok((plan, PlanLimits::for_plan(plan)))
     }

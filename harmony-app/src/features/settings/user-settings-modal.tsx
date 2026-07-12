@@ -18,6 +18,7 @@ import { type ChangeEvent, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
+import { AdminTab } from '@/features/admin'
 import {
   AvatarUploadError,
   type AvatarUploadErrorCode,
@@ -94,6 +95,11 @@ export function UserSettingsModal() {
   const selectedTab = useSettingsUiStore((s) => s.userSettingsTab)
   const setUserSettingsTab = useSettingsUiStore((s) => s.setUserSettingsTab)
   const closeUserSettings = useSettingsUiStore((s) => s.closeUserSettings)
+  // WHY: the Admin tab is revealed ONLY to the platform founder. The flag comes
+  // from GET /v1/profiles/me (`isPlatformAdmin`); the backend is the real gate,
+  // this is a defense-in-depth UI reveal.
+  const { data: profile } = useCurrentProfile()
+  const isPlatformAdmin = profile?.isPlatformAdmin === true
 
   // WHY unmount when closed: guarantees the profile form re-reads fresh
   // defaults from the profile cache on every open (load-then-render,
@@ -109,7 +115,9 @@ export function UserSettingsModal() {
             selectedKey={selectedTab}
             onSelectionChange={(key) => {
               const tab: UserSettingsTab | null =
-                key === 'profile' || key === 'notifications' || key === 'desktop' ? key : null
+                key === 'profile' || key === 'notifications' || key === 'desktop' || key === 'admin'
+                  ? key
+                  : null
               if (tab !== null) setUserSettingsTab(tab)
             }}
             aria-label={t('userSettingsTitle')}
@@ -129,6 +137,12 @@ export function UserSettingsModal() {
             {isTauri() && (
               <Tab key="desktop" title={t('tabDesktop')} data-test="user-settings-tab-desktop">
                 <DesktopSettingsTab />
+              </Tab>
+            )}
+            {/* Founder-only: revealed by the me.isPlatformAdmin flag. */}
+            {isPlatformAdmin && (
+              <Tab key="admin" title={t('tabAdmin')} data-test="user-settings-tab-admin">
+                <AdminTab />
               </Tab>
             )}
           </Tabs>

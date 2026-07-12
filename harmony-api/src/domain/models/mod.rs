@@ -2,6 +2,7 @@
 //!
 //! These are pure domain entities with no infrastructure dependencies.
 
+mod admin;
 mod analytics;
 mod ban;
 mod channel;
@@ -30,6 +31,7 @@ pub mod server_event;
 mod user_preferences;
 mod voice_session;
 
+pub use admin::{AdminUserQuota, AdminUserSummary, AdminUserUsage};
 pub use analytics::{AnalyticsEvent, AnalyticsEventName};
 pub use ban::ServerBan;
 pub use channel::{Channel, ChannelModerationContext, ChannelType};
@@ -66,7 +68,7 @@ pub use moderation::{
     ServerModerationSettings,
 };
 pub use moderation_log::{ModerationAction, ModerationLogEntry, NewModerationLogEntry};
-pub use plan::{Plan, PlanLimits, ResourceKind};
+pub use plan::{Plan, PlanLimits, ResourceKind, SELF_HOSTED_LIMITS};
 pub use profile::{IdentityImageKind, IdentityImageModerationStatus, Profile, UserStatus};
 pub use reaction::{EmojiVariety, ReactionSummary, Reactor};
 pub use read_state::ChannelReadState;
