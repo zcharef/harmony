@@ -2,18 +2,22 @@ import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
 import { Compass, Info, LogOut, MessageSquare, Plus, Ticket } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useChannels, useUnreadStore } from '@/features/channels'
+import { CreateChannelDialog, useChannels, useUnreadStore } from '@/features/channels'
 import { useDms } from '@/features/dms'
 import { useFriendRequests } from '@/features/friends'
+import { useLeaveServer } from '@/features/members'
+import { useSettingsUiStore } from '@/features/settings'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import type { ServerResponse } from '@/lib/api'
 import { useDiscoveryUiStore } from '@/lib/discovery-ui-store'
 import { supabase } from '@/lib/supabase'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { CreateInviteDialog } from './create-invite-dialog'
 import { CreateServerDialog } from './create-server-dialog'
 import { useServers } from './hooks/use-servers'
 import { JoinServerDialog } from './join-server-dialog'
+import { ServerContextMenu } from './server-context-menu'
 
 /**
  * WHY: Checks if any channel in a server has unread messages by reading
@@ -78,10 +82,18 @@ function ServerIcon({
   server,
   isActive,
   onSelect,
+  onInvite,
+  onSettings,
+  onCreateChannel,
+  onLeave,
 }: {
   server: ServerResponse
   isActive: boolean
   onSelect: () => void
+  onInvite: () => void
+  onSettings: () => void
+  onCreateChannel: () => void
+  onLeave: () => void
 }) {
   // WHY: Generate initials from server name for avatar fallback
   const initials = server.name
@@ -94,54 +106,81 @@ function ServerIcon({
 
   const hasUnread = useServerHasUnread(server.id)
   const mentionCount = useServerMentionCount(server.id)
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false)
 
+  function handleContextMenu(e: React.MouseEvent) {
+    e.preventDefault()
+    setIsContextMenuOpen(true)
+  }
+
+  // WHY the wrapper + invisible anchor: the icon needs TWO interactions — a
+  // left-click that selects the server (the button) and a right-click that
+  // opens the context menu. HeroUI's Dropdown clones its single trigger child,
+  // so it can't share the button node. The context menu anchors to a
+  // pointer-events-none span covering the icon, opened via the wrapper's
+  // onContextMenu — the two coexist without fighting for the trigger. Mirrors
+  // the member-row pattern (members/member-list.tsx).
   return (
-    <Tooltip content={server.name} placement="right" offset={8}>
-      <button
-        data-test="server-button"
-        data-server-id={server.id}
-        type="button"
-        onClick={onSelect}
-        className="relative flex w-full items-center justify-center group"
-      >
-        {/* Active pill indicator */}
-        <div
-          className={cn(
-            'absolute left-0 w-1 rounded-r-full bg-foreground transition-all duration-200',
-            isActive ? 'h-10' : 'h-0 group-hover:h-5',
+    // biome-ignore lint/a11y/noStaticElementInteractions: onContextMenu (right-click) opens the server context menu; the primary select action lives on the inner button, which carries the interactive semantics
+    <div className="relative w-full" onContextMenu={handleContextMenu}>
+      <Tooltip content={server.name} placement="right" offset={8}>
+        <button
+          data-test="server-button"
+          data-server-id={server.id}
+          type="button"
+          onClick={onSelect}
+          className="relative flex w-full items-center justify-center group"
+        >
+          {/* Active pill indicator */}
+          <div
+            className={cn(
+              'absolute left-0 w-1 rounded-r-full bg-foreground transition-all duration-200',
+              isActive ? 'h-10' : 'h-0 group-hover:h-5',
+            )}
+          />
+
+          <Avatar
+            name={initials}
+            src={server.iconUrl ?? undefined}
+            classNames={{
+              base: cn(
+                'h-12 w-12 cursor-pointer transition-all duration-200',
+                isActive
+                  ? 'rounded-2xl bg-primary text-primary-foreground'
+                  : 'rounded-[24px] hover:rounded-2xl bg-default-100 text-default-foreground hover:bg-primary hover:text-primary-foreground',
+              ),
+              name: cn(
+                'text-sm font-medium transition-all duration-200',
+                isActive
+                  ? 'text-primary-foreground'
+                  : 'text-default-foreground group-hover:text-primary-foreground',
+              ),
+            }}
+          />
+
+          {/* Mention count pill replaces the plain dot when any channel has mentions (spec §1) */}
+          {mentionCount > 0 && !isActive && (
+            <MentionCountBadge count={mentionCount} testId="server-mention-badge" />
           )}
-        />
 
-        <Avatar
-          name={initials}
-          src={server.iconUrl ?? undefined}
-          classNames={{
-            base: cn(
-              'h-12 w-12 cursor-pointer transition-all duration-200',
-              isActive
-                ? 'rounded-2xl bg-primary text-primary-foreground'
-                : 'rounded-[24px] hover:rounded-2xl bg-default-100 text-default-foreground hover:bg-primary hover:text-primary-foreground',
-            ),
-            name: cn(
-              'text-sm font-medium transition-all duration-200',
-              isActive
-                ? 'text-primary-foreground'
-                : 'text-default-foreground group-hover:text-primary-foreground',
-            ),
-          }}
-        />
-
-        {/* Mention count pill replaces the plain dot when any channel has mentions (spec §1) */}
-        {mentionCount > 0 && !isActive && (
-          <MentionCountBadge count={mentionCount} testId="server-mention-badge" />
-        )}
-
-        {/* Unread dot — shows when any channel in this server has unread messages */}
-        {mentionCount === 0 && hasUnread && !isActive && (
-          <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-content1 bg-danger" />
-        )}
-      </button>
-    </Tooltip>
+          {/* Unread dot — shows when any channel in this server has unread messages */}
+          {mentionCount === 0 && hasUnread && !isActive && (
+            <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-content1 bg-danger" />
+          )}
+        </button>
+      </Tooltip>
+      <ServerContextMenu
+        serverId={server.id}
+        isOpen={isContextMenuOpen}
+        onOpenChange={setIsContextMenuOpen}
+        onInvite={onInvite}
+        onSettings={onSettings}
+        onCreateChannel={onCreateChannel}
+        onLeave={onLeave}
+      >
+        <span aria-hidden className="pointer-events-none absolute inset-0" />
+      </ServerContextMenu>
+    </div>
   )
 }
 
@@ -163,9 +202,18 @@ export function ServerList({
   const { t } = useTranslation('servers')
   const { t: tAuth } = useTranslation('auth')
   const { t: tDms } = useTranslation('dms')
+  const { t: tChannels } = useTranslation('channels')
   const { data: servers, isPending, isError } = useServers()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isJoinOpen, setIsJoinOpen] = useState(false)
+  // WHY: Context-menu Invite/Create-Channel dialogs are owned here (not in
+  // ChannelSidebar) so they can target ANY right-clicked server — ChannelSidebar
+  // only knows the active server and unmounts in DM view. Each holds the target
+  // server id; null = closed.
+  const [inviteServerId, setInviteServerId] = useState<string | null>(null)
+  const [createChannelServerId, setCreateChannelServerId] = useState<string | null>(null)
+  const leaveServerMutation = useLeaveServer()
+  const openServerSettings = useSettingsUiStore((s) => s.openServerSettings)
   const hasDmUnread = useDmsHaveUnread()
   const dmMentionCount = useDmsMentionCount()
   // Incoming friend requests badge on the DM home button (§5.4). Warm cache via
@@ -252,6 +300,27 @@ export function ServerList({
               server={server}
               isActive={view === 'servers' && server.id === selectedServerId}
               onSelect={() => onSelectServer(server.id)}
+              // WHY select-then-act: Settings/Invite/Create-Channel target the
+              // ACTIVE server (openServerSettings reads it; dialogs are keyed by
+              // the target id). Selecting the right-clicked server first ensures
+              // the action lands on it, not whatever was previously active.
+              onInvite={() => {
+                onSelectServer(server.id)
+                setInviteServerId(server.id)
+              }}
+              onSettings={() => {
+                onSelectServer(server.id)
+                openServerSettings()
+              }}
+              onCreateChannel={() => {
+                onSelectServer(server.id)
+                setCreateChannelServerId(server.id)
+              }}
+              onLeave={() => {
+                if (window.confirm(tChannels('leaveConfirm', { serverName: server.name }))) {
+                  leaveServerMutation.mutate(server.id)
+                }
+              }}
             />
           ))}
         </div>
@@ -388,6 +457,23 @@ export function ServerList({
         onClose={() => setIsJoinOpen(false)}
         onJoined={(serverId) => onSelectServer(serverId)}
       />
+
+      {/* Context-menu action dialogs — keyed by the right-clicked server id. */}
+      {inviteServerId !== null && (
+        <CreateInviteDialog
+          serverId={inviteServerId}
+          isOpen
+          onClose={() => setInviteServerId(null)}
+        />
+      )}
+
+      {createChannelServerId !== null && (
+        <CreateChannelDialog
+          serverId={createChannelServerId}
+          isOpen
+          onClose={() => setCreateChannelServerId(null)}
+        />
+      )}
     </div>
   )
 }
