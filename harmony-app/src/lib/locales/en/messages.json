@@ -42,8 +42,15 @@
   "attachmentUnavailable": "Image unavailable",
   "downloadAttachment": "Download {{filename}}",
   "imageAttachment": "Image attachment",
+  "videoAttachment": "Video attachment",
   "attachmentScanning": "Scanning…",
   "attachmentRemoved": "Image removed — not permitted in this channel",
   "attachmentNsfw": "Possibly sensitive content",
-  "attachmentReveal": "Show content"
+  "attachmentReveal": "Show content",
+  "lightbox": {
+    "openOriginal": "Open original",
+    "close": "Close preview",
+    "imageLabel": "Image preview",
+    "videoLabel": "Video preview"
+  }
 }
