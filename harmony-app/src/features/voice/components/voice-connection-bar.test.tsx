@@ -103,6 +103,20 @@ describe('VoiceConnectionBar connection state machine', () => {
     expect(screen.getByText('Retry')).toBeTruthy()
   })
 
+  it('shows timeout-specific copy and a retry action when the connect timed out', () => {
+    useVoiceConnectionStore.setState({
+      status: 'failed',
+      error: null,
+      connectFailureReason: 'timeout',
+    })
+    const { onRetry } = renderBar()
+
+    expect(screen.getByText("Couldn't connect to voice")).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('voice-retry-btn'))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
   it('shows the disconnected state without controls', () => {
     useVoiceConnectionStore.setState({ status: 'disconnected' })
     renderBar()

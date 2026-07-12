@@ -80,6 +80,51 @@ function insertSelfIntoParticipantCache(
   )
 }
 
+/** WHY: A join API call creates a server-side voice session before the LiveKit
+ * connection is attempted. When the connect then fails, times out, or the join
+ * itself throws, that session lingers until the ~45s sweep — fire a best-effort
+ * leave to release it now. Extracted so handleJoinVoice reuses one path (both
+ * the post-connect guard and the catch) and stays under Biome's complexity limit. */
+function cleanupOrphanedVoiceSession(channelId: string): void {
+  leaveVoice({ path: { id: channelId }, throwOnError: true }).catch((leaveErr: unknown) => {
+    logger.warn('voice_join_cleanup_leave_failed', {
+      error: leaveErr instanceof Error ? leaveErr.message : String(leaveErr),
+      channelId,
+    })
+  })
+}
+
+/** WHY: Extracted to keep handleJoinVoice under Biome's cognitive-complexity
+ * limit. Surfaces a failed join per ADR-045: a plan-gate rejection routes to the
+ * central UpgradeModal (resetting the bar to 'idle' so the modal is the sole
+ * feedback), any other error sets the 'failed' bar with the server-provided
+ * detail (or null → i18n fallback). connectFailureReason is reset so a prior
+ * attempt's timeout copy never lingers. Either way the orphaned server-side
+ * session (joinVoice may have created one before the failure) is released. */
+function handleJoinError(err: unknown, channelId: string, serverId: string): void {
+  const rawMessage = err instanceof Error ? err.message : String(err)
+  logger.error('voice_join_api_failed', { error: rawMessage, channelId, serverId })
+
+  const gate = extractPlanGateError(err)
+  if (gate !== null) {
+    openUpgradeModal(gate)
+    useVoiceConnectionStore.setState({ status: 'idle', error: null, connectFailureReason: null })
+  } else {
+    // WHY: ProblemDetails carry a user-facing detail; LiveKit/other SDK errors
+    // contain raw WebSocket URLs, so pass null and let VoiceConnectionBar fall
+    // back to the i18n 'connectionFailed' key (ADR-028). rawMessage is unusable
+    // here — String(err) on a ProblemDetails plain object yields "[object Object]".
+    const userMessage = isProblemDetails(err) ? err.detail : null
+    useVoiceConnectionStore.setState({
+      status: 'failed',
+      error: userMessage,
+      connectFailureReason: null,
+    })
+  }
+
+  cleanupOrphanedVoiceSession(channelId)
+}
+
 /** WHY: Extracted to reduce scheduleTokenRefresh cognitive complexity below
  * Biome's limit of 15. Handles the successful token refresh: reconnects to
  * LiveKit if still in the same channel, updates TTL, resets retry count, and
@@ -98,6 +143,11 @@ async function handleTokenRefreshSuccess(
   // switched channels or disconnected, skip the refresh.
   if (store.currentChannelId === refreshChannelId && store.room !== null) {
     await storeConnect(refreshChannelId, refreshServerId, refreshData.token, refreshData.url)
+    // WHY: storeConnect resolves even when the reconnect fails or times out (it
+    // sets 'failed' internally). Only continue the refresh cycle if it actually
+    // reconnected — otherwise the store already surfaced 'failed' + retry and
+    // rescheduling would log a false success on a dead room.
+    if (useVoiceConnectionStore.getState().status !== 'connected') return
     // WHY: Update TTL from the fresh response so the next cycle
     // uses the server's latest value (may change across plans).
     ttlSecsRef.current = refreshData.ttlSecs ?? FALLBACK_TOKEN_TTL_SECS
@@ -369,6 +419,19 @@ export function useVoiceConnection() {
         }
 
         await storeConnect(channelId, serverId, data.token, data.url)
+
+        // WHY: storeConnect resolves even when the LiveKit connection fails or
+        // times out (it catches internally and sets status 'failed'). Bail before
+        // the success-only side effects so a failed/timed-out connect never plays
+        // the join sound, inserts a ghost participant, or schedules a token
+        // refresh on a dead room. The server-side session created by joinVoice is
+        // still alive — clean it up (mirrors the catch below) so it does not
+        // linger until the sweep; the 'failed' bar already offers retry.
+        if (useVoiceConnectionStore.getState().status !== 'connected') {
+          cleanupOrphanedVoiceSession(channelId)
+          return
+        }
+
         playVoiceSound('join')
         // WHY: Self-joined SSE events are skipped (isSelfJoinedEvent) to prevent
         // the name appearing before audio is connected. Now that storeConnect
@@ -390,38 +453,7 @@ export function useVoiceConnection() {
         // This is a background op — failure is logged, not surfaced (ADR-028).
         scheduleTokenRefresh()
       } catch (err: unknown) {
-        const rawMessage = err instanceof Error ? err.message : String(err)
-        logger.error('voice_join_api_failed', { error: rawMessage, channelId, serverId })
-        // WHY: a voice_concurrent plan-gate rejection routes to the central
-        // UpgradeModal — joinVoice is a plain SDK call (not a react-query
-        // mutation), so the global MutationCache never sees it. Reset to 'idle'
-        // so the VoiceConnectionBar shows no failed/error state: the modal is
-        // the sole feedback (mirrors the emoji-settings-tab isPlanGateError
-        // guard, ADR-045).
-        const gate = extractPlanGateError(err)
-        if (gate !== null) {
-          openUpgradeModal(gate)
-          useVoiceConnectionStore.setState({ status: 'idle', error: null })
-        } else {
-          // WHY: ProblemDetails from our API have user-friendly detail messages.
-          // LiveKit SDK errors contain raw WebSocket URLs — not user-friendly.
-          // Passing null lets VoiceConnectionBar fall through to the i18n
-          // 'connectionFailed' translation key (ADR-028).
-          // WHY: rawMessage is String(err) which produces "[object Object]" for
-          // ProblemDetails (plain objects, not Error instances). Use .detail directly.
-          const userMessage = isProblemDetails(err) ? err.detail : null
-          useVoiceConnectionStore.setState({ status: 'failed', error: userMessage })
-        }
-
-        // WHY (P1-5): If storeConnect (room.connect()) failed, the server-side
-        // session created by joinVoice is still alive and will linger for 45s
-        // until the sweep. Fire a best-effort leaveVoice to clean it up.
-        leaveVoice({ path: { id: channelId }, throwOnError: true }).catch((leaveErr: unknown) => {
-          logger.warn('voice_join_cleanup_leave_failed', {
-            error: leaveErr instanceof Error ? leaveErr.message : String(leaveErr),
-            channelId,
-          })
-        })
+        handleJoinError(err, channelId, serverId)
       } finally {
         isJoiningRef.current = false
       }

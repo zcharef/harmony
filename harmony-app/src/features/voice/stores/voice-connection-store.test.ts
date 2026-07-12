@@ -199,7 +199,9 @@ vi.mock('@livekit/krisp-noise-filter', () => ({
 // Import the store AFTER mocks are set up
 // ---------------------------------------------------------------------------
 
-const { useVoiceConnectionStore } = await import('@/features/voice/stores/voice-connection-store')
+const { useVoiceConnectionStore, CONNECT_TIMEOUT_MS } = await import(
+  '@/features/voice/stores/voice-connection-store'
+)
 
 const initialState = useVoiceConnectionStore.getState()
 
@@ -387,6 +389,164 @@ describe('useVoiceConnectionStore', () => {
       await connectStore()
 
       expect(useVoiceConnectionStore.getState().error).toBeNull()
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // connect() timeout — an INITIAL connect that never reaches 'connected'
+  // -------------------------------------------------------------------------
+  describe('connect timeout', () => {
+    /** Swap in a Room whose connect()/mic can be made to hang. Returns the room
+     * and a restore() to put the original constructor back. */
+    async function useHangingRoom(
+      configure: (room: MockRoom) => void,
+    ): Promise<{ room: MockRoom; restore: () => void }> {
+      const livekitModule = await import('livekit-client')
+      const original = livekitModule.Room
+      const room = createMockRoom()
+      configure(room)
+      // @ts-expect-error — overriding module export for test
+      livekitModule.Room = Object.assign(
+        function HangingRoom() {
+          ;(globalThis as Record<string, unknown>).__latestMockRoom = room
+          return room
+        },
+        { getLocalDevices: vi.fn().mockResolvedValue([]) },
+      )
+      return {
+        room,
+        restore: () => {
+          livekitModule.Room = original
+        },
+      }
+    }
+
+    it('transitions to failed with a timeout reason when room.connect never completes', async () => {
+      const { room, restore } = await useHangingRoom((r) => {
+        r.connect = vi.fn().mockReturnValue(new Promise<void>(() => {}))
+      })
+
+      const connectPromise = useVoiceConnectionStore
+        .getState()
+        .connect(CHANNEL_ID, SERVER_ID, TOKEN, URL)
+
+      // Before the window elapses the bar shows 'connecting', not 'failed'.
+      expect(useVoiceConnectionStore.getState().status).toBe('connecting')
+
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS)
+      await connectPromise
+
+      const state = useVoiceConnectionStore.getState()
+      expect(state.status).toBe('failed')
+      expect(state.connectFailureReason).toBe('timeout')
+      expect(state.error).toBeNull()
+      expect(state.room).toBeNull()
+      // Half-open attempt torn down so retry starts fresh.
+      expect(room.disconnect).toHaveBeenCalled()
+
+      restore()
+    })
+
+    it('times out when mic acquisition never resolves (unanswered permission prompt)', async () => {
+      const { restore } = await useHangingRoom((r) => {
+        r.localParticipant.setMicrophoneEnabled = vi
+          .fn()
+          .mockReturnValue(new Promise<void>(() => {}))
+      })
+
+      const connectPromise = useVoiceConnectionStore
+        .getState()
+        .connect(CHANNEL_ID, SERVER_ID, TOKEN, URL)
+
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS)
+      await connectPromise
+
+      const state = useVoiceConnectionStore.getState()
+      expect(state.status).toBe('failed')
+      expect(state.connectFailureReason).toBe('timeout')
+
+      restore()
+    })
+
+    it('does not fire the timeout after a successful connect (timer cleared)', async () => {
+      await connectStore()
+      expect(useVoiceConnectionStore.getState().status).toBe('connected')
+
+      // Well past the window — a leaked timer would flip this to 'failed'.
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS * 2)
+
+      expect(useVoiceConnectionStore.getState().status).toBe('connected')
+      expect(useVoiceConnectionStore.getState().connectFailureReason).toBeNull()
+    })
+
+    it('does not transition to failed when the user leaves before the timeout', async () => {
+      const { restore } = await useHangingRoom((r) => {
+        r.connect = vi.fn().mockReturnValue(new Promise<void>(() => {}))
+      })
+
+      const connectPromise = useVoiceConnectionStore
+        .getState()
+        .connect(CHANNEL_ID, SERVER_ID, TOKEN, URL)
+      expect(useVoiceConnectionStore.getState().status).toBe('connecting')
+
+      // User leaves/cancels while still connecting.
+      await useVoiceConnectionStore.getState().disconnect()
+      expect(useVoiceConnectionStore.getState().status).toBe('idle')
+
+      // The stale timeout must not resurrect a 'failed' bar.
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS)
+      await connectPromise
+
+      expect(useVoiceConnectionStore.getState().status).toBe('idle')
+      expect(useVoiceConnectionStore.getState().connectFailureReason).toBeNull()
+
+      restore()
+    })
+
+    it('does not resurrect connected when a successful connect was superseded by leave', async () => {
+      // A room whose connect() resolves only when released, so a disconnect() can
+      // interleave between 'connecting' and the successful resolution.
+      let releaseConnect: () => void = () => {}
+      const { room, restore } = await useHangingRoom((r) => {
+        r.connect = vi.fn().mockReturnValue(
+          new Promise<void>((resolve) => {
+            releaseConnect = resolve
+          }),
+        )
+      })
+
+      const connectPromise = useVoiceConnectionStore
+        .getState()
+        .connect(CHANNEL_ID, SERVER_ID, TOKEN, URL)
+      expect(useVoiceConnectionStore.getState().status).toBe('connecting')
+
+      // User leaves while still connecting — supersedes this attempt.
+      await useVoiceConnectionStore.getState().disconnect()
+      expect(useVoiceConnectionStore.getState().status).toBe('idle')
+
+      // The in-flight connect now succeeds; it must NOT resurrect 'connected'.
+      releaseConnect()
+      await connectPromise
+
+      expect(useVoiceConnectionStore.getState().status).toBe('idle')
+      expect(useVoiceConnectionStore.getState().room).toBeNull()
+      // The orphaned room was torn down instead of becoming a ghost session.
+      expect(room.disconnect).toHaveBeenCalled()
+
+      restore()
+    })
+
+    it('does not fire the connect timeout during a later auto-reconnect cycle', async () => {
+      const room = await connectStore()
+
+      // A transient drop → LiveKit auto-reconnect (a DIFFERENT path from connect()).
+      room.__emit('reconnecting')
+      expect(useVoiceConnectionStore.getState().status).toBe('reconnecting')
+
+      await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS * 2)
+
+      room.__emit('reconnected')
+      expect(useVoiceConnectionStore.getState().status).toBe('connected')
     })
   })
 

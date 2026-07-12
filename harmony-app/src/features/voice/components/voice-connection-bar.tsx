@@ -52,10 +52,12 @@ function StatusText({
   status,
   channelName,
   error,
+  connectFailureReason,
 }: {
   status: VoiceConnectionStatus
   channelName: string | null
   error: string | null
+  connectFailureReason: 'timeout' | null
 }) {
   const { t } = useTranslation('voice')
   switch (status) {
@@ -72,12 +74,14 @@ function StatusText({
           )}
         </>
       )
-    case 'failed':
-      return (
-        <span className="truncate text-xs font-medium text-danger">
-          {error ?? t('connectionFailed')}
-        </span>
-      )
+    case 'failed': {
+      // WHY: A connect timeout gets its own copy ("Couldn't connect to voice") —
+      // it reads clearer than the generic "Connection failed" after the user
+      // waited out the window. A server-provided detail (error) still wins.
+      const failedMessage =
+        error ?? (connectFailureReason === 'timeout' ? t('connectTimeout') : t('connectionFailed'))
+      return <span className="truncate text-xs font-medium text-danger">{failedMessage}</span>
+    }
     case 'disconnected':
       return <span className="text-xs text-default-500">{t('disconnected')}</span>
     default:
@@ -89,6 +93,7 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
   const { t } = useTranslation('voice')
   const status = useVoiceConnectionStore((s) => s.status)
   const error = useVoiceConnectionStore((s) => s.error)
+  const connectFailureReason = useVoiceConnectionStore((s) => s.connectFailureReason)
   const deviceFallbacks = useVoiceConnectionStore((s) => s.deviceFallbacks)
   const isKrispEnabled = useVoiceConnectionStore((s) => s.isKrispEnabled)
   const isPttMode = useVoiceConnectionStore((s) => s.isPttMode)
@@ -125,7 +130,12 @@ export function VoiceConnectionBar({ channelName, onRetry }: VoiceConnectionBarP
               )}
 
               <div className="flex min-w-0 flex-1 flex-col">
-                <StatusText status={status} channelName={channelName} error={error} />
+                <StatusText
+                  status={status}
+                  channelName={channelName}
+                  error={error}
+                  connectFailureReason={connectFailureReason}
+                />
               </div>
 
               {status === 'failed' && (
