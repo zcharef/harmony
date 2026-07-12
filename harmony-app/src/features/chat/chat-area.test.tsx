@@ -99,8 +99,6 @@ vi.mock('./hooks/use-typing-indicator', () => ({
   useTypingIndicator: () => ({ typingUsers: [], sendTyping: vi.fn() }),
 }))
 
-// WHY mocked: the drop-wiring test pushes a real file through the REAL
-// useComposerAttachments — only the network upload behind it is stubbed.
 // WHY satisfies: the stub must stay shaped like the real hook's return type
 // (UploadedAttachment = NewAttachmentRequest) — vi.mock factories are not
 // checked against the mocked module, so this pins the contract instead.
@@ -290,7 +288,7 @@ describe('ChatArea attachment drop wiring', () => {
     fireEvent.drop(target, { dataTransfer: { files: [file], types: ['Files'] } })
   }
 
-  it('drag-over shows the dropzone overlay and drop enqueues the file into the tray', async () => {
+  it('drag-over shows the dropzone overlay and drop forwards the file to the composer', async () => {
     const { input } = renderChatArea()
 
     fireEvent.dragOver(input, { dataTransfer: { types: ['Files'] } })
@@ -298,8 +296,13 @@ describe('ChatArea attachment drop wiring', () => {
 
     dropFile(input, new File(['hello'], 'notes.txt', { type: 'text/plain' }))
 
-    const tile = await screen.findByTestId('attachment-tile')
-    expect(tile.textContent).toContain('notes.txt')
+    // The onDrop handler forwards the dropped files to the composer-attachments
+    // hook (mocked at its seam here); tray/tile rendering is that hook's own
+    // unit concern.
+    expect(composerAttachments.enqueueFiles).toHaveBeenCalledTimes(1)
+    const enqueued = composerAttachments.enqueueFiles.mock.calls[0]?.[0] as FileList
+    expect(enqueued.length).toBe(1)
+    expect(enqueued[0]?.name).toBe('notes.txt')
     // The drop also clears the overlay.
     expect(screen.queryByTestId('attachment-dropzone')).toBeNull()
   })
@@ -309,7 +312,7 @@ describe('ChatArea attachment drop wiring', () => {
 
     fireEvent.drop(input, { dataTransfer: { files: [], types: [] } })
 
-    expect(screen.queryAllByTestId('attachment-tile')).toHaveLength(0)
+    expect(composerAttachments.enqueueFiles).not.toHaveBeenCalled()
   })
 })
 

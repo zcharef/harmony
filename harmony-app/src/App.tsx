@@ -22,8 +22,8 @@ import { useFaviconBadge } from '@/hooks/use-favicon-badge'
 import { useSystemTray } from '@/hooks/use-system-tray'
 import { getInviteCodeFromPath } from '@/lib/invite-path'
 import { logger } from '@/lib/logger'
-import { isTauri } from '@/lib/platform'
 import { extractPlanGateError } from '@/lib/plan-gate'
+import { isTauri } from '@/lib/platform'
 import { ROUTES } from '@/lib/routes'
 
 const queryClient = new QueryClient({
