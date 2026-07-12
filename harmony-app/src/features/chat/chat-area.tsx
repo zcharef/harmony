@@ -1219,10 +1219,12 @@ function EncryptionBannerSection({
   // WHY: DMs on web work (plaintext), but show a softer informational banner.
   // Same disclosure on desktop when the recipient is keyless (web-only user): the
   // DM is plaintext because they cannot receive encryption, and the user should know.
+  // The desktop case uses recipient-oriented copy (no download CTA — the user is
+  // already on desktop; it is the RECIPIENT who lacks encryption).
   if ((!isTauri() && isDm) || isDesktopDmKeyless) {
     return (
       <div className="mt-4">
-        <DmPlaintextBanner />
+        <DmPlaintextBanner variant={isDesktopDmKeyless ? 'recipient-keyless' : 'web'} />
       </div>
     )
   }

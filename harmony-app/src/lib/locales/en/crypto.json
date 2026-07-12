@@ -33,6 +33,7 @@
   "blockedCannotSend": "You have blocked this contact. Unblock them to send messages.",
   "e2eeInitFailed": "End-to-end encryption failed to initialize. Messages will be sent without encryption.",
   "dmWebPlaintext": "Messages you send here are not encrypted. Use the desktop app for end-to-end encryption.",
+  "dmDesktopRecipientKeyless": "This person hasn't set up end-to-end encryption yet, so messages you send here aren't encrypted.",
   "encryptedTooltip": "End-to-end encrypted",
   "notEncryptedTooltip": "Not encrypted — sent from web",
   "dmEncryptionFailed": "Message not sent — it could not be encrypted. Please try again."
