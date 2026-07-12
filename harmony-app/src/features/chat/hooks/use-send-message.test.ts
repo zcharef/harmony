@@ -21,9 +21,18 @@ vi.mock('@/lib/toast', () => ({
   toastApiError: vi.fn(),
 }))
 
+// WHY key-as-value: keep the test independent of i18n init. The hook resolves
+// the actionable message via i18n.t(...); asserting on the key proves the wiring
+// (which key is chosen) without coupling to the English copy.
+vi.mock('i18next', () => ({
+  default: { t: vi.fn((key: string) => key) },
+}))
+
 // Imports after vi.mock so we get the mocked versions
 const { sendMessage } = await import('@/lib/api')
 const { logger } = await import('@/lib/logger')
+const { toastApiError } = await import('@/lib/toast')
+const { DmEncryptionError } = await import('../lib/dm-encryption-error')
 
 const CHANNEL_ID = 'channel-1'
 const USER_ID = 'user-1'
@@ -497,10 +506,64 @@ describe('useSendMessage', () => {
       expect(sendMessage).not.toHaveBeenCalled()
       // Nothing is cached as plaintext either (the message was not sent).
       expect(encryption.cachePlaintext).not.toHaveBeenCalled()
-      // The rejection carries a user-meaningful message for the onError path.
-      expect(result.current.error?.message).toBe(
-        'Message not sent — could not encrypt it. Your recipient may not have encryption set up.',
+      // The rejection is a tagged encryption failure (ADR-027) carrying the
+      // actionable, localized reason — not a plain generic Error.
+      expect(result.current.error).toBeInstanceOf(DmEncryptionError)
+      expect(result.current.error?.message).toBe('crypto:dmEncryptionFailed')
+    })
+
+    it('surfaces the SPECIFIC encryption reason (not the generic fallback) via the toast', async () => {
+      // WHY regression (ADR-027, Part B): the actionable reason was computed then
+      // swallowed because getApiErrorDetail only unwraps ProblemDetails. onError must
+      // pass the tagged encryption message as the toast text, not 'chat:sendMessageFailed'.
+      const encryption = buildEncryption({
+        encryptFn: vi.fn().mockRejectedValue(new Error('No pre-keys available')),
+      })
+
+      const queryClient = createMutationTestClient()
+      queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
+
+      const wrapper = createQueryWrapper(queryClient)
+      const { result } = renderHook(
+        () => useSendMessage(CHANNEL_ID, USER_ID, 'testuser', encryption),
+        { wrapper },
       )
+
+      await act(async () => {
+        result.current.mutate({ content: 'hello' })
+      })
+
+      await waitFor(() => expect(result.current.isError).toBe(true))
+
+      expect(toastApiError).toHaveBeenCalledTimes(1)
+      const [errorArg, fallbackArg] = vi.mocked(toastApiError).mock.calls[0] ?? []
+      expect(errorArg).toBeInstanceOf(DmEncryptionError)
+      expect(fallbackArg).toBe('crypto:dmEncryptionFailed')
+      // It must NOT collapse to the generic send-failed string.
+      expect(fallbackArg).not.toBe('chat:sendMessageFailed')
+    })
+
+    it('keeps the GENERIC fallback for a normal (non-encryption) send failure', async () => {
+      // WHY the complement: only tagged encryption failures get the specific copy;
+      // every other error must still route through the generic 'send failed' string.
+      const apiError = new Error('Network failure')
+      vi.mocked(sendMessage).mockRejectedValueOnce(apiError)
+
+      const queryClient = createMutationTestClient()
+      queryClient.setQueryData(queryKeys.messages.byChannel(CHANNEL_ID), buildCacheData([]))
+
+      const wrapper = createQueryWrapper(queryClient)
+      const { result } = renderHook(() => useSendMessage(CHANNEL_ID, USER_ID, 'testuser'), {
+        wrapper,
+      })
+
+      await act(async () => {
+        result.current.mutate({ content: 'will fail' })
+      })
+
+      await waitFor(() => expect(result.current.isError).toBe(true))
+
+      expect(toastApiError).toHaveBeenCalledWith(apiError, 'chat:sendMessageFailed')
     })
 
     it('logs a warning breadcrumb when encryption fails', async () => {
