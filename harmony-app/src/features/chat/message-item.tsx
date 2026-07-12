@@ -581,7 +581,7 @@ function ReactionBar({
             onClick={() =>
               r.reactedByMe === true ? onRemoveReaction?.(r.emoji) : onAddReaction?.(r.emoji)
             }
-            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors${r.reactedByMe === true ? ' border-primary bg-primary/10 text-primary' : ' border-default-200 bg-default-50 hover:bg-default-100'}`}
+            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors${r.reactedByMe === true ? ' border-accent bg-accent/10 text-accent' : ' border-default-200 bg-default-50 hover:bg-default-100'}`}
           >
             <ReactionEmoji emoji={r.emoji} emojiMap={emojiMap} />
             <span>{r.count}</span>

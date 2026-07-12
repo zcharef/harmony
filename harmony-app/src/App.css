@@ -6,6 +6,36 @@
 @theme {
   --font-sans: "Nunito Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+
+  /*
+   * Modular type scale (base 16px, ratio ~1.125 / major second).
+   *
+   * WHY redeclared here: Tailwind v4 generates every `text-*` utility from these
+   * `--text-*` theme variables, so overriding them re-sizes all ~180 `text-sm`
+   * and ~147 `text-xs` call sites app-wide with zero component edits. The app was
+   * dense — message body rode `text-sm` (14px) and metadata `text-xs` (12px),
+   * which read as "too small". Body now sits at the comfortable 16px reading base;
+   * metadata bumps 12→13 to stay compact in tight timestamp/label rows. Each size
+   * is paired with its line-height (Tailwind v4 requires the paired
+   * `--text-*--line-height`, else the default line-height sticks). Leading
+   * loosens for body/meta (1.45–1.5) and deliberately tightens as the display
+   * sizes grow (1.4 → 1.25) — standard typographic rhythm, and tighter than the
+   * roomy Tailwind defaults so large headings stay compact in dense panes.
+   */
+  --text-xs: 0.8125rem; /* 13px (was 12) — timestamps, secondary metadata */
+  --text-xs--line-height: 1.45;
+  --text-sm: 1rem; /* 16px (was 14) — message body / primary content */
+  --text-sm--line-height: 1.5;
+  --text-base: 1rem; /* 16px — true base (unchanged) */
+  --text-base--line-height: 1.5;
+  --text-lg: 1.125rem; /* 18px = 16 × 1.125 */
+  --text-lg--line-height: 1.4;
+  --text-xl: 1.25rem; /* 20px */
+  --text-xl--line-height: 1.35;
+  --text-2xl: 1.5rem; /* 24px */
+  --text-2xl--line-height: 1.3;
+  --text-3xl: 1.875rem; /* 30px */
+  --text-3xl--line-height: 1.25;
 }
 
 @utility bg-gradient-harmony {
