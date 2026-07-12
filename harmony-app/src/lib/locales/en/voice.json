@@ -18,6 +18,8 @@
   "undeafen": "Undeafen",
   "microphone": "Microphone",
   "speaker": "Speaker",
+  "selectInputDevice": "Select input device",
+  "selectOutputDevice": "Select output device",
   "switchMicrophoneFailed": "Failed to switch microphone",
   "switchSpeakerFailed": "Failed to switch speaker",
   "microphoneUnplugged": "Microphone disconnected — switched to the default device",

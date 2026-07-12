@@ -6,8 +6,12 @@ vi.mock('@/lib/logger', () => ({
 
 import {
   clearPreferredDeviceId,
+  loadPreferredDeafened,
   loadPreferredDeviceId,
+  loadPreferredMuted,
+  savePreferredDeafened,
   savePreferredDeviceId,
+  savePreferredMuted,
 } from './device-preferences'
 
 beforeEach(() => {
@@ -74,6 +78,47 @@ describe('device-preferences', () => {
       'write_storage_failed',
       expect.objectContaining({ key: 'voice_preferred_audio_output' }),
     )
+
+    spy.mockRestore()
+  })
+})
+
+describe('audio-state-preferences (pre-call mute/deafen)', () => {
+  it('defaults to unmuted/undeafened when nothing is stored', () => {
+    expect(loadPreferredMuted()).toBe(false)
+    expect(loadPreferredDeafened()).toBe(false)
+  })
+
+  it('round-trips the muted preference', () => {
+    savePreferredMuted(true)
+    expect(loadPreferredMuted()).toBe(true)
+    expect(localStorage.getItem('voice_preferred_muted')).toBe('true')
+    // Deafen is independent.
+    expect(loadPreferredDeafened()).toBe(false)
+
+    savePreferredMuted(false)
+    expect(loadPreferredMuted()).toBe(false)
+    expect(localStorage.getItem('voice_preferred_muted')).toBe('false')
+  })
+
+  it('round-trips the deafened preference', () => {
+    savePreferredDeafened(true)
+    expect(loadPreferredDeafened()).toBe(true)
+    expect(loadPreferredMuted()).toBe(false)
+  })
+
+  it('treats any non-"true" stored value as false', () => {
+    localStorage.setItem('voice_preferred_muted', 'garbage')
+    expect(loadPreferredMuted()).toBe(false)
+  })
+
+  it('returns false when localStorage.getItem throws', () => {
+    const spy = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
+      throw new Error('storage disabled')
+    })
+
+    expect(loadPreferredMuted()).toBe(false)
+    expect(loadPreferredDeafened()).toBe(false)
 
     spy.mockRestore()
   })

@@ -1,5 +1,5 @@
 import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
-import { Compass, Info, LogOut, MessageSquare, Plus, Ticket } from 'lucide-react'
+import { Compass, Info, MessageSquare, Plus, Ticket } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CreateChannelDialog, useChannels, useUnreadStore } from '@/features/channels'
@@ -10,8 +10,6 @@ import { useSettingsUiStore } from '@/features/settings'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import type { ServerResponse } from '@/lib/api'
 import { useDiscoveryUiStore } from '@/lib/discovery-ui-store'
-import { supabase } from '@/lib/supabase'
-import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { CreateInviteDialog } from './create-invite-dialog'
 import { CreateServerDialog } from './create-server-dialog'
@@ -200,7 +198,6 @@ export function ServerList({
   onSelectDmView,
 }: ServerListProps) {
   const { t } = useTranslation('servers')
-  const { t: tAuth } = useTranslation('auth')
   const { t: tDms } = useTranslation('dms')
   const { t: tChannels } = useTranslation('channels')
   const { data: servers, isPending, isError } = useServers()
@@ -411,34 +408,6 @@ export function ServerList({
               base: cn(
                 'h-12 w-12 cursor-pointer rounded-[24px] bg-default-100 text-default-foreground',
                 'transition-all duration-200 hover:rounded-2xl hover:bg-primary hover:text-primary-foreground',
-              ),
-              icon: 'text-current',
-            }}
-          />
-        </button>
-      </Tooltip>
-
-      {/* Logout button */}
-      <Tooltip content={tAuth('logout')} placement="right" offset={8}>
-        <button
-          type="button"
-          data-test="logout-button"
-          onClick={() => {
-            supabase.auth.signOut().catch((err: unknown) => {
-              toast.error(tAuth('logoutFailed'), {
-                context: { error: err instanceof Error ? err.message : String(err) },
-              })
-            })
-          }}
-          aria-label={tAuth('logout')}
-          className="flex items-center justify-center"
-        >
-          <Avatar
-            icon={<LogOut className="h-5 w-5" />}
-            classNames={{
-              base: cn(
-                'h-12 w-12 cursor-pointer rounded-[24px] bg-default-100 text-default-foreground',
-                'transition-all duration-200 hover:rounded-2xl hover:bg-danger hover:text-danger-foreground',
               ),
               icon: 'text-current',
             }}

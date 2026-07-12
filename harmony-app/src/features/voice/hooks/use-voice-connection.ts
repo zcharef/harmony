@@ -52,7 +52,8 @@ function insertSelfIntoParticipantCache(
   queryClient: ReturnType<typeof useQueryClient>,
 ): void {
   if (userId === undefined) return
-  const room = useVoiceConnectionStore.getState().room
+  const voiceState = useVoiceConnectionStore.getState()
+  const room = voiceState.room
   const liveKitName = room?.localParticipant.name ?? ''
   // WHY: LiveKit only knows the name embedded in the token grant, which can be
   // empty. Fall back to the cached profile username so the sidebar never shows
@@ -72,10 +73,32 @@ function insertSelfIntoParticipantCache(
           userId,
           displayName,
           joinedAt: new Date().toISOString(),
-          isMuted: false,
-          isDeafened: false,
+          // WHY: Seed from the store, not hardcoded false — a user who muted or
+          // deafened BEFORE joining (persisted pre-call intent) must appear
+          // muted/deafened to themselves immediately on join.
+          isMuted: voiceState.isMuted,
+          isDeafened: voiceState.isDeafened,
         },
       ]
+    },
+  )
+}
+
+/** WHY: A user who muted/deafened BEFORE joining (persisted pre-call intent)
+ * differs from the server's unmuted-by-default join upsert. Push that state once
+ * so other clients see the mute/deafen via SSE from the start — the mute/deaf
+ * sync effect fires only on a value CHANGE and a pre-muted user's value does not
+ * change across join, so it cannot cover this. Background op: log-only on
+ * failure (ADR-028). No-op when the state is the default (unmuted, undeafened).
+ * Extracted to keep handleJoinVoice under Biome's cognitive-complexity limit. */
+function syncInitialVoiceState(sessionId: string): void {
+  const { isMuted, isDeafened } = useVoiceConnectionStore.getState()
+  if (!isMuted && !isDeafened) return
+  updateVoiceState({ body: { sessionId, isMuted, isDeafened }, throwOnError: true }).catch(
+    (err: unknown) => {
+      logger.warn('voice_initial_state_sync_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
     },
   )
 }
@@ -441,9 +464,15 @@ export function useVoiceConnection() {
         // Mirrors the evictFromPreviousChannel pattern.
         insertSelfIntoParticipantCache(channelId, userId, queryClient)
         sessionIdRef.current = data.sessionId
-        // WHY (H2): Reset the guard so the mute/deaf sync useEffect skips the
-        // initial post-join render (server already has is_muted=false from upsert).
+        // WHY (H2): Skip the first post-join mute/deaf sync effect run — the
+        // server upsert already wrote is_muted=false,is_deafened=false, and the
+        // effect only fires on a value CHANGE (a pre-muted user's value does not
+        // change across join, so it would never fire anyway).
         isInitialMuteDeafRef.current = true
+        // WHY: A pre-muted/deafened user (persisted pre-call intent) differs
+        // from the server's unmuted default — push it once explicitly so other
+        // clients see it via SSE from the start (the sync effect cannot).
+        syncInitialVoiceState(data.sessionId)
         // WHY: Store the server-provided TTL so scheduleTokenRefresh uses the
         // dynamic value instead of the hardcoded fallback.
         ttlSecsRef.current = data.ttlSecs ?? FALLBACK_TOKEN_TTL_SECS

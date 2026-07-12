@@ -13,7 +13,7 @@ import {
 } from '@heroui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { TFunction } from 'i18next'
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy, LogOut } from 'lucide-react'
 import { type ChangeEvent, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -32,6 +32,8 @@ import type { ProfileResponse } from '@/lib/api'
 import { getApiErrorDetail } from '@/lib/api-error'
 import { resolveDisplayName } from '@/lib/display-name'
 import { isTauri } from '@/lib/platform'
+import { supabase } from '@/lib/supabase'
+import { toast } from '@/lib/toast'
 import { DesktopSettingsTab } from './desktop-settings-tab'
 import { type UserSettingsTab, useSettingsUiStore } from './stores/settings-ui-store'
 
@@ -91,6 +93,7 @@ function resolveBannerErrorMessage(error: unknown, t: TFunction<'settings'>): st
  */
 export function UserSettingsModal() {
   const { t } = useTranslation('settings')
+  const { t: tAuth } = useTranslation('auth')
   const isOpen = useSettingsUiStore((s) => s.showUserSettings)
   const selectedTab = useSettingsUiStore((s) => s.userSettingsTab)
   const setUserSettingsTab = useSettingsUiStore((s) => s.setUserSettingsTab)
@@ -146,6 +149,26 @@ export function UserSettingsModal() {
               </Tab>
             )}
           </Tabs>
+          {/* WHY: Logout lives here (bottom-left, red) — the single sign-out
+              entry point, moved out of the left server rail. onAuthStateChange
+              clears the auth store and redirects, so no manual teardown here. */}
+          <div className="flex justify-start pt-2">
+            <Button
+              variant="light"
+              color="danger"
+              startContent={<LogOut className="h-4 w-4" />}
+              onPress={() => {
+                supabase.auth.signOut().catch((err: unknown) => {
+                  toast.error(tAuth('logoutFailed'), {
+                    context: { error: err instanceof Error ? err.message : String(err) },
+                  })
+                })
+              }}
+              data-test="user-settings-logout-button"
+            >
+              {tAuth('logout')}
+            </Button>
+          </div>
         </ModalBody>
       </ModalContent>
     </Modal>
