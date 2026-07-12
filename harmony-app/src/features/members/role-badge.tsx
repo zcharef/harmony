@@ -6,7 +6,7 @@ import type { MemberRole } from './moderation-types'
 const ROLE_ICON_CLASS: Record<MemberRole, string> = {
   owner: 'text-warning',
   admin: 'text-danger',
-  moderator: 'text-primary',
+  moderator: 'text-accent',
   member: '',
 }
 

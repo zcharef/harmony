@@ -54,7 +54,7 @@ export function MentionPill({ userId, mentions, serverId }: MentionPillProps) {
     <span
       data-test="mention-pill"
       data-mention-user-id={userId}
-      className="cursor-default rounded bg-primary/10 px-1 font-medium text-primary"
+      className="cursor-default rounded bg-accent/10 px-1 font-medium text-accent"
     >
       @{resolveDisplayName(resolved)}
     </span>
