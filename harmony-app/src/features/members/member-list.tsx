@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/shared/error-state'
 import { useAuthStore } from '@/features/auth'
+import { useCreateDm } from '@/features/dms'
 import { StatusIndicator, usePresenceStore } from '@/features/presence'
 import {
   FoundingBadge,
@@ -228,11 +229,23 @@ function MemberRow({
   const displayName = resolveDisplayName(member)
   const isSelf = member.userId === currentUserId
   const officialUserIds = useOfficialBadges()
+  const createDm = useCreateDm()
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false)
 
   function handleContextMenu(e: React.MouseEvent) {
     e.preventDefault()
     setIsContextMenuOpen(true)
+  }
+
+  // WHY here (not in profiles): keeps `members → dms` one-directional. Reuses the
+  // canonical open-or-create-DM flow; useCreateDm.onError already toasts/logs, so
+  // the call site only supplies onSuccess (ADR-045, matches the context menu).
+  function handleStartDm(userId: string) {
+    createDm.mutate(userId, {
+      onSuccess: (data) => {
+        onNavigateDm(data.serverId, data.channelId)
+      },
+    })
   }
 
   // WHY the wrapper + invisible anchor: the row needs TWO overlays — a
@@ -244,7 +257,7 @@ function MemberRow({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: onContextMenu (right-click) opens the moderation menu; the primary press action lives on the inner button (the ProfilePopover trigger), which carries the interactive semantics
     <div className="relative" onContextMenu={handleContextMenu}>
-      <ProfilePopover userId={member.userId} serverId={serverId}>
+      <ProfilePopover userId={member.userId} serverId={serverId} onStartDm={handleStartDm}>
         <button
           type="button"
           data-test="member-item"
