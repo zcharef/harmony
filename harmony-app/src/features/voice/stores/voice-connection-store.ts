@@ -405,6 +405,118 @@ async function attachKrispProcessor(track: LocalAudioTrack): Promise<void> {
   return krispInitPromise
 }
 
+/** WHY (bug 3): The local activity ring must analyze the SAME audio that is
+ * published — post-KRISP when KRISP is on (so the ring does not light on
+ * keyboard noise KRISP strips from the outgoing track), and the raw capture
+ * track when KRISP is off (nothing is filtered, so raw IS the published audio).
+ * KRISP attaches asynchronously, so binding the detector synchronously in
+ * LocalTrackPublished pins it to the RAW pre-KRISP track forever. This helper
+ * (re)binds the detector to the currently-correct track and is called AFTER
+ * attach resolves and on every processed-track change (KRISP toggle, input
+ * device switch). Reads getProcessor()?.processedTrack — the processed
+ * MediaStreamTrack KRISP exposes — falling back to the raw capture track. */
+function rebuildLocalSpeakingDetector(
+  track: LocalAudioTrack,
+  room: Room,
+  get: GetState,
+  set: SetState,
+): void {
+  const audioCtx = getOrCreateAudioContext()
+  if (audioCtx === null) return
+
+  const localIdentity = room.localParticipant.identity
+
+  // WHY: Tear down the previous local detector before rebinding so we never
+  // leak an AnalyserNode still wired to the old (raw or previous-mic) track.
+  const existing = speakerDetectorCleanups.get(localIdentity)
+  if (existing !== undefined) {
+    existing()
+    speakerDetectorCleanups.delete(localIdentity)
+  }
+
+  // WHY: Only read the processed track when KRISP is enabled. When it is off the
+  // published audio is the raw capture track, so the ring must read raw too.
+  const processedTrack = get().isKrispEnabled ? track.getProcessor()?.processedTrack : undefined
+  const sourceTrack = processedTrack ?? track.mediaStreamTrack
+
+  const detectorCleanup = createSpeakingDetector(audioCtx, sourceTrack, (speaking) => {
+    if (speaking) hasSpokenSinceLastHeartbeat = true
+    updateSpeaker(localIdentity, speaking, get, set)
+  })
+  speakerDetectorCleanups.set(localIdentity, detectorCleanup)
+}
+
+/** WHY (bug 2 + bug 3): switchActiveDevice('audioinput', …) replaces the mic
+ * track and emits TrackEvent.Restarted — NOT LocalTrackPublished — so the
+ * KRISP-attach wired to LocalTrackPublished never re-runs. LiveKit's internal
+ * processor.restart() rebuilds the worklet but leaves it DISABLED, so KRISP
+ * silently stops suppressing noise on the new mic. Re-assert the user's KRISP
+ * toggle state on the new track, then rebuild the local speaking detector from
+ * the resulting processed track (bug 3) once the re-assert settles — so the
+ * detector never binds to the raw new-mic capture. Covers the manual selector
+ * switch AND the store's restorePreferredDevice / fallBackIfDeviceGone paths. */
+function reapplyKrispOnInputChange(
+  track: LocalAudioTrack,
+  room: Room,
+  get: GetState,
+  set: SetState,
+): void {
+  const { isKrispEnabled } = get()
+
+  const reassert = async (): Promise<void> => {
+    // WHY: Await any in-flight initial attach so we do not race its setEnabled.
+    if (krispInitPromise !== null) await krispInitPromise
+    if (krispProcessorRef !== null) {
+      // WHY: Re-apply the user's toggle state — respect KRISP-off, never
+      // force-enable. LiveKit left the rebuilt worklet disabled.
+      await krispProcessorRef.setEnabled(isKrispEnabled)
+    } else if (isKrispEnabled) {
+      // WHY: No processor yet (KRISP was off at publish, toggled on, then the
+      // device switched) — attach fresh on the current mic track.
+      await attachKrispProcessor(track)
+    }
+  }
+
+  reassert()
+    .catch((err: unknown) => {
+      logger.warn('voice_krisp_device_change_reapply_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
+    .finally(() => {
+      // WHY (bug 3): Rebuild AFTER the re-assert settles so processedTrack is the
+      // new mic's, not the previous one. On KRISP-off it reads the raw track.
+      rebuildLocalSpeakingDetector(track, room, get, set)
+    })
+}
+
+/** WHY: Runs on RoomEvent.ActiveDeviceChanged. Only an audioinput change touches
+ * the mic pipeline (KRISP + the local detector); audiooutput/videoinput changes
+ * are irrelevant. */
+function handleActiveDeviceChanged(
+  kind: MediaDeviceKind,
+  room: Room,
+  get: GetState,
+  set: SetState,
+): void {
+  if (kind !== 'audioinput') return
+  const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
+  const track = micPub?.track
+  if (!(track instanceof LocalAudioTrack)) return
+
+  reapplyKrispOnInputChange(track, room, get, set)
+}
+
+/** WHY: Rebind the local speaking detector to the current mic publication's
+ * track. Shared by toggleKrisp (raw ↔ processed swap) so the caller stays under
+ * Biome's cognitive-complexity limit; no-op when there is no local mic track. */
+function rebuildDetectorFromMic(room: Room, get: GetState, set: SetState): void {
+  const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
+  if (micPub?.track instanceof LocalAudioTrack) {
+    rebuildLocalSpeakingDetector(micPub.track, room, get, set)
+  }
+}
+
 /** WHY: Extracted to reduce connect() cognitive complexity below Biome's limit of 15. */
 function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
   /** WHY: Registers a listener and stores a cleanup closure so removeRoomListeners()
@@ -542,32 +654,37 @@ function registerRoomEvents(room: Room, get: GetState, set: SetState): void {
       trackPublication.source === Track.Source.Microphone &&
       trackPublication.track instanceof LocalAudioTrack
     ) {
+      const localTrack = trackPublication.track
       // WHY: KRISP attaches via LocalTrackPublished per LiveKit docs.
       if (get().isKrispEnabled) {
-        attachKrispProcessor(trackPublication.track).catch((err: unknown) => {
-          logger.warn('voice_krisp_init_failed', {
-            error: err instanceof Error ? err.message : String(err),
+        attachKrispProcessor(localTrack)
+          .catch((err: unknown) => {
+            logger.warn('voice_krisp_init_failed', {
+              error: err instanceof Error ? err.message : String(err),
+            })
+            set({ isKrispEnabled: false })
           })
-          set({ isKrispEnabled: false })
-        })
-      }
-
-      // WHY: Client-side speaking detection for the local participant.
-      // Uses mediaStreamTrack which returns post-KRISP audio when active.
-      const audioCtx = getOrCreateAudioContext()
-      if (audioCtx !== null) {
-        const localIdentity = room.localParticipant.identity
-        const detectorCleanup = createSpeakingDetector(
-          audioCtx,
-          trackPublication.track.mediaStreamTrack,
-          (speaking) => {
-            if (speaking) hasSpokenSinceLastHeartbeat = true
-            updateSpeaker(localIdentity, speaking, get, set)
-          },
-        )
-        speakerDetectorCleanups.set(localIdentity, detectorCleanup)
+          // WHY (bug 3): Build the local speaking detector only AFTER attach
+          // settles so it binds to the post-KRISP processed track — never the
+          // raw pre-KRISP capture. On failure isKrispEnabled is now false, so
+          // rebuild reads the raw track (correct — nothing is filtered).
+          .finally(() => {
+            rebuildLocalSpeakingDetector(localTrack, room, get, set)
+          })
+      } else {
+        // WHY: KRISP off — the published audio is the raw capture track, so the
+        // detector reads it directly (nothing is filtered).
+        rebuildLocalSpeakingDetector(localTrack, room, get, set)
       }
     }
+  })
+
+  // WHY (bug 2 + bug 3): An input-device switch replaces the mic track without
+  // re-firing LocalTrackPublished. Re-assert KRISP to the user's toggle state
+  // and rebind the detector to the new processed track.
+  onRoom(RoomEvent.ActiveDeviceChanged, (kind: MediaDeviceKind) => {
+    if (get().room !== room) return
+    handleActiveDeviceChanged(kind, room, get, set)
   })
 }
 
@@ -913,6 +1030,11 @@ export const useVoiceConnectionStore = create<VoiceConnectionState>()((set, get)
           await attachKrispProcessor(micPub.track)
         }
       }
+
+      // WHY (bug 3): The published audio just changed (raw ↔ post-KRISP), so
+      // rebuild the detector to read the new source — processed when now on,
+      // raw when now off — keeping the activity ring in sync with the toggle.
+      rebuildDetectorFromMic(room, get, set)
     }
 
     doToggle().catch((err: unknown) => {

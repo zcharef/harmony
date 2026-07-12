@@ -43,7 +43,7 @@ import {
   useServers,
 } from '@/features/server-nav'
 import { ServerSettings, UserSettingsModal, useSettingsUiStore } from '@/features/settings'
-import { useVoiceConnection } from '@/features/voice'
+import { useRealtimeVoicePresence, useVoiceConnection } from '@/features/voice'
 import { useFetchSSE } from '@/hooks/use-fetch-sse'
 import { useAboutUiStore } from '@/lib/about-ui-store'
 import { type ConnectionStatus, useConnectionStatus } from '@/lib/connection-store'
@@ -588,6 +588,12 @@ export function MainLayout({ initialServerId = null }: MainLayoutProps) {
   // which killed the heartbeat → server swept sessions after 75s → names
   // disappeared while audio was still working (LiveKit P2P is independent).
   const { joinVoice } = useVoiceConnection()
+  // WHY: Global voice-presence reconciliation. On any voice Joined(userId, B)
+  // it evicts userId from every OTHER channel's participant cache, killing the
+  // ghost-presence-on-switch staleness even for servers/channels whose lists
+  // are not mounted. Mounted here (not a sidebar) so it survives view switches
+  // (§4.6) — the same reason useVoiceConnection lives here.
+  useRealtimeVoicePresence()
   const { data: channels } = useChannels(selectedServerId)
 
   // WHY: DM list needed to derive chat header info (recipient name) when in DM view
