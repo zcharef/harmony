@@ -24,8 +24,30 @@ const MENTION_UUID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
 const SERVER_ID = 'server-1'
 const CHANNEL_ID = 'channel-1'
 
-const { sendMutate, membersState, composerAttachments, messagesState } = vi.hoisted(() => ({
+const {
+  sendMutate,
+  membersState,
+  composerAttachments,
+  messagesState,
+  platformState,
+  cryptoStoreState,
+  cryptoGateState,
+  sendArgs,
+} = vi.hoisted(() => ({
   sendMutate: vi.fn(),
+  // WHY mutable platform: most tests run as web (isTauri false); the DM
+  // encryption gate + banner tests flip this to desktop per-test and reset after.
+  platformState: { isTauri: false },
+  // WHY mutable crypto store: the desktop gate needs an initialized local device
+  // to produce an encryption param; default matches the original web-uninitialized
+  // stub so the pre-existing tests are unaffected.
+  cryptoStoreState: { isInitialized: false, deviceId: null as string | null, initFailed: false },
+  // WHY mutable gate: useRecipientEncryptable's tri-state (true=encryptable,
+  // false=confirmed keyless, undefined=unknown) drives the plaintext-vs-E2EE gate.
+  cryptoGateState: { recipientEncryptable: undefined as boolean | undefined },
+  // WHY captured: useSendMessage is stubbed, so we read the 4th arg (the encryption
+  // param the gate produced) to assert plaintext (undefined) vs E2EE (defined).
+  sendArgs: { encryption: undefined as unknown },
   // WHY mutable: most tests want an empty list (data undefined); the message
   // filter tests seed a loaded window by assigning messagesState.data.
   messagesState: { data: undefined as unknown },
@@ -69,7 +91,17 @@ const { sendMutate, membersState, composerAttachments, messagesState } = vi.hois
 // are stubbed.
 vi.mock('./hooks/use-send-message', () => ({
   OPTIMISTIC_ID_PREFIX: 'temp-',
-  useSendMessage: () => ({ mutate: sendMutate }),
+  // WHY capture the 4th arg: it is the encryption param produced by the real
+  // useDmEncryption gate — undefined ⇒ plaintext send, defined ⇒ E2EE.
+  useSendMessage: (
+    _channelId: string,
+    _userId: string,
+    _username: string,
+    encryption?: unknown,
+  ) => {
+    sendArgs.encryption = encryption
+    return { mutate: sendMutate }
+  },
 }))
 
 vi.mock('./hooks/use-composer-attachments', () => ({
@@ -161,7 +193,8 @@ vi.mock('@/features/presence', () => ({
 }))
 
 vi.mock('@/features/crypto', () => ({
-  DmPlaintextBanner: () => null,
+  // WHY a real testid: the keyless-DM disclosure test asserts the banner renders.
+  DmPlaintextBanner: () => <div data-test="dm-plaintext-banner" />,
   E2eeAlphaBanner: () => null,
   EncryptedChannelNotice: () => null,
   EncryptedMessageContent: () => null,
@@ -177,14 +210,19 @@ vi.mock('@/features/crypto', () => ({
   }),
   useCryptoSession: () => ({ ensureSession: vi.fn() }),
   useCryptoStore: (
-    selector: (s: { isInitialized: boolean; deviceId: null; initFailed: boolean }) => unknown,
-  ) => selector({ isInitialized: false, deviceId: null, initFailed: false }),
+    selector: (s: {
+      isInitialized: boolean
+      deviceId: string | null
+      initFailed: boolean
+    }) => unknown,
+  ) => selector(cryptoStoreState),
   useEncryptedMessages: () => ({
     decryptMessage: vi.fn(),
     loadCachedDecryptions: vi.fn(),
     getCachedPlaintext: vi.fn(),
     setCachedPlaintext: vi.fn(),
   }),
+  useRecipientEncryptable: () => cryptoGateState.recipientEncryptable,
   useSafetyNumber: () => ({ safetyNumber: null, isLoading: false }),
   useTrustLevel: () => ({ trustLevel: 'unverified', setLevel: vi.fn() }),
 }))
@@ -193,7 +231,10 @@ vi.mock('@/features/preferences', () => ({
   usePreferences: () => ({ data: { hideProfanity: false } }),
 }))
 
-vi.mock('@/lib/platform', () => ({ isTauri: () => false }))
+vi.mock('@/lib/platform', () => ({
+  isTauri: () => platformState.isTauri,
+  openExternalUrl: vi.fn(),
+}))
 vi.mock('@/lib/crypto', () => ({ encrypt: vi.fn() }))
 vi.mock('@/lib/crypto-cache', () => ({ cacheMessage: vi.fn(async () => undefined) }))
 
@@ -498,5 +539,85 @@ describe('ChatArea plan-gate send feedback', () => {
     const onError = await captureSendOnError()
     onError({ status: 500, title: 'Server Error', detail: 'boom' })
     expect(composerAttachments.setSendError).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * Desktop DM encryption gate + plaintext disclosure (E9). Desktop forces E2EE for
+ * DMs, but a keyless (web-only) recipient cannot receive it — encrypting to them
+ * 404s and fails the send closed. The gate must fall back to plaintext (with the
+ * disclosure banner) ONLY for a confirmed-keyless recipient, and NEVER downgrade a
+ * recipient who has keys. `sendArgs.encryption` is the encryption param the real
+ * useDmEncryption gate produced: undefined ⇒ plaintext, defined ⇒ E2EE.
+ */
+describe('ChatArea desktop DM encryption gate', () => {
+  const RECIPIENT = {
+    id: 'user-friend',
+    username: 'friend',
+    displayName: null,
+    avatarUrl: null,
+  }
+
+  function renderDesktopDm() {
+    const Wrapper = createQueryWrapper(createTestQueryClient())
+    return render(
+      <Wrapper>
+        <ChatArea
+          channelId={CHANNEL_ID}
+          channelName={null}
+          serverId={SERVER_ID}
+          currentUserRole="member"
+          isDm
+          dmRecipient={RECIPIENT}
+        />
+      </Wrapper>,
+    )
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sendArgs.encryption = 'unset'
+    // Desktop with an initialized local device — the prerequisites for E2EE.
+    platformState.isTauri = true
+    cryptoStoreState.isInitialized = true
+    cryptoStoreState.deviceId = 'device-local'
+    cryptoStoreState.initFailed = false
+  })
+
+  afterEach(() => {
+    platformState.isTauri = false
+    cryptoStoreState.isInitialized = false
+    cryptoStoreState.deviceId = null
+    cryptoGateState.recipientEncryptable = undefined
+  })
+
+  it('encrypts (no plaintext downgrade) when the recipient has keys', () => {
+    cryptoGateState.recipientEncryptable = true
+    renderDesktopDm()
+
+    // The gate produced an encryption param ⇒ the DM is sent E2EE.
+    expect(sendArgs.encryption).toBeDefined()
+    expect(sendArgs.encryption).toHaveProperty('encryptFn')
+    // No plaintext disclosure banner when the DM is actually encrypted.
+    expect(screen.queryByTestId('dm-plaintext-banner')).toBeNull()
+  })
+
+  it('sends plaintext + shows the disclosure banner for a confirmed-keyless recipient', () => {
+    cryptoGateState.recipientEncryptable = false
+    renderDesktopDm()
+
+    // The gate returned undefined ⇒ plaintext send (no throw, no fail-closed).
+    expect(sendArgs.encryption).toBeUndefined()
+    // The user is told the DM is not encrypted (recipient has no keys).
+    expect(screen.getByTestId('dm-plaintext-banner')).toBeTruthy()
+  })
+
+  it('keeps E2EE (never downgrades) while the capability probe is unknown', () => {
+    // undefined = query loading / errored: must NOT be read as keyless.
+    cryptoGateState.recipientEncryptable = undefined
+    renderDesktopDm()
+
+    expect(sendArgs.encryption).toBeDefined()
+    expect(screen.queryByTestId('dm-plaintext-banner')).toBeNull()
   })
 })

@@ -34,5 +34,6 @@
   "e2eeInitFailed": "End-to-end encryption failed to initialize. Messages will be sent without encryption.",
   "dmWebPlaintext": "Messages you send here are not encrypted. Use the desktop app for end-to-end encryption.",
   "encryptedTooltip": "End-to-end encrypted",
-  "notEncryptedTooltip": "Not encrypted — sent from web"
+  "notEncryptedTooltip": "Not encrypted — sent from web",
+  "dmEncryptionFailed": "Message not sent — it could not be encrypted. Please try again."
 }

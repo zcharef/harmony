@@ -39,6 +39,7 @@ import {
   useCryptoSession,
   useCryptoStore,
   useEncryptedMessages,
+  useRecipientEncryptable,
   useSafetyNumber,
   useTrustLevel,
   VerifyIdentityModal,
@@ -974,10 +975,18 @@ function useInputPlaceholder(
  * WHY extracted: Builds the E2EE encryption parameter for DM message sending.
  * Returns undefined when encryption is not applicable (not DM, not desktop, no session).
  * This keeps crypto concerns out of the main ChatArea rendering logic.
+ *
+ * WHY the capability gate: a recipient with no registered device (every web-only user)
+ * cannot receive E2EE — encrypting to them 404s server-side and fails the send closed.
+ * When the recipient is CONFIRMED keyless (`recipientEncryptable === false`) we return
+ * undefined so the DM sends plaintext, exactly as web↔web DMs already do. `undefined`
+ * (unknown: query loading/errored) keeps E2EE on — a transient probe failure must never
+ * silently downgrade a recipient who might hold keys (confidentiality invariant).
  */
 function useDmEncryption(
   isDm: boolean,
   recipientUserId: string | null,
+  recipientEncryptable: boolean | undefined,
   /** WHY: Updates the in-memory decrypt cache so the sender can read their own message. */
   setCachedPlaintext?: (messageId: string, plaintext: string) => void,
 ): SendMessageEncryption | undefined {
@@ -987,7 +996,14 @@ function useDmEncryption(
   const deviceId = useCryptoStore((s) => s.deviceId)
 
   return useMemo(() => {
-    if (!isDm || !isDesktop || !isInitialized || recipientUserId === null || deviceId === null) {
+    if (
+      !isDm ||
+      !isDesktop ||
+      !isInitialized ||
+      recipientUserId === null ||
+      deviceId === null ||
+      recipientEncryptable === false
+    ) {
       return undefined
     }
 
@@ -1016,7 +1032,16 @@ function useDmEncryption(
         )
       },
     }
-  }, [isDm, isDesktop, isInitialized, recipientUserId, deviceId, ensureSession, setCachedPlaintext])
+  }, [
+    isDm,
+    isDesktop,
+    isInitialized,
+    recipientUserId,
+    deviceId,
+    recipientEncryptable,
+    ensureSession,
+    setCachedPlaintext,
+  ])
 }
 
 /**
@@ -1177,9 +1202,12 @@ function useDecryptionCachePreload(
 function EncryptionBannerSection({
   isDm,
   isChannelEncrypted,
+  isDesktopDmKeyless,
 }: {
   isDm: boolean
   isChannelEncrypted: boolean
+  /** WHY: Desktop DM whose recipient has no keys — plaintext, so disclose it too. */
+  isDesktopDmKeyless: boolean
 }) {
   if (!isTauri() && isChannelEncrypted) {
     return (
@@ -1189,7 +1217,9 @@ function EncryptionBannerSection({
     )
   }
   // WHY: DMs on web work (plaintext), but show a softer informational banner.
-  if (!isTauri() && isDm) {
+  // Same disclosure on desktop when the recipient is keyless (web-only user): the
+  // DM is plaintext because they cannot receive encryption, and the user should know.
+  if ((!isTauri() && isDm) || isDesktopDmKeyless) {
     return (
       <div className="mt-4">
         <DmPlaintextBanner />
@@ -1206,6 +1236,7 @@ function EncryptionBannerSection({
 function MessageListStatus({
   isDm,
   isChannelEncrypted,
+  isDesktopDmKeyless,
   channelId,
   channelName,
   dmRecipient,
@@ -1219,6 +1250,8 @@ function MessageListStatus({
 }: {
   isDm: boolean
   isChannelEncrypted: boolean
+  /** WHY: Desktop DM whose recipient has no keys — plaintext, disclose it. */
+  isDesktopDmKeyless: boolean
   channelId: string
   channelName: string | null
   dmRecipient: DmRecipientResponse | null
@@ -1248,7 +1281,11 @@ function MessageListStatus({
             channelName={channelName}
             subtitle={t('channelStart', { channelName: channelName ?? t('channelFallback') })}
           />
-          <EncryptionBannerSection isDm={isDm} isChannelEncrypted={isChannelEncrypted} />
+          <EncryptionBannerSection
+            isDm={isDm}
+            isChannelEncrypted={isChannelEncrypted}
+            isDesktopDmKeyless={isDesktopDmKeyless}
+          />
           <Divider className="mt-4" />
         </div>
       )}
@@ -1278,7 +1315,11 @@ function MessageListStatus({
             channelName={channelName}
             subtitle={t('noMessagesYet')}
           />
-          <EncryptionBannerSection isDm={isDm} isChannelEncrypted={isChannelEncrypted} />
+          <EncryptionBannerSection
+            isDm={isDm}
+            isChannelEncrypted={isChannelEncrypted}
+            isDesktopDmKeyless={isDesktopDmKeyless}
+          />
         </div>
       )}
     </>
@@ -1366,8 +1407,21 @@ export function ChatArea({
     setCachedPlaintext: setChannelCachedPlaintext,
   } = useChannelEncryption()
 
-  // WHY: Build encryption param for DMs on desktop. Undefined for channels or web.
-  const dmEncryption = useDmEncryption(isDm, dmRecipient?.id ?? null, setCachedPlaintext)
+  // WHY: Probe whether the DM recipient can receive E2EE (has ≥1 registered device).
+  // `false` = confirmed keyless (web-only user) → send plaintext instead of failing closed;
+  // `undefined` = unknown/web → keep E2EE on (never downgrade a possible key-holder).
+  const recipientEncryptable = useRecipientEncryptable(isDm ? (dmRecipient?.id ?? null) : null)
+  // WHY: Build encryption param for DMs on desktop. Undefined for channels, web, or a
+  // confirmed-keyless recipient (then the DM sends plaintext, disclosed via the banner).
+  const dmEncryption = useDmEncryption(
+    isDm,
+    dmRecipient?.id ?? null,
+    recipientEncryptable,
+    setCachedPlaintext,
+  )
+  // WHY: On desktop, a confirmed-keyless DM recipient means this DM is plaintext (they
+  // cannot receive encryption). Surface the same disclosure banner web DMs already show.
+  const isDesktopDmKeyless = isDm && isTauri() && recipientEncryptable === false
   // WHY: Build encryption param for encrypted channels on desktop.
   const channelEncryption = useChannelEncryptionParam(
     isChannelEncrypted,
@@ -1810,6 +1864,7 @@ export function ChatArea({
           <MessageListStatus
             isDm={isDm}
             isChannelEncrypted={isChannelEncrypted}
+            isDesktopDmKeyless={isDesktopDmKeyless}
             channelId={channelId}
             channelName={channelName}
             dmRecipient={dmRecipient}

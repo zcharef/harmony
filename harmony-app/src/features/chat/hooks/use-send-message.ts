@@ -15,6 +15,7 @@ import { isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
 import { toastApiError } from '@/lib/toast'
+import { DmEncryptionError } from '../lib/dm-encryption-error'
 import { OPTIMISTIC_ID_PREFIX } from '../lib/optimistic-id'
 import { buildParentPreview } from './build-parent-preview'
 
@@ -97,13 +98,19 @@ export function useSendMessage(
   return useMutation({
     mutationFn: async (input: SendMessageInput) => {
       // WHY encrypted context is fail-closed: When `encryption` is present the user
-      // believes this DM is end-to-end encrypted. If encryptFn fails (recipient has
-      // no pre-key bundle → 404, Olm/ratchet error, Tauri invoke failure) we MUST NOT
-      // silently send the content in cleartext — that is a confidentiality downgrade
-      // the user never consented to and stores their message plaintext server-side.
-      // We reject the mutation instead so onError surfaces visible feedback and
-      // nothing is sent. sendMessage is called outside the catch so genuine API
-      // errors still propagate to onError as expected.
+      // believes this DM is end-to-end encrypted. If encryptFn fails (Olm/ratchet error,
+      // exhausted one-time keys, Tauri invoke failure) we MUST NOT silently send the
+      // content in cleartext — that is a confidentiality downgrade the user never
+      // consented to and stores their message plaintext server-side. We reject the
+      // mutation instead so onError surfaces visible feedback and nothing is sent.
+      // sendMessage is called outside the catch so genuine API errors still propagate
+      // to onError as expected.
+      //
+      // NOTE: a KEYLESS recipient (no registered device) never reaches this branch —
+      // useDmEncryption returns undefined for them, so their DM goes plaintext (with the
+      // disclosure banner). This throw is therefore a genuine encryption failure for a
+      // recipient who IS supposed to be encryptable; it is tagged so onError can surface
+      // the specific, actionable reason instead of the generic fallback (ADR-027).
       if (encryption !== undefined) {
         let encrypted: { content: string; senderDeviceId: string }
         try {
@@ -114,9 +121,7 @@ export function useSendMessage(
             error:
               encryptionError instanceof Error ? encryptionError.message : String(encryptionError),
           })
-          throw new Error(
-            'Message not sent — could not encrypt it. Your recipient may not have encryption set up.',
-          )
+          throw new DmEncryptionError(i18n.t('crypto:dmEncryptionFailed'))
         }
 
         // WHY only here: the server cannot parse ciphertext, so the encrypted
@@ -289,7 +294,13 @@ export function useSendMessage(
           onRateLimited(Number(waitMatch[1]))
         }
       }
-      toastApiError(error, i18n.t('chat:sendMessageFailed'))
+      // WHY the encryption branch: a DmEncryptionError already carries the specific,
+      // actionable reason (ADR-027 — do not swallow it behind the generic string).
+      // getApiErrorDetail only unwraps RFC 9457 ProblemDetails, so we pass the tagged
+      // message as the fallback for this case; every other error keeps the generic one.
+      const fallback =
+        error instanceof DmEncryptionError ? error.message : i18n.t('chat:sendMessageFailed')
+      toastApiError(error, fallback)
 
       // WHY rollback: Restore the exact cache state from before the mutation
       // so the user does not see a ghost message that never reached the server
