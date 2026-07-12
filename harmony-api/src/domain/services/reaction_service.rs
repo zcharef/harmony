@@ -591,10 +591,13 @@ mod tests {
             _caller_user_id: &UserId,
             _query_text: &str,
             _filters: &crate::domain::ports::MessageSearchFilters,
-            _cursor: Option<DateTime<Utc>>,
+            _cursor: Option<crate::domain::ports::SearchCursor>,
             _limit: i64,
-        ) -> Result<Vec<MessageWithAuthor>, DomainError> {
-            Ok(vec![])
+        ) -> Result<crate::domain::ports::SearchPage, DomainError> {
+            Ok(crate::domain::ports::SearchPage {
+                messages: vec![],
+                next_cursor: None,
+            })
         }
         async fn update_content(
             &self,
