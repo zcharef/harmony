@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use url::{Host, Url};
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{IdentityImageKind, Profile, UserId};
@@ -81,14 +82,29 @@ const RESERVED_USERNAMES: &[&str] = &[
 pub struct ProfileService {
     repo: Arc<dyn ProfileRepository>,
     content_filter: Arc<ContentFilter>,
+    /// Whether loopback `http://` avatar/banner URLs are accepted.
+    ///
+    /// WHY: Production serves identity images over `https://` and requires it
+    /// strictly. The local dev stack serves them from Supabase storage over
+    /// plain `http://127.0.0.1:64321/...`, which would otherwise be unreachable
+    /// through the https-only gate — making avatar/banner (and scan-before-
+    /// reveal) untestable locally. Wired to `!config.is_production()` at the
+    /// composition root: `true` only when NOT production, and even then only
+    /// loopback hosts are allowed (never arbitrary http).
+    allow_insecure_local_urls: bool,
 }
 
 impl ProfileService {
     #[must_use]
-    pub fn new(repo: Arc<dyn ProfileRepository>, content_filter: Arc<ContentFilter>) -> Self {
+    pub fn new(
+        repo: Arc<dyn ProfileRepository>,
+        content_filter: Arc<ContentFilter>,
+        allow_insecure_local_urls: bool,
+    ) -> Self {
         Self {
             repo,
             content_filter,
+            allow_insecure_local_urls,
         }
     }
 
@@ -432,18 +448,7 @@ impl ProfileService {
         }
 
         if let Some(Some(ref url)) = avatar_url {
-            if !url.starts_with("https://") {
-                return Err(DomainError::ValidationError(
-                    "Avatar URL must use HTTPS".to_string(),
-                ));
-            }
-            // WHY: 2048 is the conventional browser URL ceiling — anything
-            // longer is not a fetchable avatar, just column bloat.
-            if url.len() > 2048 {
-                return Err(DomainError::ValidationError(
-                    "Avatar URL must be at most 2048 characters".to_string(),
-                ));
-            }
+            validate_image_url(url, "Avatar", self.allow_insecure_local_urls)?;
         }
 
         if let Some(Some(ref name)) = display_name {
@@ -479,16 +484,7 @@ impl ProfileService {
         }
 
         if let Some(Some(ref url)) = banner_url {
-            if !url.starts_with("https://") {
-                return Err(DomainError::ValidationError(
-                    "Banner URL must use HTTPS".to_string(),
-                ));
-            }
-            if url.len() > 2048 {
-                return Err(DomainError::ValidationError(
-                    "Banner URL must be at most 2048 characters".to_string(),
-                ));
-            }
+            validate_image_url(url, "Banner", self.allow_insecure_local_urls)?;
         }
 
         // Apply text fields first. Identity IMAGES are NOT written here: a
@@ -581,6 +577,61 @@ impl ProfileService {
         nsfw_score: Option<f32>,
     ) -> Result<Option<Profile>, DomainError> {
         self.repo.reject_image(user_id, kind, url, nsfw_score).await
+    }
+}
+
+/// Validate an identity-image URL (avatar or banner).
+///
+/// Always accepts `https://` (unchanged production rule). When
+/// `allow_insecure_local` is `true` (non-production only) it ALSO accepts
+/// `http://` whose host is loopback (`127.0.0.1` / `localhost` / `[::1]`), so
+/// local Supabase storage (`http://127.0.0.1:64321/...`) is testable on the dev
+/// stack. Non-loopback `http://` and every non-http scheme are rejected in
+/// every environment. Enforces the 2048-char ceiling last.
+///
+/// `label` is the field name embedded in the user-facing error ("Avatar" /
+/// "Banner"), keeping the message identical to the pre-refactor behavior.
+fn validate_image_url(
+    url: &str,
+    label: &str,
+    allow_insecure_local: bool,
+) -> Result<(), DomainError> {
+    let is_https = url.starts_with("https://");
+    let is_allowed_local = allow_insecure_local && is_loopback_http(url);
+    if !is_https && !is_allowed_local {
+        return Err(DomainError::ValidationError(format!(
+            "{label} URL must use HTTPS"
+        )));
+    }
+    // WHY: 2048 is the conventional browser URL ceiling — anything longer is
+    // not a fetchable image, just column bloat.
+    if url.len() > 2048 {
+        return Err(DomainError::ValidationError(format!(
+            "{label} URL must be at most 2048 characters"
+        )));
+    }
+    Ok(())
+}
+
+/// Whether `raw` is an `http://` URL pointing at a loopback host.
+///
+/// Parses the URL and inspects the host so that only genuine loopback targets
+/// pass — `127.0.0.0/8`, `::1`, or the literal `localhost`. A domain that
+/// merely embeds a loopback literal (`127.0.0.1.evil.com`, `localhost.evil.com`)
+/// or a userinfo trick (`http://127.0.0.1@evil.com`) resolves to its real,
+/// non-loopback host and is correctly rejected.
+fn is_loopback_http(raw: &str) -> bool {
+    let Ok(parsed) = Url::parse(raw) else {
+        return false;
+    };
+    if parsed.scheme() != "http" {
+        return false;
+    }
+    match parsed.host() {
+        Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
     }
 }
 
@@ -708,7 +759,7 @@ mod tests {
         // 499 already granted → the 500th account receives the badge.
         let repo = Arc::new(FakeProfileRepo::default());
         repo.founding_holders.store(499, SeqCst);
-        let svc = ProfileService::new(repo.clone(), Arc::new(ContentFilter::noop()));
+        let svc = ProfileService::new(repo.clone(), Arc::new(ContentFilter::noop()), false);
         svc.grant_founding_if_eligible(&UserId::new(Uuid::from_u128(1)), Utc::now())
             .await
             .unwrap();
@@ -719,7 +770,8 @@ mod tests {
         repo_full
             .founding_holders
             .store(FOUNDING_MAX_ACCOUNTS, SeqCst);
-        let svc_full = ProfileService::new(repo_full.clone(), Arc::new(ContentFilter::noop()));
+        let svc_full =
+            ProfileService::new(repo_full.clone(), Arc::new(ContentFilter::noop()), false);
         svc_full
             .grant_founding_if_eligible(&UserId::new(Uuid::from_u128(2)), Utc::now())
             .await
@@ -734,7 +786,7 @@ mod tests {
         use std::sync::atomic::Ordering::SeqCst;
 
         let repo = Arc::new(FakeProfileRepo::default());
-        let svc = ProfileService::new(repo.clone(), Arc::new(ContentFilter::noop()));
+        let svc = ProfileService::new(repo.clone(), Arc::new(ContentFilter::noop()), false);
         let user = UserId::new(Uuid::from_u128(7));
 
         // Not official until granted.
@@ -756,7 +808,7 @@ mod tests {
         use std::sync::atomic::Ordering::SeqCst;
 
         let repo = Arc::new(FakeProfileRepo::default());
-        let svc = ProfileService::new(repo.clone(), Arc::new(ContentFilter::noop()));
+        let svc = ProfileService::new(repo.clone(), Arc::new(ContentFilter::noop()), false);
         let user = UserId::new(Uuid::from_u128(8));
 
         svc.grant_official_badge(&user).await.unwrap();
@@ -1077,10 +1129,22 @@ mod tests {
         }
     }
 
+    /// Prod-strict service: `allow_insecure_local_urls = false` (https only).
     fn profile_service() -> ProfileService {
         ProfileService::new(
             Arc::new(FakeProfileRepo::default()),
             Arc::new(ContentFilter::noop()),
+            false,
+        )
+    }
+
+    /// Dev-mode service: `allow_insecure_local_urls = true` — accepts loopback
+    /// `http://` image URLs (Supabase-local storage shape), never prod http.
+    fn profile_service_dev() -> ProfileService {
+        ProfileService::new(
+            Arc::new(FakeProfileRepo::default()),
+            Arc::new(ContentFilter::noop()),
+            true,
         )
     }
 
@@ -1410,6 +1474,163 @@ mod tests {
         );
     }
 
+    // ── image-URL scheme gate: dev http-loopback allowance ──────
+    //
+    // Prod keeps the strict https-only rule (`profile_service()` = false). The
+    // dev stack (`profile_service_dev()` = true) additionally accepts loopback
+    // http, because local Supabase storage serves `http://127.0.0.1:64321/...`.
+    // Non-loopback http and non-http schemes are rejected in EVERY environment.
+
+    #[tokio::test]
+    async fn dev_mode_accepts_http_loopback_avatar_and_banner() {
+        let svc = profile_service_dev();
+
+        // Avatar over 127.0.0.1 (local Supabase storage shape).
+        assert!(
+            svc.update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                Some(Some(
+                    "http://127.0.0.1:64321/storage/v1/object/avatar.png".to_string()
+                )),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .is_ok()
+        );
+
+        // Banner over the `localhost` alias — also loopback.
+        assert!(
+            svc.update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                None,
+                None,
+                None,
+                None,
+                Some(Some(
+                    "http://localhost:64321/storage/v1/object/banner.png".to_string()
+                )),
+            )
+            .await
+            .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn dev_mode_accepts_http_ipv6_loopback() {
+        let svc = profile_service_dev();
+        assert!(
+            svc.update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                Some(Some("http://[::1]:64321/avatar.png".to_string())),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn dev_mode_still_accepts_https() {
+        let svc = profile_service_dev();
+        assert!(
+            svc.update_profile(
+                &UserId::new(Uuid::from_u128(1)),
+                Some(Some("https://cdn.example.com/a.png".to_string())),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn dev_mode_rejects_http_non_loopback() {
+        let svc = profile_service_dev();
+        // A loopback literal embedded in a domain must NOT bypass the check.
+        for url in [
+            "http://evil.example.com/a.png",
+            "http://127.0.0.1.evil.com/a.png",
+            "http://localhost.evil.com/a.png",
+        ] {
+            let err = svc
+                .update_profile(
+                    &UserId::new(Uuid::from_u128(1)),
+                    Some(Some(url.to_string())),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, DomainError::ValidationError(_)),
+                "dev must reject non-loopback {url}: got {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn dev_mode_rejects_non_http_scheme() {
+        let svc = profile_service_dev();
+        // Non-http schemes are never image URLs, even on the dev stack.
+        for url in ["file:///etc/passwd", "ftp://127.0.0.1/a.png"] {
+            let err = svc
+                .update_profile(
+                    &UserId::new(Uuid::from_u128(1)),
+                    Some(Some(url.to_string())),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, DomainError::ValidationError(_)),
+                "dev must reject non-http {url}: got {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn prod_mode_rejects_all_http_including_loopback() {
+        // prod-strict: the dev loopback allowance must never leak to production —
+        // loopback AND non-loopback http are both rejected.
+        let svc = profile_service();
+        for url in [
+            "http://127.0.0.1:64321/a.png",
+            "http://localhost/a.png",
+            "http://[::1]/a.png",
+            "http://evil.example.com/a.png",
+        ] {
+            let err = svc
+                .update_profile(
+                    &UserId::new(Uuid::from_u128(1)),
+                    Some(Some(url.to_string())),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, DomainError::ValidationError(_)),
+                "prod must reject {url}: got {err:?}"
+            );
+        }
+    }
+
     // ── upsert_from_auth display_name (signup) ───────────────────
     //
     // The FakeProfileRepo echoes back the display_name the service passed to
@@ -1424,6 +1645,7 @@ mod tests {
         ProfileService::new(
             Arc::new(FakeProfileRepo::default()),
             Arc::new(ContentFilter::from_words(&["slurword"])),
+            false,
         )
     }
 
@@ -1602,7 +1824,7 @@ mod tests {
     /// write actually reached the repository.
     fn remediation_fixture(filter: ContentFilter) -> (ProfileService, Arc<FakeProfileRepo>) {
         let repo = Arc::new(FakeProfileRepo::default());
-        let svc = ProfileService::new(repo.clone(), Arc::new(filter));
+        let svc = ProfileService::new(repo.clone(), Arc::new(filter), false);
         (svc, repo)
     }
 

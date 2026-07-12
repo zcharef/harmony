@@ -72,6 +72,7 @@ fn service(pool: PgPool) -> ProfileService {
     ProfileService::new(
         Arc::new(PgProfileRepository::new(pool)),
         Arc::new(ContentFilter::noop()),
+        false,
     )
 }
 

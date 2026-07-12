@@ -148,6 +148,7 @@ fn profile_service(pool: &PgPool) -> Arc<ProfileService> {
     Arc::new(ProfileService::new(
         Arc::new(PgProfileRepository::new(pool.clone())),
         Arc::new(ContentFilter::noop()),
+        false,
     ))
 }
 
