@@ -218,6 +218,9 @@ async fn build_handler_app_state(pool: PgPool) -> AppState {
         member_repo.clone(),
         plan_checker.clone(),
         livekit,
+        Arc::new(harmony_api::infra::postgres::PgAnalyticsRecorder::new(
+            pool.clone(),
+        )),
     )));
 
     let profile_repo: Arc<dyn harmony_api::domain::ports::ProfileRepository> =

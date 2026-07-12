@@ -34,7 +34,7 @@ impl KeyService {
     ///
     /// # Errors
     /// - `DomainError::ValidationError` if inputs exceed length limits.
-    /// - `DomainError::LimitExceeded` if the user already has 25 devices.
+    /// - `DomainError::Forbidden` if the user already has 25 devices.
     /// - Repository errors on failure.
     pub async fn register_device(
         &self,
@@ -52,14 +52,12 @@ impl KeyService {
         // thousands of devices, each with 100 one-time keys, to exhaust storage.
         let device_count = self.key_repo.count_user_devices(user_id).await?;
         if device_count >= MAX_DEVICES_PER_USER {
-            // SAFETY: MAX_DEVICES_PER_USER is a positive constant (25).
-            #[allow(clippy::cast_sign_loss)]
-            let limit = MAX_DEVICES_PER_USER as u64;
-            return Err(DomainError::LimitExceeded {
-                resource: "devices",
-                plan: "all".to_string(),
-                limit,
-            });
+            // WHY Forbidden (not LimitExceeded): the device cap is an
+            // anti-flooding guard identical on every plan — it is not a
+            // plan gate and must never trigger the upgrade paywall.
+            return Err(DomainError::Forbidden(format!(
+                "Device limit reached: at most {MAX_DEVICES_PER_USER} devices per user"
+            )));
         }
 
         // WHY: validate_device_name trims before checking length, so the stored

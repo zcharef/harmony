@@ -1,10 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import { unblockUser } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 /** Unblock a user (idempotent). Does NOT restore any prior friendship. */
 export function useUnblockUser() {
@@ -22,7 +21,7 @@ export function useUnblockUser() {
       logger.error('unblock_user_failed', {
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('friends:unblockFailed')))
+      toastApiError(error, i18n.t('friends:unblockFailed'))
     },
   })
 }

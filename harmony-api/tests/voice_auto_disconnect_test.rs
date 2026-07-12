@@ -340,6 +340,9 @@ async fn build_app_state_with_voice(pool: PgPool) -> AppState {
         member_repo.clone(),
         plan_checker.clone(),
         livekit,
+        Arc::new(harmony_api::infra::postgres::PgAnalyticsRecorder::new(
+            pool.clone(),
+        )),
     )));
 
     // WHY: Rebuild repos for AppState — follows same pattern as voice_endpoint_test.rs.

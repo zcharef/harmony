@@ -1,10 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import { blockUser } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 /**
  * Block a user (idempotent PUT). Blocking tears down any friendship/pending
@@ -29,7 +28,7 @@ export function useBlockUser() {
       logger.error('block_user_failed', {
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('friends:blockFailed')))
+      toastApiError(error, i18n.t('friends:blockFailed'))
     },
   })
 }

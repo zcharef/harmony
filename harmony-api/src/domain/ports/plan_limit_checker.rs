@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::{PlanLimits, ServerId, UserId};
+use crate::domain::models::{Plan, PlanLimits, ServerId, UserId};
 
 /// Checks whether a server has reached its plan limit for a given resource.
 ///
@@ -41,6 +41,20 @@ pub trait PlanLimitChecker: Send + Sync + std::fmt::Debug {
     /// or `DomainError::Internal` on infrastructure failure.
     async fn get_server_plan_limits(&self, server_id: &ServerId)
     -> Result<PlanLimits, DomainError>;
+
+    /// Return the server's `SaaS` plan tier, when one applies.
+    ///
+    /// Default `None` fits self-hosted deployments (no tiers) and test fakes;
+    /// only the hosted Postgres checker reads a real plan. Callers use it to
+    /// attach upgrade context to plan-gate rejections.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DomainError::NotFound` if the server does not exist,
+    /// or `DomainError::Internal` on infrastructure failure.
+    async fn get_server_plan(&self, _server_id: &ServerId) -> Result<Option<Plan>, DomainError> {
+        Ok(None)
+    }
 
     /// Check if the user can create another server. (§1, per-user)
     ///

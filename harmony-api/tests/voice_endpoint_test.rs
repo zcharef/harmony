@@ -139,6 +139,9 @@ async fn app_state_with_voice(pool: PgPool) -> AppState {
         member_repo.clone(),
         plan_checker.clone(),
         livekit,
+        Arc::new(harmony_api::infra::postgres::PgAnalyticsRecorder::new(
+            pool.clone(),
+        )),
     )));
 
     build_app_state(pool, voice_service, Some(voice_repo)).await

@@ -11,10 +11,10 @@ import type {
   ProfileResponse,
 } from '@/lib/api'
 import { sendMessage } from '@/lib/api'
-import { getApiErrorDetail, isProblemDetails } from '@/lib/api-error'
+import { isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 import { OPTIMISTIC_ID_PREFIX } from '../lib/optimistic-id'
 import { buildParentPreview } from './build-parent-preview'
 
@@ -289,7 +289,7 @@ export function useSendMessage(
           onRateLimited(Number(waitMatch[1]))
         }
       }
-      toast.error(getApiErrorDetail(error, i18n.t('chat:sendMessageFailed')))
+      toastApiError(error, i18n.t('chat:sendMessageFailed'))
 
       // WHY rollback: Restore the exact cache state from before the mutation
       // so the user does not see a ghost message that never reached the server

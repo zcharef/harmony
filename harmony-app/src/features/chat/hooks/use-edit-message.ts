@@ -1,10 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import { editMessage } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 /**
  * WHY invalidation (not optimistic update): Edit is a low-frequency action
@@ -32,7 +31,7 @@ export function useEditMessage(channelId: string) {
         channelId,
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('chat:editMessageFailed')))
+      toastApiError(error, i18n.t('chat:editMessageFailed'))
     },
   })
 }

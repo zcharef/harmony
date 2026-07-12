@@ -10,7 +10,7 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::domain::models::{ChannelId, ServerId, UserId};
+use crate::domain::models::{ChannelId, Plan, ResourceKind, ServerId, UserId};
 
 /// Stable analytics event names (§10: "stable event names").
 ///
@@ -45,6 +45,17 @@ pub enum AnalyticsEventName {
     DiscoveryViewed,
     /// A user joined a server through the directory's one-click join.
     DiscoveryJoin,
+    /// The API rejected an action on a plan gate (monetization funnel top).
+    /// Emitted server-side at the rejection site — counts every hit even
+    /// when no client ever renders the paywall.
+    PlanLimitHit,
+    /// The upgrade paywall was shown to a user (client-emitted).
+    PaywallViewed,
+    /// The paywall's upgrade CTA was clicked (client-emitted) — the
+    /// Stripe-readiness signal.
+    PaywallCtaClicked,
+    /// The paywall was dismissed without upgrading (client-emitted).
+    PaywallDismissed,
 }
 
 impl AnalyticsEventName {
@@ -63,6 +74,10 @@ impl AnalyticsEventName {
             Self::SessionConnected => "session_connected",
             Self::DiscoveryViewed => "discovery_viewed",
             Self::DiscoveryJoin => "discovery_join",
+            Self::PlanLimitHit => "plan_limit_hit",
+            Self::PaywallViewed => "paywall_viewed",
+            Self::PaywallCtaClicked => "paywall_cta_clicked",
+            Self::PaywallDismissed => "paywall_dismissed",
         }
     }
 }
@@ -94,6 +109,29 @@ impl AnalyticsEvent {
             channel_id: None,
             properties: Value::Object(serde_json::Map::new()),
         }
+    }
+
+    /// Build a `plan_limit_hit` funnel event for a plan-gate rejection.
+    ///
+    /// WHY a shared constructor: every rejection site (the plan-limit checker
+    /// and the atomic voice gate inside `upsert_with_limit`) must emit an
+    /// identical event shape. The `code` mirrors the client's plan-gate
+    /// contract — `limit == 0` means the feature is not in the plan at all,
+    /// a distinct funnel signal from an exhausted nonzero allowance.
+    /// Centralizing it here keeps the emitters from ever diverging.
+    #[must_use]
+    pub fn plan_limit_hit(resource: ResourceKind, plan: Plan, limit: u64) -> Self {
+        let code = if limit == 0 {
+            "FEATURE_NOT_IN_PLAN"
+        } else {
+            "PLAN_LIMIT_REACHED"
+        };
+        Self::new(AnalyticsEventName::PlanLimitHit).properties(serde_json::json!({
+            "resource": resource.key(),
+            "code": code,
+            "plan": plan.as_str(),
+            "limit": limit,
+        }))
     }
 
     #[must_use]

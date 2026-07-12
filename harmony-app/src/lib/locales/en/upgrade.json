@@ -1,0 +1,51 @@
+{
+  "plans": {
+    "free": "Free",
+    "supporter": "Supporter",
+    "creator": "Creator"
+  },
+  "taglines": {
+    "free": "Where every community starts",
+    "supporter": "For communities finding their groove",
+    "creator": "For communities at full scale"
+  },
+  "resources": {
+    "owned_servers": "servers of your own",
+    "joined_servers": "joined servers",
+    "members": "members",
+    "channels": "channels",
+    "categories": "categories",
+    "roles": "roles",
+    "voice_concurrent": "voice participants",
+    "active_invites": "active invites",
+    "open_dms": "open DM conversations",
+    "attachments_per_message": "attachments per message",
+    "attachment_size": "upload size",
+    "custom_emoji": "custom emoji"
+  },
+  "headline": {
+    "feature": "{{resource}} are a {{plan}} feature",
+    "limit": "You've used all {{limit}} {{resource}} on the {{plan}} plan",
+    "limitPerRequest": "The {{plan}} plan allows {{limit}} {{resource}}",
+    "limitBytes": "{{plan}} uploads are capped at {{limit}}"
+  },
+  "subtitle": {
+    "feature": "Unlock it with {{plan}} — and get more of everything else.",
+    "limit": "Get more room with {{plan}} — and more of everything else."
+  },
+  "perks": {
+    "ownedServers": "{{count}} servers of your own",
+    "members": "Up to {{count}} members per server",
+    "uploads": "Uploads up to {{size}}",
+    "activeInvites": "{{count}} active invites per server",
+    "voice": "{{count}} voice participants",
+    "customEmoji": "{{count}} custom emoji, animated too"
+  },
+  "blockedResourceNone": "Not included",
+  "recommended": "Recommended",
+  "currentPlan": "Current plan",
+  "cta": "Upgrade to {{plan}}",
+  "maybeLater": "Maybe later",
+  "mailSubject": "Upgrade my Harmony plan to {{plan}}",
+  "mailBody": "Hi,\n\nI'd like to upgrade to the {{plan}} plan — I ran into the {{resource}} limit on the {{currentPlan}} plan.\n\nPlease use the account tied to this email address.\n\nThanks!"
+}

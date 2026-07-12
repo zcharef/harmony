@@ -6,9 +6,38 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::domain::errors::DomainError;
+use crate::domain::models::Plan;
 
 /// RFC 9457 Content-Type for Problem Details responses.
 const PROBLEM_JSON: &str = "application/problem+json";
+
+/// Machine-readable code: the plan's limit for the resource is zero — the
+/// feature is not part of the current plan at all.
+pub const CODE_FEATURE_NOT_IN_PLAN: &str = "FEATURE_NOT_IN_PLAN";
+
+/// Machine-readable code: the plan includes the resource but its nonzero
+/// allowance is used up.
+pub const CODE_PLAN_LIMIT_REACHED: &str = "PLAN_LIMIT_REACHED";
+
+/// Structured plan-gate details (RFC 9457 extension member, like `upgrade_url`).
+///
+/// WHY: The client paywall needs machine-usable facts — parsing them out of
+/// the human-readable `detail` string would break on every copy change.
+/// Field names are `snake_case` to match the established `upgrade_url`
+/// extension member on `ProblemDetails`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlanGate {
+    /// Stable resource key (e.g. `custom_emoji`, `owned_servers`).
+    pub resource: String,
+    /// The plan the rejected caller is currently on.
+    pub current_plan: Plan,
+    /// The current plan's limit for the resource (0 = feature not included).
+    pub limit: u64,
+    /// Lowest tier that unlocks or raises the resource. Absent when no tier
+    /// does (already at the top tier's ceiling).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required_plan: Option<Plan>,
+}
 
 /// RFC 9457 Problem Details response.
 ///
@@ -26,6 +55,14 @@ pub struct ProblemDetails {
     /// an "Upgrade" CTA using this URL. Only present on `LimitExceeded` errors.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upgrade_url: Option<String>,
+    /// Machine-readable error code (`FEATURE_NOT_IN_PLAN` / `PLAN_LIMIT_REACHED`).
+    /// Only present on plan-gate rejections.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// Structured plan-gate details for the client paywall.
+    /// Only present on plan-gate rejections with a known tier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_gate: Option<PlanGate>,
 }
 
 #[allow(dead_code)] // with_instance will be used when specific error types need instance URIs
@@ -38,6 +75,8 @@ impl ProblemDetails {
             detail: detail.into(),
             instance: None,
             upgrade_url: None,
+            code: None,
+            plan_gate: None,
         }
     }
 
@@ -182,11 +221,49 @@ impl From<DomainError> for ApiError {
                 limit,
             } => {
                 let status = StatusCode::FORBIDDEN;
-                let mut problem = ProblemDetails::new(
-                    status,
-                    "Plan Limit Exceeded",
-                    format!("Plan limit reached: {limit} {resource} on the {plan} plan"),
-                );
+                let mut problem = match plan {
+                    Some(plan) => {
+                        // WHY the split: a zero limit means the plan does not
+                        // include the feature AT ALL — "limit reached" phrasing
+                        // would be wrong (nothing was reached) and the client
+                        // paywall pitches "unlock" instead of "raise".
+                        let (code, title, detail) = if limit == 0 {
+                            (
+                                CODE_FEATURE_NOT_IN_PLAN,
+                                "Feature Not In Plan",
+                                format!(
+                                    "{} are not included in the {plan} plan",
+                                    resource.display_name()
+                                ),
+                            )
+                        } else {
+                            (
+                                CODE_PLAN_LIMIT_REACHED,
+                                "Plan Limit Exceeded",
+                                format!(
+                                    "Plan limit reached: {limit} {} on the {plan} plan",
+                                    resource.display_name()
+                                ),
+                            )
+                        };
+                        let mut problem = ProblemDetails::new(status, title, detail);
+                        problem.code = Some(code.to_string());
+                        problem.plan_gate = Some(PlanGate {
+                            resource: resource.key().to_string(),
+                            current_plan: plan,
+                            limit,
+                            required_plan: Plan::lowest_tier_unlocking(resource, limit),
+                        });
+                        problem
+                    }
+                    // WHY no code/plan_gate: without a tier (self-hosted)
+                    // there is nothing to upsell — generic limit message only.
+                    None => ProblemDetails::new(
+                        status,
+                        "Plan Limit Exceeded",
+                        format!("Plan limit reached: {limit} {}", resource.display_name()),
+                    ),
+                };
                 // WHY: Hardcoded for now. When billing is added (Phase 4), this
                 // will come from config. YAGNI — no config mechanism until needed.
                 problem.upgrade_url = Some("https://harmony.app/pricing".to_string());

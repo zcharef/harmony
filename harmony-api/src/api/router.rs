@@ -102,6 +102,11 @@ pub fn build_router(state: AppState, livekit_url: Option<&str>) -> Router {
         .route("/v1/events", get(handlers::events::sse_events))
         // Auth
         .route("/v1/auth/me", post(handlers::profiles::sync_profile))
+        // Analytics (client-emitted funnel events)
+        .route(
+            "/v1/analytics/events",
+            post(handlers::analytics::record_event),
+        )
         // Profiles
         .route(
             "/v1/profiles/me",

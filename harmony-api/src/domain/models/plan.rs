@@ -28,6 +28,21 @@ impl Plan {
             Self::Creator => "creator",
         }
     }
+
+    /// Lowest tier whose limit for `resource` is strictly greater than
+    /// `current_limit` — i.e. the cheapest upgrade that unlocks (limit 0)
+    /// or raises the blocked resource.
+    ///
+    /// Returns `None` when no tier raises it (already at the Creator
+    /// ceiling), letting callers fall back to generic messaging.
+    #[must_use]
+    pub fn lowest_tier_unlocking(resource: ResourceKind, current_limit: u64) -> Option<Self> {
+        // WHY only Supporter/Creator: Free is never an upgrade target, and
+        // tier ordering (Free <= Supporter <= Creator) is pinned by tests.
+        [Self::Supporter, Self::Creator]
+            .into_iter()
+            .find(|tier| PlanLimits::for_plan(*tier).limit_for(resource) > current_limit)
+    }
 }
 
 impl std::fmt::Display for Plan {
@@ -74,6 +89,8 @@ pub enum ResourceKind {
     OpenDms,
     // §6 Files (per message)
     AttachmentsPerMessage,
+    /// §6 Files — per-file byte cap (`max_attachment_size_bytes`).
+    AttachmentSize,
     // §9 Emoji (per server)
     CustomEmoji,
 }
@@ -93,7 +110,31 @@ impl ResourceKind {
             Self::ActiveInvites => "active invites",
             Self::OpenDms => "open DM conversations",
             Self::AttachmentsPerMessage => "attachments per message",
+            Self::AttachmentSize => "attachment size",
             Self::CustomEmoji => "custom emoji",
+        }
+    }
+
+    /// Stable machine key for API error details and analytics properties.
+    ///
+    /// WHY: The frontend paywall switches copy on this key and analytics
+    /// aggregates on it — renaming a key silently fragments both, so treat
+    /// these as a public contract.
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::OwnedServers => "owned_servers",
+            Self::JoinedServers => "joined_servers",
+            Self::Members => "members",
+            Self::Channels => "channels",
+            Self::Categories => "categories",
+            Self::Roles => "roles",
+            Self::VoiceConcurrent => "voice_concurrent",
+            Self::ActiveInvites => "active_invites",
+            Self::OpenDms => "open_dms",
+            Self::AttachmentsPerMessage => "attachments_per_message",
+            Self::AttachmentSize => "attachment_size",
+            Self::CustomEmoji => "custom_emoji",
         }
     }
 }
@@ -316,6 +357,7 @@ impl PlanLimits {
             ResourceKind::ActiveInvites => self.max_active_invites,
             ResourceKind::OpenDms => self.max_open_dms,
             ResourceKind::AttachmentsPerMessage => self.max_attachments_per_message,
+            ResourceKind::AttachmentSize => self.max_attachment_size_bytes,
             ResourceKind::CustomEmoji => self.max_custom_emojis,
         }
     }
@@ -709,6 +751,78 @@ mod tests {
             PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::CustomEmoji),
             500
         );
+    }
+
+    #[test]
+    fn limit_for_attachment_size() {
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Free).limit_for(ResourceKind::AttachmentSize),
+            8_388_608
+        );
+        assert_eq!(
+            PlanLimits::for_plan(Plan::Creator).limit_for(ResourceKind::AttachmentSize),
+            104_857_600
+        );
+    }
+
+    // ── Lowest unlocking tier (paywall recommendation) ──────────────────
+
+    #[test]
+    fn lowest_tier_unlocking_zero_limit_feature() {
+        // Free's custom emoji cap is 0 — Supporter is the cheapest unlock.
+        assert_eq!(
+            Plan::lowest_tier_unlocking(ResourceKind::CustomEmoji, 0),
+            Some(Plan::Supporter)
+        );
+    }
+
+    #[test]
+    fn lowest_tier_unlocking_nonzero_limit() {
+        // Free owns 3 servers; Supporter raises to 10.
+        assert_eq!(
+            Plan::lowest_tier_unlocking(ResourceKind::OwnedServers, 3),
+            Some(Plan::Supporter)
+        );
+        // Supporter's 100 custom emoji → Creator raises to 500.
+        assert_eq!(
+            Plan::lowest_tier_unlocking(ResourceKind::CustomEmoji, 100),
+            Some(Plan::Creator)
+        );
+    }
+
+    #[test]
+    fn lowest_tier_unlocking_none_at_ceiling() {
+        // Creator's owned-server cap (25) is the ceiling — nothing raises it.
+        assert_eq!(
+            Plan::lowest_tier_unlocking(ResourceKind::OwnedServers, 25),
+            None
+        );
+        // Channels are 10,000 on every tier — no tier raises the limit.
+        assert_eq!(
+            Plan::lowest_tier_unlocking(ResourceKind::Channels, 10_000),
+            None
+        );
+    }
+
+    // ── ResourceKind stable machine keys ────────────────────────────────
+
+    #[test]
+    fn resource_kind_keys_are_stable() {
+        assert_eq!(ResourceKind::OwnedServers.key(), "owned_servers");
+        assert_eq!(ResourceKind::JoinedServers.key(), "joined_servers");
+        assert_eq!(ResourceKind::Members.key(), "members");
+        assert_eq!(ResourceKind::Channels.key(), "channels");
+        assert_eq!(ResourceKind::Categories.key(), "categories");
+        assert_eq!(ResourceKind::Roles.key(), "roles");
+        assert_eq!(ResourceKind::VoiceConcurrent.key(), "voice_concurrent");
+        assert_eq!(ResourceKind::ActiveInvites.key(), "active_invites");
+        assert_eq!(ResourceKind::OpenDms.key(), "open_dms");
+        assert_eq!(
+            ResourceKind::AttachmentsPerMessage.key(),
+            "attachments_per_message"
+        );
+        assert_eq!(ResourceKind::AttachmentSize.key(), "attachment_size");
+        assert_eq!(ResourceKind::CustomEmoji.key(), "custom_emoji");
     }
 
     // ── Plan FromStr round-trip ─────────────────────────────────────────

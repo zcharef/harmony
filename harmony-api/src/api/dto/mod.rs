@@ -1,5 +1,6 @@
 //! Data Transfer Objects (request/response types).
 
+pub mod analytics;
 pub mod badges;
 pub mod bans;
 pub mod channels;
@@ -25,6 +26,7 @@ pub mod servers;
 pub mod user_preferences;
 pub mod voice;
 
+pub use analytics::{ClientAnalyticsEventName, RecordAnalyticsEventRequest};
 pub use badges::{OfficialBadgeGrantRequest, OfficialBadgesResponse};
 pub use bans::{BanListQuery, BanListResponse, BanResponse, BanUserRequest};
 pub use channels::{

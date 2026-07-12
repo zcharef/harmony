@@ -10,7 +10,7 @@ import { useJumpToMessage } from './use-jump-to-message'
 // Mock each so the tests assert branch behaviour (scroll vs fetch, which toast)
 // without a live API, HeroUI toast host, or bundled translations.
 vi.mock('@/lib/api', () => ({ listMessages: vi.fn() }))
-vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn() } }))
+vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn() }, toastApiError: vi.fn() }))
 vi.mock('@/lib/logger', () => ({ logger: { warn: vi.fn(), error: vi.fn() } }))
 vi.mock('react-i18next', () => ({
   // Identity `t` → assert against raw i18n keys.

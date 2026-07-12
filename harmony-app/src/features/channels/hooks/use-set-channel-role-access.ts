@@ -2,10 +2,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import type { ChannelRoleAccessResponse, Role } from '@/lib/api'
 import { setChannelRoleAccess } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 /**
  * WHY: Replaces the full grant set of a private channel (PUT replace-the-set
@@ -46,7 +45,7 @@ export function useSetChannelRoleAccess(serverId: string, channelId: string) {
       logger.error('set_channel_role_access_failed', {
         error: error instanceof Error ? error.message : String(error),
       })
-      toast.error(getApiErrorDetail(error, i18n.t('settings:channelAccessSaveError')))
+      toastApiError(error, i18n.t('settings:channelAccessSaveError'))
     },
 
     onSettled: () => {

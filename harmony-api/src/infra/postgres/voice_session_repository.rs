@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{
-    ChannelId, NewVoiceSession, ServerId, UserId, VoiceSession, VoiceSessionId,
+    ChannelId, NewVoiceSession, Plan, ResourceKind, ServerId, UserId, VoiceSession, VoiceSessionId,
 };
 use crate::domain::ports::VoiceSessionRepository;
 
@@ -179,7 +179,7 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
         &self,
         session: &NewVoiceSession,
         max_concurrent: u64,
-        plan_name: String,
+        plan: Option<Plan>,
     ) -> Result<(VoiceSession, Option<VoiceSession>), DomainError> {
         let uid = session.user_id.0;
         let cid = session.channel_id.0;
@@ -248,8 +248,8 @@ impl VoiceSessionRepository for PgVoiceSessionRepository {
 
         if count >= max_i64 {
             return Err(DomainError::LimitExceeded {
-                resource: "concurrent voice participants",
-                plan: plan_name,
+                resource: ResourceKind::VoiceConcurrent,
+                plan,
                 limit: max_concurrent,
             });
         }

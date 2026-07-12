@@ -294,8 +294,8 @@ mod tests {
         async fn check_emoji_limit(&self, _server_id: &ServerId) -> Result<(), DomainError> {
             if self.at_cap {
                 Err(DomainError::LimitExceeded {
-                    resource: "custom emoji",
-                    plan: self.plan.to_string(),
+                    resource: crate::domain::models::ResourceKind::CustomEmoji,
+                    plan: Some(self.plan),
                     limit: PlanLimits::for_plan(self.plan).max_custom_emojis,
                 })
             } else {

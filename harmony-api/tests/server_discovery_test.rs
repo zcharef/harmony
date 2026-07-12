@@ -239,6 +239,7 @@ async fn build_app_state(pool: PgPool) -> AppState {
         member_repo.clone(),
         plan_checker.clone(),
         Arc::new(FakeLiveKitTokenGenerator),
+        Arc::new(PgAnalyticsRecorder::new(pool.clone())),
     ));
 
     let instance_id = uuid::Uuid::new_v4();

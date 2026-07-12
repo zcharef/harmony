@@ -2,10 +2,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 import type { UpdateUserPreferencesRequest, UserPreferencesResponse } from '@/lib/api'
 import { updatePreferences } from '@/lib/api'
-import { getApiErrorDetail } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { queryKeys } from '@/lib/query-keys'
-import { toast } from '@/lib/toast'
+import { toastApiError } from '@/lib/toast'
 
 /**
  * WHY silent: some updates are background side-effects the user never
@@ -81,7 +80,7 @@ export function useUpdatePreferences() {
         error: error instanceof Error ? error.message : String(error),
       })
       if (patch.silent !== true) {
-        toast.error(getApiErrorDetail(error, i18n.t('preferences.updateFailed')))
+        toastApiError(error, i18n.t('preferences.updateFailed'))
       }
     },
   })

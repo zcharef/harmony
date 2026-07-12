@@ -6,12 +6,12 @@ use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
 use crate::domain::models::{
-    ChannelId, ChannelType, NewVoiceSession, ServerId, UserId, VoiceRefreshToken, VoiceSession,
-    VoiceToken,
+    AnalyticsEvent, ChannelId, ChannelType, NewVoiceSession, Plan, ResourceKind, ServerId, UserId,
+    VoiceRefreshToken, VoiceSession, VoiceToken,
 };
 use crate::domain::ports::{
-    ChannelRepository, LiveKitTokenGenerator, MemberRepository, PlanLimitChecker, VoiceGrants,
-    VoiceSessionRepository,
+    AnalyticsRecorder, ChannelRepository, LiveKitTokenGenerator, MemberRepository,
+    PlanLimitChecker, VoiceGrants, VoiceSessionRepository,
 };
 
 /// Service for voice channel business logic.
@@ -21,6 +21,10 @@ pub struct VoiceService {
     member_repo: Arc<dyn MemberRepository>,
     plan_checker: Arc<dyn PlanLimitChecker>,
     livekit: Arc<dyn LiveKitTokenGenerator>,
+    /// WHY: the TOCTOU-safe voice gate lives in `upsert_with_limit`, which
+    /// cannot reach the analytics recorder — this service emits the
+    /// `plan_limit_hit` funnel event when that gate rejects a join.
+    analytics: Arc<dyn AnalyticsRecorder>,
 }
 
 // WHY: Manual Debug because dyn trait objects need explicit impl through Arc.
@@ -32,6 +36,7 @@ impl std::fmt::Debug for VoiceService {
             .field("member_repo", &self.member_repo)
             .field("plan_checker", &self.plan_checker)
             .field("livekit", &self.livekit)
+            .field("analytics", &self.analytics)
             .finish()
     }
 }
@@ -44,6 +49,7 @@ impl VoiceService {
         member_repo: Arc<dyn MemberRepository>,
         plan_checker: Arc<dyn PlanLimitChecker>,
         livekit: Arc<dyn LiveKitTokenGenerator>,
+        analytics: Arc<dyn AnalyticsRecorder>,
     ) -> Self {
         Self {
             voice_repo,
@@ -51,7 +57,38 @@ impl VoiceService {
             member_repo,
             plan_checker,
             livekit,
+            analytics,
         }
+    }
+
+    /// Emit the `plan_limit_hit` funnel event for a voice-concurrent rejection.
+    ///
+    /// WHY here: the gate itself is the atomic `upsert_with_limit` in the repo
+    /// (TOCTOU-safe), which has no analytics access. This mirrors the
+    /// fire-and-forget spawn used by `PgPlanLimitChecker::reject` (ADR-027) so
+    /// a slow or failing analytics insert never blocks or fails the join.
+    fn spawn_plan_limit_hit(
+        &self,
+        resource: ResourceKind,
+        plan: Plan,
+        limit: u64,
+        server_id: &ServerId,
+        user_id: &UserId,
+    ) {
+        let event = AnalyticsEvent::plan_limit_hit(resource, plan, limit)
+            .server(server_id.clone())
+            .user(user_id.clone());
+        let recorder = Arc::clone(&self.analytics);
+        tokio::spawn(async move {
+            let name = event.name;
+            if let Err(error) = recorder.record(event).await {
+                tracing::warn!(
+                    event = %name,
+                    error = %error,
+                    "analytics event insert failed — event dropped"
+                );
+            }
+        });
     }
 
     /// Join a voice channel. Returns a `LiveKit` token and session metadata.
@@ -135,6 +172,9 @@ impl VoiceService {
         //    check and bitrate/duration grants, eliminating the previous
         //    duplicate get_server_limits query from check_voice_concurrent).
         let limits = self.plan_checker.get_server_plan_limits(server_id).await?;
+        // WHY: the tier (None on self-hosted) rides along so a concurrent-limit
+        // rejection carries upgrade context for the client paywall.
+        let plan = self.plan_checker.get_server_plan(server_id).await?;
 
         // 5. Build display name: nickname (per-server) → display_name → username.
         let display_name = member
@@ -174,17 +214,28 @@ impl VoiceService {
             server_id: server_id.clone(),
             session_id: Uuid::new_v4().to_string(),
         };
-        let (_session, previous) = self
+        let (_session, previous) = match self
             .voice_repo
-            .upsert_with_limit(
-                &new_session,
-                max_concurrent,
-                // WHY: PlanLimits doesn't carry the plan name; the error
-                // message uses this for display only. Self-hosted has a
-                // 10,000 limit so this path won't trigger in practice.
-                "server".to_string(),
-            )
-            .await?;
+            .upsert_with_limit(&new_session, max_concurrent, plan)
+            .await
+        {
+            Ok(sessions) => sessions,
+            Err(err) => {
+                // WHY: the concurrent-voice gate rejects INSIDE upsert_with_limit
+                // (atomic COUNT + INSERT), so this is the only place the join
+                // decision can feed the monetization funnel. Emit only when a
+                // tier is known — self-hosted (plan = None) has nothing to upsell.
+                if let DomainError::LimitExceeded {
+                    resource,
+                    plan: Some(plan),
+                    limit,
+                } = &err
+                {
+                    self.spawn_plan_limit_hit(*resource, *plan, *limit, server_id, user_id);
+                }
+                return Err(err);
+            }
+        };
 
         // WHY: A same-channel rejoin (double-click, token refresh) returns the
         // just-replaced session as `previous` — reporting it would make the
@@ -798,7 +849,7 @@ mod tests {
             &self,
             session: &NewVoiceSession,
             max_concurrent: u64,
-            plan_name: String,
+            plan: Option<crate::domain::models::Plan>,
         ) -> Result<(VoiceSession, Option<VoiceSession>), DomainError> {
             let sessions = self.sessions.lock().await;
             #[allow(clippy::cast_possible_wrap)]
@@ -808,8 +859,8 @@ mod tests {
                 .count() as u64;
             if count >= max_concurrent {
                 return Err(DomainError::LimitExceeded {
-                    resource: "concurrent voice participants",
-                    plan: plan_name,
+                    resource: crate::domain::models::ResourceKind::VoiceConcurrent,
+                    plan,
                     limit: max_concurrent,
                 });
             }
@@ -951,26 +1002,58 @@ mod tests {
         }
     }
 
+    // -- CapturingRecorder --
+
+    /// Analytics recorder fake that captures every emitted event so tests can
+    /// assert the monetization funnel receives voice plan-gate rejections.
+    #[derive(Debug, Default)]
+    struct CapturingRecorder {
+        events: Mutex<Vec<AnalyticsEvent>>,
+    }
+
+    #[async_trait]
+    impl AnalyticsRecorder for CapturingRecorder {
+        async fn record(&self, event: AnalyticsEvent) -> Result<(), DomainError> {
+            self.events.lock().await.push(event);
+            Ok(())
+        }
+    }
+
     // -- FakePlanChecker --
 
     #[derive(Debug)]
     struct FakePlanChecker {
         /// When Some, `check_voice_concurrent` returns this error.
         voice_error: Option<DomainError>,
+        /// Tier reported by `get_server_plan` (drives paywall upgrade context).
+        plan: Option<Plan>,
     }
 
     impl FakePlanChecker {
         fn allowed() -> Self {
-            Self { voice_error: None }
+            Self {
+                voice_error: None,
+                plan: None,
+            }
+        }
+
+        /// Allowed checker that reports a concrete plan tier — needed so a
+        /// voice-concurrent rejection carries the plan the funnel event records.
+        fn allowed_on_plan(plan: Plan) -> Self {
+            Self {
+                voice_error: None,
+                plan: Some(plan),
+            }
         }
 
         fn limit_exceeded() -> Self {
             Self {
                 voice_error: Some(DomainError::LimitExceeded {
-                    resource: "concurrent voice participants",
-                    plan: "free".to_string(),
+                    resource: crate::domain::models::ResourceKind::VoiceConcurrent,
+                    plan: Some(crate::domain::models::Plan::Free),
                     limit: 5,
                 }),
+                plan: None,
             }
         }
     }
@@ -996,6 +1079,13 @@ mod tests {
             Ok(PlanLimits::for_plan(crate::domain::models::Plan::Free))
         }
 
+        async fn get_server_plan(
+            &self,
+            _server_id: &ServerId,
+        ) -> Result<Option<Plan>, DomainError> {
+            Ok(self.plan)
+        }
+
         async fn check_owned_server_limit(&self, _user_id: &UserId) -> Result<(), DomainError> {
             Ok(())
         }
@@ -1006,21 +1096,16 @@ mod tests {
 
         async fn check_voice_concurrent(&self, _server_id: &ServerId) -> Result<(), DomainError> {
             match &self.voice_error {
-                Some(err) => Err(DomainError::LimitExceeded {
-                    resource: match err {
-                        DomainError::LimitExceeded { resource, .. } => resource,
-                        _ => "voice",
-                    },
-                    plan: match err {
-                        DomainError::LimitExceeded { plan, .. } => plan.clone(),
-                        _ => "free".to_string(),
-                    },
-                    limit: match err {
-                        DomainError::LimitExceeded { limit, .. } => *limit,
-                        _ => 0,
-                    },
+                Some(DomainError::LimitExceeded {
+                    resource,
+                    plan,
+                    limit,
+                }) => Err(DomainError::LimitExceeded {
+                    resource: *resource,
+                    plan: *plan,
+                    limit: *limit,
                 }),
-                None => Ok(()),
+                Some(_) | None => Ok(()),
             }
         }
 
@@ -1150,6 +1235,7 @@ mod tests {
         channel_repo: Arc<InMemoryChannelRepo>,
         member_repo: Arc<InMemoryMemberRepo>,
         voice_repo: Arc<InMemoryVoiceSessionRepo>,
+        analytics: Arc<CapturingRecorder>,
         service: VoiceService,
     }
 
@@ -1157,6 +1243,7 @@ mod tests {
         let channel_repo = Arc::new(InMemoryChannelRepo::new());
         let member_repo = Arc::new(InMemoryMemberRepo::new());
         let voice_repo = Arc::new(InMemoryVoiceSessionRepo::new());
+        let analytics = Arc::new(CapturingRecorder::default());
 
         let service = VoiceService::new(
             Arc::clone(&voice_repo) as Arc<dyn VoiceSessionRepository>,
@@ -1164,12 +1251,14 @@ mod tests {
             Arc::clone(&member_repo) as Arc<dyn MemberRepository>,
             Arc::new(plan_checker),
             Arc::new(livekit),
+            Arc::clone(&analytics) as Arc<dyn AnalyticsRecorder>,
         );
 
         TestHarness {
             channel_repo,
             member_repo,
             voice_repo,
+            analytics,
             service,
         }
     }
@@ -1297,11 +1386,73 @@ mod tests {
             DomainError::LimitExceeded {
                 resource, limit, ..
             } => {
-                assert_eq!(resource, "concurrent voice participants");
+                assert_eq!(
+                    resource,
+                    crate::domain::models::ResourceKind::VoiceConcurrent
+                );
                 assert_eq!(limit, 5);
             }
             other => panic!("Expected LimitExceeded, got {:?}", other),
         }
+    }
+
+    // 4b. A voice-concurrent rejection feeds the monetization funnel.
+    // WHY: the gate lives in the repo's atomic upsert_with_limit (TOCTOU-safe),
+    // which has no analytics access — VoiceService must emit `plan_limit_hit`
+    // so voice caps count even when the client never renders the paywall.
+    #[tokio::test]
+    async fn join_voice_at_plan_limit_emits_plan_limit_hit() {
+        let h = build_harness(
+            FakePlanChecker::allowed_on_plan(Plan::Free),
+            FakeLiveKit::enabled(),
+        );
+        let uid = user_id(1);
+        let sid = server_id(10);
+        let cid = channel_id(100);
+
+        h.channel_repo
+            .insert(make_voice_channel(cid.clone(), sid.clone()))
+            .await;
+        h.member_repo
+            .insert(make_member(uid.clone(), sid.clone()))
+            .await;
+
+        // Fill the free concurrent-voice cap (5) with other users.
+        for i in 2..=6 {
+            let session = NewVoiceSession {
+                user_id: user_id(i),
+                channel_id: cid.clone(),
+                server_id: sid.clone(),
+                session_id: format!("sess-{i}"),
+            };
+            h.voice_repo.upsert(&session).await.unwrap();
+        }
+
+        let result = h.service.join_voice(&uid, &cid).await;
+        assert!(matches!(result, Err(DomainError::LimitExceeded { .. })));
+
+        // WHY poll: the emit is fire-and-forget (tokio::spawn), so it races the
+        // return — mirror the integration suite's bounded wait.
+        let mut captured = None;
+        for _ in 0..50 {
+            {
+                let events = h.analytics.events.lock().await;
+                if let Some(event) = events.first() {
+                    captured = Some(event.clone());
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+
+        let event = captured.expect("plan_limit_hit must be emitted for a voice cap rejection");
+        assert_eq!(event.name.as_str(), "plan_limit_hit");
+        assert_eq!(event.server_id.as_ref(), Some(&sid));
+        assert_eq!(event.user_id.as_ref(), Some(&uid));
+        assert_eq!(event.properties["resource"], "voice_concurrent");
+        assert_eq!(event.properties["code"], "PLAN_LIMIT_REACHED");
+        assert_eq!(event.properties["plan"], "free");
+        assert_eq!(event.properties["limit"], 5);
     }
 
     // 5. join_voice when token generation fails returns ExternalService

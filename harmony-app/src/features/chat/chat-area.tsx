@@ -55,6 +55,7 @@ import { encrypt } from '@/lib/crypto'
 import { cacheMessage } from '@/lib/crypto-cache'
 import { resolveDisplayName } from '@/lib/display-name'
 import { logger } from '@/lib/logger'
+import { isPlanGateError } from '@/lib/plan-gate'
 import { isTauri } from '@/lib/platform'
 import { AttachmentTray } from './components/attachment-tray'
 import { MentionAutocomplete, mentionOptionId } from './components/mention-autocomplete'
@@ -1563,9 +1564,17 @@ export function ChatArea({
         // already-uploaded URLs are reused on retry (no re-upload, §6.1).
         onSuccess: () => attachments.clear(),
         onError: (error) => {
-          // WHY surface inline here (in addition to the hook's generic toast):
-          // a plan-cap rejection is an explicit user action failing — the
-          // composer shows the actionable detail next to the tray (ADR-028).
+          // WHY early return on a plan gate: attachment caps
+          // (attachments_per_message / attachment_size) open the UpgradeModal
+          // centrally via the MutationCache — an inline composer error on top
+          // of it would be duplicate feedback (mirrors emoji-settings-tab,
+          // ADR-045).
+          if (isPlanGateError(error)) {
+            return
+          }
+          // WHY surface inline otherwise: a non-plan send failure is an explicit
+          // user action failing — the composer shows the actionable detail next
+          // to the tray (ADR-028).
           if (hasAttachments === true) {
             attachments.setSendError(getApiErrorDetail(error, t('attachSendFailed')))
           }

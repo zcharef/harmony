@@ -24,8 +24,24 @@ const MENTION_UUID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
 const SERVER_ID = 'server-1'
 const CHANNEL_ID = 'channel-1'
 
-const { sendMutate, membersState } = vi.hoisted(() => ({
+const { sendMutate, membersState, composerAttachments } = vi.hoisted(() => ({
   sendMutate: vi.fn(),
+  // WHY a shared mutable stub: the send onError guard only reaches
+  // setSendError when the tray is non-empty (hasAttachments), so the plan-gate
+  // suppression test flips `isEmpty` and spies on setSendError. Defaults to an
+  // empty tray so the mention-wiring tests keep their original behavior.
+  composerAttachments: {
+    items: [] as unknown[],
+    capError: null,
+    sendError: null as string | null,
+    isEmpty: true,
+    hasFailedUpload: false,
+    enqueueFiles: vi.fn(),
+    removeAttachment: vi.fn(),
+    clear: vi.fn(),
+    setSendError: vi.fn(),
+    resolveUploaded: vi.fn(async () => [] as unknown[]),
+  },
   membersState: {
     page: {
       items: [
@@ -51,6 +67,10 @@ const { sendMutate, membersState } = vi.hoisted(() => ({
 vi.mock('./hooks/use-send-message', () => ({
   OPTIMISTIC_ID_PREFIX: 'temp-',
   useSendMessage: () => ({ mutate: sendMutate }),
+}))
+
+vi.mock('./hooks/use-composer-attachments', () => ({
+  useComposerAttachments: () => composerAttachments,
 }))
 
 vi.mock('./hooks/use-messages', () => ({
@@ -79,8 +99,6 @@ vi.mock('./hooks/use-typing-indicator', () => ({
   useTypingIndicator: () => ({ typingUsers: [], sendTyping: vi.fn() }),
 }))
 
-// WHY mocked: the drop-wiring test pushes a real file through the REAL
-// useComposerAttachments — only the network upload behind it is stubbed.
 // WHY satisfies: the stub must stay shaped like the real hook's return type
 // (UploadedAttachment = NewAttachmentRequest) — vi.mock factories are not
 // checked against the mocked module, so this pins the contract instead.
@@ -270,7 +288,7 @@ describe('ChatArea attachment drop wiring', () => {
     fireEvent.drop(target, { dataTransfer: { files: [file], types: ['Files'] } })
   }
 
-  it('drag-over shows the dropzone overlay and drop enqueues the file into the tray', async () => {
+  it('drag-over shows the dropzone overlay and drop forwards the file to the composer', async () => {
     const { input } = renderChatArea()
 
     fireEvent.dragOver(input, { dataTransfer: { types: ['Files'] } })
@@ -278,8 +296,13 @@ describe('ChatArea attachment drop wiring', () => {
 
     dropFile(input, new File(['hello'], 'notes.txt', { type: 'text/plain' }))
 
-    const tile = await screen.findByTestId('attachment-tile')
-    expect(tile.textContent).toContain('notes.txt')
+    // The onDrop handler forwards the dropped files to the composer-attachments
+    // hook (mocked at its seam here); tray/tile rendering is that hook's own
+    // unit concern.
+    expect(composerAttachments.enqueueFiles).toHaveBeenCalledTimes(1)
+    const enqueued = composerAttachments.enqueueFiles.mock.calls[0]?.[0] as FileList
+    expect(enqueued.length).toBe(1)
+    expect(enqueued[0]?.name).toBe('notes.txt')
     // The drop also clears the overlay.
     expect(screen.queryByTestId('attachment-dropzone')).toBeNull()
   })
@@ -289,6 +312,59 @@ describe('ChatArea attachment drop wiring', () => {
 
     fireEvent.drop(input, { dataTransfer: { files: [], types: [] } })
 
-    expect(screen.queryAllByTestId('attachment-tile')).toHaveLength(0)
+    expect(composerAttachments.enqueueFiles).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Plan-gate send feedback (ADR-045). A plan-gated attachment rejection
+ * (attachments_per_message / attachment_size) opens the UpgradeModal centrally
+ * via the MutationCache — the composer must NOT also set its inline send error
+ * (duplicate feedback). Non-plan failures still surface inline.
+ */
+describe('ChatArea plan-gate send feedback', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // A non-empty tray makes hasAttachments true, so the onError path reaches
+    // the setSendError guard under test.
+    composerAttachments.isEmpty = false
+    composerAttachments.resolveUploaded.mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    composerAttachments.isEmpty = true
+  })
+
+  async function captureSendOnError() {
+    const { input } = renderChatArea()
+    typeInComposer(input, 'hello')
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(sendMutate).toHaveBeenCalledTimes(1))
+    return sendMutate.mock.calls[0]?.[1]?.onError as (error: unknown) => void
+  }
+
+  const planGateProblem = {
+    status: 403,
+    title: 'Plan Limit Exceeded',
+    detail: 'Plan limit reached: 1 attachments per message on the free plan',
+    code: 'PLAN_LIMIT_REACHED',
+    plan_gate: {
+      resource: 'attachments_per_message',
+      current_plan: 'free',
+      limit: 1,
+      required_plan: 'supporter',
+    },
+  }
+
+  it('does NOT set the inline send error for a plan-gate rejection', async () => {
+    const onError = await captureSendOnError()
+    onError(planGateProblem)
+    expect(composerAttachments.setSendError).not.toHaveBeenCalled()
+  })
+
+  it('DOES set the inline send error for a non-plan-gate failure', async () => {
+    const onError = await captureSendOnError()
+    onError({ status: 500, title: 'Server Error', detail: 'boom' })
+    expect(composerAttachments.setSendError).toHaveBeenCalledTimes(1)
   })
 })

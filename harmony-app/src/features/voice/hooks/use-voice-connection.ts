@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import type React from 'react'
 import { useCallback, useEffect, useRef } from 'react'
+import { openUpgradeModal } from '@/features/upgrade'
 import type { ProfileResponse, VoiceParticipantResponse } from '@/lib/api'
 import {
   joinVoice,
@@ -11,6 +12,7 @@ import {
 } from '@/lib/api'
 import { isProblemDetails } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
+import { extractPlanGateError } from '@/lib/plan-gate'
 import { queryKeys } from '@/lib/query-keys'
 import { supabase } from '@/lib/supabase'
 import { fireAndForgetVoiceLeave } from '@/lib/voice-cleanup'
@@ -390,14 +392,26 @@ export function useVoiceConnection() {
       } catch (err: unknown) {
         const rawMessage = err instanceof Error ? err.message : String(err)
         logger.error('voice_join_api_failed', { error: rawMessage, channelId, serverId })
-        // WHY: ProblemDetails from our API have user-friendly detail messages.
-        // LiveKit SDK errors contain raw WebSocket URLs — not user-friendly.
-        // Passing null lets VoiceConnectionBar fall through to the i18n
-        // 'connectionFailed' translation key (ADR-028).
-        // WHY: rawMessage is String(err) which produces "[object Object]" for
-        // ProblemDetails (plain objects, not Error instances). Use .detail directly.
-        const userMessage = isProblemDetails(err) ? err.detail : null
-        useVoiceConnectionStore.setState({ status: 'failed', error: userMessage })
+        // WHY: a voice_concurrent plan-gate rejection routes to the central
+        // UpgradeModal — joinVoice is a plain SDK call (not a react-query
+        // mutation), so the global MutationCache never sees it. Reset to 'idle'
+        // so the VoiceConnectionBar shows no failed/error state: the modal is
+        // the sole feedback (mirrors the emoji-settings-tab isPlanGateError
+        // guard, ADR-045).
+        const gate = extractPlanGateError(err)
+        if (gate !== null) {
+          openUpgradeModal(gate)
+          useVoiceConnectionStore.setState({ status: 'idle', error: null })
+        } else {
+          // WHY: ProblemDetails from our API have user-friendly detail messages.
+          // LiveKit SDK errors contain raw WebSocket URLs — not user-friendly.
+          // Passing null lets VoiceConnectionBar fall through to the i18n
+          // 'connectionFailed' translation key (ADR-028).
+          // WHY: rawMessage is String(err) which produces "[object Object]" for
+          // ProblemDetails (plain objects, not Error instances). Use .detail directly.
+          const userMessage = isProblemDetails(err) ? err.detail : null
+          useVoiceConnectionStore.setState({ status: 'failed', error: userMessage })
+        }
 
         // WHY (P1-5): If storeConnect (room.connect()) failed, the server-side
         // session created by joinVoice is still alive and will linger for 45s

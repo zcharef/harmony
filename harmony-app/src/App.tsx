@@ -1,5 +1,5 @@
 import { HeroUIProvider, Spinner, ToastProvider } from '@heroui/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { FeatureErrorBoundary } from '@/components/shared/error-boundary'
@@ -14,6 +14,7 @@ import {
 } from '@/features/auth'
 import { CryptoProvider } from '@/features/crypto'
 import { InviteLandingPage } from '@/features/invite'
+import { openUpgradeModal, UpgradeModal } from '@/features/upgrade'
 import { useAppUpdater } from '@/hooks/use-app-updater'
 import { useDockBadge } from '@/hooks/use-dock-badge'
 import { useDocumentTitle } from '@/hooks/use-document-title'
@@ -21,10 +22,25 @@ import { useFaviconBadge } from '@/hooks/use-favicon-badge'
 import { useSystemTray } from '@/hooks/use-system-tray'
 import { getInviteCodeFromPath } from '@/lib/invite-path'
 import { logger } from '@/lib/logger'
+import { extractPlanGateError } from '@/lib/plan-gate'
 import { isTauri } from '@/lib/platform'
 import { ROUTES } from '@/lib/routes'
 
 const queryClient = new QueryClient({
+  // WHY a global MutationCache handler: FEATURE_NOT_IN_PLAN /
+  // PLAN_LIMIT_REACHED can come from ANY plan-gated mutation (emoji upload,
+  // invites, servers, channels, attachments…). Intercepting here opens the
+  // UpgradeModal for every surface with ONE integration point; per-hook
+  // onError toasts route through toastApiError, which stays silent for
+  // these two codes so the modal is the only feedback (ADR-045).
+  mutationCache: new MutationCache({
+    onError: (error) => {
+      const gate = extractPlanGateError(error)
+      if (gate !== null) {
+        openUpgradeModal(gate)
+      }
+    },
+  }),
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60 * 5, // 5 minutes
@@ -212,6 +228,7 @@ function App() {
               </FeatureErrorBoundary>
             </CryptoProvider>
           </AuthProvider>
+          <UpgradeModal />
         </main>
         <ToastProvider
           placement="bottom-right"
