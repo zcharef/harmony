@@ -31,12 +31,13 @@ test.describe('Server CRUD', () => {
     await serverButtonsBefore.first().waitFor({ timeout: 10000 })
     const countBefore = await serverButtonsBefore.count()
 
-    // ACTION: open create server dialog
+    // ACTION: open the Add-a-Server chooser, then pick "Create My Own"
     const addButton = page.locator('[data-test="add-server-button"]')
     await addButton.click()
 
-    const dialog = page.locator('[data-test="create-server-dialog"]')
+    const dialog = page.locator('[data-test="add-server-dialog"]')
     await expect(dialog).toBeVisible({ timeout: 5000 })
+    await page.locator('[data-test="add-server-create-option"]').click()
 
     const newServerName = `Created ${Date.now()}`
     const nameInput = page.locator('[data-test="server-name-input"]')

@@ -19,6 +19,10 @@ const envSchema = z.object({
   // WHY: Desktop auth opens the web login page in the system browser.
   // In production: https://app.joinharmony.app — in dev: http://localhost:1420
   VITE_WEB_APP_URL: z.string().url().optional(),
+  // WHY: Host used to build shareable invite links (joinharmony.app/i/<code>).
+  // Optional — defaults to EXTERNAL_LINKS.INVITE_BASE. Set per-deployment when
+  // the short-link host differs from the default apex (buildInviteUrl, invite-path.ts).
+  VITE_INVITE_BASE_URL: z.string().url().optional(),
   VITE_SENTRY_DSN: z.string().url().optional(),
   VITE_OFFICIAL_SERVER_ID: z.string().uuid().optional(),
 })

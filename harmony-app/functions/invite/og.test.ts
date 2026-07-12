@@ -75,6 +75,12 @@ describe('buildInviteOgTags', () => {
     expect(tags).toContain('content="1 member · Chat, voice and community on Harmony"')
   })
 
+  it('emits og:url for a short /i/ invite link', () => {
+    const shortUrl = 'https://joinharmony.app/i/abc123'
+    const tags = buildInviteOgTags(preview, shortUrl, fallback)
+    expect(tags).toContain(`<meta property="og:url" content="${shortUrl}" />`)
+  })
+
   it('falls back to the app logo when the server has no icon', () => {
     const tags = buildInviteOgTags({ ...preview, serverIconUrl: null }, url, fallback)
     expect(tags).toContain(`<meta property="og:image" content="${fallback}" />`)

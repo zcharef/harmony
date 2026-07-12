@@ -3,7 +3,7 @@ import { LogIn, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { CreateServerDialog, JoinServerDialog } from '@/features/server-nav'
+import { AddServerDialog } from '@/features/server-nav'
 
 interface WelcomeScreenProps {
   onServerCreated: (serverId: string) => void
@@ -12,8 +12,8 @@ interface WelcomeScreenProps {
 
 export function WelcomeScreen({ onServerCreated, onServerJoined }: WelcomeScreenProps) {
   const { t } = useTranslation('servers')
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [isJoinOpen, setIsJoinOpen] = useState(false)
+  // WHY null = closed: the pressed card decides which step AddServerDialog opens to.
+  const [addStep, setAddStep] = useState<'create' | 'join' | null>(null)
 
   return (
     <div
@@ -46,7 +46,7 @@ export function WelcomeScreen({ onServerCreated, onServerJoined }: WelcomeScreen
         <Card
           data-test="welcome-create-card"
           isPressable
-          onPress={() => setIsCreateOpen(true)}
+          onPress={() => setAddStep('create')}
           className="w-64 border border-divider bg-content1 transition-transform hover:scale-[1.02]"
         >
           <CardBody className="gap-3 p-5">
@@ -62,7 +62,7 @@ export function WelcomeScreen({ onServerCreated, onServerJoined }: WelcomeScreen
         <Card
           data-test="welcome-join-card"
           isPressable
-          onPress={() => setIsJoinOpen(true)}
+          onPress={() => setAddStep('join')}
           className="w-64 border border-divider bg-content1 transition-transform hover:scale-[1.02]"
         >
           <CardBody className="gap-3 p-5">
@@ -75,20 +75,16 @@ export function WelcomeScreen({ onServerCreated, onServerJoined }: WelcomeScreen
         </Card>
       </div>
 
-      <CreateServerDialog
-        isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
+      <AddServerDialog
+        isOpen={addStep !== null}
+        initialStep={addStep ?? 'choose'}
+        onClose={() => setAddStep(null)}
         onCreated={(serverId) => {
-          setIsCreateOpen(false)
+          setAddStep(null)
           onServerCreated(serverId)
         }}
-      />
-
-      <JoinServerDialog
-        isOpen={isJoinOpen}
-        onClose={() => setIsJoinOpen(false)}
         onJoined={(serverId) => {
-          setIsJoinOpen(false)
+          setAddStep(null)
           onServerJoined(serverId)
         }}
       />

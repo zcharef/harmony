@@ -41,10 +41,10 @@ test.describe('Invites', () => {
     const inviteCode = responseBody.code
     expect(inviteCode.length).toBeGreaterThan(0)
 
-    // Verify the generated invite code is displayed in the UI
+    // Verify the generated invite LINK is displayed in the UI. It is now a full
+    // share URL (joinharmony.app/i/<code>) that embeds the code, not the bare code.
     const codeDisplay = page.locator('[data-test="invite-code-display"]')
-    // WHY: invite-code-display is an <input> element — use toHaveValue, not toContainText.
-    await expect(codeDisplay).toHaveValue(inviteCode, { timeout: 10_000 })
+    await expect(codeDisplay).toHaveValue(new RegExp(`/i/${inviteCode}$`), { timeout: 10_000 })
 
     // Close the dialog
     await page.locator('[data-test="invite-done-button"]').click()
@@ -81,11 +81,12 @@ test.describe('Invites', () => {
     await page.locator('[data-test="invite-done-button"]').click()
     await expect(createDialog).not.toBeVisible({ timeout: 5_000 })
 
-    // Step 2: Open the join server dialog
-    await page.locator('[data-test="join-server-button"]').click()
+    // Step 2: Open the Add-a-Server chooser and pick "Join a Server"
+    await page.locator('[data-test="add-server-button"]').click()
 
-    const joinDialog = page.locator('[data-test="join-server-dialog"]')
+    const joinDialog = page.locator('[data-test="add-server-dialog"]')
     await expect(joinDialog).toBeVisible({ timeout: 5_000 })
+    await page.locator('[data-test="add-server-join-option"]').click()
 
     // Fill in the invite code
     const codeInput = page.locator('[data-test="invite-code-input"]')

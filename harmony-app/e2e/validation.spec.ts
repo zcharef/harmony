@@ -45,7 +45,9 @@ test.describe('Input Validation', () => {
       const addServerBtn = page.locator('[data-test="add-server-button"]')
       await addServerBtn.waitFor({ timeout: 10_000 })
       await addServerBtn.click()
-      await page.locator('[data-test="create-server-dialog"]').waitFor({ timeout: 10000 })
+      // The "+" opens the Create/Join chooser — pick "Create My Own" to reach the form.
+      await page.locator('[data-test="add-server-dialog"]').waitFor({ timeout: 10000 })
+      await page.locator('[data-test="add-server-create-option"]').click()
 
       // Leave name empty, submit
       const nameInput = page.locator('[data-test="server-name-input"]')
@@ -56,7 +58,7 @@ test.describe('Input Validation', () => {
       // WHY: Client-side Zod schema requires min(1). The zodResolver catches the
       // error before handleSubmit fires, so dialog stays open with the submit
       // button still present — no API call is made.
-      await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({
+      await expect(page.locator('[data-test="add-server-dialog"]')).toBeVisible({
         timeout: 5000,
       })
       await expect(page.locator('[data-test="create-server-submit-button"]')).toBeVisible()
@@ -70,7 +72,9 @@ test.describe('Input Validation', () => {
       const addServerBtn = page.locator('[data-test="add-server-button"]')
       await addServerBtn.waitFor({ timeout: 10_000 })
       await addServerBtn.click()
-      await page.locator('[data-test="create-server-dialog"]').waitFor({ timeout: 10000 })
+      // The "+" opens the Create/Join chooser — pick "Create My Own" to reach the form.
+      await page.locator('[data-test="add-server-dialog"]').waitFor({ timeout: 10000 })
+      await page.locator('[data-test="add-server-create-option"]').click()
 
       const longName = 'a'.repeat(101)
       const nameInput = page.locator('[data-test="server-name-input"]')
@@ -82,7 +86,7 @@ test.describe('Input Validation', () => {
       // WHY: Client-side Zod schema has max(100). The zodResolver catches the
       // error before handleSubmit fires, so no POST request is ever made.
       // Dialog stays open with the submit button still present — no API call needed.
-      await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({
+      await expect(page.locator('[data-test="add-server-dialog"]')).toBeVisible({
         timeout: 5000,
       })
       await expect(page.locator('[data-test="create-server-submit-button"]')).toBeVisible()
@@ -96,7 +100,9 @@ test.describe('Input Validation', () => {
       const addServerBtn = page.locator('[data-test="add-server-button"]')
       await addServerBtn.waitFor({ timeout: 10_000 })
       await addServerBtn.click()
-      await page.locator('[data-test="create-server-dialog"]').waitFor({ timeout: 10000 })
+      // The "+" opens the Create/Join chooser — pick "Create My Own" to reach the form.
+      await page.locator('[data-test="add-server-dialog"]').waitFor({ timeout: 10000 })
+      await page.locator('[data-test="add-server-create-option"]').click()
 
       // Control char U+0009 (tab) — client form accepts it (no regex), but API rejects it
       const nameWithControlChar = 'Server\tName'
@@ -114,7 +120,7 @@ test.describe('Input Validation', () => {
       const response = await responsePromise
       expect(response.status()).toBeGreaterThanOrEqual(400)
 
-      await expect(page.locator('[data-test="create-server-dialog"]')).toBeVisible({
+      await expect(page.locator('[data-test="add-server-dialog"]')).toBeVisible({
         timeout: 5000,
       })
     })

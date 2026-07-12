@@ -1,5 +1,5 @@
 import { Avatar, Divider, Spinner, Tooltip } from '@heroui/react'
-import { Compass, Info, MessageSquare, Plus, Ticket } from 'lucide-react'
+import { Compass, Info, MessageSquare, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CreateChannelDialog, useChannels, useUnreadStore } from '@/features/channels'
@@ -11,10 +11,9 @@ import { useAboutUiStore } from '@/lib/about-ui-store'
 import type { ServerResponse } from '@/lib/api'
 import { useDiscoveryUiStore } from '@/lib/discovery-ui-store'
 import { cn } from '@/lib/utils'
+import { AddServerDialog } from './add-server-dialog'
 import { CreateInviteDialog } from './create-invite-dialog'
-import { CreateServerDialog } from './create-server-dialog'
 import { useServers } from './hooks/use-servers'
-import { JoinServerDialog } from './join-server-dialog'
 import { ServerContextMenu } from './server-context-menu'
 
 /**
@@ -201,8 +200,7 @@ export function ServerList({
   const { t: tDms } = useTranslation('dms')
   const { t: tChannels } = useTranslation('channels')
   const { data: servers, isPending, isError } = useServers()
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [isJoinOpen, setIsJoinOpen] = useState(false)
+  const [isAddOpen, setIsAddOpen] = useState(false)
   // WHY: Context-menu Invite/Create-Channel dialogs are owned here (not in
   // ChannelSidebar) so they can target ANY right-clicked server — ChannelSidebar
   // only knows the active server and unmounts in DM view. Each holds the target
@@ -325,12 +323,12 @@ export function ServerList({
 
       <Divider className="mx-auto my-2 w-8 bg-divider" />
 
-      {/* Add server button */}
+      {/* Add server button — single entry opening the Create / Join chooser */}
       <Tooltip content={t('addServer')} placement="right" offset={8}>
         <button
           type="button"
           data-test="add-server-button"
-          onClick={() => setIsCreateOpen(true)}
+          onClick={() => setIsAddOpen(true)}
           aria-label={t('addServer')}
           className="flex items-center justify-center"
         >
@@ -369,28 +367,6 @@ export function ServerList({
         </button>
       </Tooltip>
 
-      {/* Join server (via invite code) button */}
-      <Tooltip content={t('joinServer')} placement="right" offset={8}>
-        <button
-          type="button"
-          data-test="join-server-button"
-          onClick={() => setIsJoinOpen(true)}
-          aria-label={t('joinServer')}
-          className="mt-2 flex items-center justify-center"
-        >
-          <Avatar
-            icon={<Ticket className="h-5 w-5" />}
-            classNames={{
-              base: cn(
-                'h-12 w-12 cursor-pointer rounded-[24px] bg-default-100 text-default-foreground',
-                'transition-all duration-200 hover:rounded-2xl hover:bg-primary hover:text-primary-foreground',
-              ),
-              icon: 'text-current',
-            }}
-          />
-        </button>
-      </Tooltip>
-
       <Divider className="mx-auto my-2 w-8 bg-divider" />
 
       {/* About button */}
@@ -415,15 +391,10 @@ export function ServerList({
         </button>
       </Tooltip>
 
-      <CreateServerDialog
-        isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
+      <AddServerDialog
+        isOpen={isAddOpen}
+        onClose={() => setIsAddOpen(false)}
         onCreated={(serverId) => onSelectServer(serverId)}
-      />
-
-      <JoinServerDialog
-        isOpen={isJoinOpen}
-        onClose={() => setIsJoinOpen(false)}
         onJoined={(serverId) => onSelectServer(serverId)}
       />
 

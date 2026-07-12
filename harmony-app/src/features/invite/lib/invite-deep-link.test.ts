@@ -29,6 +29,10 @@ describe('parseInviteDeepLink', () => {
     // Trailing slash tolerated (mirrors invite-path.ts).
     ['harmony://invite/abc123/', 'abc123'],
     [`harmony://invite/${'a'.repeat(32)}`, 'a'.repeat(32)],
+    // Short /i/ shape — mirrors the /i/ web links.
+    ['harmony://i/abc123', 'abc123'],
+    ['harmony://i/ABCxyz09', 'ABCxyz09'],
+    ['harmony://i/abc123/', 'abc123'],
   ])('accepts %s', (url, code) => {
     expect(parseInviteDeepLink(url)).toBe(code)
   })
@@ -51,6 +55,12 @@ describe('parseInviteDeepLink', () => {
     ['harmony://invite/abc123#frag'],
     // Over-length code.
     [`harmony://invite/${'a'.repeat(33)}`],
+    // Short shape stays just as strict — no bare host, no extra segments.
+    ['harmony://i'],
+    ['harmony://i/'],
+    ['harmony://i/abc-123'],
+    ['harmony://i/abc123/extra'],
+    [`harmony://i/${'a'.repeat(33)}`],
   ])('rejects %s', (url) => {
     expect(parseInviteDeepLink(url)).toBeNull()
   })
