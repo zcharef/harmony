@@ -16,6 +16,8 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
+import { buildInviteUrl } from '@/lib/invite-path'
+import { logger } from '@/lib/logger'
 import { useCreateInvite } from './hooks/use-create-invite'
 
 function getExpiryOptions(t: TFunction<'servers'>) {
@@ -69,11 +71,25 @@ export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDi
     )
   }
 
+  // WHY the full URL: recipients open a link, not a bare code — the copied value
+  // is joinharmony.app/i/<code>, which App.tsx auto-follows into the join flow.
+  const inviteUrl = generatedCode === null ? '' : buildInviteUrl(generatedCode)
+
   function handleCopy() {
     if (generatedCode === null) return
-    navigator.clipboard.writeText(generatedCode)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    // WHY .catch (ADR-027): clipboard write can reject (permissions/insecure
+    // context); route the failure to the logger instead of dropping it silently.
+    navigator.clipboard
+      .writeText(inviteUrl)
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      })
+      .catch((error: unknown) => {
+        logger.error('invite_link_copy_failed', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
   }
 
   function handleClose() {
@@ -88,15 +104,15 @@ export function CreateInviteDialog({ serverId, isOpen, onClose }: CreateInviteDi
       <ModalContent>
         {generatedCode !== null ? (
           <>
-            <ModalHeader>{t('yourInviteCode')}</ModalHeader>
+            <ModalHeader>{t('yourInviteLink')}</ModalHeader>
             <ModalBody>
-              <p className="text-sm text-default-500">{t('shareInviteCode')}</p>
+              <p className="text-sm text-default-500">{t('shareInviteLink')}</p>
               <div className="flex items-center gap-2">
                 <Input
-                  value={generatedCode}
+                  value={inviteUrl}
                   isReadOnly
                   variant="bordered"
-                  classNames={{ input: 'font-mono text-lg' }}
+                  classNames={{ input: 'font-mono text-sm' }}
                   data-test="invite-code-display"
                 />
                 <Button

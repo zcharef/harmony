@@ -1,18 +1,18 @@
 import { logger } from '@/lib/logger'
 
 /**
- * harmony://invite/<code> deep links — desktop only.
+ * harmony://i/<code> and harmony://invite/<code> deep links — desktop only.
  *
  * WHY strict parsing: the code charset mirrors the API's invite-code format
  * (1-32 alphanumeric, see invite-path.ts / invite_service.rs). Anything
  * else — query strings, extra path segments, other hosts — is rejected so a
- * crafted deep link can never navigate the app anywhere but /invite/:code.
+ * crafted deep link can never navigate the app anywhere but the invite flow.
  *
  * Pattern reference: desktop-auth.ts listenForAuthCallback (raw-URL string
  * matching, getCurrent() for cold start, onOpenUrl for warm start).
  */
 
-const INVITE_DEEP_LINK_REGEX = /^harmony:\/\/invite\/([A-Za-z0-9]{1,32})\/?$/
+const INVITE_DEEP_LINK_REGEX = /^harmony:\/\/(?:i|invite)\/([A-Za-z0-9]{1,32})\/?$/
 
 /**
  * Extracts the invite code from a raw deep-link URL, or `null` when the URL

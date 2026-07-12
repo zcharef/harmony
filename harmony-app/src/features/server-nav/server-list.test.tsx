@@ -201,3 +201,22 @@ describe('ServerList context menu', () => {
     confirmSpy.mockRestore()
   })
 })
+
+describe('ServerList add-server chooser', () => {
+  it('opens the AddServerDialog chooser (Create + Join) from the single "+" button', async () => {
+    renderRail()
+
+    fireEvent.click(screen.getByTestId('add-server-button'))
+
+    expect(await screen.findByTestId('add-server-dialog')).toBeTruthy()
+    expect(screen.getByTestId('add-server-create-option')).toBeTruthy()
+    expect(screen.getByTestId('add-server-join-option')).toBeTruthy()
+  })
+
+  it('no longer renders a separate join-server button (join lives in the chooser)', () => {
+    renderRail()
+
+    expect(screen.getByTestId('add-server-button')).toBeTruthy()
+    expect(screen.queryByTestId('join-server-button')).toBeNull()
+  })
+})
