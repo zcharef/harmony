@@ -178,12 +178,21 @@ vi.mock('livekit-client', () => {
       TrackUnsubscribed: 'trackUnsubscribed',
       LocalTrackPublished: 'localTrackPublished',
       LocalTrackUnpublished: 'localTrackUnpublished',
+      ActiveDeviceChanged: 'activeDeviceChanged',
     },
     Track: {
       Kind: { Audio: 'audio', Video: 'video' },
       Source: { Microphone: 'microphone' },
     },
-    LocalAudioTrack: class LocalAudioTrack {},
+    // WHY: Default surface the store's local speaking detector reads —
+    // getProcessor() (post-KRISP processed track) and mediaStreamTrack (raw).
+    // Tests override these via Object.assign when they need a real processor.
+    LocalAudioTrack: class LocalAudioTrack {
+      mediaStreamTrack = { kind: 'audio', id: 'local-raw-track' }
+      getProcessor(): unknown {
+        return undefined
+      }
+    },
   }
 })
 
@@ -924,6 +933,178 @@ describe('useVoiceConnectionStore', () => {
 
       await vi.waitFor(() => {
         expect(useVoiceConnectionStore.getState().isKrispEnabled).toBe(false)
+      })
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // KRISP re-enable on input-device change (bug 2) + activity ring reads
+  // post-KRISP audio (bug 3). Both hinge on reconciling KRISP / the local
+  // speaking detector with later track & processor changes.
+  // -------------------------------------------------------------------------
+  describe('KRISP + local detector reconciliation', () => {
+    const RAW_TRACK = { kind: 'audio', id: 'raw-mic-track' }
+    const PROCESSED_TRACK = { kind: 'audio', id: 'krisp-processed-track' }
+
+    /** Build a local mic track whose getProcessor() exposes a processed track,
+     * matching the LiveKit + KRISP surface the store reads. */
+    async function buildLocalMicTrack(
+      overrides: Record<string, unknown> = {},
+    ): Promise<Record<string, unknown>> {
+      const { LocalAudioTrack } = await import('livekit-client')
+      // @ts-expect-error — mock class constructor takes no args
+      return Object.assign(new LocalAudioTrack(), {
+        mediaStreamTrack: RAW_TRACK,
+        setProcessor: vi.fn().mockResolvedValue(undefined),
+        getProcessor: vi.fn().mockReturnValue({ processedTrack: PROCESSED_TRACK }),
+        ...overrides,
+      })
+    }
+
+    /** Connect, publish the mic track, and wait for the async KRISP attach to
+     * settle. Returns the room, the published track, and the shared processor. */
+    async function connectWithKrisp(): Promise<{
+      room: MockRoom
+      track: Record<string, unknown>
+      processor: { setEnabled: Mock }
+    }> {
+      const room = await connectStore()
+      const track = await buildLocalMicTrack()
+      room.localParticipant.getTrackPublication = vi.fn().mockReturnValue({ track })
+
+      room.__emit('localTrackPublished', { source: 'microphone', track })
+
+      const { KrispNoiseFilter } = await import('@livekit/krisp-noise-filter')
+      await vi.waitFor(() => {
+        expect(KrispNoiseFilter).toHaveBeenCalled()
+      })
+      const processor = vi.mocked(KrispNoiseFilter).mock.results[0]?.value as { setEnabled: Mock }
+      return { room, track, processor }
+    }
+
+    // -- Bug 3: the local detector binds to the POST-KRISP processed track ----
+
+    it('binds the local detector to the processed track after KRISP attaches', async () => {
+      const { createSpeakingDetector } = await import('../lib/speaking-detector')
+      const room = await connectStore()
+      const track = await buildLocalMicTrack()
+      vi.mocked(createSpeakingDetector).mockClear()
+
+      room.__emit('localTrackPublished', { source: 'microphone', track })
+
+      // WHY (bug 3): the detector must analyze the processed track, not the raw
+      // pre-KRISP capture — otherwise the ring lights on noise KRISP strips.
+      await vi.waitFor(() => {
+        expect(createSpeakingDetector).toHaveBeenCalledWith(
+          expect.anything(),
+          PROCESSED_TRACK,
+          expect.any(Function),
+        )
+      })
+      expect(createSpeakingDetector).not.toHaveBeenCalledWith(
+        expect.anything(),
+        RAW_TRACK,
+        expect.any(Function),
+      )
+    })
+
+    it('binds the local detector to the raw track when KRISP is off', async () => {
+      const { createSpeakingDetector } = await import('../lib/speaking-detector')
+      const room = await connectStore()
+      useVoiceConnectionStore.setState({ isKrispEnabled: false })
+      const track = await buildLocalMicTrack()
+      vi.mocked(createSpeakingDetector).mockClear()
+
+      room.__emit('localTrackPublished', { source: 'microphone', track })
+
+      // WHY: KRISP off → the published audio IS the raw capture track, so the
+      // ring reads raw (correct — nothing is filtered).
+      await vi.waitFor(() => {
+        expect(createSpeakingDetector).toHaveBeenCalledWith(
+          expect.anything(),
+          RAW_TRACK,
+          expect.any(Function),
+        )
+      })
+    })
+
+    it('rebuilds the local detector from the raw track when KRISP is toggled off', async () => {
+      const { createSpeakingDetector } = await import('../lib/speaking-detector')
+      const { processor } = await connectWithKrisp()
+      vi.mocked(createSpeakingDetector).mockClear()
+      processor.setEnabled.mockClear()
+
+      useVoiceConnectionStore.getState().toggleKrisp()
+
+      await vi.waitFor(() => {
+        expect(processor.setEnabled).toHaveBeenCalledWith(false)
+      })
+      // WHY: after disabling KRISP the ring must switch to the raw track.
+      await vi.waitFor(() => {
+        expect(createSpeakingDetector).toHaveBeenLastCalledWith(
+          expect.anything(),
+          RAW_TRACK,
+          expect.any(Function),
+        )
+      })
+    })
+
+    // -- Bug 2: KRISP re-asserted on input-device change ----------------------
+
+    it('re-applies KRISP to the user toggle state on an input-device change', async () => {
+      const { room, processor } = await connectWithKrisp()
+      processor.setEnabled.mockClear()
+
+      room.__emit('activeDeviceChanged', 'audioinput')
+
+      // WHY (bug 2): switchActiveDevice rebuilds the worklet disabled; the store
+      // must re-assert setEnabled(true) so KRISP keeps suppressing on the new mic.
+      await vi.waitFor(() => {
+        expect(processor.setEnabled).toHaveBeenCalledWith(true)
+      })
+    })
+
+    it('respects KRISP-off on an input-device change (does not force-enable)', async () => {
+      const { room, processor } = await connectWithKrisp()
+      useVoiceConnectionStore.setState({ isKrispEnabled: false })
+      processor.setEnabled.mockClear()
+
+      room.__emit('activeDeviceChanged', 'audioinput')
+
+      await vi.waitFor(() => {
+        expect(processor.setEnabled).toHaveBeenCalledWith(false)
+      })
+    })
+
+    it('ignores an audiooutput device change (mic pipeline untouched)', async () => {
+      const { room, processor } = await connectWithKrisp()
+      processor.setEnabled.mockClear()
+
+      room.__emit('activeDeviceChanged', 'audiooutput')
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(processor.setEnabled).not.toHaveBeenCalled()
+    })
+
+    it('rebuilds the local detector from the new processed track on input-device change', async () => {
+      const { createSpeakingDetector } = await import('../lib/speaking-detector')
+      const { room, track } = await connectWithKrisp()
+
+      // The new mic exposes a different processed track after the switch.
+      const NEW_PROCESSED = { kind: 'audio', id: 'new-mic-processed-track' }
+      ;(track.getProcessor as Mock).mockReturnValue({ processedTrack: NEW_PROCESSED })
+      vi.mocked(createSpeakingDetector).mockClear()
+
+      room.__emit('activeDeviceChanged', 'audioinput')
+
+      // WHY (bug 3, unified with bug 2): the ring must follow the new mic's
+      // processed track after the switch.
+      await vi.waitFor(() => {
+        expect(createSpeakingDetector).toHaveBeenCalledWith(
+          expect.anything(),
+          NEW_PROCESSED,
+          expect.any(Function),
+        )
       })
     })
   })
