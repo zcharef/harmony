@@ -31,6 +31,10 @@ export function DesktopAuthRedirect() {
     setStatus('redirecting')
 
     try {
+      // WHY still check the session: the create call is authenticated (Bearer
+      // access token). We no longer send the refresh token — the backend binds
+      // the code to the authenticated user and mints a fresh, independent
+      // desktop session at redeem time (so web-side rotation can't revoke it).
       const { data: sessionData } = await supabase.auth.getSession()
       const session = sessionData.session
       if (session === null || codeChallenge === null || state === null) {
@@ -40,7 +44,6 @@ export function DesktopAuthRedirect() {
       const { data } = await createDesktopAuthCode({
         body: {
           codeChallenge,
-          refreshToken: session.refresh_token,
         },
         throwOnError: true,
       })

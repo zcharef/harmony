@@ -70,6 +70,11 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:64322/postgres
       SUPABASE_URL: http://127.0.0.1:64321
       SUPABASE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+      # WHY: the redeem endpoint mints an independent session via the GoTrue
+      # admin API, which needs the service_role key. Without it the API starts
+      # with no minter and redeem returns 502, failing the desktop-auth E2E.
+      # Same local demo service_role key as CI_SUPABASE_SERVICE_ROLE_KEY below.
+      SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
       ENVIRONMENT: test
       SERVER_PORT: "3000"
       # WHY: The E2E suite seeds many messages as one test user; the flood

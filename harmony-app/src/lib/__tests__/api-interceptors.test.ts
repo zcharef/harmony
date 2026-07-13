@@ -1,4 +1,4 @@
-import { AuthError } from '@supabase/supabase-js'
+import { AuthError, AuthRetryableFetchError } from '@supabase/supabase-js'
 import { vi } from 'vitest'
 
 // -- Module mocks (hoisted before imports) ------------------------------------
@@ -150,10 +150,12 @@ describe('responseInterceptor', () => {
       expect(result).toBe(retryResponse)
     })
 
-    it('clears auth store when refresh fails', async () => {
+    it('clears auth store on a DEFINITIVE invalid-grant refresh failure', async () => {
+      // A plain AuthError (invalid_grant / expired session) is NOT a retryable
+      // fetch error → definitive → the session is cleared.
       vi.mocked(supabase.auth.refreshSession).mockResolvedValue({
         data: { session: null, user: null },
-        error: new AuthError('expired', 401, 'session_expired'),
+        error: new AuthError('invalid grant', 400, 'invalid_grant'),
       })
 
       const request = buildRequest()
@@ -164,6 +166,39 @@ describe('responseInterceptor', () => {
       expect(supabase.auth.refreshSession).toHaveBeenCalledOnce()
       expect(useAuthStore.getState().clear).toHaveBeenCalledOnce()
       // WHY: Original 401 response is returned so the caller can handle it.
+      expect(result).toBe(response)
+    })
+
+    it('KEEPS the session on a TRANSIENT (network/5xx) refresh failure', async () => {
+      // WHY: A flaky network at launch must never force a logout. supabase-js's
+      // AuthRetryableFetchError signals a recoverable failure — do NOT clear;
+      // return the 401 so TanStack Query backs off and auto-refresh recovers.
+      vi.mocked(supabase.auth.refreshSession).mockResolvedValue({
+        data: { session: null, user: null },
+        error: new AuthRetryableFetchError('network down', 0),
+      })
+
+      const request = buildRequest()
+      const response = buildResponse(401)
+
+      const result = await responseInterceptor(response, request, buildOptions())
+
+      expect(supabase.auth.refreshSession).toHaveBeenCalledOnce()
+      expect(useAuthStore.getState().clear).not.toHaveBeenCalled()
+      expect(result).toBe(response)
+    })
+
+    it('KEEPS the session when refreshSession throws unexpectedly', async () => {
+      // An unexpected rejection is an infrastructure hiccup, not proof the
+      // refresh token is dead → treated as transient, session preserved.
+      vi.mocked(supabase.auth.refreshSession).mockRejectedValue(new Error('boom'))
+
+      const request = buildRequest()
+      const response = buildResponse(401)
+
+      const result = await responseInterceptor(response, request, buildOptions())
+
+      expect(useAuthStore.getState().clear).not.toHaveBeenCalled()
       expect(result).toBe(response)
     })
 

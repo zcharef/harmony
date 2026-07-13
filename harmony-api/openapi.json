@@ -501,7 +501,7 @@
           "Auth"
         ],
         "summary": "Create a one-time desktop auth code (browser side of the PKCE exchange).",
-        "description": "The authenticated user's access token is extracted from the Authorization header,\nand the refresh token + PKCE `code_challenge` are provided in the request body.\nReturns a short-lived auth code that the desktop app can redeem.\n\n# Errors\nReturns `ApiError` on missing Authorization header, validation failure, or DB error.",
+        "description": "Binds the code to the authenticated user (verified by the auth middleware)\nand the PKCE `code_challenge`. Returns a short-lived auth code the desktop\napp can redeem. Redeem mints a FRESH, independent session for this user — no\ntoken is stored or forwarded here.\n\n# Errors\nReturns `ApiError` on validation failure or DB error.",
         "operationId": "create_desktop_auth_code",
         "requestBody": {
           "content": {
@@ -557,8 +557,8 @@
         "tags": [
           "Auth"
         ],
-        "summary": "Redeem a one-time desktop auth code for session tokens.",
-        "description": "Verifies the PKCE `code_verifier` against the stored `code_challenge` (S256),\nthen returns the access and refresh tokens. The auth code is consumed\n(deleted) in a single atomic query to guarantee single-use.\n\n# Errors\nReturns `ApiError` on validation failure, expired/invalid code, or PKCE mismatch.",
+        "summary": "Redeem a one-time desktop auth code for a fresh, independent session.",
+        "description": "Verifies the PKCE `code_verifier` against the stored `code_challenge` (S256),\nthen mints a BRAND-NEW Supabase session for the user the code is bound to\n(service-role admin path) and returns its access + refresh tokens. The auth\ncode is consumed (deleted) in a single atomic query to guarantee single-use.\n\nWHY mint (not forward): the desktop must own its own refresh-token family so\nweb-side rotation cannot revoke it while the desktop is closed. The minted\nsession is disjoint from the browser's.\n\n# Errors\nReturns `ApiError` on validation failure, expired/invalid code, PKCE\nmismatch, or `502` when the session mint (external Supabase call) fails.",
         "operationId": "redeem_desktop_auth_code",
         "requestBody": {
           "content": {
@@ -593,6 +593,16 @@
           },
           "401": {
             "description": "Invalid or expired auth code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Session mint failed (upstream auth)",
             "content": {
               "application/json": {
                 "schema": {
@@ -7673,22 +7683,16 @@
       },
       "CreateDesktopAuthRequest": {
         "type": "object",
-        "description": "Request body for creating a desktop auth code.",
+        "description": "Request body for creating a desktop auth code.\n",
         "required": [
-          "codeChallenge",
-          "refreshToken"
+          "codeChallenge"
         ],
         "properties": {
           "codeChallenge": {
             "type": "string",
-            "description": "PKCE `code_challenge` (S256-hashed `code_verifier`, base64url-encoded)."
-          },
-          "refreshToken": {
-            "type": "string",
-            "description": "Supabase refresh token to store for the desktop app."
+            "description": "PKCE `code_challenge` (S256-hashed `code_verifier`, base64url-encoded).\n\nWHY no token here: the code binds to the authenticated user (derived\nfrom the Bearer access token), and redeem mints a fresh, independent\nsession for that user — the browser never hands over its own token."
           }
-        },
-        "additionalProperties": false
+        }
       },
       "CreateDesktopAuthResponse": {
         "type": "object",

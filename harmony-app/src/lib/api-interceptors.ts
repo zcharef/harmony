@@ -14,25 +14,48 @@
  * import from client.gen.ts itself).
  */
 
+import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { client } from '@/lib/api/client.gen'
 import { logger } from '@/lib/logger'
 import { supabase } from '@/lib/supabase'
 
 const REQUEST_ID_HEADER = 'x-request-id'
 
+/**
+ * Outcome of a token refresh attempt.
+ * - `refreshed`: a new token was minted → retry the original request.
+ * - `transient`: network drop / 5xx from the auth server → KEEP the session;
+ *   let TanStack Query back off and supabase-js background auto-refresh recover.
+ *   A flaky network at launch must never force a logout.
+ * - `definitive`: the refresh token is genuinely dead (invalid_grant,
+ *   refresh_token_not_found / already_used, expired session) → clear the session.
+ */
+type RefreshOutcome = 'refreshed' | 'transient' | 'definitive'
+
 // WHY: Singleton promise prevents concurrent refresh races when multiple
 // 401s arrive simultaneously (e.g., parallel queries on page load).
-let refreshPromise: Promise<boolean> | null = null
+let refreshPromise: Promise<RefreshOutcome> | null = null
 
 /** @internal Used by responseInterceptor below. */
-async function refreshToken(): Promise<boolean> {
+async function refreshToken(): Promise<RefreshOutcome> {
   if (refreshPromise !== null) {
     return refreshPromise
   }
 
   refreshPromise = supabase.auth
     .refreshSession()
-    .then(({ error }) => error === null)
+    .then(({ error }): RefreshOutcome => {
+      if (error === null) {
+        return 'refreshed'
+      }
+      // WHY library type (isAuthRetryableFetchError): only supabase-js's own
+      // retryable class (network failure / 5xx) is transient. Anything else is
+      // a definitive invalid-grant that should log out.
+      return isAuthRetryableFetchError(error) ? 'transient' : 'definitive'
+    })
+    // WHY treat an unexpected throw as transient: a rejected promise here is an
+    // infrastructure hiccup, not proof the refresh token is dead. Don't log out.
+    .catch((): RefreshOutcome => 'transient')
     .finally(() => {
       refreshPromise = null
     })
@@ -84,6 +107,51 @@ function rebuildRequest(
 }
 
 /**
+ * Handle a 401 by refreshing the token and retrying, or (on a definitive
+ * invalid-grant) clearing the session. Transient/network refresh failures
+ * preserve the session and return the 401 for TanStack Query to back off on.
+ *
+ * WHY extracted: keeps `responseInterceptor` under the cognitive-complexity cap.
+ */
+async function handleUnauthorized(
+  response: Response,
+  request: Request,
+  options: InterceptorOptions,
+): Promise<Response> {
+  const outcome = await refreshToken()
+
+  if (outcome === 'definitive') {
+    // WHY: Import auth store lazily to avoid import-order issues at startup.
+    // Zustand stores are singletons — getState() works outside React components.
+    const { useAuthStore } = await import('@/features/auth/stores/auth-store')
+    useAuthStore.getState().clear()
+    return response
+  }
+
+  if (outcome === 'transient') {
+    // WHY keep the session: a network drop / 5xx at the auth server is
+    // recoverable. Return the 401 so TanStack Query backs off and retries;
+    // supabase-js's background auto-refresh recovers the token. Force-logging
+    // out here (the old behavior) turned a launch-time network blip into a
+    // forced re-login — the exact failure this hardening removes.
+    return response
+  }
+
+  // WHY: Get a fresh token after successful refresh to build the retry request.
+  const { data } = await supabase.auth.getSession()
+  const newToken = data.session?.access_token
+  if (newToken === undefined) {
+    return response
+  }
+
+  const retryHeaders = new Headers(request.headers)
+  retryHeaders.set('Authorization', `Bearer ${newToken}`)
+
+  const _fetch = options.fetch ?? globalThis.fetch
+  return _fetch(rebuildRequest(request, options, retryHeaders))
+}
+
+/**
  * Response interceptor — handles 401 and 429 transparently.
  *
  * WHY this is a response interceptor (not error):
@@ -122,28 +190,7 @@ export async function responseInterceptor(
 
   // --- 401 Unauthorized: silent token refresh + retry ---
   if (response.status === 401) {
-    const refreshed = await refreshToken()
-
-    if (!refreshed) {
-      // WHY: Import auth store lazily to avoid import-order issues at startup.
-      // Zustand stores are singletons — getState() works outside React components.
-      const { useAuthStore } = await import('@/features/auth/stores/auth-store')
-      useAuthStore.getState().clear()
-      return response
-    }
-
-    // WHY: Get a fresh token after successful refresh to build the retry request.
-    const { data } = await supabase.auth.getSession()
-    const newToken = data.session?.access_token
-    if (newToken === undefined) {
-      return response
-    }
-
-    const retryHeaders = new Headers(request.headers)
-    retryHeaders.set('Authorization', `Bearer ${newToken}`)
-
-    const _fetch = options.fetch ?? globalThis.fetch
-    return _fetch(rebuildRequest(request, options, retryHeaders))
+    return handleUnauthorized(response, request, options)
   }
 
   // --- 429 Rate Limited: transparent single retry ---

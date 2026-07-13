@@ -550,6 +550,37 @@ async fn init_app_state(config: &Config) -> AppInit {
         );
     }
 
+    // WHY: The desktop redeem endpoint mints a fresh, independent Supabase
+    // session via the service-role admin API. Enabled only when BOTH the
+    // Supabase URL and the service-role key are configured; otherwise desktop
+    // redeem returns 502 (self-hosted/dev without desktop auth).
+    let session_minter: Option<Arc<dyn domain::ports::SessionMinter>> = match (
+        config.supabase_url.as_ref(),
+        config.supabase_service_role_key.as_ref(),
+    ) {
+        (Some(url), Some(key)) => {
+            match infra::supabase_admin::SupabaseAdminClient::new(url, key.clone()) {
+                Ok(client) => {
+                    tracing::info!("Desktop session minting enabled (Supabase admin)");
+                    Some(Arc::new(client) as Arc<dyn domain::ports::SessionMinter>)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        "Failed to build Supabase admin client — desktop session minting DISABLED"
+                    );
+                    None
+                }
+            }
+        }
+        _ => {
+            tracing::warn!(
+                "SUPABASE_SERVICE_ROLE_KEY or SUPABASE_URL unset — desktop session minting DISABLED (redeem returns 502)"
+            );
+            None
+        }
+    };
+
     let state = AppState::new(
         pool,
         config.supabase_jwt_secret.clone(),
@@ -595,7 +626,8 @@ async fn init_app_state(config: &Config) -> AppInit {
         attachment_url_origin,
         config.trusted_proxy_secret.clone(),
     )
-    .with_founder(founder_id);
+    .with_founder(founder_id)
+    .with_session_minter(session_minter);
 
     AppInit {
         state,
