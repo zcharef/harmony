@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef } from 'react'
 import { z } from 'zod'
 
@@ -7,6 +8,8 @@ import { useServerEvent } from '@/hooks/use-server-event'
 import { type UserStatus, updatePresence } from '@/lib/api'
 import { zUserStatus } from '@/lib/api/zod.gen'
 import { logger } from '@/lib/logger'
+import { isTauri } from '@/lib/platform'
+import { queryKeys } from '@/lib/query-keys'
 import { usePresenceStore } from '../stores/presence-store'
 
 const IDLE_TIMEOUT_MS = 300_000
@@ -49,6 +52,7 @@ function postPresenceStatus(status: UserStatus): void {
  * 3. Handle `presence.changed` deltas (incremental updates)
  */
 export function usePresence(userId: string | null): void {
+  const queryClient = useQueryClient()
   const preferences = usePreferences()
   const preferencesReady = !preferences.isPending
   const dndEnabled = preferences.data?.dndEnabled === true
@@ -174,11 +178,27 @@ export function usePresence(userId: string | null): void {
 
       if (status === 'offline') {
         removeUser(eventUserId)
-      } else {
-        setUserStatus(eventUserId, status)
+        return
+      }
+
+      setUserStatus(eventUserId, status)
+
+      // WHY: A peer coming online may have just registered device keys (e.g. a
+      // previously web-only user's first desktop login). The DM recipient-
+      // encryptable probe caches listDevices(peer)===false with a 5-min
+      // staleTime and is never otherwise invalidated (refetchOnWindowFocus is
+      // globally off), so we keep sending PLAINTEXT to a now-keyed peer for up
+      // to ~50 min. Invalidating the one peer's device query re-runs the probe
+      // within seconds for any open DM, flipping it to E2EE and clearing the
+      // plaintext banner. Desktop-only (isTauri) because the probe never runs
+      // on web; scoped to eventUserId to avoid an invalidation storm. The probe
+      // stays authoritative — if the peer is still keyless it stays plaintext,
+      // preserving the no-downgrade tri-state invariant.
+      if (isTauri()) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.crypto.devices(eventUserId) })
       }
     },
-    [userId],
+    [userId, queryClient],
   )
 
   useServerEvent(userId !== null ? 'presence.changed' : null, handlePresenceEvent)
