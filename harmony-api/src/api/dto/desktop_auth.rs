@@ -3,16 +3,18 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::models::DesktopAuthCode;
+use crate::domain::models::MintedSession;
 
 /// Request body for creating a desktop auth code.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateDesktopAuthRequest {
     /// PKCE `code_challenge` (S256-hashed `code_verifier`, base64url-encoded).
+    ///
+    /// WHY no token here: the code binds to the authenticated user (derived
+    /// from the Bearer access token), and redeem mints a fresh, independent
+    /// session for that user — the browser never hands over its own token.
     pub code_challenge: String,
-    /// Supabase refresh token to store for the desktop app.
-    pub refresh_token: String,
 }
 
 /// Response containing the one-time auth code.
@@ -58,11 +60,11 @@ impl std::fmt::Debug for RedeemDesktopAuthResponse {
     }
 }
 
-impl From<DesktopAuthCode> for RedeemDesktopAuthResponse {
-    fn from(code: DesktopAuthCode) -> Self {
+impl From<MintedSession> for RedeemDesktopAuthResponse {
+    fn from(session: MintedSession) -> Self {
         Self {
-            access_token: code.access_token,
-            refresh_token: code.refresh_token,
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
         }
     }
 }

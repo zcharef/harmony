@@ -26,6 +26,13 @@ pub struct Config {
     /// Supabase project URL (optional, for storage/auth admin calls)
     pub supabase_url: Option<String>,
 
+    /// Supabase service-role key (server-side only). Required to mint fresh,
+    /// independent desktop sessions at auth-code redeem time via the `GoTrue`
+    /// admin API. NEVER exposed to clients or logs (wrapped in `SecretString`).
+    /// When absent (self-hosted/dev without desktop), the desktop redeem
+    /// endpoint returns 502.
+    pub supabase_service_role_key: Option<SecretString>,
+
     /// Sentry DSN for crash reporting (optional in dev)
     pub sentry_dsn: Option<SecretString>,
 
@@ -201,6 +208,13 @@ impl std::fmt::Debug for Config {
             .field("max_db_connections", &self.max_db_connections)
             .field("supabase_jwt_secret", &"[REDACTED]")
             .field("supabase_url", &self.supabase_url)
+            .field(
+                "supabase_service_role_key",
+                &self
+                    .supabase_service_role_key
+                    .as_ref()
+                    .map(|_| "[REDACTED]"),
+            )
             .field(
                 "sentry_dsn",
                 &self.sentry_dsn.as_ref().map(|_| "[REDACTED]"),

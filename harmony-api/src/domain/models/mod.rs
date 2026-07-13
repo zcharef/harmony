@@ -18,6 +18,7 @@ mod message_embed;
 mod message_report;
 mod message_with_author;
 mod migration;
+mod minted_session;
 mod moderation;
 mod moderation_log;
 mod plan;
@@ -63,6 +64,7 @@ pub use migration::{
     ALIVE_MIN_MESSAGES, ALIVE_MIN_NON_OWNER_ACTIVE, MemberCohortPage, MemberFollowThrough,
     MigrationProgress, NotYetActiveMember, RecommendedAction, ServerAliveSnapshot,
 };
+pub use minted_session::MintedSession;
 pub use moderation::{
     AttachmentScanRetry, EmojiImageScanRetry, IdentityImageScanRetry, ModerationRetry,
     ServerModerationSettings,

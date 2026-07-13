@@ -15,6 +15,7 @@ pub mod pg_presence_tracker;
 pub mod plan_always_allowed;
 pub mod postgres;
 pub mod safe_browsing;
+pub mod supabase_admin;
 
 pub use noop_csam_matcher::NoopCsamMatcher;
 pub use noop_image_classifier::NoopImageClassifier;

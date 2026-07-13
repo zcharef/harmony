@@ -3,18 +3,21 @@
 use async_trait::async_trait;
 
 use crate::domain::errors::DomainError;
-use crate::domain::models::DesktopAuthCode;
+use crate::domain::models::{DesktopAuthCode, UserId};
 
 /// Intent-based repository for PKCE desktop auth codes.
 #[async_trait]
 pub trait DesktopAuthRepository: Send + Sync + std::fmt::Debug {
-    /// Create a one-time auth code with stored tokens and PKCE challenge.
+    /// Create a one-time auth code bound to `user_id` with its PKCE challenge.
+    ///
+    /// WHY `user_id` (not tokens): redeem mints a fresh, independent session
+    /// for this user — the code no longer stores or forwards the browser's
+    /// session tokens.
     async fn create_code(
         &self,
         auth_code: &str,
         code_challenge: &str,
-        access_token: &str,
-        refresh_token: &str,
+        user_id: UserId,
         expires_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), DomainError>;
 

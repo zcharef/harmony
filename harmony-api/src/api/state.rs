@@ -13,7 +13,7 @@ use crate::domain::ports::{
     EmbedRepository, EmojiImageScanRetryRepository, EventBus, IdentityImageScanRetryRepository,
     ImageClassifier, MegolmSessionRepository, MemberRepository, MessageRepository,
     ModerationLogRepository, ModerationRetryRepository, PlanLimitChecker, ServerRepository,
-    StorageObjectRemover, VoiceSessionRepository,
+    SessionMinter, StorageObjectRemover, VoiceSessionRepository,
 };
 use crate::domain::services::{
     ChannelService, DiscoveryService, DmService, FriendshipService, InviteService, KeyService,
@@ -99,6 +99,10 @@ pub struct AppState {
     megolm_session_repository: Arc<dyn MegolmSessionRepository>,
     /// Desktop auth repository (PKCE exchange codes).
     desktop_auth_repository: Arc<dyn DesktopAuthRepository>,
+    /// Mints fresh, independent Supabase sessions at desktop redeem time
+    /// (service-role admin path). None = `SUPABASE_SERVICE_ROLE_KEY` (or URL)
+    /// unset → desktop redeem returns 502.
+    session_minter: Option<Arc<dyn SessionMinter>>,
     /// In-memory anti-spam guard (duplicate detection, flood muting).
     spam_guard: Arc<SpamGuard>,
     /// Async content moderator (`OpenAI` Moderation API). None = disabled.
@@ -200,6 +204,7 @@ impl std::fmt::Debug for AppState {
             .field("presence_tracker", &self.presence_tracker)
             .field("megolm_session_repository", &self.megolm_session_repository)
             .field("desktop_auth_repository", &self.desktop_auth_repository)
+            .field("session_minter", &self.session_minter.is_some())
             .field("spam_guard", &self.spam_guard)
             .field("content_moderator", &self.content_moderator.is_some())
             .field("safe_browsing", &self.safe_browsing.is_some())
@@ -403,6 +408,12 @@ impl AppState {
             presence_tracker,
             megolm_session_repository,
             desktop_auth_repository,
+            // WHY None here: the session minter needs config (service-role key +
+            // Supabase URL) not available in this constructor. It is injected at
+            // the composition root via `with_session_minter`, mirroring
+            // `with_founder`. Keeps the large `new` signature (and its many test
+            // call sites) stable.
+            session_minter: None,
             spam_guard,
             content_moderator,
             safe_browsing,
@@ -443,6 +454,17 @@ impl AppState {
     #[must_use]
     pub fn with_founder(mut self, founder_id: Option<UserId>) -> Self {
         self.founder_id = founder_id;
+        self
+    }
+
+    /// Inject the session minter used by the desktop redeem endpoint.
+    ///
+    /// Called once at the composition root when `SUPABASE_SERVICE_ROLE_KEY` and
+    /// `SUPABASE_URL` are both configured. `None` leaves desktop redeem
+    /// returning 502 (self-hosted/dev without desktop auth).
+    #[must_use]
+    pub fn with_session_minter(mut self, minter: Option<Arc<dyn SessionMinter>>) -> Self {
+        self.session_minter = minter;
         self
     }
 
@@ -647,6 +669,13 @@ impl AppState {
     #[must_use]
     pub fn desktop_auth_repository(&self) -> &dyn DesktopAuthRepository {
         &*self.desktop_auth_repository
+    }
+
+    /// Access the session minter (desktop redeem). None = service-role key
+    /// unset → desktop redeem is unavailable (502).
+    #[must_use]
+    pub fn session_minter(&self) -> Option<&Arc<dyn SessionMinter>> {
+        self.session_minter.as_ref()
     }
 
     /// Access the in-memory anti-spam guard (duplicate detection, flood muting).
