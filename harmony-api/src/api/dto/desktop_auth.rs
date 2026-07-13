@@ -6,8 +6,14 @@ use utoipa::ToSchema;
 use crate::domain::models::MintedSession;
 
 /// Request body for creating a desktop auth code.
+///
+// WHY no `deny_unknown_fields` here (deviation from ADR-026): desktop clients
+// <= v0.10.0 still send a legacy `refreshToken` in this body; it is ignored now
+// (the server mints its own session). Rejecting unknown fields would 400 every
+// already-installed client mid-rollout. Restore `deny_unknown_fields` once those
+// versions are no longer in the wild.
 #[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateDesktopAuthRequest {
     /// PKCE `code_challenge` (S256-hashed `code_verifier`, base64url-encoded).
     ///

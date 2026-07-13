@@ -452,3 +452,51 @@ async fn redeem_without_minter_returns_502() {
     let response = redeem(&app, &code, &verifier).await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
 }
+
+#[tokio::test]
+#[ignore = "requires local Postgres"]
+async fn create_tolerates_legacy_refresh_token_field() {
+    // Desktop clients <= v0.10.0 still POST a legacy `refreshToken` alongside
+    // `codeChallenge`. `CreateDesktopAuthRequest` no longer denies unknown
+    // fields, so the extra field is ignored and the code is still issued — old
+    // clients keep working through the rollout. No minter needed (create only
+    // persists the code; minting happens on redeem).
+    let state = build_app_state(test_pool().await, None).await;
+    let app = desktop_router(state);
+
+    let jwt = sign_test_jwt(Uuid::new_v4());
+    let (_verifier, challenge) = pkce_pair();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/auth/desktop-exchange/create")
+                .header(header::AUTHORIZATION, format!("Bearer {jwt}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "codeChallenge": challenge,
+                        "refreshToken": "legacy-web-refresh-token",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "legacy body with an extra refreshToken must still issue a code"
+    );
+    let json = body_json(response).await;
+    assert!(
+        json["authCode"]
+            .as_str()
+            .is_some_and(|code| !code.is_empty()),
+        "an auth code must be issued"
+    );
+}

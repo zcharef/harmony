@@ -7683,7 +7683,7 @@
       },
       "CreateDesktopAuthRequest": {
         "type": "object",
-        "description": "Request body for creating a desktop auth code.",
+        "description": "Request body for creating a desktop auth code.\n",
         "required": [
           "codeChallenge"
         ],
@@ -7692,8 +7692,7 @@
             "type": "string",
             "description": "PKCE `code_challenge` (S256-hashed `code_verifier`, base64url-encoded).\n\nWHY no token here: the code binds to the authenticated user (derived\nfrom the Bearer access token), and redeem mints a fresh, independent\nsession for that user — the browser never hands over its own token."
           }
-        },
-        "additionalProperties": false
+        }
       },
       "CreateDesktopAuthResponse": {
         "type": "object",
