@@ -16,6 +16,14 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }))
 
+// WHY controllable isTauri: the crypto-devices invalidation on peer-online is
+// desktop-only. A mutable flag lets a single mock cover both the desktop (true)
+// and web (false) branches without re-mocking per test.
+let mockIsTauri = false
+vi.mock('@/lib/platform', () => ({
+  isTauri: () => mockIsTauri,
+}))
+
 // WHY mock the voice barrel: usePresence only reads `status === 'connected'`.
 // Importing the real barrel would pull livekit-client into this test for one
 // boolean. A minimal zustand-shaped stub keeps the test focused on presence.
@@ -232,5 +240,74 @@ describe('usePresence — DND integration', () => {
     unmount()
 
     expect(usePresenceStore.getState().presenceMap.has(USER_ID)).toBe(false)
+  })
+})
+
+// -- Peer-online → re-probe DM recipient device keys (E2E auto-transition) ------
+
+describe('usePresence — crypto devices invalidation on peer online', () => {
+  const PEER_ID = 'user-peer'
+
+  function dispatchPresenceChanged(detail: { userId: string; status: string }) {
+    act(() => {
+      window.dispatchEvent(new CustomEvent('sse:presence.changed', { detail }))
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+    mockIsTauri = false
+    usePresenceStore.setState(initialPresenceState, true)
+    vi.mocked(updatePresence).mockResolvedValue({} as never)
+    vi.mocked(getPreferences).mockReturnValue(new Promise(() => {}) as never)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('invalidates the peer crypto devices query on a non-offline transition (desktop)', () => {
+    mockIsTauri = true
+    const { queryClient } = renderPresence({ preferences: buildPreferences() })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    dispatchPresenceChanged({ userId: PEER_ID, status: 'online' })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.crypto.devices(PEER_ID),
+    })
+  })
+
+  it('does NOT invalidate on web (isTauri false)', () => {
+    mockIsTauri = false
+    const { queryClient } = renderPresence({ preferences: buildPreferences() })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    dispatchPresenceChanged({ userId: PEER_ID, status: 'online' })
+
+    expect(invalidateSpy).not.toHaveBeenCalled()
+  })
+
+  it('does NOT invalidate on an offline transition (desktop)', () => {
+    mockIsTauri = true
+    const { queryClient } = renderPresence({ preferences: buildPreferences() })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    dispatchPresenceChanged({ userId: PEER_ID, status: 'offline' })
+
+    expect(invalidateSpy).not.toHaveBeenCalled()
+  })
+
+  it('invalidates for idle/dnd transitions too (any non-offline status, desktop)', () => {
+    mockIsTauri = true
+    const { queryClient } = renderPresence({ preferences: buildPreferences() })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    dispatchPresenceChanged({ userId: PEER_ID, status: 'idle' })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.crypto.devices(PEER_ID),
+    })
   })
 })
