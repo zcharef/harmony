@@ -34,7 +34,7 @@ thiserror = "2"
 anyhow = "1"
 
 # Database (Supabase Postgres via SQLx)
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "migrate"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "migrate"] }
 
 # Auth (Supabase JWT verification)
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
